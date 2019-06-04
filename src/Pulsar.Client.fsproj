@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>Pulsar.Client</RootNamespace>
+    <AssemblyName>Pulsar.Client</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="paket.references" />
+    <Compile Include="Common\PartitionedTopicMetadata.fs" />
+    <Compile Include="Api\Message.fs" />
+    <Compile Include="Api\Configuration.fs" />
+    <Compile Include="Api\Consumer.fs" />
+    <Compile Include="Api\PulsarClient.fs" />
+    <Compile Include="Api\ConsumerBuilder.fs" />
+    <Compile Include="Api\PulsarClientBuilder.fs" />
+  </ItemGroup>
+  <Import Project="..\.paket\Paket.Restore.targets" />
+</Project>
