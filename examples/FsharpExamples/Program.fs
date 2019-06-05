@@ -12,7 +12,7 @@ let main argv =
         PulsarClientBuilder()
             .WithServiceUrl("pulsar://pulsar-broker:31002")
             .Build()
-    task {
+    let t = task {
         let! consumer = 
             ConsumerBuilder(client)
                 .Topic("my-topic")
@@ -21,7 +21,8 @@ let main argv =
         let! message = consumer.ReceiveAsync()
         printfn "%A" message
         do! consumer.AcknowledgeAsync(message)
-    } |> ignore  
+    }
+    t.Wait()
     
     printfn "Example ended"
 

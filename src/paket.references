@@ -1,3 +1,4 @@
 TaskBuilder.fs
 FSharp.Core
 FSharp.UMX
+UTF8Json
