@@ -1,11 +1,9 @@
 ﻿namespace Pulsar.Client.Api
 
-type PulsarClientBuilder() =
-    let mutable config: PulsarClientConfiguration = {
-        ServiceUrl = ""
-    }
+type PulsarClientBuilder private (config: PulsarClientConfiguration) =
+    new() = PulsarClientBuilder(PulsarClientConfiguration.Default)
+    
     member this.WithServiceUrl url = 
-        config <- { config with ServiceUrl = url }
-        this
+        PulsarClientBuilder { config with ServiceUrl = url }
     member this.Build() =
         PulsarClient(config)
