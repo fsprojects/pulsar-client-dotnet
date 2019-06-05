@@ -9,11 +9,11 @@
     <None Include="paket.references" />
     <Compile Include="Common\UMX.fs" />
     <Compile Include="Common\PartitionedTopicMetadata.fs" />
+    <Compile Include="Api\Configuration.fs" />
 
     <Compile Include="Internal\HttpLookupService.fs" />
-
+    
     <Compile Include="Api\Message.fs" />
-    <Compile Include="Api\Configuration.fs" />
     <Compile Include="Api\Consumer.fs" />
     <Compile Include="Api\PulsarClient.fs" />
     <Compile Include="Api\ConsumerBuilder.fs" />
