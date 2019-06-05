@@ -1,6 +1,6 @@
 The MIT License (MIT)
 
-Copyright (c) Russian FSharp Community
+Copyright (c) fsharplang-ru and contributors
 All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
