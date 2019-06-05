@@ -1,5 +1,8 @@
 ﻿[<AutoOpen>]
 module Pulsar.Client.Common.UMX
 
-[<Measure>] type ledgerId
-[<Measure>] type entryId
+[<Measure>] type private ledgerId
+[<Measure>] type private entryId
+
+type LedgerId = int64<ledgerId>
+type EntryId = int64<entryId>

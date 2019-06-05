@@ -4,8 +4,8 @@ open Pulsar.Client.Common
 
 type MessageId = 
     {
-        LedgerId: int64<ledgerId>
-        EntryId: int64<entryId>
+        LedgerId: LedgerId
+        EntryId: EntryId
         PartitionIndex: int
     }
 
