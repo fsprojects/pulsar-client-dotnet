@@ -21,26 +21,24 @@ Target.create "Clean" (fun _ ->
 )
 
 Target.create "BuildApp" (fun _ ->
-  !! "src/*.fsproj"
+  !! "**/*.*proj"
     |> MSBuild.runRelease id buildDir "Build"
     |> Trace.logItems "AppBuild-Output: "
 )
 
 Target.create "Restore" (fun _ ->
-  !! "src/*.fsproj"
+  !! "**/*.*proj"
     |> Seq.iter (fun proj -> DotNet.restore id proj)
 )
 
-Target.create "Default" (fun _ ->
-  Trace.trace "Hello World from FAKE"
-)
+Target.create "Default" (fun _ -> Trace.trace "Default target was run")
 
 open Fake.Core.TargetOperators
 
 "Clean"
-  ==> "Restore"
-  ==> "BuildApp"
-  ==> "Default"
-
+   ==> "Restore"
+   ==> "BuildApp"
+   ==> "Default"
+   
 // start build
-Target.run
+Target.runOrDefault "Default"
