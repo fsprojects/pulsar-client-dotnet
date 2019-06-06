@@ -1,9 +1,10 @@
 #r "paket:
+source https://nuget.org/api/v2
 nuget Fake.IO.FileSystem
 nuget Fake.DotNet.MSBuild
 nuget Fake.Core.Target
 nuget Fake.DotNet.Cli
-nuget Fake.DotNet.Paket"
+nuget Fake.DotNet.Paket //"
 #load "./.fake/build.fsx/intellisense.fsx"
 
 open Fake.IO
