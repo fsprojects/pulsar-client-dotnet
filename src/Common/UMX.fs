@@ -1,5 +1,5 @@
 ﻿[<AutoOpen>]
-module Pulsar.Client.Common.UMX
+module internal Pulsar.Client.Common.UMX
 
 [<Measure>] type private ledgerId
 [<Measure>] type private entryId

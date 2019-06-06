@@ -1,4 +1,4 @@
-﻿module Pulsar.Client.Internal.HttpLookupService
+﻿module internal Pulsar.Client.Internal.HttpLookupService
 
 open System.Net.Http
 open Pulsar.Client.Api
