@@ -5,5 +5,9 @@ pool:
   vmImage: 'vs2017-win2016'
 
 steps:
-- script: build.cmd
+- script: |
+    dotnet tool install fake-cli --tool-path .fake
+    mono .paket\paket.bootstrapper.exe restore
+    mono .paket\paket.exe install
+    fake run build.fsx
   displayName: 'Build'
