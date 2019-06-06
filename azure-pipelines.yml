@@ -8,5 +8,6 @@ jobs:
         mono .paket/paket.bootstrapper.exe restore
         mono .paket/paket.exe install
         dotnet tool install fake-cli --tool-path .fake
+        sudo apt-get install fsharp
         .fake/fake run build.fsx
     displayName: 'Build'
