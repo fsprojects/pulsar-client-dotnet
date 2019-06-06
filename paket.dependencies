@@ -9,3 +9,16 @@ nuget UTF8Json
 nuget Expecto
 nuget Microsoft.NET.Test.Sdk
 nuget YoloDev.Expecto.TestSdk
+
+group Build
+  source https://api.nuget.org/v3/index.json
+  storage: none
+
+  framework: netstandard2.0
+
+  nuget Fake.Core.Target
+  nuget Fake.IO.FileSystem
+  nuget Fake.DotNet.Cli
+  
+  source https://dotnet.myget.org/F/roslyn-tools/api/v3/index.json
+  nuget RoslynTools.MSBuild prerelease
