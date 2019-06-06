@@ -10,8 +10,11 @@
     <Compile Include="Common\UMX.fs" />
     <Compile Include="Common\PartitionedTopicMetadata.fs" />
     <Compile Include="Api\Configuration.fs" />
+    <Compile Include="Internal\ILookupService.fs" />
 
     <Compile Include="Internal\HttpLookupService.fs" />
+
+    <Compile Include="Internal\BinaryProtoLookupService.fs" />
     
     <Compile Include="Api\Message.fs" />
     <Compile Include="Api\Consumer.fs" />

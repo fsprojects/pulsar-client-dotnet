@@ -7,12 +7,16 @@ open System.Net.Http
 type PulsarClient(config: PulsarClientConfiguration)  =    
     
     let httpClient = new HttpClient()
+    let lookupSerivce =
+        if (config.ServiceUrl.StartsWith("http"))
+        then HttpLookupService(config, httpClient) :> ILookupService
+        else BinaryProtoLookupService(config) :> ILookupService
 
     member this.SubscribeAsync consumerConfig =
         this.SingleTopicSubscribeAsync consumerConfig
 
     member this.GetPartitionedTopicMetadata topicName =
-        HttpLookupService.getPartitionedTopicMetadata httpClient config topicName
+        lookupSerivce.GetPartitionedTopicMetadata topicName
 
     member private this.SingleTopicSubscribeAsync (consumerConfig: ConsumerConfiguration) =
         task {
