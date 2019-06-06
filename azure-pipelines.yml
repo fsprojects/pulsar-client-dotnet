@@ -1,13 +1,14 @@
 trigger:
 - master
 
-pool:
-  vmImage: 'ubuntu-16.04'
+job : ubuntu
+  pool:
+    vmImage: 'ubuntu-16.04'
 
-steps:
-- script: |
-    dotnet tool install fake-cli --tool-path .fake
-    mono .paket\paket.bootstrapper.exe restore
-    mono .paket\paket.exe install
-    fake run build.fsx
+  steps:
+  - script: |
+      dotnet tool install fake-cli --tool-path .fake
+      mono .paket/paket.bootstrapper.exe restore
+      mono .paket/paket.exe install
+      fake run build.fsx
   displayName: 'Build'
