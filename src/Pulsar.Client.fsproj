@@ -1,10 +1,23 @@
-﻿<?xml  version="1.0"  encoding="utf-8" ?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
   </PropertyGroup>
+  <Choose>
+    <When Condition="Exists('..\..\packages\FSharp.Compiler.Tools.10.2.3\tools\Microsoft.FSharp.Targets')">
+      <PropertyGroup>
+        <FSharpTargetsPath>..\..\packages\FSharp.Compiler.Tools.10.2.3\tools\Microsoft.FSharp.Targets</FSharpTargetsPath>
+      </PropertyGroup>
+    </When>
+    <Otherwise>
+      <PropertyGroup>
+        <FSharpTargetsPath>
+        </FSharpTargetsPath>
+      </PropertyGroup>
+    </Otherwise>
+  </Choose>
   <ItemGroup>
     <None Include="paket.references" />
     <Compile Include="Common\UMX.fs" />
@@ -26,6 +39,9 @@
     <Compile Include="Api\ConsumerBuilder.fs" />
     <Compile Include="Api\ProducerBuilder.fs" />
     <Compile Include="Api\PulsarClientBuilder.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FSharp.Compiler.Tools" Version="10.2.3" />
   </ItemGroup>
   <Import Project="..\.paket\Paket.Restore.targets" />
 </Project>
