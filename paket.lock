@@ -815,3 +815,28 @@ NUGET
       FSharp.Core (>= 4.3.4) - restriction: || (>= net461) (>= netcoreapp2.0)
       System.Collections.Immutable (>= 1.4) - restriction: || (>= net461) (>= netcoreapp2.0)
       System.ValueTuple (>= 4.4) - restriction: >= net461
+
+GROUP Build
+CONTENT: NONE
+RESTRICTION: >= net461
+NUGET
+  remote: https://api.nuget.org/v3/index.json
+    FAKE (5.8.4)
+    FSharp.Compiler.Service (27.0.1)
+      FSharp.Core (>= 4.5.2)
+      System.Collections.Immutable (>= 1.5)
+      System.Reflection.Metadata (>= 1.6)
+      System.ValueTuple (>= 4.4)
+    FSharp.Core (4.6.2)
+    FSharp.Formatting (3.1)
+      FSharp.Compiler.Service (>= 27.0.1 < 28.0)
+      Microsoft.AspNet.Razor (>= 3.2.7 < 4.0)
+      System.ValueTuple (>= 4.5 < 5.0)
+    ILRepack (2.0.17)
+    Microsoft.AspNet.Razor (3.2.7)
+    System.Collections.Immutable (1.5)
+    System.Reflection.Metadata (1.6)
+      System.Collections.Immutable (>= 1.5)
+    System.ValueTuple (4.5)
+  remote: https://dotnet.myget.org/F/roslyn-tools/api/v3/index.json
+    RoslynTools.MSBuild (16.0.0-rc1-alpha)
