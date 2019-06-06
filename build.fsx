@@ -1,15 +1,15 @@
-open Microsoft.Build.Logging.StructuredLogger
-open Microsoft.Build.Tasks
-open Microsoft.Build.Tasks
 #r "paket:
 nuget Fake.IO.FileSystem
 nuget Fake.DotNet.MSBuild
-nuget Fake.Core.Target"
+nuget Fake.Core.Target
+nuget Fake.DotNet.Cli
+nuget Fake.DotNet.Paket"
 #load "./.fake/build.fsx/intellisense.fsx"
 
 open Fake.IO
 open Fake.IO.Globbing.Operators //enables !! and globbing
 open Fake.DotNet
+open Fake.DotNet.NuGet.Restore
 open Fake.Core
 
 // Properties
@@ -22,15 +22,15 @@ Target.create "Clean" (fun _ ->
 
 Target.create "BuildApp" (fun _ ->
   !! "src/*.fsproj"
+    //|> 
     |> MSBuild.runRelease id buildDir "Build"
     |> Trace.logItems "AppBuild-Output: "
 )
 
 Target.create "Restore" (fun _ ->
   !! "src/*.fsproj"
-    
-    |> MSBuild.runRelease id buildDir "Build"
-    |> Trace.logItems "AppBuild-Output: "
+    |> Seq.iter (fun proj -> DotNet.restore id proj) 
+    //|> Trace.logItems "AppBuild-Output: "
 )
 
 Target.create "Default" (fun _ ->
@@ -40,6 +40,7 @@ Target.create "Default" (fun _ ->
 open Fake.Core.TargetOperators
 
 "Clean"
+  ==> "Restore"
   ==> "BuildApp"
   ==> "Default"
 
