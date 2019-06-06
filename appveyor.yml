@@ -5,14 +5,5 @@ image: Visual Studio 2017
 build_script:
   - cmd: build.cmd BuildPackage
 
-dotnet_csproj:
-  patch: true
-  file: '**\*.csproj'
-  version: '{version}'
-  package_version: '{version}'
-  assembly_version: '{version}'
-  file_version: '{version}'
-  informational_version: '{version}'
-
 build:
   verbosity: minimal
