@@ -6,9 +6,9 @@
 trigger:
 - master
 
-pool:
-  vmImage: 'ubuntu-latest'
-
-steps:
-- script: build.cmd
-  displayName: 'Build'
+jobs:
+- template: build/azure-pipelines.job.template.yml
+  parameters:
+    name: Windows
+    vmImage: 'vs2017-win2016'
+    scriptFileName: .\build.ps1
