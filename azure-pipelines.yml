@@ -5,8 +5,8 @@ jobs:
 
     steps:
     - script: |
-        dotnet tool install fake-cli -g
         mono .paket/paket.bootstrapper.exe restore
         mono .paket/paket.exe install
+        dotnet tool install fake-cli -g
         fake run build.fsx
     displayName: 'Build'
