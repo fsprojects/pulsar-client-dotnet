@@ -10,17 +10,14 @@ nuget Microsoft.NET.Test.Sdk
 nuget YoloDev.Expecto.TestSdk
 
 group Build
-  content: none
-  framework >= net461
-  #source https://nuget.org/api/v2
   source https://api.nuget.org/v3/index.json
-  #source https://ci.appveyor.com/nuget/fsharp-formatting
+  storage: none
 
-  nuget FAKE > 5
-  nuget FSharp.Formatting prerelease
-  nuget System.ValueTuple
-  nuget Microsoft.AspNet.Razor
-  nuget ILRepack
+  framework: netstandard2.0
 
+  nuget Fake.Core.Target
+  nuget Fake.IO.FileSystem
+  nuget Fake.DotNet.Cli
+  
   source https://dotnet.myget.org/F/roslyn-tools/api/v3/index.json
   nuget RoslynTools.MSBuild prerelease

@@ -1,5 +1,11 @@
 @echo off
 
+SET TOOL_PATH=.fake
+
+IF NOT EXIST "%TOOL_PATH%\fake.exe" (
+  dotnet tool install fake-cli --tool-path ./%TOOL_PATH%
+)
+
 .paket\paket.exe restore
 if errorlevel 1 (
   exit /b %errorlevel%
@@ -7,8 +13,6 @@ if errorlevel 1 (
 
 setlocal
 
-set MSBuild=%~dp0packages\build\RoslynTools.MSBuild\tools\msbuild
-
-packages\build\FAKE\tools\FAKE.exe build.fsx %*
+"%TOOL_PATH%/fake.exe" run build.fsx
 
 endlocal
