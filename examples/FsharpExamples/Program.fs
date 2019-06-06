@@ -13,6 +13,14 @@ let main argv =
             .WithServiceUrl("pulsar://pulsar-broker:31002")
             .Build()
     let t = task {
+
+        let! producer = 
+            ProducerBuilder(client)
+                .Topic("my-topic")
+                .CreateAsync()  
+        let! messageId = producer.SendAsync([||])
+        printfn "%A" messageId
+
         let! consumer = 
             ConsumerBuilder(client)
                 .Topic("my-topic")

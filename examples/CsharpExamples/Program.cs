@@ -14,6 +14,14 @@ namespace CsharpExamples
                 new PulsarClientBuilder()
                     .WithServiceUrl("pulsar://pulsar-broker:31002")
                     .Build();
+
+            var producer =
+                await new ProducerBuilder(client)
+                    .Topic("my-topic")
+                    .CreateAsync();
+            var messageId = await producer.SendAsync(new byte[0]);
+            Console.WriteLine(messageId);
+
             var consumer =
                 await new ConsumerBuilder(client)
                         .Topic("my-topic")

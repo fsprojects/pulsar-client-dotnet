@@ -20,3 +20,11 @@ type ConsumerConfiguration =
             SubscriptionName = ""
         }
 
+type ProducerConfiguration = 
+    {
+        Topic: string
+    }   
+    static member Default =
+        {
+            Topic = ""
+        }
