@@ -5,11 +5,10 @@ open Pulsar.Client.Internal
 open System.Net.Http
 
 type PulsarClient(config: PulsarClientConfiguration)  =    
-    
-    let httpClient = new HttpClient()
+   
     let lookupSerivce =
         if (config.ServiceUrl.StartsWith("http"))
-        then HttpLookupService(config, httpClient) :> ILookupService
+        then HttpLookupService(config) :> ILookupService
         else BinaryProtoLookupService(config) :> ILookupService
 
     member this.SubscribeAsync consumerConfig =

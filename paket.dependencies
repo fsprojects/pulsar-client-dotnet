@@ -3,6 +3,7 @@ source https://api.nuget.org/v3/index.json
 nuget Expecto.FsCheck
 nuget FSharp.Core
 nuget FSharp.UMX
+nuget Pipelines.Sockets.Unofficial
 nuget TaskBuilder.fs
 nuget UTF8Json
 nuget Expecto

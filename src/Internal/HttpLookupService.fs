@@ -6,9 +6,12 @@ open FSharp.Control.Tasks.V2.ContextSensitive
 open Utf8Json
 open Pulsar.Client.Common
 open Utf8Json.Resolvers
+open System
 
 
-type internal HttpLookupService (config: PulsarClientConfiguration, client: HttpClient)   =
+type internal HttpLookupService (config: PulsarClientConfiguration) =
+    let client = new HttpClient(BaseAddress = Uri(config.ServiceUrl))
+
     interface ILookupService with
         member this.GetPartitionedTopicMetadata topicName = 
             task {
