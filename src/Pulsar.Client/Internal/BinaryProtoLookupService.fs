@@ -39,3 +39,9 @@ type internal BinaryProtoLookupService (config: PulsarClientConfiguration) =
                         conn.Input.AdvanceTo(buffer.Start, buffer.End)
                 return partitionedTopicMetadata
             }
+
+        member this.GetServiceUrl(): string = 
+            raise (System.NotImplementedException())
+
+        member this.UpdateServiceUrl(serviceUrl) = 
+            raise (System.NotImplementedException())
