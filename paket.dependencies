@@ -9,6 +9,7 @@ nuget UTF8Json
 nuget Expecto
 nuget Microsoft.NET.Test.Sdk
 nuget YoloDev.Expecto.TestSdk
+nuget FSharp.Compiler.Tools
 
 group Build
   source https://api.nuget.org/v3/index.json
