@@ -6,6 +6,9 @@
     <AssemblyName>Pulsar.Client</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <None Include="paket.references" />
     <Compile Include="Common\UMX.fs" />
     <Compile Include="Common\Commands.fs" />
@@ -27,5 +30,5 @@
     <Compile Include="Api\ProducerBuilder.fs" />
     <Compile Include="Api\PulsarClientBuilder.fs" />
   </ItemGroup>
-  <Import Project="..\.paket\Paket.Restore.targets" />
+  <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>

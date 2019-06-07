@@ -9,3 +9,4 @@ nuget UTF8Json
 nuget Expecto
 nuget Microsoft.NET.Test.Sdk
 nuget YoloDev.Expecto.TestSdk
+nuget protobuf-net
