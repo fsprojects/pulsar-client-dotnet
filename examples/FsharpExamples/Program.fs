@@ -2,7 +2,7 @@
 
 open System
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextSensitive
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 [<EntryPoint>]
 let main argv =

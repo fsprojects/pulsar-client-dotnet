@@ -1,6 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
-open FSharp.Control.Tasks.V2.ContextSensitive
+open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Internal
 open System.Net.Http
 
