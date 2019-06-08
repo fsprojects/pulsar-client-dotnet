@@ -12,4 +12,5 @@ mono: latest
 
 addons:
   apt:
+    packages:
     - fsharp
