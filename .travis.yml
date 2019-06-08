@@ -1,0 +1,15 @@
+#---------------------------------#
+#    environment configuration    #
+#---------------------------------#
+language: csharp
+os:
+  - linux
+  - osx
+sudo: required
+dist: trusty
+osx_image: xcode9.2 # OS X 10.12
+mono: latest
+
+addons:
+  apt:
+    - fsharp
