@@ -6,6 +6,8 @@
     <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Internal\ServiceNameResolverTests.fs" />
+    <Compile Include="Internal\HttpLookupServiceTests.fs" />
     <None Include="paket.references" />
     <Compile Include="Tests.fs" />
     <Compile Include="Main.fs" />

@@ -9,6 +9,7 @@
     <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AssemblyInfo.fs" />
     <None Include="paket.references" />
     <Compile Include="Common\UMX.fs" />
     <Compile Include="Common\Commands.fs" />
