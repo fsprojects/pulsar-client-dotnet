@@ -46,5 +46,5 @@
   <ItemGroup>
     <PackageReference Include="FSharp.Compiler.Tools" Version="10.2.3" />
   </ItemGroup>
-  <Import Project="..\.paket\Paket.Restore.targets" />
+  <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>
