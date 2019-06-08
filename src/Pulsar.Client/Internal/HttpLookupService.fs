@@ -2,7 +2,7 @@
 
 open System.Net.Http
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextSensitive
+open FSharp.Control.Tasks.V2.ContextInsensitive
 open Utf8Json
 open Pulsar.Client.Common
 open Utf8Json.Resolvers

@@ -1,7 +1,7 @@
 ﻿namespace Pulsar.Client.Internal
 
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextSensitive
+open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pipelines.Sockets.Unofficial
 open System.Buffers
 open System.Text

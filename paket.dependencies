@@ -10,6 +10,7 @@ nuget Expecto
 nuget Microsoft.NET.Test.Sdk
 nuget YoloDev.Expecto.TestSdk
 nuget FSharp.Compiler.Tools
+nuget protobuf-net
 
 group Build
   source https://api.nuget.org/v3/index.json
