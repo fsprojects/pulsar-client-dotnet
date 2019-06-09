@@ -13,6 +13,7 @@
     <None Include="paket.references" />
     <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\UMX.fs" />
+    <Compile Include="Common\Topic.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\Configuration.fs" />
     <Compile Include="Internal\ConnectionPool.fs" />

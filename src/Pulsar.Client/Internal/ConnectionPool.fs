@@ -5,13 +5,14 @@ open Pipelines.Sockets.Unofficial
 open System.Net
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
+open Pulsar.Client.Common
 
 module ConnectionPool =
-    let connections = ConcurrentDictionary<DnsEndPoint, Lazy<Task<SocketConnection>>>()
+    let connections = ConcurrentDictionary<EndPoint, Lazy<Task<SocketConnection>>>()
 
-    let rec getConnectionAsync (address: DnsEndPoint) =   
+    let rec getConnectionAsync (broker: Broker) =   
         let connectionTask =
-            connections.GetOrAdd(address, fun(address) -> 
+            connections.GetOrAdd(broker.PhysicalAddress, fun(address) -> 
                 lazy SocketConnection.ConnectAsync(address)).Value
         task {
             let! connection = connectionTask
@@ -19,7 +20,7 @@ module ConnectionPool =
             then
                 return connection
             else 
-                connections.TryRemove(address) |> ignore
+                connections.TryRemove(broker.PhysicalAddress) |> ignore
                 //TODO: try another available address?
-                return! getConnectionAsync address
+                return! getConnectionAsync broker
         }

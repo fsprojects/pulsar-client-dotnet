@@ -27,3 +27,6 @@ type internal HttpLookupService (config: PulsarClientConfiguration) =
         member __.UpdateServiceUrl(serviceUrl) =
             resolver <- resolver.UpdateServiceUrl(serviceUrl)
             client.BaseAddress <- resolver.ResolveHostUri()
+            
+        member this.GetBroker(topicName: TopicName) = 
+            raise (System.NotImplementedException())

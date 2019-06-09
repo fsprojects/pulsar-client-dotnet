@@ -7,3 +7,4 @@ type ILookupService =
     abstract member GetPartitionedTopicMetadata: string -> Task<PartitionedTopicMetadata>
     abstract member GetServiceUrl: unit -> string
     abstract member UpdateServiceUrl: string -> unit
+    abstract member GetBroker: TopicName -> Task<Broker>

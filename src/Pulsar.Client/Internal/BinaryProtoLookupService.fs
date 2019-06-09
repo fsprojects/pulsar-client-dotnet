@@ -45,3 +45,6 @@ type internal BinaryProtoLookupService (config: PulsarClientConfiguration) =
 
         member this.UpdateServiceUrl(serviceUrl) = 
             raise (System.NotImplementedException())
+
+        member this.GetBroker(topicName: TopicName) = 
+            raise (System.NotImplementedException())

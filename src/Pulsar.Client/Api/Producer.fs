@@ -8,9 +8,8 @@ open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open System
 
-type Producer(config: PulsarClientConfiguration, producerConfig: ProducerConfiguration) =    
+type Producer(config: PulsarClientConfiguration, producerConfig: ProducerConfiguration, lookup: ILookupService) =    
     let producerId = Generators.getNextProducerId()
-    let serviceNameResolver = ServiceNameResolver(config)
 
     member this.SendAsync (msg: byte[]) =
          task {
@@ -20,11 +19,11 @@ type Producer(config: PulsarClientConfiguration, producerConfig: ProducerConfigu
             let command = 
                 Commands.newSend producerId sequenceId 1 ChecksumType.None metadata payload
                 |> ReadOnlyMemory<byte>
-            let address = serviceNameResolver.ResolveHost()
-            let! conn = ConnectionPool.getConnectionAsync address
-            // todo find where to apply producer config
+            let topicName = TopicName(producerConfig.Topic)
+            let! broker = lookup.GetBroker(topicName)
+            let! conn = ConnectionPool.getConnectionAsync broker
             let! flushResult = conn.Output.WriteAsync(command)            
-            return { LedgerId = % 0L; EntryId = % 0L; PartitionIndex = 0 }
+            return { LedgerId = % 0L; EntryId = % 0L; PartitionIndex = topicName.PartitionInex }
         }
     member this.AcknowledgeAsync msg =
         Task.FromResult()
