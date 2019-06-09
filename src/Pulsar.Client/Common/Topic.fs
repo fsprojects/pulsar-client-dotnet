@@ -1,5 +1,7 @@
 ﻿namespace Pulsar.Client.Common
 
+open FSharp.UMX
+
 type TopicDomain =
     | Persistent
     | NonPersistent
@@ -18,5 +20,5 @@ type TopicName(topic, ?domain: TopicDomain, ?tenant: string, ?nameSpace: string 
     member __.PartitionInex 
         with get () = partitionIndex
 
-    member __.CompleteTopicName 
-        with get () = completeTopicName
+    member __.CompleteTopicName
+        with get() : CompleteTopicName = %completeTopicName
