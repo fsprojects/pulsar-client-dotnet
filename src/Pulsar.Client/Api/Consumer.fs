@@ -7,7 +7,7 @@ open FSharp.UMX
 type Consumer() =    
     member this.ReceiveAsync() =
         task {
-            return { MessageId = { LedgerId = % 0L; EntryId = % 0L; PartitionIndex = 0 } }
+            return { MessageId = { LedgerId = % 0L; EntryId = % 0L; PartitionIndex = 0 }; Payload = [||] }
         }
     member this.AcknowledgeAsync msg =
         Task.FromResult()

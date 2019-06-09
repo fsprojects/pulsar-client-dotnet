@@ -11,10 +11,11 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <None Include="paket.references" />
+    <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\UMX.fs" />
     <Compile Include="Common\Commands.fs" />
-    <Compile Include="Common\PartitionedTopicMetadata.fs" />
     <Compile Include="Api\Configuration.fs" />
+    <Compile Include="Internal\ConnectionPool.fs" />
     <Compile Include="Internal\Generators.fs" />
     <Compile Include="Internal\ServiceNameResolver.fs" />
     <Compile Include="Internal\ILookupService.fs" />

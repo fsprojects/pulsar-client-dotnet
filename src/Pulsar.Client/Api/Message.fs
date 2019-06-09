@@ -12,5 +12,6 @@ type MessageId =
 type Message =
     {
         MessageId: MessageId
+        Payload: byte[]
     }
 

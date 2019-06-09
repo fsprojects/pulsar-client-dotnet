@@ -27,12 +27,12 @@ type PulsarClient(config: PulsarClientConfiguration)  =
                 return Consumer()                
         }
 
-    member this.CreateProducerAsync (consumerConfig: ProducerConfiguration) =
+    member this.CreateProducerAsync (producerConfig: ProducerConfiguration) =
         task {
-            let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic
+            let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic
             if (metadata.Partitions > 1) 
             then
-                return Producer()
+                return Producer(config, producerConfig)
             else
-                return Producer()                
+                return Producer(config, producerConfig)                
         }
