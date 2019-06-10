@@ -15,4 +15,4 @@ let getNextProducerId(): ProducerId =
     %Interlocked.Increment(&producerId)
 
 let getNextSequenceId(): SequenceId =
-    %Interlocked.Increment(&sequenceId)
+    % (uint64 <| Interlocked.Increment(&sequenceId))

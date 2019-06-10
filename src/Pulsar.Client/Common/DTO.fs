@@ -4,7 +4,7 @@ open System.Net
 
 type ChecksumType =
     | Crc32c
-    | None
+    | No
 
 [<CLIMutable>]
 type PartitionedTopicMetadata =
@@ -16,4 +16,11 @@ type Broker =
     {
         LogicalAddress: EndPoint
         PhysicalAddress: EndPoint
+    }
+
+type SendAck =
+    {
+         SequenceId: SequenceId
+         LedgerId: LedgerId
+         EntryId: EntryId
     }

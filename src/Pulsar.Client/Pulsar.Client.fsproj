@@ -11,21 +11,24 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <None Include="paket.references" />
-    <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\UMX.fs" />
+    <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\Topic.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\Configuration.fs" />
+    <Compile Include="Api\Message.fs" />
+    <Compile Include="Internal\ClientCnx.fs" />
+    <Compile Include="Internal\ILookupService.fs" />
     <Compile Include="Internal\ConnectionPool.fs" />
+    <Compile Include="Internal\ConnectionManager.fs" />
+    <Compile Include="Internal\ConnectionHandler.fs" />
     <Compile Include="Internal\Generators.fs" />
     <Compile Include="Internal\ServiceNameResolver.fs" />
-    <Compile Include="Internal\ILookupService.fs" />
 
     <Compile Include="Internal\HttpLookupService.fs" />
 
     <Compile Include="Internal\BinaryProtoLookupService.fs" />
     
-    <Compile Include="Api\Message.fs" />
     <Compile Include="Api\Consumer.fs" />
     <Compile Include="Api\Producer.fs" />
     <Compile Include="Api\PulsarClient.fs" />
