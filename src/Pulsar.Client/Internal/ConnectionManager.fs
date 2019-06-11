@@ -3,7 +3,7 @@
 open Pulsar.Client.Common
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-let getConnection topic (lookup: ILookupService) =
+let getConnection topic (lookup: BinaryLookupService) =
     let topicName = TopicName(topic);
     task {
         let! broker = lookup.GetBroker(topicName)

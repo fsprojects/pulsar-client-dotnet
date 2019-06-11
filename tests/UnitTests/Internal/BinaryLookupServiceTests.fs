@@ -8,21 +8,21 @@ open Pulsar.Client.Internal
 let tests =
 
     let withService test =
-        let config = { ServiceUrl = "http://localhost:6650" }
-        test (HttpLookupService config :> ILookupService)
+        let config = { ServiceUrl = "pulsar://localhost:6650" }
+        test (BinaryLookupService config)
 
-    testList "HttpLookupService" [
+    testList "BinaryLookupService" [
 
         test "GetServiceUrl returns configured ServiceUrl" {
             withService <| fun(service) ->
                 let actual = service.GetServiceUrl()
-                let expected = "http://localhost:6650"
+                let expected = "pulsar://localhost:6650"
                 Expect.equal actual expected  ""
         }
 
         test "UpdateServiceUrl causes service reconfiguration" {
             withService <| fun(service) ->
-                let serviceUrl = "http://192.168.8.1:6650"
+                let serviceUrl = "pulsar://192.168.8.1:6650"
                 service.UpdateServiceUrl serviceUrl
                 let actual = service.GetServiceUrl()
                 let expected = serviceUrl

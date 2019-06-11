@@ -9,7 +9,7 @@ open Pulsar.Client.Internal
 open System
 open System.Collections.Concurrent
 
-type Producer(producerConfig: ProducerConfiguration, lookup: ILookupService) =    
+type Producer(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =    
     let producerId = Generators.getNextProducerId()
     let connectionHandler = ConnectionHandler()
     let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
