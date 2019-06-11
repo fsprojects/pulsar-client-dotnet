@@ -1,29 +1,29 @@
 ﻿namespace Pulsar.Client.Api
 
-type PulsarClientConfiguration = 
+type PulsarClientConfiguration =
     {
         ServiceUrl: string
-    }   
+    }
     static member Default =
         {
             ServiceUrl = ""
         }
 
-type ConsumerConfiguration = 
+type ConsumerConfiguration =
     {
         Topic: string
         SubscriptionName: string
-    }   
+    }
     static member Default =
         {
             Topic = ""
             SubscriptionName = ""
         }
 
-type ProducerConfiguration = 
+type ProducerConfiguration =
     {
         Topic: string
-    }   
+    }
     static member Default =
         {
             Topic = ""

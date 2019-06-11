@@ -6,6 +6,9 @@
     <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Api\ConsumerBuilderTests.fs" />
+    <Compile Include="Api\ProducerBuilderTests.fs" />
+    <Compile Include="Api\PulsarClientBuilderTests.fs" />
     <Compile Include="Internal\ServiceNameResolverTests.fs" />
     <Compile Include="Internal\BinaryLookupServiceTests.fs" />
     <None Include="paket.references" />
