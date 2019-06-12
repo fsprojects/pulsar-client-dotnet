@@ -3,6 +3,10 @@
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
 open FSharp.UMX
+open System
+
+type ConsumerException(message) =
+    inherit Exception(message)
 
 type Consumer() =    
     member this.ReceiveAsync() =
