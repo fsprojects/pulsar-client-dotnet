@@ -5,10 +5,12 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Common
 open pulsar.proto
 open FSharp.UMX
+open Pulsar.Client.Api
 
 type ConnectionHandler() =
     let connectionOpenedEvent = Event<SocketConnection>()
     let messageDeliveredEvent = Event<SendAck>()
+    let messageReceivedEvent = Event<Message>()
 
     member __.GrabCnx topic lookup  =
         task {
@@ -32,5 +34,8 @@ type ConnectionHandler() =
 
     [<CLIEvent>]
     member __.MessageDelivered = messageDeliveredEvent.Publish
+
+    [<CLIEvent>]
+    member __.MessageReceived = messageReceivedEvent.Publish
         
 
