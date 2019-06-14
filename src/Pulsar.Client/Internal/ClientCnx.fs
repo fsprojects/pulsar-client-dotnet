@@ -7,5 +7,6 @@ type ClientCnx =
     {
         Connection: SocketConnection
         ProducerId: ProducerId
+        ConsumerId: ConsumerId
     }
 

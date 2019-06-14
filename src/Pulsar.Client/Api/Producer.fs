@@ -20,8 +20,9 @@ type Producer(producerConfig: ProducerConfiguration, lookup: BinaryLookupService
     let partitionIndex = 0
 
     do connectionHandler.ConnectionOpened.Add(fun conn -> 
-        clientCnx <- Some { Connection = conn; ProducerId = producerId }
+        clientCnx <- Some { Connection = conn; ProducerId = producerId; ConsumerId = %0L }
     )
+
     do connectionHandler.MessageDelivered.Add(fun sendAck -> 
         match messages.TryGetValue(sendAck.SequenceId) with
         | true, tsc ->
@@ -48,6 +49,10 @@ type Producer(producerConfig: ProducerConfiguration, lookup: BinaryLookupService
                     Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
                     |> ReadOnlyMemory<byte>
                 let! flushResult = clientCnx.Value.Connection.Output.WriteAsync(command)
-                let tsc = TaskCompletionSource<SendAck>()
-                return! tsc.Task
+                let tsc = TaskCompletionSource<MessageId>()
+                if messages.TryAdd(sequenceId, tsc)
+                then
+                    return! tsc.Task
+                else 
+                    return failwith "Unable to add tsc"
             }
