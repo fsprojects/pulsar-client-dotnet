@@ -17,7 +17,7 @@ type Producer(producerConfig: ProducerConfiguration, lookup: BinaryLookupService
     let connectionHandler = ConnectionHandler()
     let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
     let mutable clientCnx: ClientCnx option = None
-    let partitionIndex = 0
+    let partitionIndex = -1
 
     do connectionHandler.ConnectionOpened.Add(fun conn -> 
         clientCnx <- Some { Connection = conn; ProducerId = producerId; ConsumerId = %0L }
@@ -43,8 +43,14 @@ type Producer(producerConfig: ProducerConfiguration, lookup: BinaryLookupService
         else
             task {
                 let payload = msg;
-                let metadata = new MessageMetadata()
                 let sequenceId = Generators.getNextSequenceId()
+                let metadata = 
+                    new MessageMetadata(
+                        SequenceId = %sequenceId,
+                        PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
+                        ProducerName = producerConfig.ProducerName,
+                        UncompressedSize = (payload.Length |> uint32)
+                    )
                 let command = 
                     Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
                     |> ReadOnlyMemory<byte>

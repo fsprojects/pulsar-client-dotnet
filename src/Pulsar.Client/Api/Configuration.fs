@@ -23,8 +23,10 @@ type ConsumerConfiguration =
 type ProducerConfiguration =
     {
         Topic: string
+        ProducerName: string
     }
     static member Default =
         {
             Topic = ""
+            ProducerName = ""
         }

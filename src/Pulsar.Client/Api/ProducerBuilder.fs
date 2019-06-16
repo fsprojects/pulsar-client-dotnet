@@ -27,6 +27,12 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
             { config with
                 Topic = topic |> invalidArgIfBlankString "Topic must not be blank." })
 
+    member __.ProducerName topic = 
+        ProducerBuilder(
+            client,
+            { config with
+                ProducerName = topic |> invalidArgIfBlankString "ProducerName must not be blank." })
+
     member __.CreateAsync() =
         config
         |> verify
