@@ -19,10 +19,9 @@
     <Compile Include="Api\Message.fs" />
     <Compile Include="Internal\Generators.fs" />
     <Compile Include="Internal\ClientCnx.fs" />
-    <Compile Include="Internal\ConnectionPool.fs" />
     <Compile Include="Internal\ServiceNameResolver.fs" />
     <Compile Include="Internal\BinaryLookupService.fs" />
-    <Compile Include="Internal\ConnectionManager.fs" />
+    <Compile Include="Internal\SocketManager.fs" />
     <Compile Include="Internal\ConnectionHandler.fs" />
     
     <Compile Include="Api\Consumer.fs" />

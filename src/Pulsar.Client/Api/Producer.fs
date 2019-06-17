@@ -19,21 +19,29 @@ type Producer(producerConfig: ProducerConfiguration, lookup: BinaryLookupService
     let mutable clientCnx: ClientCnx option = None
     let partitionIndex = -1
 
-    do connectionHandler.ConnectionOpened.Add(fun conn -> 
-        clientCnx <- Some { Connection = conn; ProducerId = producerId; ConsumerId = %0L }
-    )
+    do connectionHandler.ConnectionOpened
+        |> Event.add (fun conn -> 
+            clientCnx <- Some { Connection = conn; ProducerId = producerId; ConsumerId = %0L }
+        )
 
-    do connectionHandler.MessageDelivered.Add(fun sendAck -> 
-        match messages.TryGetValue(sendAck.SequenceId) with
-        | true, tsc ->
-            tsc.SetResult({
-                LedgerId = sendAck.LedgerId
-                EntryId = sendAck.EntryId
-                PartitionIndex = partitionIndex
-            })
-            messages.TryRemove(sendAck.SequenceId) |> ignore
-        | _ -> ()
-    )
+    do connectionHandler.ConnectionClosed
+        |> Event.add (fun conn -> 
+            clientCnx <- None
+            connectionHandler.GrabCnx producerConfig.Topic lookup |> ignore
+        )
+
+    do connectionHandler.MessageDelivered
+        |> Event.add (fun sendAck -> 
+            match messages.TryGetValue(sendAck.SequenceId) with
+            | true, tsc ->
+                tsc.SetResult({
+                    LedgerId = sendAck.LedgerId
+                    EntryId = sendAck.EntryId
+                    PartitionIndex = partitionIndex
+                })
+                messages.TryRemove(sendAck.SequenceId) |> ignore
+            | _ -> ()
+        )
 
     do connectionHandler.GrabCnx producerConfig.Topic lookup |> ignore
 
@@ -45,7 +53,7 @@ type Producer(producerConfig: ProducerConfiguration, lookup: BinaryLookupService
                 let payload = msg;
                 let sequenceId = Generators.getNextSequenceId()
                 let metadata = 
-                    new MessageMetadata(
+                    MessageMetadata (
                         SequenceId = %sequenceId,
                         PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
                         ProducerName = producerConfig.ProducerName,

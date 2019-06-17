@@ -9,12 +9,15 @@ open Pulsar.Client.Api
 
 type ConnectionHandler() =
     let connectionOpenedEvent = Event<SocketConnection>()
+    let connectionClosedEvent = Event<SocketConnection>()
     let messageDeliveredEvent = Event<SendAck>()
     let messageReceivedEvent = Event<Message>()
 
-    member __.GrabCnx topic lookup  =
+    member __.GrabCnx topic (lookup: BinaryLookupService)  =
         task {
-            let! conn = ConnectionManager.getConnection topic lookup
+            let topicName = TopicName(topic)
+            let! broker = lookup.GetBroker(topicName)
+            let! conn = SocketManager.getConnection broker
             connectionOpenedEvent.Trigger(conn)
             __.StartListening conn
         }
@@ -29,13 +32,12 @@ type ConnectionHandler() =
             }
         )
 
-    [<CLIEvent>]
     member __.ConnectionOpened = connectionOpenedEvent.Publish
 
-    [<CLIEvent>]
+    member __.ConnectionClosed = connectionClosedEvent.Publish
+
     member __.MessageDelivered = messageDeliveredEvent.Publish
 
-    [<CLIEvent>]
     member __.MessageReceived = messageReceivedEvent.Publish
         
 
