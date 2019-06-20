@@ -12,61 +12,45 @@ open System.Collections.Concurrent
 type ProducerException(message) =
     inherit Exception(message)
 
-type Producer(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =    
+type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =    
     let producerId = Generators.getNextProducerId()
-    let connectionHandler = ConnectionHandler()
     let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
-    let mutable clientCnx: ClientCnx option = None
     let partitionIndex = -1
-
-    do connectionHandler.ConnectionOpened
-        |> Event.add (fun conn -> 
-            clientCnx <- Some { Connection = conn; ProducerId = producerId; ConsumerId = %0L }
-        )
-
-    do connectionHandler.ConnectionClosed
-        |> Event.add (fun conn -> 
-            clientCnx <- None
-            connectionHandler.GrabCnx producerConfig.Topic lookup |> ignore
-        )
-
-    do connectionHandler.MessageDelivered
-        |> Event.add (fun sendAck -> 
-            match messages.TryGetValue(sendAck.SequenceId) with
-            | true, tsc ->
-                tsc.SetResult({
-                    LedgerId = sendAck.LedgerId
-                    EntryId = sendAck.EntryId
-                    PartitionIndex = partitionIndex
-                })
-                messages.TryRemove(sendAck.SequenceId) |> ignore
-            | _ -> ()
-        )
-
-    do connectionHandler.GrabCnx producerConfig.Topic lookup |> ignore
+    let mutable connectionHandler: ConnectionHandler = Unchecked.defaultof<ConnectionHandler>
 
     member this.SendAsync (msg: byte[]) =
-        if clientCnx.IsNone
-        then failwith "Connection is not ready"
-        else
-            task {
-                let payload = msg;
-                let sequenceId = Generators.getNextSequenceId()
-                let metadata = 
-                    MessageMetadata (
-                        SequenceId = %sequenceId,
-                        PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
-                        ProducerName = producerConfig.ProducerName,
-                        UncompressedSize = (payload.Length |> uint32)
-                    )
-                let command = 
-                    Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
-                    |> ReadOnlyMemory<byte>
-                let! flushResult = clientCnx.Value.Connection.Output.WriteAsync(command)
-                let tsc = TaskCompletionSource<MessageId>()
-                if messages.TryAdd(sequenceId, tsc)
-                then
-                    return! tsc.Task
-                else 
-                    return failwith "Unable to add tsc"
-            }
+        task {
+            let payload = msg;
+            let sequenceId = Generators.getNextSequenceId()
+            let metadata = 
+                MessageMetadata (
+                    SequenceId = %sequenceId,
+                    PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
+                    ProducerName = producerConfig.ProducerName,
+                    UncompressedSize = (payload.Length |> uint32)
+                )
+            let command = 
+                Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
+                |> ReadOnlyMemory<byte>
+            let! flushResult = connectionHandler.Send(command)
+            let tsc = TaskCompletionSource<MessageId>()
+            if messages.TryAdd(sequenceId, tsc)
+            then
+                return! tsc.Task
+            else 
+                return failwith "Unable to add tsc"
+        }
+
+    member private __.InitConnectionHandler(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
+        task {
+            let! ch = ConnectionHandler.Init(producerConfig.Topic, lookup)
+            connectionHandler <- ch
+        }
+
+    static member Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
+        task {
+            let producer = Producer(producerConfig, lookup)
+            do! producer.InitConnectionHandler(producerConfig, lookup)
+            return producer
+        }
+        

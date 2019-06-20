@@ -21,13 +21,8 @@ type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService
 
     let consumerId = Generators.getNextConsumerId()
     let queue = new ConcurrentQueue<Message>()
-    let connectionHandler = ConnectionHandler()    
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
-    let mutable clientCnx: ClientCnx option = None
-
-    do connectionHandler.ConnectionOpened.Add(fun conn -> 
-        clientCnx <- Some { Connection = conn; ProducerId = %0L; ConsumerId = consumerId }
-    )
+    let mutable connectionHandler: ConnectionHandler = Unchecked.defaultof<ConnectionHandler>   
 
     let mb = MailboxProcessor.Start(fun inbox ->
         let mutable channel: AsyncReplyChannel<Message> = nullChannel
@@ -57,8 +52,6 @@ type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService
         mb.Post(AddMessage msg)
     )
 
-    do connectionHandler.GrabCnx consumerConfig.Topic lookup |> ignore
-
     member this.ReceiveAsync() =
         task {
             match queue.TryDequeue() with
@@ -68,17 +61,27 @@ type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService
                  return! mb.PostAndAsyncReply(GetMessage)           
         }
 
-    member this.AcknowledgeAsync (msg: Message) =
-        if clientCnx.IsNone
-        then failwith "Connection is not ready"
-        else
-            task {
-                let command = 
-                           Commands.newAck consumerId msg.MessageId.LedgerId msg.MessageId.EntryId CommandAck.AckType.Individual
-                           |> ReadOnlyMemory<byte>
-                let! flushResult = clientCnx.Value.Connection.Output.WriteAsync(command)
-                return! Task.FromResult()
-            }
+    member this.AcknowledgeAsync (msg: Message) =       
+        task {
+            let command = 
+                        Commands.newAck consumerId msg.MessageId.LedgerId msg.MessageId.EntryId CommandAck.AckType.Individual
+                        |> ReadOnlyMemory<byte>
+            let! flushResult = connectionHandler.Send(command)
+            return! Task.FromResult()
+        }
+
+    member private __.InitConnectionHandler(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
+        task {
+            let! ch = ConnectionHandler.Init(consumerConfig.Topic, lookup)
+            connectionHandler <- ch
+        }
+
+    static member Init(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
+        task {
+            let producer = Consumer(consumerConfig, lookup)
+            do! producer.InitConnectionHandler(consumerConfig, lookup)
+            return producer
+        }
        
 
         
