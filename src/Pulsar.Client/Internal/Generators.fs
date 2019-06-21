@@ -10,13 +10,13 @@ let mutable private consumerId = 0L
 let mutable private sequenceId = 0L
 
 let getNextRequestId(): RequestId =
-    %Interlocked.Increment(&requestId)
+    % (uint64 <| Interlocked.Increment(&requestId))
 
 let getNextProducerId(): ProducerId =
-    %Interlocked.Increment(&producerId)
+    % (uint64 <| Interlocked.Increment(&producerId))
 
 let getNextConsumerId(): ConsumerId =
-    %Interlocked.Increment(&consumerId)
+    % (uint64 <| Interlocked.Increment(&consumerId))
 
 let getNextSequenceId(): SequenceId =
     % (uint64 <| Interlocked.Increment(&sequenceId))

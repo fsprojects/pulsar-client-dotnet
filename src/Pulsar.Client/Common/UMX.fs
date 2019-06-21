@@ -13,8 +13,8 @@ open FSharp.UMX
 
 type LedgerId = uint64<ledgerId>
 type EntryId = uint64<entryId>
-type RequestId = int64<requestId>
-type ProducerId = int64<producerId>
-type ConsumerId = int64<consumerId>
+type RequestId = uint64<requestId>
+type ProducerId = uint64<producerId>
+type ConsumerId = uint64<consumerId>
 type SequenceId = uint64<sequenceId>
 type CompleteTopicName = string<completeTopicName>

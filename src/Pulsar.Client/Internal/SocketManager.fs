@@ -79,14 +79,17 @@ let private readSocket (conn: SocketConnection) (tsc: TaskCompletionSource<Socke
             else
                 match tryParse buffer with
                 | XCommandConnected (cmd, consumed) ->
+                    //TODO check server protocol version
                     tsc.SetResult(conn)
                     reader.AdvanceTo(consumed)
                 | XCommandPartitionedTopicMetadataResponse (cmd, consumed) ->
-                    let tsc = requests.[%(int64 cmd.RequestId)]
-                    tsc.SetResult({ Partitions = cmd.Partitions })                    
+                    let requestId = %cmd.RequestId
+                    let tsc = requests.[requestId]
+                    tsc.SetResult({ Partitions = cmd.Partitions })  
+                    requests.TryRemove(requestId) |> ignore
                     reader.AdvanceTo(consumed)
                 | XCommandMessage (cmd, consumed) ->
-                    let consumerEvent = consumers.[%(int64 cmd.ConsumerId)]
+                    let consumerEvent = consumers.[%cmd.ConsumerId]
                     // TODO handle real messages
                     consumerEvent.Trigger(null)        
                     reader.AdvanceTo(consumed)
