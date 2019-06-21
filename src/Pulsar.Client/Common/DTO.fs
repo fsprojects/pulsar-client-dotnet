@@ -9,7 +9,7 @@ type ChecksumType =
 [<CLIMutable>]
 type PartitionedTopicMetadata =
     {
-        Partitions: int
+        Partitions: uint32
     }
 
 type Broker = 

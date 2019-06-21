@@ -10,3 +10,6 @@ let newSend (producerId: ProducerId) (sequenceId: SequenceId) (numMessages: int)
 
 let newAck (consumerId: ConsumerId) (ledgerId: LedgerId) (entryId: EntryId) (ackType: CommandAck.AckType) : byte[] =
     [||]
+
+let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) : byte[] =
+    [||]
