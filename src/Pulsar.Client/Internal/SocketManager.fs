@@ -43,7 +43,7 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
     then
         let totalength = BinaryPrimitives.ReadInt32BigEndian(sp)
         let frameLength = totalength + 4
-        if (totalength >= sp.Length)
+        if (totalength <= sp.Length)
         then
             let commandLength = BinaryPrimitives.ReadInt32BigEndian(sp.Slice(4))
             let msgStream =  new MemoryStream(sp.Slice(8,commandLength).ToArray())
