@@ -14,3 +14,8 @@ addons:
   apt:
     packages:
     - fsharp
+
+before_script:
+  - chmod +x build.sh
+script:
+  - travis_wait 60 ./build.sh
