@@ -29,7 +29,20 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 | ProducerMessage.Connect ((broker, mb), channel) ->
                     let! connection = SocketManager.registerProducer broker producerId mb |> Async.AwaitTask
                     channel.Reply()
-                    return! loop { state with Connection = Connected connection }   
+                    return! loop { state with Connection = Connected connection }
+                | ProducerMessage.Reconnect ->
+                    // TODO backoff
+                    let topicName = TopicName(producerConfig.Topic)
+                    let! broker = lookup.GetBroker(topicName) |> Async.AwaitTask
+                    let! connection = SocketManager.getConnection broker |> Async.AwaitTask
+                    return! loop { state with Connection = Connected connection }
+                | ProducerMessage.Disconnected (connection, mb) ->
+                    if state.Connection = Connected connection
+                    then
+                        mb.Post(ProducerMessage.Reconnect)
+                        return! loop { state with Connection = NotConnected }
+                    else 
+                        return! loop state
                 | ProducerMessage.SendMessage (payload, channel) ->
                     match state.Connection with
                     | Connected conn ->
@@ -37,7 +50,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         channel.Reply(flushResult)
                         return! loop state
                     | NotConnected ->
-                        //TODO reconnect
+                        //TODO put message on schedule
                         return! loop state
                 | ProducerMessage.SendReceipt receipt ->
                     let sequenceId = %receipt.SequenceId
@@ -89,9 +102,9 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
                 |> ReadOnlyMemory<byte>
             return! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
-        }
+        }    
 
-    member private __.Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
+    member private __.InitInternal() =
         task {
             let topicName = TopicName(producerConfig.Topic)
             let! broker = lookup.GetBroker(topicName)
@@ -101,7 +114,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
     static member Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
         task {
             let producer = Producer(producerConfig, lookup)
-            do! producer.Init(producerConfig, lookup)
+            do! producer.InitInternal()
             return producer
         }
         

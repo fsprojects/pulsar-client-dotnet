@@ -41,11 +41,15 @@ type ConnectionState =
 
 type ProducerMessage = 
     | Connect of (Broker*MailboxProcessor<ProducerMessage>) * AsyncReplyChannel<unit>
+    | Reconnect
+    | Disconnected of SocketConnection*MailboxProcessor<ProducerMessage>
     | SendReceipt of CommandSendReceipt
     | SendMessage of ReadOnlyMemory<byte> * AsyncReplyChannel<FlushResult>
 
 type ConsumerMessage =
     | Connect of (Broker*MailboxProcessor<ConsumerMessage>) * AsyncReplyChannel<unit>
+    | Reconnect
+    | Disconnected of SocketConnection*MailboxProcessor<ConsumerMessage>
     | AddMessage of Message
     | GetMessage of AsyncReplyChannel<Message>
     | Ack of ReadOnlyMemory<byte> * AsyncReplyChannel<FlushResult>

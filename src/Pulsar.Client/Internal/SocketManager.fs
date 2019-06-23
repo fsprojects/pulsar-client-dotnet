@@ -115,6 +115,11 @@ let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
         async {
             let! ((connection, payload), replyChannel) = inbox.Receive()
             let! flushResult = connection.Output.WriteAsync(payload).AsTask() |> Async.AwaitTask
+            if (flushResult.IsCanceled || flushResult.IsCompleted)
+            then
+                consumers |> Seq.iter (fun (kv) -> kv.Value.Post(ConsumerMessage.Disconnected (connection, kv.Value)))
+                producers |> Seq.iter (fun (kv) -> kv.Value.Post(ProducerMessage.Disconnected (connection, kv.Value)))
+            // TODO handle failure properly
             replyChannel.Reply(flushResult)
             return! loop ()             
         }

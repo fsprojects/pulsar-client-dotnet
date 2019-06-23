@@ -33,6 +33,19 @@ type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService
                     let! connection = SocketManager.registerConsumer broker consumerId mb |> Async.AwaitTask
                     channel.Reply()
                     return! loop { state with Connection = Connected connection }  
+                | ConsumerMessage.Reconnect ->
+                    // TODO backoff
+                    let topicName = TopicName(consumerConfig.Topic)
+                    let! broker = lookup.GetBroker(topicName) |> Async.AwaitTask
+                    let! connection = SocketManager.getConnection broker |> Async.AwaitTask
+                    return! loop { state with Connection = Connected connection }
+                | ConsumerMessage.Disconnected (connection, mb) ->
+                    if state.Connection = Connected connection
+                    then
+                        mb.Post(ConsumerMessage.Reconnect)
+                        return! loop { state with Connection = NotConnected }
+                    else 
+                        return! loop state
                 | ConsumerMessage.AddMessage x ->
                     if channel = nullChannel
                     then 
@@ -55,7 +68,7 @@ type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService
                         channel.Reply(flushResult)
                         return! loop state
                     | NotConnected ->
-                        //TODO reconnect
+                        //TODO put message on schedule
                         return! loop state                             
             }
         loop { Connection = NotConnected }
@@ -79,9 +92,9 @@ type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService
             return! Task.FromResult()
         }
 
-    member private __.Init(producerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
+    member private __.InitInternal() =
         task {
-            let topicName = TopicName(producerConfig.Topic)
+            let topicName = TopicName(consumerConfig.Topic)
             let! broker = lookup.GetBroker(topicName)
             return! mb.PostAndAsyncReply(fun channel -> Connect ((broker, mb), channel))
         }
@@ -89,7 +102,7 @@ type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService
     static member Init(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
         task {
             let consumer = Consumer(consumerConfig, lookup)
-            do! consumer.Init(consumerConfig, lookup)
+            do! consumer.InitInternal()
             return consumer
         }
        
