@@ -12,11 +12,40 @@ open System.Collections.Concurrent
 type ProducerException(message) =
     inherit Exception(message)
 
+type ProducerState = {
+    Connection: ConnectionState
+}
+
 type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =    
     let producerId = Generators.getNextProducerId()
-    let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
+    let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageIdData>>()
     let partitionIndex = -1
-    let mutable connectionHandler: ConnectionHandler = Unchecked.defaultof<ConnectionHandler>
+
+    let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
+        let rec loop (state: ProducerState) =
+            async {
+                let! msg = inbox.Receive()
+                match msg with
+                | ProducerMessage.Connect ((broker, mb), channel) ->
+                    let! connection = SocketManager.registerProducer broker producerId mb |> Async.AwaitTask
+                    channel.Reply()
+                    return! loop { state with Connection = Connected connection }   
+                | ProducerMessage.SendMessage (payload, channel) ->
+                    match state.Connection with
+                    | Connected conn ->
+                        let! flushResult = SocketManager.send (conn, payload)
+                        channel.Reply(flushResult)
+                        return! loop state
+                    | NotConnected ->
+                        //TODO reconnect
+                        return! loop state
+                | ProducerMessage.SendReceipt receipt ->
+                    let tsc = messages.[%receipt.SequenceId]
+                    tsc.SetResult(receipt.MessageId)
+                    return! loop state                        
+            }
+        loop { Connection = NotConnected }  
+    )    
 
     member this.SendAsync (msg: byte[]) =
         task {
@@ -32,8 +61,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
             let command = 
                 Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
                 |> ReadOnlyMemory<byte>
-            let! flushResult = connectionHandler.Send(command)
-            let tsc = TaskCompletionSource<MessageId>()
+            let! flushResult = mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
+            let tsc = TaskCompletionSource<MessageIdData>()
             if messages.TryAdd(sequenceId, tsc)
             then
                 return! tsc.Task
@@ -41,16 +70,17 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 return failwith "Unable to add tsc"
         }
 
-    member private __.InitConnectionHandler(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
+    member private __.Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
         task {
-            let! ch = ConnectionHandler.Init(producerConfig.Topic, lookup)
-            connectionHandler <- ch
+            let topicName = TopicName(producerConfig.Topic)
+            let! broker = lookup.GetBroker(topicName)
+            return! mb.PostAndAsyncReply(fun channel -> ProducerMessage.Connect ((broker, mb), channel))
         }
 
     static member Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
         task {
             let producer = Producer(producerConfig, lookup)
-            do! producer.InitConnectionHandler(producerConfig, lookup)
+            do! producer.Init(producerConfig, lookup)
             return producer
         }
         

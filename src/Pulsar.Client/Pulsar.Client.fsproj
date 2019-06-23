@@ -16,12 +16,10 @@
     <Compile Include="Common\Topic.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\Configuration.fs" />
-    <Compile Include="Api\Message.fs" />
     <Compile Include="Internal\Generators.fs" />
     <Compile Include="Internal\ServiceNameResolver.fs" />
     <Compile Include="Internal\SocketManager.fs" />
     <Compile Include="Internal\BinaryLookupService.fs" />
-    <Compile Include="Internal\ConnectionHandler.fs" />
     
     <Compile Include="Api\Consumer.fs" />
     <Compile Include="Api\Producer.fs" />

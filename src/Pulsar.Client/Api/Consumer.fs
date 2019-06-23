@@ -13,44 +13,53 @@ open pulsar.proto
 type ConsumerException(message) =
     inherit Exception(message)
 
-type MailboxMessage =
-    | AddMessage of Message
-    | GetMessage of AsyncReplyChannel<Message>
+type ConsumerState = {
+    Connection: ConnectionState
+}
 
 type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =    
 
     let consumerId = Generators.getNextConsumerId()
     let queue = new ConcurrentQueue<Message>()
-    let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
-    let mutable connectionHandler: ConnectionHandler = Unchecked.defaultof<ConnectionHandler>   
+    let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>  
 
-    let mb = MailboxProcessor.Start(fun inbox ->
+    let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
         let mutable channel: AsyncReplyChannel<Message> = nullChannel
-        let rec loop () =
+        let rec loop (state: ConsumerState) =
             async {
                 let! msg = inbox.Receive()
                 match msg with
-                | AddMessage x ->
+                | ConsumerMessage.Connect ((broker, mb), channel) ->
+                    let! connection = SocketManager.registerConsumer broker consumerId mb |> Async.AwaitTask
+                    channel.Reply()
+                    return! loop { state with Connection = Connected connection }  
+                | ConsumerMessage.AddMessage x ->
                     if channel = nullChannel
                     then 
                         queue.Enqueue(x)
                     else 
                         channel.Reply(x)
                         channel <- nullChannel
-                | GetMessage ch ->
+                    return! loop state
+                | ConsumerMessage.GetMessage ch ->
                     match queue.TryDequeue() with
                     | true, msg ->
                         ch.Reply msg
                     | false, _ ->
-                        channel <- ch
-                return! loop ()             
+                        channel <- ch                    
+                    return! loop state
+                | ConsumerMessage.Ack (payload, channel) ->
+                    match state.Connection with
+                    | Connected conn ->
+                        let! flushResult = SocketManager.send (conn, payload)
+                        channel.Reply(flushResult)
+                        return! loop state
+                    | NotConnected ->
+                        //TODO reconnect
+                        return! loop state                             
             }
-        loop ()
+        loop { Connection = NotConnected }
     )    
-
-    do connectionHandler.MessageReceived.Add(fun msg -> 
-        mb.Post(AddMessage msg)
-    )
 
     member this.ReceiveAsync() =
         task {
@@ -64,23 +73,24 @@ type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService
     member this.AcknowledgeAsync (msg: Message) =       
         task {
             let command = 
-                        Commands.newAck consumerId msg.MessageId.LedgerId msg.MessageId.EntryId CommandAck.AckType.Individual
+                        Commands.newAck consumerId %msg.MessageId.ledgerId %msg.MessageId.entryId CommandAck.AckType.Individual
                         |> ReadOnlyMemory<byte>
-            let! flushResult = connectionHandler.Send(command)
+            let! flushResult = mb.PostAndAsyncReply(fun channel -> Ack (command, channel))
             return! Task.FromResult()
         }
 
-    member private __.InitConnectionHandler(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
+    member private __.Init(producerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
         task {
-            let! ch = ConnectionHandler.Init(consumerConfig.Topic, lookup)
-            connectionHandler <- ch
+            let topicName = TopicName(producerConfig.Topic)
+            let! broker = lookup.GetBroker(topicName)
+            return! mb.PostAndAsyncReply(fun channel -> Connect ((broker, mb), channel))
         }
 
     static member Init(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
         task {
-            let producer = Consumer(consumerConfig, lookup)
-            do! producer.InitConnectionHandler(consumerConfig, lookup)
-            return producer
+            let consumer = Consumer(consumerConfig, lookup)
+            do! consumer.Init(consumerConfig, lookup)
+            return consumer
         }
        
 

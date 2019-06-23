@@ -25,12 +25,14 @@ let protocolVersion =
 
 let connections = ConcurrentDictionary<EndPoint, Lazy<Task<SocketConnection>>>()
 let requests = ConcurrentDictionary<RequestId, TaskCompletionSource<obj>>()
-let consumers = ConcurrentDictionary<ConsumerId, Event<obj>>()
+let consumers = ConcurrentDictionary<ConsumerId, MailboxProcessor<ConsumerMessage>>()
+let producers = ConcurrentDictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
 
 
 type PulsarCommands =
     | XCommandConnected of CommandConnected * SequencePosition
     | XCommandPartitionedTopicMetadataResponse of CommandPartitionedTopicMetadataResponse * SequencePosition
+    | XCommandSendReceipt of CommandSendReceipt * SequencePosition
     | XCommandMessage of CommandMessage * SequencePosition
     | IncompleteCommand
     | InvalidCommand of Exception
@@ -54,7 +56,9 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                     XCommandConnected (command.Connected, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.PartitionedMetadataResponse -> 
                     XCommandPartitionedTopicMetadataResponse (command.partitionMetadataResponse, buffer.GetPosition(int64 frameLength))
-                | BaseCommand.Type.Ack -> 
+                | BaseCommand.Type.SendReceipt -> 
+                    XCommandSendReceipt (command.SendReceipt, buffer.GetPosition(int64 frameLength))
+                | BaseCommand.Type.Message -> 
                     XCommandMessage (command.Message, buffer.GetPosition(int64 frameLength))
                 | _ -> 
                     InvalidCommand (Exception("Unknown command type"))
@@ -88,10 +92,14 @@ let private readSocket (conn: SocketConnection) (tsc: TaskCompletionSource<Socke
                     tsc.SetResult({ Partitions = cmd.Partitions })  
                     requests.TryRemove(requestId) |> ignore
                     reader.AdvanceTo(consumed)
+                | XCommandSendReceipt (cmd, consumed) ->
+                    let producerMb = producers.[%cmd.ProducerId]
+                    producerMb.Post(SendReceipt cmd)   
+                    reader.AdvanceTo(consumed)
                 | XCommandMessage (cmd, consumed) ->
                     let consumerEvent = consumers.[%cmd.ConsumerId]
                     // TODO handle real messages
-                    consumerEvent.Trigger(null)        
+                    consumerEvent.Post(AddMessage { MessageId = null; Payload = [||] })        
                     reader.AdvanceTo(consumed)
                 | IncompleteCommand ->
                     reader.AdvanceTo(buffer.Start, buffer.End)
@@ -126,10 +134,20 @@ let private connect address =
         return! initialConnectionTsc.Task
     }    
 
-let rec getConnection (broker: Broker) =   
+let getConnection (broker: Broker) =   
     connections.GetOrAdd(broker.PhysicalAddress, fun(address) -> 
         lazy connect address).Value
                
+let registerProducer (broker: Broker) (producerId: ProducerId) (producerMb: MailboxProcessor<ProducerMessage>) =
+    let connection = getConnection broker
+    producers.TryAdd(producerId, producerMb) |> ignore
+    connection
+
+let registerConsumer (broker: Broker) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
+    let connection = getConnection broker
+    consumers.TryAdd(consumerId, consumerMb) |> ignore
+    connection
+
 let send payload = 
     sendMb.PostAndAsyncReply(fun replyChannel -> payload, replyChannel)
 
