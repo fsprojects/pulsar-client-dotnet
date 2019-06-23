@@ -9,11 +9,13 @@ type internal ServiceUri = Uri
 
 type internal ServiceNameResolver(config: PulsarClientConfiguration) =
 
+    let mutable config = config
+
     member __.GetServiceUrl() = config.ServiceUrl
 
-    member __.UpdateServiceUrl (serviceUrl: string) =
-        let config = { config with ServiceUrl = serviceUrl }
-        ServiceNameResolver(config)
+    member this.UpdateServiceUrl (serviceUrl: string) =
+        config <- { config with ServiceUrl = serviceUrl }
+        this.GetServiceUrl()
 
     member __.GetServiceUri() = ServiceUri(config.ServiceUrl)
 

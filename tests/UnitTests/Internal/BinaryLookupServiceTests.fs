@@ -23,7 +23,7 @@ let tests =
         test "UpdateServiceUrl causes service reconfiguration" {
             withService <| fun(service) ->
                 let serviceUrl = "pulsar://192.168.8.1:6650"
-                service.UpdateServiceUrl serviceUrl
+                service.UpdateServiceUrl serviceUrl |> ignore
                 let actual = service.GetServiceUrl()
                 let expected = serviceUrl
                 Expect.equal actual expected  ""

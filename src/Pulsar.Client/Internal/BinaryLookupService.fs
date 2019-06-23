@@ -26,11 +26,9 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
             return result :?> PartitionedTopicMetadata
         }
 
-    member __.GetServiceUrl(): string = 
-        raise (System.NotImplementedException())
-
-    member __.UpdateServiceUrl(serviceUrl): unit = 
-        raise (System.NotImplementedException())
+    member __.GetServiceUrl() = serviceNameResolver.GetServiceUrl()
+ 
+    member __.UpdateServiceUrl(serviceUrl) = serviceNameResolver.UpdateServiceUrl(serviceUrl)
 
     member __.GetBroker(topicName: TopicName): Task<Broker> = 
         raise (System.NotImplementedException())
