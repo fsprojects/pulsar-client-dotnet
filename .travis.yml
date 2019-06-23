@@ -9,6 +9,7 @@ sudo: required
 dist: trusty
 osx_image: xcode9.2 # OS X 10.12
 mono: latest
+dotnet: 2.2.105
 
 addons:
   apt:
