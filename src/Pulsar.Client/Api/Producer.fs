@@ -40,14 +40,18 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         //TODO reconnect
                         return! loop state
                 | ProducerMessage.SendReceipt receipt ->
-                    let tsc = messages.[%receipt.SequenceId]
-                    tsc.SetResult(receipt.MessageId)
+                    let sequenceId = %receipt.SequenceId
+                    match messages.TryGetValue(sequenceId) with
+                    | true, tsc ->
+                        tsc.SetResult(receipt.MessageId)
+                        messages.TryRemove(sequenceId) |> ignore
+                    | false, _ -> ()
                     return! loop state                        
             }
         loop { Connection = NotConnected }  
     )    
 
-    member this.SendAsync (msg: byte[]) =
+    member this.SendAndWaitAsync (msg: byte[]) =
         task {
             let payload = msg;
             let sequenceId = Generators.getNextSequenceId()
@@ -68,6 +72,23 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 return! tsc.Task
             else 
                 return failwith "Unable to add tsc"
+        }
+
+    member this.SendAsync (msg: byte[]) =
+        task {
+            let payload = msg;
+            let sequenceId = Generators.getNextSequenceId()
+            let metadata = 
+                MessageMetadata (
+                    SequenceId = %sequenceId,
+                    PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
+                    ProducerName = producerConfig.ProducerName,
+                    UncompressedSize = (payload.Length |> uint32)
+                )
+            let command = 
+                Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
+                |> ReadOnlyMemory<byte>
+            return! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
         }
 
     member private __.Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =

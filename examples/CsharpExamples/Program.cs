@@ -19,7 +19,7 @@ namespace CsharpExamples
                 await new ProducerBuilder(client)
                     .Topic("my-topic")
                     .CreateAsync();
-            var messageId = await producer.SendAsync(new byte[0]);
+            var messageId = await producer.SendAndWaitAsync(new byte[0]);
             Console.WriteLine(messageId);
 
             var consumer =
