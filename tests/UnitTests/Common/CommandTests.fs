@@ -8,8 +8,34 @@ open Pulsar.Client.Internal
 open System.Data
 open System.Buffers
 open System
+open System.IO
+open ProtoBuf
+open System.Net
 
-module CommandsTests =
+module CommandsTests =    
+        
+    let int32ToBigEndian(num : Int32) =
+        IPAddress.HostToNetworkOrder(num)
+        
+    let int32FromBigEndian(num : Int32) =
+        IPAddress.NetworkToHostOrder(num)
+    
+    let private protoDeserialize<'T> (bytes : byte[]) =
+        use stream = new MemoryStream(bytes)
+        Serializer.Deserialize<'T>(stream)
+    
+    let deserializeSimpleCommand(bytes : byte[]) =
+        use stream = new MemoryStream(bytes)
+        use reader = new BinaryReader(stream)
+    
+        let totalSize = reader.ReadInt32() |> int32FromBigEndian
+        let commandSize = reader.ReadInt32() |> int32FromBigEndian
+    
+        let command =
+            reader.ReadBytes(bytes.Length - 8)
+            |> protoDeserialize<BaseCommand>
+    
+        (totalSize, commandSize, command)
 
     let serializeDeserialize cmd = 
         let rentedArray = ArrayPool<byte>.Shared.Rent(30)

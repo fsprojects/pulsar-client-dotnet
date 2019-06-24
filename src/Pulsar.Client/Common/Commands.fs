@@ -17,16 +17,6 @@ let private protoSerialize instance =
     Serializer.Serialize(stream, instance)
     stream.ToArray()
 
-let private protoDeserialize<'T> (bytes : byte[]) =
-    use stream = new MemoryStream(bytes)
-    Serializer.Deserialize<'T>(stream)
-
-let internal int32ToBigEndian(num : Int32) =
-    IPAddress.HostToNetworkOrder(num)
-
-let internal int32FromBigEndian(num : Int32) =
-    IPAddress.NetworkToHostOrder(num)
-
 let internal serializeSimpleCommand(command : BaseCommand) =
     fun (buffer: Memory<byte>) ->
         let commandBytes = protoSerialize command
@@ -39,19 +29,6 @@ let internal serializeSimpleCommand(command : BaseCommand) =
         BinaryPrimitives.WriteInt32BigEndian(buffer.Span.Slice(4), commandSize)
         commandBytes.CopyTo(buffer.Span.Slice(8))
         frameSize
-
-let internal deserializeSimpleCommand(bytes : byte[]) =
-    use stream = new MemoryStream(bytes)
-    use reader = new BinaryReader(stream)
-
-    let totalSize = reader.ReadInt32() |> int32FromBigEndian
-    let commandSize = reader.ReadInt32() |> int32FromBigEndian
-
-    let command =
-        reader.ReadBytes(bytes.Length - 8)
-        |> protoDeserialize<BaseCommand>
-
-    (totalSize, commandSize, command)
 
 let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : SerializedPayload =
     let request = CommandPartitionedTopicMetadata(Topic = topicName, RequestId = uint64(%requestId))
