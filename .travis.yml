@@ -18,6 +18,5 @@ addons:
 
 before_script:
   - chmod +x build.sh
-  - chmod +x -R /src
 script:
   - travis_wait 60 ./build.sh
