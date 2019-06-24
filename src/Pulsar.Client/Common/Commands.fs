@@ -6,6 +6,8 @@ open ProtoBuf
 open System
 open System.IO
 open System.Net
+open pulsar.proto
+open System.Data
 
 type internal CommandType = BaseCommand.Type
 
@@ -17,18 +19,6 @@ let private protoSerialize instance =
 let private protoDeserialize<'T> (bytes : byte[]) =
     use stream = new MemoryStream(bytes)
     Serializer.Deserialize<'T>(stream)
-
-let internal getTypeByCommandType commandType : CommandType =
-    match commandType with
-    | t when t = typeof<CommandPartitionedTopicMetadata> -> CommandType.PartitionedMetadata
-    | t when t = typeof<CommandConnect> -> CommandType.Connect
-    | t -> failwith (sprintf "Unrecognized command type parameter '%A'." t)
-
-let internal toBaseCommand<'m>(initializeCommand : BaseCommand -> 'm -> unit) (metadata : 'm) =
-    let commandType = getTypeByCommandType (metadata.GetType())
-    let command = BaseCommand(``type`` = commandType)
-    initializeCommand command metadata
-    command
 
 let internal int32ToBigEndian(num : Int32) =
     IPAddress.HostToNetworkOrder(num)
@@ -62,9 +52,9 @@ let internal fromSimpleCommandBytes(bytes : byte[]) =
     (totalSize, commandSize, command)
 
 let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : byte [] =
-    CommandPartitionedTopicMetadata(Topic = topicName, RequestId = uint64(%requestId))
-    |> toBaseCommand (fun c p -> c.partitionMetadata <- p)
-    |> toSimpleCommandBytes
+    let request = CommandPartitionedTopicMetadata(Topic = topicName, RequestId = uint64(%requestId))
+    let command = BaseCommand(``type`` = CommandType.PartitionedMetadata, partitionMetadata = request)
+    command |> toSimpleCommandBytes
 
 let newSend (producerId : ProducerId) (sequenceId : SequenceId)
     (numMessages : int) (checksumType : ChecksumType)
@@ -76,6 +66,6 @@ let newAck (consumerId : ConsumerId) (ledgerId : LedgerId) (entryId : EntryId)
     [||]
 
 let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) : byte[] =
-    CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int)protocolVersion)
-    |> toBaseCommand (fun c p -> c.Connect <- p)
-    |> toSimpleCommandBytes
+    let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion)
+    let command = BaseCommand(``type`` = CommandType.Connect, Connect = request)
+    command |> toSimpleCommandBytes
