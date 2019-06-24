@@ -6,6 +6,7 @@
     <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Common\CommandTests.fs" />
     <Compile Include="Api\ConsumerBuilderTests.fs" />
     <Compile Include="Api\ProducerBuilderTests.fs" />
     <Compile Include="Api\PulsarClientBuilderTests.fs" />
