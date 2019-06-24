@@ -107,14 +107,16 @@ let private readSocket (conn: SocketConnection) (tsc: TaskCompletionSource<Socke
                     raise ex
     }
 
-type Payload = SocketConnection*ReadOnlyMemory<byte>
+type Payload = SocketConnection*SerializedPayload
 type SocketMessage = Payload * AsyncReplyChannel<FlushResult>
 
 let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
     let rec loop () =
         async {
             let! ((connection, payload), replyChannel) = inbox.Receive()
-            let! flushResult = connection.Output.WriteAsync(payload).AsTask() |> Async.AwaitTask
+            let frameSize = connection.Output.GetMemory() |> payload
+            connection.Output.Advance(frameSize)
+            let! flushResult = connection.Output.FlushAsync().AsTask() |> Async.AwaitTask
             if (flushResult.IsCanceled || flushResult.IsCompleted)
             then
                 consumers |> Seq.iter (fun (kv) -> kv.Value.Post(ConsumerMessage.Disconnected (connection, kv.Value)))
@@ -134,7 +136,6 @@ let private connect address =
         let listener = Task.Run(fun() -> (readSocket connection initialConnectionTsc).Wait())
         let connectPayload = 
             Commands.newConnect clientVersion protocolVersion
-            |> ReadOnlyMemory
         let! flushResult = sendMb.PostAndAsyncReply(fun replyChannel -> (connection, connectPayload), replyChannel)
         return! initialConnectionTsc.Task
     }    

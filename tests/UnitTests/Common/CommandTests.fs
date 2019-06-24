@@ -6,8 +6,18 @@ open Pulsar.Client.Common.Commands
 open pulsar.proto
 open Pulsar.Client.Internal
 open System.Data
+open System.Buffers
+open System
 
 module CommandsTests =
+
+    let serializeDeserialize cmd = 
+        let rentedArray = ArrayPool<byte>.Shared.Rent(30)
+        let memory = Memory(rentedArray)
+        let frameSize = cmd memory
+        let commandBytes = memory.Span.Slice(0, frameSize).ToArray()
+        ArrayPool<byte>.Shared.Return(rentedArray)
+        commandBytes |> deserializeSimpleCommand
 
     [<Tests>]
     let tests =
@@ -17,10 +27,9 @@ module CommandsTests =
             test "newPartitionMetadataRequest should return correct frame" {
                 let topicName = "test-topic"
                 let requestId = Generators.getNextRequestId()
-
-                let totalSize, commandSize, command =
-                    newPartitionMetadataRequest topicName requestId
-                    |> fromSimpleCommandBytes
+               
+                let totalSize, commandSize, command = 
+                    serializeDeserialize (newPartitionMetadataRequest topicName requestId)
 
                 totalSize |> Expect.equal "" 23
                 commandSize |> Expect.equal "" 19
@@ -33,9 +42,8 @@ module CommandsTests =
                 let clientVersion = "client-version"
                 let protocolVersion = ProtocolVersion.V1
 
-                let totalSize, commandSize, command =
-                    newConnect clientVersion protocolVersion
-                    |> fromSimpleCommandBytes
+                let totalSize, commandSize, command = 
+                    serializeDeserialize (newConnect clientVersion protocolVersion)
 
                 totalSize |> Expect.equal "" 26
                 commandSize |> Expect.equal "" 22

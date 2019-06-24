@@ -21,7 +21,6 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
             let requestId = Generators.getNextRequestId()
             let request = 
                 Commands.newPartitionMetadataRequest topicName requestId
-                |> ReadOnlyMemory<byte>
             let! result = SocketManager.sendAndWaitForReply requestId (conn, request)
             return result :?> PartitionedTopicMetadata
         }

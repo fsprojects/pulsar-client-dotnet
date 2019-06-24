@@ -35,6 +35,8 @@ type Message =
         Payload: byte[]
     }
 
+type SerializedPayload = Memory<byte> -> int
+
 type ConnectionState =
     | NotConnected
     | Connected of SocketConnection    
@@ -44,7 +46,7 @@ type ProducerMessage =
     | Reconnect
     | Disconnected of SocketConnection*MailboxProcessor<ProducerMessage>
     | SendReceipt of CommandSendReceipt
-    | SendMessage of ReadOnlyMemory<byte> * AsyncReplyChannel<FlushResult>
+    | SendMessage of SerializedPayload * AsyncReplyChannel<FlushResult>
 
 type ConsumerMessage =
     | Connect of (Broker*MailboxProcessor<ConsumerMessage>) * AsyncReplyChannel<unit>
@@ -52,4 +54,4 @@ type ConsumerMessage =
     | Disconnected of SocketConnection*MailboxProcessor<ConsumerMessage>
     | AddMessage of Message
     | GetMessage of AsyncReplyChannel<Message>
-    | Ack of ReadOnlyMemory<byte> * AsyncReplyChannel<FlushResult>
+    | Ack of SerializedPayload * AsyncReplyChannel<FlushResult>

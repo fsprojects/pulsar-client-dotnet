@@ -8,6 +8,7 @@ open System.IO
 open System.Net
 open pulsar.proto
 open System.Data
+open System.Buffers.Binary
 
 type internal CommandType = BaseCommand.Type
 
@@ -26,19 +27,20 @@ let internal int32ToBigEndian(num : Int32) =
 let internal int32FromBigEndian(num : Int32) =
     IPAddress.NetworkToHostOrder(num)
 
-let internal toSimpleCommandBytes(command : BaseCommand) =
-    let commandBytes = protoSerialize command
-    let commandSize = commandBytes.Length |> int32ToBigEndian
-    let totalSize = (commandBytes.Length + 4) |> int32ToBigEndian
-    use stream = new MemoryStream()
-    use writer = new BinaryWriter(stream)
-    writer.Write(totalSize)
-    writer.Write(commandSize)
-    writer.Write(commandBytes)
-    writer.Flush()
-    stream.ToArray()
+let internal serializeSimpleCommand(command : BaseCommand) =
+    fun (buffer: Memory<byte>) ->
+        let commandBytes = protoSerialize command
+    
+        let commandSize = commandBytes.Length
+        let totalSize = commandBytes.Length + 4
+        let frameSize = totalSize + 4
+      
+        BinaryPrimitives.WriteInt32BigEndian(buffer.Span, totalSize)
+        BinaryPrimitives.WriteInt32BigEndian(buffer.Span.Slice(4), commandSize)
+        commandBytes.CopyTo(buffer.Span.Slice(8))
+        frameSize
 
-let internal fromSimpleCommandBytes(bytes : byte[]) =
+let internal deserializeSimpleCommand(bytes : byte[]) =
     use stream = new MemoryStream(bytes)
     use reader = new BinaryReader(stream)
 
@@ -51,21 +53,21 @@ let internal fromSimpleCommandBytes(bytes : byte[]) =
 
     (totalSize, commandSize, command)
 
-let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : byte [] =
+let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : SerializedPayload =
     let request = CommandPartitionedTopicMetadata(Topic = topicName, RequestId = uint64(%requestId))
     let command = BaseCommand(``type`` = CommandType.PartitionedMetadata, partitionMetadata = request)
-    command |> toSimpleCommandBytes
+    command |> serializeSimpleCommand
 
 let newSend (producerId : ProducerId) (sequenceId : SequenceId)
     (numMessages : int) (checksumType : ChecksumType)
-    (msgMetadata : MessageMetadata) payload : byte [] =
-    [||]
+    (msgMetadata : MessageMetadata) payload : SerializedPayload =
+    Unchecked.defaultof<SerializedPayload>
 
 let newAck (consumerId : ConsumerId) (ledgerId : LedgerId) (entryId : EntryId)
-    (ackType : CommandAck.AckType) : byte [] =
-    [||]
+    (ackType : CommandAck.AckType) : SerializedPayload =
+    Unchecked.defaultof<SerializedPayload>
 
-let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) : byte[] =
+let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) : SerializedPayload =
     let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion)
     let command = BaseCommand(``type`` = CommandType.Connect, Connect = request)
-    command |> toSimpleCommandBytes
+    command |> serializeSimpleCommand

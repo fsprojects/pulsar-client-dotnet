@@ -77,7 +77,6 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 )
             let command = 
                 Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
-                |> ReadOnlyMemory<byte>
             let! flushResult = mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
             let tsc = TaskCompletionSource<MessageIdData>()
             if messages.TryAdd(sequenceId, tsc)
@@ -100,7 +99,6 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 )
             let command = 
                 Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
-                |> ReadOnlyMemory<byte>
             return! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
         }    
 

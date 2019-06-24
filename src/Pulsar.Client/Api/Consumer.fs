@@ -85,9 +85,7 @@ type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService
 
     member this.AcknowledgeAsync (msg: Message) =       
         task {
-            let command = 
-                        Commands.newAck consumerId %msg.MessageId.ledgerId %msg.MessageId.entryId CommandAck.AckType.Individual
-                        |> ReadOnlyMemory<byte>
+            let command = Commands.newAck consumerId %msg.MessageId.ledgerId %msg.MessageId.entryId CommandAck.AckType.Individual
             let! flushResult = mb.PostAndAsyncReply(fun channel -> Ack (command, channel))
             return! Task.FromResult()
         }
