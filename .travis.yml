@@ -9,6 +9,7 @@ sudo: required
 dist: xenial
 osx_image: xcode9.2 # OS X 10.12
 dotnet: 2.2.105
+mono: none
 
 addons:
   apt:
