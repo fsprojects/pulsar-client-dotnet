@@ -6,13 +6,7 @@ open ProtoBuf
 open System
 open System.IO
 open System.Net
-open pulsar.proto
-open System.Data
-open System.Buffers.Binary
 open Microsoft.IO
-open System.IO.Pipelines
-open Pipelines.Sockets.Unofficial
-open System.Threading.Tasks
 
 type internal CommandType = BaseCommand.Type
 
@@ -29,8 +23,8 @@ let internal serializeSimpleCommand(command : BaseCommand) =
         for i in 1..8 do
             stream.WriteByte(0uy)
         Serializer.Serialize(stream, command)
-        let frameSize = int stream.Length  
-        let totalSize = frameSize - 4 
+        let frameSize = int stream.Length
+        let totalSize = frameSize - 4
         let commandSize = frameSize - 8
 
         stream.Seek(0L,SeekOrigin.Begin) |> ignore
@@ -38,7 +32,7 @@ let internal serializeSimpleCommand(command : BaseCommand) =
         binaryWriter.Write(int32ToBigEndian totalSize)
         binaryWriter.Write(int32ToBigEndian commandSize)
         stream.Seek(0L, SeekOrigin.Begin) |> ignore
-                
+
         stream.CopyToAsync(output)
 
 let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : SerializedPayload =
@@ -58,4 +52,9 @@ let newAck (consumerId : ConsumerId) (ledgerId : LedgerId) (entryId : EntryId)
 let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) : SerializedPayload =
     let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion)
     let command = BaseCommand(``type`` = CommandType.Connect, Connect = request)
+    command |> serializeSimpleCommand
+
+let newLookup (topicName : string) (requestId : RequestId) (authoritative : bool) =
+    let request = CommandLookupTopic(Topic = topicName, Authoritative = authoritative, RequestId = uint64(%requestId))
+    let command = BaseCommand(``type`` = CommandType.Lookup, lookupTopic = request)
     command |> serializeSimpleCommand
