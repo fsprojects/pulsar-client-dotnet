@@ -2,14 +2,15 @@
 
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Internal
-open System.Net.Http
 
-type PulsarClient(config: PulsarClientConfiguration)  =    
-   
-    let lookupSerivce =
-        if (config.ServiceUrl.StartsWith("http"))
-        then HttpLookupService(config) :> ILookupService
-        else BinaryProtoLookupService(config) :> ILookupService
+open System
+
+type PulsarClientException(message) =
+    inherit Exception(message)
+
+type PulsarClient(config: PulsarClientConfiguration) =
+
+    let lookupSerivce = BinaryLookupService(config)
 
     member this.SubscribeAsync consumerConfig =
         this.SingleTopicSubscribeAsync consumerConfig
@@ -20,19 +21,19 @@ type PulsarClient(config: PulsarClientConfiguration)  =
     member private this.SingleTopicSubscribeAsync (consumerConfig: ConsumerConfiguration) =
         task {
             let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic
-            if (metadata.Partitions > 1) 
+            if (metadata.Partitions > 1u)
             then
-                return Consumer()
+                return! Consumer.Init(consumerConfig, lookupSerivce)
             else
-                return Consumer()                
+                return! Consumer.Init(consumerConfig, lookupSerivce)
         }
 
-    member this.CreateProducerAsync (consumerConfig: ProducerConfiguration) =
+    member this.CreateProducerAsync (producerConfig: ProducerConfiguration) =
         task {
-            let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic
-            if (metadata.Partitions > 1) 
+            let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic
+            if (metadata.Partitions > 1u)
             then
-                return Producer()
+                return! Producer.Init(producerConfig, lookupSerivce)
             else
-                return Producer()                
+                return! Producer.Init(producerConfig, lookupSerivce)
         }

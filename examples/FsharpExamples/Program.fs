@@ -18,7 +18,7 @@ let main argv =
             ProducerBuilder(client)
                 .Topic("my-topic")
                 .CreateAsync()  
-        let! messageId = producer.SendAsync([||])
+        let! messageId = producer.SendAndWaitAsync([||])
         printfn "%A" messageId
 
         let! consumer = 
