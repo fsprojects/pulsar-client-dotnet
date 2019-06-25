@@ -9,6 +9,7 @@ open Pulsar.Client.Common
 open System
 open Utf8Json
 open System.Threading.Tasks
+open SocketManager
 
 
 type BinaryLookupService (config: PulsarClientConfiguration) =
@@ -22,7 +23,11 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
             let request = 
                 Commands.newPartitionMetadataRequest topicName requestId
             let! result = SocketManager.sendAndWaitForReply requestId (connection, request)
-            return result :?> PartitionedTopicMetadata
+            match result with
+            | PartitionedTopicMetadata metadata ->
+                return metadata
+            | _ -> 
+                return failwith "Incorrect return type"
         }
 
     member __.GetServiceUrl() = serviceNameResolver.GetServiceUrl()

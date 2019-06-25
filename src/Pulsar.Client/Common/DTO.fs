@@ -7,16 +7,29 @@ open System.IO.Pipelines
 open Pipelines.Sockets.Unofficial
 open System.IO
 open System.Threading.Tasks
+open FSharp.UMX
 
 type ChecksumType =
     | Crc32c
     | No
 
-[<CLIMutable>]
 type PartitionedTopicMetadata =
     {
         Partitions: uint32
     }
+
+type MessageId =
+    {
+        LedgerId: LedgerId
+        EntryId: EntryId
+        Partition: int
+    } 
+    with static member FromMessageIdData(messageIdData: MessageIdData) =
+            {
+                LedgerId = %messageIdData.ledgerId
+                EntryId = %messageIdData.entryId
+                Partition = messageIdData.Partition
+            }
 
 type Broker = 
     {
@@ -33,7 +46,7 @@ type SendAck =
 
 type Message =
     {
-        MessageId: MessageIdData
+        MessageId: MessageId
         Payload: byte[]
     }
     

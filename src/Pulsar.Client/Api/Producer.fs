@@ -18,7 +18,7 @@ type ProducerState = {
 
 type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =    
     let producerId = Generators.getNextProducerId()
-    let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageIdData>>()
+    let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
     let partitionIndex = -1
 
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
@@ -56,7 +56,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     let sequenceId = %receipt.SequenceId
                     match messages.TryGetValue(sequenceId) with
                     | true, tsc ->
-                        tsc.SetResult(receipt.MessageId)
+                        tsc.SetResult(MessageId.FromMessageIdData(receipt.MessageId))
                         messages.TryRemove(sequenceId) |> ignore
                     | false, _ -> ()
                     return! loop state                        
@@ -78,7 +78,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
             let command = 
                 Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
             do! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
-            let tsc = TaskCompletionSource<MessageIdData>()
+            let tsc = TaskCompletionSource()
             if messages.TryAdd(sequenceId, tsc)
             then
                 return! tsc.Task

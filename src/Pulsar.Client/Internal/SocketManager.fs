@@ -23,8 +23,12 @@ let protocolVersion =
     :?> ProtocolVersion[] 
     |> Array.last
 
+
+type PulsarTypes =
+    | PartitionedTopicMetadata of PartitionedTopicMetadata
+
 let connections = ConcurrentDictionary<EndPoint, Lazy<Task<Connection>>>()
-let requests = ConcurrentDictionary<RequestId, TaskCompletionSource<obj>>()
+let requests = ConcurrentDictionary<RequestId, TaskCompletionSource<PulsarTypes>>()
 let consumers = ConcurrentDictionary<ConsumerId, MailboxProcessor<ConsumerMessage>>()
 let producers = ConcurrentDictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
 
@@ -90,7 +94,7 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandPartitionedTopicMetadataResponse (cmd, consumed) ->
                     let requestId = %cmd.RequestId
                     let tsc = requests.[requestId]
-                    tsc.SetResult({ Partitions = cmd.Partitions })  
+                    tsc.SetResult(PartitionedTopicMetadata { Partitions = cmd.Partitions })  
                     requests.TryRemove(requestId) |> ignore
                     reader.AdvanceTo(consumed)
                 | XCommandSendReceipt (cmd, consumed) ->
@@ -100,7 +104,7 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandMessage (cmd, consumed) ->
                     let consumerEvent = consumers.[%cmd.ConsumerId]
                     // TODO handle real messages
-                    consumerEvent.Post(AddMessage { MessageId = null; Payload = [||] })        
+                    consumerEvent.Post(AddMessage { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = [||] })        
                     reader.AdvanceTo(consumed)
                 | IncompleteCommand ->
                     reader.AdvanceTo(buffer.Start, buffer.End)
