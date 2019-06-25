@@ -9,26 +9,37 @@ open System.Net
 open pulsar.proto
 open System.Data
 open System.Buffers.Binary
+open Microsoft.IO
+open System.IO.Pipelines
+open Pipelines.Sockets.Unofficial
+open System.Threading.Tasks
 
 type internal CommandType = BaseCommand.Type
 
-let private protoSerialize instance =
-    use stream = new MemoryStream()
-    Serializer.Serialize(stream, instance)
-    stream.ToArray()
+let private memoryStreamManager = RecyclableMemoryStreamManager()
+Serializer.PrepareSerializer<BaseCommand>()
+
+let inline int32ToBigEndian(num : Int32) =
+    IPAddress.HostToNetworkOrder(num)
 
 let internal serializeSimpleCommand(command : BaseCommand) =
-    fun (buffer: Memory<byte>) ->
-        let commandBytes = protoSerialize command
-    
-        let commandSize = commandBytes.Length
-        let totalSize = commandBytes.Length + 4
-        let frameSize = totalSize + 4
-      
-        BinaryPrimitives.WriteInt32BigEndian(buffer.Span, totalSize)
-        BinaryPrimitives.WriteInt32BigEndian(buffer.Span.Slice(4), commandSize)
-        commandBytes.CopyTo(buffer.Span.Slice(8))
-        frameSize
+    fun (output: Stream) ->
+        use stream = memoryStreamManager.GetStream()
+        // write fake totalLength
+        for i in 1..8 do
+            stream.WriteByte(0uy)
+        Serializer.Serialize(stream, command)
+        let frameSize = int stream.Length  
+        let totalSize = frameSize - 4 
+        let commandSize = frameSize - 8
+
+        stream.Seek(0L,SeekOrigin.Begin) |> ignore
+        use binaryWriter = new BinaryWriter(stream)
+        binaryWriter.Write(int32ToBigEndian totalSize)
+        binaryWriter.Write(int32ToBigEndian commandSize)
+        stream.Seek(0L, SeekOrigin.Begin) |> ignore
+                
+        stream.CopyToAsync(output)
 
 let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : SerializedPayload =
     let request = CommandPartitionedTopicMetadata(Topic = topicName, RequestId = uint64(%requestId))

@@ -252,11 +252,10 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <_NuspecFiles Include="$(AdjustedNuspecOutputPath)\*.$(PackageVersion.Split(`+`)[0]).nuspec"/>
+      <_NuspecFiles Include="$(AdjustedNuspecOutputPath)\*.$(PackageVersion).nuspec"/>
     </ItemGroup>
 
-    <Exec Condition="@(_NuspecFiles) != ''" Command='$(PaketCommand) fix-nuspecs files "@(_NuspecFiles)" project-file "$(PaketProjectFile)" ' />
-    <Error Condition="@(_NuspecFiles) == ''" Text='Could not find nuspec files in "$(AdjustedNuspecOutputPath)" (Version: "$(PackageVersion)"), therefore we cannot call "paket fix-nuspecs" and have to error out!' />
+    <Exec Command='$(PaketCommand) fix-nuspecs files "@(_NuspecFiles)" project-file "$(PaketProjectFile)" ' Condition="@(_NuspecFiles) != ''" />
 
     <ConvertToAbsolutePath Condition="@(_NuspecFiles) != ''" Paths="@(_NuspecFiles)">
       <Output TaskParameter="AbsolutePaths" PropertyName="NuspecFileAbsolutePath" />

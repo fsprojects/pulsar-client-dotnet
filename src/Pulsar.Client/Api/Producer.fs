@@ -46,8 +46,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 | ProducerMessage.SendMessage (payload, channel) ->
                     match state.Connection with
                     | Connected conn ->
-                        let! flushResult = SocketManager.send (conn, payload)
-                        channel.Reply(flushResult)
+                        do! SocketManager.send (conn, payload)
+                        channel.Reply()
                         return! loop state
                     | NotConnected ->
                         //TODO put message on schedule
@@ -77,7 +77,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 )
             let command = 
                 Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
-            let! flushResult = mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
+            do! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
             let tsc = TaskCompletionSource<MessageIdData>()
             if messages.TryAdd(sequenceId, tsc)
             then

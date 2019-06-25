@@ -11,11 +11,9 @@ open System
 open System.IO
 open ProtoBuf
 open System.Net
+open System.Threading.Tasks
 
 module CommandsTests =    
-        
-    let int32ToBigEndian(num : Int32) =
-        IPAddress.HostToNetworkOrder(num)
         
     let int32FromBigEndian(num : Int32) =
         IPAddress.NetworkToHostOrder(num)
@@ -37,12 +35,10 @@ module CommandsTests =
     
         (totalSize, commandSize, command)
 
-    let serializeDeserialize cmd = 
-        let rentedArray = ArrayPool<byte>.Shared.Rent(30)
-        let memory = Memory(rentedArray)
-        let frameSize = cmd memory
-        let commandBytes = memory.Span.Slice(0, frameSize).ToArray()
-        ArrayPool<byte>.Shared.Return(rentedArray)
+    let serializeDeserialize (cmd: (MemoryStream -> Task)) = 
+        let stream = new MemoryStream()
+        (cmd stream).Wait() 
+        let commandBytes = stream.ToArray()
         commandBytes |> deserializeSimpleCommand
 
     [<Tests>]

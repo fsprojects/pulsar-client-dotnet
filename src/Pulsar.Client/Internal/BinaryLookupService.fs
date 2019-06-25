@@ -17,11 +17,11 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
     member __.GetPartitionedTopicMetadata topicName = 
         task {
             let endpoint = serviceNameResolver.ResolveHost()
-            use! conn = SocketManager.getConnection { PhysicalAddress = endpoint; LogicalAddress = endpoint }
+            let! connection = SocketManager.getConnection { PhysicalAddress = endpoint; LogicalAddress = endpoint }
             let requestId = Generators.getNextRequestId()
             let request = 
                 Commands.newPartitionMetadataRequest topicName requestId
-            let! result = SocketManager.sendAndWaitForReply requestId (conn, request)
+            let! result = SocketManager.sendAndWaitForReply requestId (connection, request)
             return result :?> PartitionedTopicMetadata
         }
 

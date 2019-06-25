@@ -23,7 +23,7 @@ let protocolVersion =
     :?> ProtocolVersion[] 
     |> Array.last
 
-let connections = ConcurrentDictionary<EndPoint, Lazy<Task<SocketConnection>>>()
+let connections = ConcurrentDictionary<EndPoint, Lazy<Task<Connection>>>()
 let requests = ConcurrentDictionary<RequestId, TaskCompletionSource<obj>>()
 let consumers = ConcurrentDictionary<ConsumerId, MailboxProcessor<ConsumerMessage>>()
 let producers = ConcurrentDictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
@@ -70,8 +70,9 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
     else
         IncompleteCommand
 
-let private readSocket (conn: SocketConnection) (tsc: TaskCompletionSource<SocketConnection>) =
+let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Connection>) =
     task {
+        let (conn, _) = connection
         let mutable continueLooping = true
         let reader = conn.Input
         while continueLooping do
@@ -84,7 +85,7 @@ let private readSocket (conn: SocketConnection) (tsc: TaskCompletionSource<Socke
                 match tryParse buffer with
                 | XCommandConnected (cmd, consumed) ->
                     //TODO check server protocol version
-                    tsc.SetResult(conn)
+                    tsc.SetResult(connection)
                     reader.AdvanceTo(consumed)
                 | XCommandPartitionedTopicMetadataResponse (cmd, consumed) ->
                     let requestId = %cmd.RequestId
@@ -107,22 +108,22 @@ let private readSocket (conn: SocketConnection) (tsc: TaskCompletionSource<Socke
                     raise ex
     }
 
-type Payload = SocketConnection*SerializedPayload
-type SocketMessage = Payload * AsyncReplyChannel<FlushResult>
+type Payload = Connection*SerializedPayload
+type SocketMessage = Payload * AsyncReplyChannel<unit>
 
 let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
     let rec loop () =
         async {
             let! ((connection, payload), replyChannel) = inbox.Receive()
-            let frameSize = connection.Output.GetMemory() |> payload
-            connection.Output.Advance(frameSize)
-            let! flushResult = connection.Output.FlushAsync().AsTask() |> Async.AwaitTask
-            if (flushResult.IsCanceled || flushResult.IsCompleted)
+            let (conn, streamWriter)  = connection
+            do! streamWriter |> payload |> Async.AwaitTask                       
+            
+            if (not conn.Socket.Connected)
             then
                 consumers |> Seq.iter (fun (kv) -> kv.Value.Post(ConsumerMessage.Disconnected (connection, kv.Value)))
                 producers |> Seq.iter (fun (kv) -> kv.Value.Post(ProducerMessage.Disconnected (connection, kv.Value)))
             // TODO handle failure properly
-            replyChannel.Reply(flushResult)
+            replyChannel.Reply()
             return! loop ()             
         }
     loop ()
@@ -131,12 +132,14 @@ let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
 
 let private connect address =
     task {
-        let! connection = SocketConnection.ConnectAsync(address)
-        let initialConnectionTsc = TaskCompletionSource<SocketConnection>()
+        let! socketConnection = SocketConnection.ConnectAsync(address)
+        let writerStream = StreamConnection.GetWriter(socketConnection.Output)
+        let connection = (socketConnection, writerStream)
+        let initialConnectionTsc = TaskCompletionSource<Connection>()
         let listener = Task.Run(fun() -> (readSocket connection initialConnectionTsc).Wait())
         let connectPayload = 
             Commands.newConnect clientVersion protocolVersion
-        let! flushResult = sendMb.PostAndAsyncReply(fun replyChannel -> (connection, connectPayload), replyChannel)
+        do! sendMb.PostAndAsyncReply(fun replyChannel -> (connection, connectPayload), replyChannel)
         return! initialConnectionTsc.Task
     }    
 
@@ -159,7 +162,7 @@ let send payload =
 
 let sendAndWaitForReply reqId payload = 
     task {
-        let! flushResult = sendMb.PostAndAsyncReply(fun replyChannel -> payload, replyChannel)
+        do! sendMb.PostAndAsyncReply(fun replyChannel -> payload, replyChannel)
         let tsc = TaskCompletionSource()
         if requests.TryAdd(reqId, tsc) |> not
         then tsc.SetException(Exception("Duplicate request"))       

@@ -5,6 +5,8 @@ open System
 open pulsar.proto
 open System.IO.Pipelines
 open Pipelines.Sockets.Unofficial
+open System.IO
+open System.Threading.Tasks
 
 type ChecksumType =
     | Crc32c
@@ -34,24 +36,26 @@ type Message =
         MessageId: MessageIdData
         Payload: byte[]
     }
-
-type SerializedPayload = Memory<byte> -> int
+    
+type WriterStream = Stream
+type SerializedPayload = WriterStream -> Task
+type Connection = SocketConnection * WriterStream
 
 type ConnectionState =
     | NotConnected
-    | Connected of SocketConnection    
+    | Connected of Connection    
 
 type ProducerMessage = 
     | Connect of (Broker*MailboxProcessor<ProducerMessage>) * AsyncReplyChannel<unit>
     | Reconnect
-    | Disconnected of SocketConnection*MailboxProcessor<ProducerMessage>
+    | Disconnected of Connection*MailboxProcessor<ProducerMessage>
     | SendReceipt of CommandSendReceipt
-    | SendMessage of SerializedPayload * AsyncReplyChannel<FlushResult>
+    | SendMessage of SerializedPayload * AsyncReplyChannel<unit>
 
 type ConsumerMessage =
     | Connect of (Broker*MailboxProcessor<ConsumerMessage>) * AsyncReplyChannel<unit>
     | Reconnect
-    | Disconnected of SocketConnection*MailboxProcessor<ConsumerMessage>
+    | Disconnected of Connection*MailboxProcessor<ConsumerMessage>
     | AddMessage of Message
     | GetMessage of AsyncReplyChannel<Message>
-    | Ack of SerializedPayload * AsyncReplyChannel<FlushResult>
+    | Ack of SerializedPayload * AsyncReplyChannel<unit>

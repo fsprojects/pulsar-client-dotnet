@@ -64,8 +64,8 @@ type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService
                 | ConsumerMessage.Ack (payload, channel) ->
                     match state.Connection with
                     | Connected conn ->
-                        let! flushResult = SocketManager.send (conn, payload)
-                        channel.Reply(flushResult)
+                        do! SocketManager.send (conn, payload)
+                        channel.Reply()
                         return! loop state
                     | NotConnected ->
                         //TODO put message on schedule
@@ -86,7 +86,7 @@ type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService
     member this.AcknowledgeAsync (msg: Message) =       
         task {
             let command = Commands.newAck consumerId %msg.MessageId.ledgerId %msg.MessageId.entryId CommandAck.AckType.Individual
-            let! flushResult = mb.PostAndAsyncReply(fun channel -> Ack (command, channel))
+            do! mb.PostAndAsyncReply(fun channel -> Ack (command, channel))
             return! Task.FromResult()
         }
 
