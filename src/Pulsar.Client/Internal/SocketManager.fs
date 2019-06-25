@@ -38,8 +38,42 @@ type PulsarCommands =
     | XCommandPartitionedTopicMetadataResponse of CommandPartitionedTopicMetadataResponse * SequencePosition
     | XCommandSendReceipt of CommandSendReceipt * SequencePosition
     | XCommandMessage of CommandMessage * SequencePosition
+    | XCommandPing of CommandPing * SequencePosition
     | IncompleteCommand
     | InvalidCommand of Exception
+
+
+type Payload = Connection*SerializedPayload
+type SocketMessage = 
+    | SocketMessageWithReply of Payload * AsyncReplyChannel<unit>
+    | SocketMessageWithoutReply of Payload
+
+let sendSerializedPayload ((connection, serializedPayload): Payload ) = 
+    task {
+        let (conn, streamWriter) = connection
+        do! streamWriter |> serializedPayload         
+               
+        if (not conn.Socket.Connected)
+        then
+            consumers |> Seq.iter (fun (kv) -> kv.Value.Post(ConsumerMessage.Disconnected (connection, kv.Value)))
+            producers |> Seq.iter (fun (kv) -> kv.Value.Post(ProducerMessage.Disconnected (connection, kv.Value)))
+    }
+
+let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
+    
+    let rec loop () =
+        async {
+            match! inbox.Receive() with
+            | SocketMessageWithReply (payload, replyChannel) ->
+                do! sendSerializedPayload payload |> Async.AwaitTask
+                // TODO handle failure properly
+                replyChannel.Reply()
+            | SocketMessageWithoutReply payload ->
+                 do! sendSerializedPayload payload |> Async.AwaitTask
+            return! loop ()             
+        }
+    loop ()
+)
 
 
 let tryParse (buffer: ReadOnlySequence<byte>) =
@@ -64,6 +98,8 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                     XCommandSendReceipt (command.SendReceipt, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.Message -> 
                     XCommandMessage (command.Message, buffer.GetPosition(int64 frameLength))
+                | BaseCommand.Type.Ping -> 
+                    XCommandPing (command.Ping, buffer.GetPosition(int64 frameLength))
                 | _ -> 
                     InvalidCommand (Exception("Unknown command type"))
             with
@@ -100,7 +136,10 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandSendReceipt (cmd, consumed) ->
                     let producerMb = producers.[%cmd.ProducerId]
                     producerMb.Post(SendReceipt cmd)   
-                    reader.AdvanceTo(consumed)
+                    reader.AdvanceTo(consumed)                
+                | XCommandPing (cmd, consumed) ->
+                    sendMb.Post(SocketMessageWithoutReply (connection, Commands.newPong()))
+                    reader.AdvanceTo(consumed)         
                 | XCommandMessage (cmd, consumed) ->
                     let consumerEvent = consumers.[%cmd.ConsumerId]
                     // TODO handle real messages
@@ -112,26 +151,6 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                     raise ex
     }
 
-type Payload = Connection*SerializedPayload
-type SocketMessage = Payload * AsyncReplyChannel<unit>
-
-let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
-    let rec loop () =
-        async {
-            let! ((connection, payload), replyChannel) = inbox.Receive()
-            let (conn, streamWriter)  = connection
-            do! streamWriter |> payload |> Async.AwaitTask                       
-            
-            if (not conn.Socket.Connected)
-            then
-                consumers |> Seq.iter (fun (kv) -> kv.Value.Post(ConsumerMessage.Disconnected (connection, kv.Value)))
-                producers |> Seq.iter (fun (kv) -> kv.Value.Post(ProducerMessage.Disconnected (connection, kv.Value)))
-            // TODO handle failure properly
-            replyChannel.Reply()
-            return! loop ()             
-        }
-    loop ()
-)
 
 
 let private connect address =
@@ -143,7 +162,7 @@ let private connect address =
         let listener = Task.Run(fun() -> (readSocket connection initialConnectionTsc).Wait())
         let connectPayload = 
             Commands.newConnect clientVersion protocolVersion
-        do! sendMb.PostAndAsyncReply(fun replyChannel -> (connection, connectPayload), replyChannel)
+        do! sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply ((connection, connectPayload), replyChannel))
         return! initialConnectionTsc.Task
     }    
 
@@ -162,11 +181,11 @@ let registerConsumer (broker: Broker) (consumerId: ConsumerId) (consumerMb: Mail
     connection
 
 let send payload = 
-    sendMb.PostAndAsyncReply(fun replyChannel -> payload, replyChannel)
+    sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
 
 let sendAndWaitForReply reqId payload = 
     task {
-        do! sendMb.PostAndAsyncReply(fun replyChannel -> payload, replyChannel)
+        do! sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
         let tsc = TaskCompletionSource()
         if requests.TryAdd(reqId, tsc) |> not
         then tsc.SetException(Exception("Duplicate request"))       

@@ -59,3 +59,8 @@ let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) : Seri
     let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion)
     let command = BaseCommand(``type`` = CommandType.Connect, Connect = request)
     command |> serializeSimpleCommand
+
+let newPong () : SerializedPayload =
+    let request = CommandPong()
+    let command = BaseCommand(``type`` = CommandType.Pong, Pong = request)
+    command |> serializeSimpleCommand
