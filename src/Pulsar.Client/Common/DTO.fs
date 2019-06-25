@@ -18,6 +18,10 @@ type PartitionedTopicMetadata =
         Partitions: uint32
     }
 
+type LookupTopicResult = {
+    BrokerServiceUrl : string
+}
+
 type MessageId =
     {
         LedgerId: LedgerId
