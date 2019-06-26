@@ -3,11 +3,15 @@
 open System
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
+open Microsoft.Extensions.Logging.Console
+open Microsoft.Extensions.Logging
+    
 
 [<EntryPoint>]
 let main argv =
     printfn "Example started"
-
+      
+    PulsarClient.Logger <- ConsoleLogger("PulsarLogger", Func<string,LogLevel,bool>(fun x y -> true), true)
     let client =
         PulsarClientBuilder()
             .WithServiceUrl("pulsar://pulsar-broker:31002")

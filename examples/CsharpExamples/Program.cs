@@ -1,6 +1,8 @@
 ﻿using Pulsar.Client.Api;
 using System;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging.Console;
+using Microsoft.Extensions.Logging;
 
 namespace CsharpExamples
 {
@@ -9,6 +11,8 @@ namespace CsharpExamples
         static async Task Main(string[] args)
         {
             Console.WriteLine("Example started");
+
+            PulsarClient.Logger = new ConsoleLogger("PulsarLogger", (x, y) => true, true);
 
             var client =
                 new PulsarClientBuilder()

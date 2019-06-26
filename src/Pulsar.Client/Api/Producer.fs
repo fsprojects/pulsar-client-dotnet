@@ -8,6 +8,7 @@ open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open System
 open System.Collections.Concurrent
+open Microsoft.Extensions.Logging
 
 type ProducerException(message) =
     inherit Exception(message)
@@ -87,6 +88,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
         }
 
     member this.SendAsync (msg: byte[]) =
+        Log.Logger.LogDebug("Sending Async")
+
         task {
             let payload = msg;
             let sequenceId = Generators.getNextSequenceId()

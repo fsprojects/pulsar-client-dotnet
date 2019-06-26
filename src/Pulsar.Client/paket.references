@@ -4,3 +4,4 @@ FSharp.UMX
 UTF8Json
 Pipelines.Sockets.Unofficial
 Microsoft.IO.RecyclableMemoryStream
+Microsoft.Extensions.Logging.Abstractions

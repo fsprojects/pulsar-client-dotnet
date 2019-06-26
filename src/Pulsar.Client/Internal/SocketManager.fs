@@ -9,8 +9,7 @@ open System.Buffers.Binary
 open System.Threading.Tasks
 open Pipelines.Sockets.Unofficial
 open System
-open System.IO.Pipelines
-open Pulsar.Client.Api
+open Microsoft.Extensions.Logging
 open pulsar.proto
 open ProtoBuf
 open System.IO
@@ -55,21 +54,23 @@ let sendSerializedPayload ((connection, serializedPayload): Payload ) =
                
         if (not conn.Socket.Connected)
         then
+            Log.Logger.LogWarning("Socket was disconnected")
             consumers |> Seq.iter (fun (kv) -> kv.Value.Post(ConsumerMessage.Disconnected (connection, kv.Value)))
             producers |> Seq.iter (fun (kv) -> kv.Value.Post(ProducerMessage.Disconnected (connection, kv.Value)))
     }
 
-let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
-    
+let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->    
     let rec loop () =
         async {
             match! inbox.Receive() with
             | SocketMessageWithReply (payload, replyChannel) ->
+                Log.Logger.LogDebug("Sending payload with reply")
                 do! sendSerializedPayload payload |> Async.AwaitTask
                 // TODO handle failure properly
                 replyChannel.Reply()
             | SocketMessageWithoutReply payload ->
-                 do! sendSerializedPayload payload |> Async.AwaitTask
+                Log.Logger.LogDebug("Sending payload without reply")
+                do! sendSerializedPayload payload |> Async.AwaitTask
             return! loop ()             
         }
     loop ()
@@ -89,6 +90,7 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
             let msgStream =  new MemoryStream(sp.Slice(8,commandLength).ToArray())
             try
                 let command = Serializer.Deserialize<BaseCommand>(msgStream)
+                Log.Logger.LogDebug("Got message of type {0}", command.``type``)
                 match command.``type`` with
                 | BaseCommand.Type.Connected -> 
                     XCommandConnected (command.Connected, buffer.GetPosition(int64 frameLength))
@@ -153,7 +155,8 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
 
 
 
-let private connect address =
+let private connect (address: EndPoint) =
+    Log.Logger.LogInformation("Connecting to {0}", address)
     task {
         let! socketConnection = SocketConnection.ConnectAsync(address)
         let writerStream = StreamConnection.GetWriter(socketConnection.Output)
@@ -173,11 +176,13 @@ let getConnection (broker: Broker) =
 let registerProducer (broker: Broker) (producerId: ProducerId) (producerMb: MailboxProcessor<ProducerMessage>) =
     let connection = getConnection broker
     producers.TryAdd(producerId, producerMb) |> ignore
+    Log.Logger.LogInformation("Producer registered")
     connection
 
 let registerConsumer (broker: Broker) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
     let connection = getConnection broker
     consumers.TryAdd(consumerId, consumerMb) |> ignore
+    Log.Logger.LogInformation("Consumer registered")
     connection
 
 let send payload = 

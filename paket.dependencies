@@ -3,6 +3,8 @@ source https://api.nuget.org/v3/index.json
 nuget Expecto.FsCheck
 nuget FSharp.Core
 nuget FSharp.UMX
+nuget Microsoft.Extensions.Logging.Abstractions
+nuget Microsoft.Extensions.Logging.Console
 nuget Microsoft.IO.RecyclableMemoryStream
 nuget Pipelines.Sockets.Unofficial
 nuget TaskBuilder.fs

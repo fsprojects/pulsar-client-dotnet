@@ -16,6 +16,7 @@
     <Compile Include="Common\Topic.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\Configuration.fs" />
+    <Compile Include="Internal\Log.fs" />
     <Compile Include="Internal\Generators.fs" />
     <Compile Include="Internal\ServiceNameResolver.fs" />
     <Compile Include="Internal\SocketManager.fs" />

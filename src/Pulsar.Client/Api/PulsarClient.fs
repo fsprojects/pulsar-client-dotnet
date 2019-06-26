@@ -18,6 +18,10 @@ type PulsarClient(config: PulsarClientConfiguration) =
     member this.GetPartitionedTopicMetadata topicName =
         lookupSerivce.GetPartitionedTopicMetadata topicName
 
+    static member Logger
+        with get () = Log.Logger
+        and set (value) = Log.Logger <- value
+
     member private this.SingleTopicSubscribeAsync (consumerConfig: ConsumerConfiguration) =
         task {
             let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic
