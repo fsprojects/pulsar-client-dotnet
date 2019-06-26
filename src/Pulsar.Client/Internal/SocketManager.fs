@@ -1,4 +1,4 @@
-﻿module Pulsar.Client.Internal.SocketManager
+﻿module internal Pulsar.Client.Internal.SocketManager
 
 open Pulsar.Client.Common
 open FSharp.Control.Tasks.V2.ContextInsensitive

@@ -1,4 +1,4 @@
-﻿module Pulsar.Client.Internal.Generators
+﻿module internal Pulsar.Client.Internal.Generators
 
 open System.Threading
 open Pulsar.Client.Common

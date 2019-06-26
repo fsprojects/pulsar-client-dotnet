@@ -3,7 +3,7 @@
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.Logging.Abstractions
 
-type Log() =
+type internal Log() =
     static let mutable _logger: ILogger = (NullLogger.Instance :> ILogger)
 
     static member Logger
