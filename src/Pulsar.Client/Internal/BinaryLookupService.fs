@@ -12,7 +12,7 @@ open System.Threading.Tasks
 open SocketManager
 
 
-type internal BinaryLookupService (config: PulsarClientConfiguration) =
+type BinaryLookupService (config: PulsarClientConfiguration) =
     let serviceNameResolver = ServiceNameResolver(config)
 
     member __.GetPartitionedTopicMetadata topicName = 

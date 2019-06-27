@@ -17,7 +17,7 @@ type ConsumerState = {
     Connection: ConnectionState
 }
 
-type Consumer(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =    
+type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =    
 
     let consumerId = Generators.getNextConsumerId()
     let queue = new ConcurrentQueue<Message>()
