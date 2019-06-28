@@ -19,6 +19,7 @@ type PartitionedTopicMetadata =
     }
 
 type LookupTopicResult = {
+    Proxy: bool
     BrokerServiceUrl : string
 }
 

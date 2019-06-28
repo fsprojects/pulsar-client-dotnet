@@ -131,11 +131,11 @@ module CommandsTests =
                 let authoritative = true
 
                 let totalSize, commandSize, command = 
-                    serializeDeserialize (newLookup topicName requestId authoritative )
+                    serializeDeserializeSimpleCommand (newLookup topicName requestId authoritative )
 
-                totalSize |> Expect.equal "" 26
-                commandSize |> Expect.equal "" 22
-                command.``type``  |> Expect.equal "" CommandType.Connect
+                totalSize |> Expect.equal "" 25
+                commandSize |> Expect.equal "" 21
+                command.``type``  |> Expect.equal "" CommandType.Lookup
                 command.lookupTopic.Topic |> Expect.equal "" topicName
                 command.lookupTopic.RequestId |> Expect.equal "" (uint64(requestId))
                 command.lookupTopic.Authoritative |> Expect.equal "" authoritative

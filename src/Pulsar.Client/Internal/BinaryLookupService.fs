@@ -10,6 +10,7 @@ open System
 open Utf8Json
 open System.Threading.Tasks
 open SocketManager
+open System.Net
 
 
 type BinaryLookupService (config: PulsarClientConfiguration) =
@@ -43,7 +44,11 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
             let! result = SocketManager.sendAndWaitForReply requestId (connection, request)
             match result with
             | LookupTopicResult metadata ->
-                return metadata
+                let uri = Uri(metadata.BrokerServiceUrl)
+                let address = DnsEndPoint(uri.Host, uri.Port)
+                return if metadata.Proxy
+                       then { LogicalAddress = address; PhysicalAddress = endpoint }
+                       else { LogicalAddress = address; PhysicalAddress = address }
             | _ -> 
                 return failwith "Incorrect return type"
         }

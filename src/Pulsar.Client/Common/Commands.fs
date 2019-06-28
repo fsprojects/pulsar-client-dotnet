@@ -127,7 +127,6 @@ let newPong () : SerializedPayload =
     let request = CommandPong()
     let command = BaseCommand(``type`` = CommandType.Pong, Pong = request)
     command |> serializeSimpleCommand
-    command |> serializeSimpleCommand
 
 let newLookup (topicName : string) (requestId : RequestId) (authoritative : bool) =
     let request = CommandLookupTopic(Topic = topicName, Authoritative = authoritative, RequestId = uint64(%requestId))

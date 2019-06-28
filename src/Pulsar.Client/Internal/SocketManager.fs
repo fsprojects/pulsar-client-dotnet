@@ -52,8 +52,9 @@ type SocketMessage =
 let sendSerializedPayload ((connection, serializedPayload): Payload ) = 
     task {
         let (conn, streamWriter) = connection
-        do! streamWriter |> serializedPayload         
+        let task = streamWriter |> serializedPayload         
                
+        do! task
         if (not conn.Socket.Connected)
         then
             Log.Logger.LogWarning("Socket was disconnected")
@@ -154,7 +155,7 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandLookupTopic (cmd, consumed) ->
                     let requestId = %cmd.RequestId
                     let tsc = requests.[requestId]
-                    let result = LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl }
+                    let result = LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
                     tsc.SetResult(result)  
                     requests.TryRemove(requestId) |> ignore
                     reader.AdvanceTo(consumed)
