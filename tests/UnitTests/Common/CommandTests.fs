@@ -2,11 +2,11 @@
 
 open Expecto
 open Expecto.Flip
+open Pulsar.Client.Common
 open Pulsar.Client.Common.Commands
 open pulsar.proto
 open Pulsar.Client.Internal
-open System.Data
-open System.Buffers
+open FSharp.UMX
 open System
 open System.IO
 open ProtoBuf
@@ -16,6 +16,9 @@ open System.Threading.Tasks
 module CommandsTests =    
         
     let int32FromBigEndian(num : Int32) =
+        IPAddress.NetworkToHostOrder(num)
+
+    let int16FromBigEndian(num : Int16) =
         IPAddress.NetworkToHostOrder(num)
     
     let private protoDeserialize<'T> (bytes : byte[]) =
@@ -30,16 +33,45 @@ module CommandsTests =
         let commandSize = reader.ReadInt32() |> int32FromBigEndian
     
         let command =
-            reader.ReadBytes(bytes.Length - 8)
+            reader.ReadBytes(commandSize)
             |> protoDeserialize<BaseCommand>
     
         (totalSize, commandSize, command)
 
-    let serializeDeserialize (cmd: (MemoryStream -> Task)) = 
+    let deserializePayloadCommand(bytes : byte[]) =
+        use stream = new MemoryStream(bytes)
+        use reader = new BinaryReader(stream)
+    
+        let totalSize = reader.ReadInt32() |> int32FromBigEndian
+        let commandSize = reader.ReadInt32() |> int32FromBigEndian
+    
+        let command =
+            reader.ReadBytes(commandSize)
+            |> protoDeserialize<BaseCommand>
+
+        let magicNumber = reader.ReadInt16() |> int16FromBigEndian
+        let crc32 = reader.ReadInt32() |> int32FromBigEndian
+        let medataSize = reader.ReadInt32() |> int32FromBigEndian
+
+        let metadata =
+            reader.ReadBytes(medataSize)
+            |> protoDeserialize<MessageMetadata>
+
+        let payload = reader.ReadBytes(bytes.Length - 8 - commandSize - 10 - medataSize)
+    
+        (bytes, totalSize, commandSize, command, magicNumber, crc32, medataSize, metadata, payload)
+
+    let serializeDeserializeSimpleCommand (cmd: (MemoryStream -> Task)) = 
         let stream = new MemoryStream()
         (cmd stream).Wait() 
         let commandBytes = stream.ToArray()
         commandBytes |> deserializeSimpleCommand
+
+    let serializeDeserializePayloadCommand (cmd: (MemoryStream -> Task)) = 
+        let stream = new MemoryStream()
+        (cmd stream).Wait() 
+        let commandBytes = stream.ToArray()
+        commandBytes |> deserializePayloadCommand
 
     [<Tests>]
     let tests =
@@ -51,7 +83,7 @@ module CommandsTests =
                 let requestId = Generators.getNextRequestId()
                
                 let totalSize, commandSize, command = 
-                    serializeDeserialize (newPartitionMetadataRequest topicName requestId)
+                    serializeDeserializeSimpleCommand (newPartitionMetadataRequest topicName requestId)
 
                 totalSize |> Expect.equal "" 23
                 commandSize |> Expect.equal "" 19
@@ -65,12 +97,31 @@ module CommandsTests =
                 let protocolVersion = ProtocolVersion.V1
 
                 let totalSize, commandSize, command = 
-                    serializeDeserialize (newConnect clientVersion protocolVersion)
+                    serializeDeserializeSimpleCommand (newConnect clientVersion protocolVersion)
 
                 totalSize |> Expect.equal "" 26
                 commandSize |> Expect.equal "" 22
                 command.``type``  |> Expect.equal "" CommandType.Connect
                 command.Connect.ClientVersion |> Expect.equal "" clientVersion
                 command.Connect.ProtocolVersion |> Expect.equal "" ((int) protocolVersion)
+            }
+
+            test "newMessage should return correct frame" {
+                let producerId: ProducerId =  % 5UL
+                let sequenceId: SequenceId =  % 6UL
+                let numMessages =  1
+                let metadata = MessageMetadata(ProducerName = "TestMe")
+                let payload = [| 1uy; 17uy; |]
+
+                let (bytes, totalSize, commandSize, command, magicNumber, crc32, medataSize, resultMetadata, resultPayload) = 
+                    serializeDeserializePayloadCommand (newSend producerId sequenceId numMessages metadata payload)
+                
+                let crcArrayStart = 8 + commandSize + 6
+                let crcArray = bytes.AsSpan(crcArrayStart, 4 + medataSize + resultPayload.Length).ToArray()
+
+                let currentCrc32 = CRC32.CRC32.Get(uint32 0, crcArray, crcArray.Length) |> int32
+
+                magicNumber |> Expect.equal "" (int16 0x0e01)
+                crc32 |> Expect.equal "" currentCrc32
             }
         ]

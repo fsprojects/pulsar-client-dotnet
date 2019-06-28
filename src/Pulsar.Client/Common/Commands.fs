@@ -13,6 +13,7 @@ open Microsoft.IO
 open System.IO.Pipelines
 open Pipelines.Sockets.Unofficial
 open System.Threading.Tasks
+open CRC32
 
 type internal CommandType = BaseCommand.Type
 
@@ -25,14 +26,19 @@ let inline int32ToBigEndian(num : Int32) =
 let internal serializeSimpleCommand(command : BaseCommand) =
     fun (output: Stream) ->
         use stream = memoryStreamManager.GetStream()
+
         // write fake totalLength
         for i in 1..8 do
             stream.WriteByte(0uy)
+
+        // write commandPayload
         Serializer.Serialize(stream, command)
         let frameSize = int stream.Length  
-        let totalSize = frameSize - 4 
-        let commandSize = frameSize - 8
 
+        let totalSize = frameSize - 4 
+        let commandSize = totalSize - 4
+
+        //write total size and command size
         stream.Seek(0L,SeekOrigin.Begin) |> ignore
         use binaryWriter = new BinaryWriter(stream)
         binaryWriter.Write(int32ToBigEndian totalSize)
@@ -41,15 +47,75 @@ let internal serializeSimpleCommand(command : BaseCommand) =
                 
         stream.CopyToAsync(output)
 
-let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : SerializedPayload =
-    let request = CommandPartitionedTopicMetadata(Topic = topicName, RequestId = uint64(%requestId))
-    let command = BaseCommand(``type`` = CommandType.PartitionedMetadata, partitionMetadata = request)
-    command |> serializeSimpleCommand
+let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[]) =
+    fun (output: Stream) ->
+        use stream = memoryStreamManager.GetStream()
 
-let newSend (producerId : ProducerId) (sequenceId : SequenceId)
-    (numMessages : int) (checksumType : ChecksumType)
-    (msgMetadata : MessageMetadata) payload : SerializedPayload =
-    Unchecked.defaultof<SerializedPayload>
+        // write fake totalLength
+        for i in 1..8 do
+            stream.WriteByte(0uy)
+
+        // write commandPayload
+        Serializer.Serialize(stream, command)
+
+        let stream1Size = int stream.Length  
+        let totalCommandSize = stream1Size - 4 
+        let commandSize = totalCommandSize - 4
+
+        // write magic number 0x0e01
+        stream.WriteByte(14uy)
+        stream.WriteByte(1uy)
+
+        // write fake CRC sum and fake metadata length
+        for i in 1..8 do
+            stream.WriteByte(0uy)
+        
+        // write metadata
+        Serializer.Serialize(stream, metadata)
+        let stream2Size = int stream.Length
+        let totalMetadataSize = stream2Size - stream1Size - 6
+        let metadataSize = totalMetadataSize - 4 
+
+        // write payload
+        stream.Write(payload, 0, payload.Length)
+        
+        let frameSize = int stream.Length  
+        let totalSize = frameSize - 4 
+        let payloadSize = frameSize - stream2Size
+
+        let crcStart = stream1Size + 2
+        let crcPayloadStart = crcStart + 4       
+
+        // write missing sizes
+        use binaryWriter = new BinaryWriter(stream)
+
+        //write Metadata size
+        stream.Seek(int64 crcPayloadStart, SeekOrigin.Begin) |> ignore
+        binaryWriter.Write(int32ToBigEndian metadataSize)
+
+        //write CRC
+        stream.Seek(int64 crcPayloadStart, SeekOrigin.Begin) |> ignore
+        let crc = int32 <| CRC32.Get(0u, stream, totalMetadataSize + payloadSize)
+        stream.Seek(int64 crcStart, SeekOrigin.Begin) |> ignore
+        binaryWriter.Write(int32ToBigEndian crc)
+
+        //write total size and command size
+        stream.Seek(0L, SeekOrigin.Begin) |> ignore
+        binaryWriter.Write(int32ToBigEndian totalSize)
+        binaryWriter.Write(int32ToBigEndian commandSize)
+
+        stream.Seek(0L, SeekOrigin.Begin) |> ignore                
+        stream.CopyToAsync(output)
+
+let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : SerializedPayload =
+    let request = CommandPartitionedTopicMetadata(Topic = topicName, RequestId = %requestId)
+    let command = BaseCommand(``type`` = CommandType.PartitionedMetadata, partitionMetadata = request)
+    serializeSimpleCommand command
+
+let newSend (producerId : ProducerId) (sequenceId : SequenceId) (numMessages : int) (msgMetadata : MessageMetadata) (payload: byte[]) : SerializedPayload =    
+    let request = CommandSend(ProducerId = %producerId, SequenceId = %sequenceId, NumMessages = numMessages)
+    let command = BaseCommand(``type`` = CommandType.Send, Send = request)
+    serializePayloadCommand command msgMetadata payload
 
 let newAck (consumerId : ConsumerId) (ledgerId : LedgerId) (entryId : EntryId)
     (ackType : CommandAck.AckType) : SerializedPayload =

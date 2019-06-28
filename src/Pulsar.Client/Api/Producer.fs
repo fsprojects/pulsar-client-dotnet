@@ -77,7 +77,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     UncompressedSize = (payload.Length |> uint32)
                 )
             let command = 
-                Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
+                Commands.newSend producerId sequenceId 1 metadata payload
             do! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
             let tsc = TaskCompletionSource()
             if messages.TryAdd(sequenceId, tsc)
@@ -101,7 +101,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     UncompressedSize = (payload.Length |> uint32)
                 )
             let command = 
-                Commands.newSend producerId sequenceId 1 ChecksumType.No metadata payload
+                Commands.newSend producerId sequenceId 1 metadata payload
             return! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
         }    
 
