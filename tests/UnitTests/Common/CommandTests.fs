@@ -124,4 +124,20 @@ module CommandsTests =
                 magicNumber |> Expect.equal "" (int16 0x0e01)
                 crc32 |> Expect.equal "" currentCrc32
             }
+
+            test "newLookup should return correct frame" {
+                let topicName = "test-topic"
+                let requestId = Generators.getNextRequestId()
+                let authoritative = true
+
+                let totalSize, commandSize, command = 
+                    serializeDeserialize (newLookup topicName requestId authoritative )
+
+                totalSize |> Expect.equal "" 26
+                commandSize |> Expect.equal "" 22
+                command.``type``  |> Expect.equal "" CommandType.Connect
+                command.lookupTopic.Topic |> Expect.equal "" topicName
+                command.lookupTopic.RequestId |> Expect.equal "" (uint64(requestId))
+                command.lookupTopic.Authoritative |> Expect.equal "" authoritative
+            }
         ]

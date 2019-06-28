@@ -6,9 +6,6 @@ open ProtoBuf
 open System
 open System.IO
 open System.Net
-open pulsar.proto
-open System.Data
-open System.Buffers.Binary
 open Microsoft.IO
 open System.IO.Pipelines
 open Pipelines.Sockets.Unofficial
@@ -44,7 +41,7 @@ let internal serializeSimpleCommand(command : BaseCommand) =
         binaryWriter.Write(int32ToBigEndian totalSize)
         binaryWriter.Write(int32ToBigEndian commandSize)
         stream.Seek(0L, SeekOrigin.Begin) |> ignore
-                
+
         stream.CopyToAsync(output)
 
 let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[]) =
@@ -129,4 +126,10 @@ let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) : Seri
 let newPong () : SerializedPayload =
     let request = CommandPong()
     let command = BaseCommand(``type`` = CommandType.Pong, Pong = request)
+    command |> serializeSimpleCommand
+    command |> serializeSimpleCommand
+
+let newLookup (topicName : string) (requestId : RequestId) (authoritative : bool) =
+    let request = CommandLookupTopic(Topic = topicName, Authoritative = authoritative, RequestId = uint64(%requestId))
+    let command = BaseCommand(``type`` = CommandType.Lookup, lookupTopic = request)
     command |> serializeSimpleCommand

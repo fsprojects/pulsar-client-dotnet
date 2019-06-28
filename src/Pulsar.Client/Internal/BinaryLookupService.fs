@@ -34,5 +34,16 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
  
     member __.UpdateServiceUrl(serviceUrl) = serviceNameResolver.UpdateServiceUrl(serviceUrl)
 
-    member __.GetBroker(topicName: TopicName): Task<Broker> = 
-        raise (System.NotImplementedException())
+    member __.GetBroker(topicName: TopicName) = 
+        task {
+            let endpoint = serviceNameResolver.ResolveHost()
+            let! connection = SocketManager.getConnection { PhysicalAddress = endpoint; LogicalAddress = endpoint }
+            let requestId = Generators.getNextRequestId()
+            let request = Commands.newLookup (topicName.ToString()) requestId false
+            let! result = SocketManager.sendAndWaitForReply requestId (connection, request)
+            match result with
+            | LookupTopicResult metadata ->
+                return metadata
+            | _ -> 
+                return failwith "Incorrect return type"
+        }

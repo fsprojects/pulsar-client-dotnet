@@ -25,6 +25,7 @@ let protocolVersion =
 
 type PulsarTypes =
     | PartitionedTopicMetadata of PartitionedTopicMetadata
+    | LookupTopicResult of LookupTopicResult
 
 let connections = ConcurrentDictionary<EndPoint, Lazy<Task<Connection>>>()
 let requests = ConcurrentDictionary<RequestId, TaskCompletionSource<PulsarTypes>>()
@@ -38,6 +39,7 @@ type PulsarCommands =
     | XCommandSendReceipt of CommandSendReceipt * SequencePosition
     | XCommandMessage of CommandMessage * SequencePosition
     | XCommandPing of CommandPing * SequencePosition
+    | XCommandLookupTopic of CommandLookupTopicResponse * SequencePosition
     | IncompleteCommand
     | InvalidCommand of Exception
 
@@ -100,6 +102,8 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                     XCommandSendReceipt (command.SendReceipt, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.Message -> 
                     XCommandMessage (command.Message, buffer.GetPosition(int64 frameLength))
+                | BaseCommand.Type.LookupResponse -> 
+                    XCommandLookupTopic (command.lookupTopicResponse, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.Ping -> 
                     XCommandPing (command.Ping, buffer.GetPosition(int64 frameLength))
                 | _ -> 
@@ -146,6 +150,13 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                     let consumerEvent = consumers.[%cmd.ConsumerId]
                     // TODO handle real messages
                     consumerEvent.Post(AddMessage { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = [||] })        
+                    reader.AdvanceTo(consumed)
+                | XCommandLookupTopic (cmd, consumed) ->
+                    let requestId = %cmd.RequestId
+                    let tsc = requests.[requestId]
+                    let result = LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl }
+                    tsc.SetResult(result)  
+                    requests.TryRemove(requestId) |> ignore
                     reader.AdvanceTo(consumed)
                 | IncompleteCommand ->
                     reader.AdvanceTo(buffer.Start, buffer.End)
