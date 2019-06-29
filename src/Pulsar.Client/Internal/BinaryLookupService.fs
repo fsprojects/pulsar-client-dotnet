@@ -18,14 +18,14 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
         let requestId = Generators.getNextRequestId()
         let request = createRequest requestId
         let! response = SocketManager.sendAndWaitForReply requestId (connection, request)
-        return {| Response = response; Enpoint = endpoint |}
+        return (response, endpoint)
     }
 
     member __.GetPartitionedTopicMetadata topicName = 
         task {
             let makeRequest = fun requestId -> Commands.newPartitionMetadataRequest topicName requestId
-            let! result = executeRequest makeRequest
-            match result.Response with
+            let! (response, _) = executeRequest makeRequest
+            match response with
             | PartitionedTopicMetadata metadata ->
                 return metadata
             | _ -> 
@@ -39,13 +39,13 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
     member __.GetBroker(topicName: TopicName) = 
         task {
             let makeRequest = fun requestId -> Commands.newLookup (topicName.ToString()) requestId false
-            let! result = executeRequest makeRequest
-            match result.Response with
+            let! (response, endpoint) = executeRequest makeRequest
+            match response with
             | LookupTopicResult metadata ->
                 let uri = Uri(metadata.BrokerServiceUrl)
                 let address = DnsEndPoint(uri.Host, uri.Port)
                 return if metadata.Proxy
-                       then { LogicalAddress = LogicalAddres address; PhysicalAddress = PhysicalAddress result.Enpoint }
+                       then { LogicalAddress = LogicalAddres address; PhysicalAddress = PhysicalAddress endpoint }
                        else { LogicalAddress = LogicalAddres address; PhysicalAddress = PhysicalAddress address }
             | _ -> 
                 return failwith "Incorrect return type"
@@ -53,8 +53,8 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
 
     member __.GetTopicsUnderNamespace (ns : string, mode : TopicDomain) = task {
         let makeRequest = fun requestId -> Commands.newGetTopicsOfNamespaceRequest ns requestId mode
-        let! result = executeRequest makeRequest
-        match result.Response with
+        let! (response, _) = executeRequest makeRequest
+        match response with
         | TopicsOfNamespace topics ->
             return topics
         | _ -> 
