@@ -297,6 +297,7 @@ node_modules/
 _Pvt_Extensions
 
 # Paket dependency manager
+.paket/.store/
 .paket/paket.exe
 paket-files/
 
@@ -352,3 +353,5 @@ MigrationBackup/
 
 # Add .idea to gitignore
 .idea/
+
+.ionide/
