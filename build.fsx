@@ -1,10 +1,4 @@
-#r "paket:
-source https://nuget.org/api/v2
-nuget Fake.IO.FileSystem
-nuget Fake.DotNet.MSBuild
-nuget Fake.Core.Target
-nuget Fake.DotNet.Cli
-nuget Fake.DotNet.Paket //"
+#r "paket: groupref Build //"
 #load "./.fake/build.fsx/intellisense.fsx"
 
 open Fake.IO
@@ -28,8 +22,13 @@ Target.create "BuildApp" (fun _ ->
 )
 
 Target.create "Restore" (fun _ ->
-  !! "**/*.*proj"
-    |> Seq.iter (fun proj -> DotNet.restore id proj)
+   !! "**/*.*proj"
+     |> Seq.iter (fun proj -> DotNet.restore id proj)
+ )
+
+Target.create "RunTests" (fun _ ->
+    !!("**/*.Tests.*proj")
+    |> Seq.iter (DotNet.test id)
 )
 
 Target.create "Default" (fun _ -> Trace.trace "Default target was run")
@@ -37,9 +36,10 @@ Target.create "Default" (fun _ -> Trace.trace "Default target was run")
 open Fake.Core.TargetOperators
 
 "Clean"
-   ==> "Restore"
-   ==> "BuildApp"
-   ==> "Default"
-   
+  ==> "Restore"
+  ==> "BuildApp"
+  ==> "RunTests"
+  ==> "Default"
+
 // start build
 Target.runOrDefault "Default"
