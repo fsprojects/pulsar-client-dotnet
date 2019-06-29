@@ -18,10 +18,16 @@ type PartitionedTopicMetadata =
         Partitions: uint32
     }
 
-type LookupTopicResult = {
-    Proxy: bool
-    BrokerServiceUrl : string
-}
+type ProducerSuccess =
+    {
+        GeneratedProducerName: string
+    }
+
+type LookupTopicResult = 
+    {
+        Proxy: bool
+        BrokerServiceUrl : string
+    }
 
 type MessageId =
     {

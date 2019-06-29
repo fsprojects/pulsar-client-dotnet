@@ -15,6 +15,7 @@ open ProtoBuf
 open System.IO
 open FSharp.UMX
 open System.Reflection
+open Pulsar.Client.Api
 
 let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
 let protocolVersion = 
@@ -26,6 +27,7 @@ let protocolVersion =
 type PulsarTypes =
     | PartitionedTopicMetadata of PartitionedTopicMetadata
     | LookupTopicResult of LookupTopicResult
+    | ProducerSuccess of ProducerSuccess
 
 let connections = ConcurrentDictionary<EndPoint, Lazy<Task<Connection>>>()
 let requests = ConcurrentDictionary<RequestId, TaskCompletionSource<PulsarTypes>>()
@@ -40,6 +42,7 @@ type PulsarCommands =
     | XCommandMessage of CommandMessage * SequencePosition
     | XCommandPing of CommandPing * SequencePosition
     | XCommandLookupTopic of CommandLookupTopicResponse * SequencePosition
+    | XCommandProducerSuccess of CommandProducerSuccess * SequencePosition
     | IncompleteCommand
     | InvalidCommand of Exception
 
@@ -52,9 +55,8 @@ type SocketMessage =
 let sendSerializedPayload ((connection, serializedPayload): Payload ) = 
     task {
         let (conn, streamWriter) = connection
-        let task = streamWriter |> serializedPayload         
-               
-        do! task
+        do! streamWriter |> serializedPayload    
+
         if (not conn.Socket.Connected)
         then
             Log.Logger.LogWarning("Socket was disconnected")
@@ -107,6 +109,8 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                     XCommandLookupTopic (command.lookupTopicResponse, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.Ping -> 
                     XCommandPing (command.Ping, buffer.GetPosition(int64 frameLength))
+                | BaseCommand.Type.ProducerSuccess -> 
+                    XCommandProducerSuccess (command.ProducerSuccess, buffer.GetPosition(int64 frameLength))
                 | _ -> 
                     InvalidCommand (Exception("Unknown command type"))
             with
@@ -159,13 +163,18 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                     tsc.SetResult(result)  
                     requests.TryRemove(requestId) |> ignore
                     reader.AdvanceTo(consumed)
+                | XCommandProducerSuccess (cmd, consumed) ->
+                    let requestId = %cmd.RequestId
+                    let tsc = requests.[requestId]
+                    let result = ProducerSuccess { GeneratedProducerName = cmd.ProducerName }
+                    tsc.SetResult(result)  
+                    requests.TryRemove(requestId) |> ignore
+                    reader.AdvanceTo(consumed)
                 | IncompleteCommand ->
                     reader.AdvanceTo(buffer.Start, buffer.End)
                 | InvalidCommand ex ->
                     raise ex
     }
-
-
 
 let private connect (address: EndPoint) =
     Log.Logger.LogInformation("Connecting to {0}", address)
@@ -184,18 +193,6 @@ let private connect (address: EndPoint) =
 let getConnection (broker: Broker) =   
     connections.GetOrAdd(broker.PhysicalAddress, fun(address) -> 
         lazy connect address).Value
-               
-let registerProducer (broker: Broker) (producerId: ProducerId) (producerMb: MailboxProcessor<ProducerMessage>) =
-    let connection = getConnection broker
-    producers.TryAdd(producerId, producerMb) |> ignore
-    Log.Logger.LogInformation("Producer registered")
-    connection
-
-let registerConsumer (broker: Broker) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
-    let connection = getConnection broker
-    consumers.TryAdd(consumerId, consumerMb) |> ignore
-    Log.Logger.LogInformation("Consumer registered")
-    connection
 
 let send payload = 
     sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
@@ -208,3 +205,26 @@ let sendAndWaitForReply reqId payload =
         then tsc.SetException(Exception("Duplicate request"))       
         return! tsc.Task
     }
+
+let registerProducer (broker: Broker) (producerConfig: ProducerConfiguration) (producerId: ProducerId) (producerMb: MailboxProcessor<ProducerMessage>) =
+    task {
+        let! connection = getConnection broker
+        producers.TryAdd(producerId, producerMb) |> ignore
+        Log.Logger.LogInformation("Connection established for producer")
+        let requestId = Generators.getNextRequestId()
+        let payload = 
+            Commands.newProducer producerConfig.Topic producerConfig.ProducerName producerId requestId
+        let! result = sendAndWaitForReply requestId (connection, payload)
+        match result with
+        | ProducerSuccess success ->
+            Log.Logger.LogInformation("Producer registered with name {0}", success.GeneratedProducerName)
+            return connection
+        | _ -> 
+            return failwith "Incorrect return type"
+    }
+
+let registerConsumer (broker: Broker) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
+    let connection = getConnection broker
+    consumers.TryAdd(consumerId, consumerMb) |> ignore
+    Log.Logger.LogInformation("Consumer registered")
+    connection

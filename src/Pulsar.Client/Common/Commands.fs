@@ -132,3 +132,8 @@ let newLookup (topicName : string) (requestId : RequestId) (authoritative : bool
     let request = CommandLookupTopic(Topic = topicName, Authoritative = authoritative, RequestId = uint64(%requestId))
     let command = BaseCommand(``type`` = CommandType.Lookup, lookupTopic = request)
     command |> serializeSimpleCommand
+
+let newProducer (topicName : string) (producerName: string) (producerId : ProducerId) (requestId : RequestId) =
+    let request = CommandProducer(Topic = %TopicName(topicName).CompleteTopicName, ProducerId = %producerId, RequestId = %requestId, ProducerName = producerName)
+    let command = BaseCommand(``type`` = CommandType.Producer, Producer = request)
+    command |> serializeSimpleCommand

@@ -28,7 +28,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 let! msg = inbox.Receive()
                 match msg with
                 | ProducerMessage.Connect ((broker, mb), channel) ->
-                    let! connection = SocketManager.registerProducer broker producerId mb |> Async.AwaitTask
+                    let! connection = SocketManager.registerProducer broker producerConfig producerId mb |> Async.AwaitTask
                     channel.Reply()
                     return! loop { state with Connection = Connected connection }
                 | ProducerMessage.Reconnect ->
