@@ -97,7 +97,7 @@ module CommandsTests =
                 let protocolVersion = ProtocolVersion.V1
 
                 let totalSize, commandSize, command = 
-                    serializeDeserializeSimpleCommand (newConnect clientVersion protocolVersion)
+                    serializeDeserializeSimpleCommand (newConnect clientVersion protocolVersion None)
 
                 totalSize |> Expect.equal "" 26
                 commandSize |> Expect.equal "" 22

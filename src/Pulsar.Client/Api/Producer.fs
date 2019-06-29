@@ -60,7 +60,16 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         tsc.SetResult(MessageId.FromMessageIdData(receipt.MessageId))
                         messages.TryRemove(sequenceId) |> ignore
                     | false, _ -> ()
-                    return! loop state                        
+                    return! loop state  
+                | ProducerMessage.SendError error ->
+                    let sequenceId = %error.SequenceId
+                    match messages.TryGetValue(sequenceId) with
+                    | true, tsc ->
+                        Log.Logger.LogError("SendError code: {0} message: {1}", error.Error, error.Message)
+                        tsc.SetException(Exception(error.Message))
+                        messages.TryRemove(sequenceId) |> ignore
+                    | false, _ -> ()
+                    return! loop state
             }
         loop { Connection = NotConnected }  
     )    

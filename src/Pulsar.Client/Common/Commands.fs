@@ -118,8 +118,11 @@ let newAck (consumerId : ConsumerId) (ledgerId : LedgerId) (entryId : EntryId)
     (ackType : CommandAck.AckType) : SerializedPayload =
     Unchecked.defaultof<SerializedPayload>
 
-let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) : SerializedPayload =
+let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : SerializedPayload =    
     let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion)
+    match proxyToBroker with
+    | Some logicalAddress -> request.ProxyToBrokerUrl <- sprintf "%s:%d" logicalAddress.Host logicalAddress.Port
+    | None -> ()
     let command = BaseCommand(``type`` = CommandType.Connect, Connect = request)
     command |> serializeSimpleCommand
 
@@ -134,6 +137,6 @@ let newLookup (topicName : string) (requestId : RequestId) (authoritative : bool
     command |> serializeSimpleCommand
 
 let newProducer (topicName : string) (producerName: string) (producerId : ProducerId) (requestId : RequestId) =
-    let request = CommandProducer(Topic = %TopicName(topicName).CompleteTopicName, ProducerId = %producerId, RequestId = %requestId, ProducerName = producerName)
+    let request = CommandProducer(Topic = topicName, ProducerId = %producerId, RequestId = %requestId, ProducerName = producerName)
     let command = BaseCommand(``type`` = CommandType.Producer, Producer = request)
     command |> serializeSimpleCommand

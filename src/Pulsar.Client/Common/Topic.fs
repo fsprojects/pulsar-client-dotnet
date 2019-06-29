@@ -12,7 +12,7 @@ type TopicName(topic, ?domain: TopicDomain, ?tenant: string, ?nameSpace: string 
     let _namespace = defaultArg nameSpace "default"
     let _topicDomain = 
         match _domain with
-        | Persistent -> "persitent"
+        | Persistent -> "persistent"
         | NonPersistent -> "non-persistent"
     let completeTopicName = sprintf "%s://%s/%s/%s" _topicDomain _tenant _namespace topic
     let partitionIndex = 1

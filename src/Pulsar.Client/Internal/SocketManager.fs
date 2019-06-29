@@ -29,7 +29,7 @@ type PulsarTypes =
     | LookupTopicResult of LookupTopicResult
     | ProducerSuccess of ProducerSuccess
 
-let connections = ConcurrentDictionary<EndPoint, Lazy<Task<Connection>>>()
+let connections = ConcurrentDictionary<LogicalAddres, Lazy<Task<Connection>>>()
 let requests = ConcurrentDictionary<RequestId, TaskCompletionSource<PulsarTypes>>()
 let consumers = ConcurrentDictionary<ConsumerId, MailboxProcessor<ConsumerMessage>>()
 let producers = ConcurrentDictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
@@ -43,6 +43,7 @@ type PulsarCommands =
     | XCommandPing of CommandPing * SequencePosition
     | XCommandLookupTopic of CommandLookupTopicResponse * SequencePosition
     | XCommandProducerSuccess of CommandProducerSuccess * SequencePosition
+    | XCommandSendError of CommandSendError * SequencePosition
     | IncompleteCommand
     | InvalidCommand of Exception
 
@@ -111,6 +112,8 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                     XCommandPing (command.Ping, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.ProducerSuccess -> 
                     XCommandProducerSuccess (command.ProducerSuccess, buffer.GetPosition(int64 frameLength))
+                | BaseCommand.Type.SendError -> 
+                    XCommandSendError (command.SendError, buffer.GetPosition(int64 frameLength))
                 | _ -> 
                     InvalidCommand (Exception("Unknown command type"))
             with
@@ -147,7 +150,11 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandSendReceipt (cmd, consumed) ->
                     let producerMb = producers.[%cmd.ProducerId]
                     producerMb.Post(SendReceipt cmd)   
-                    reader.AdvanceTo(consumed)                
+                    reader.AdvanceTo(consumed)  
+                | XCommandSendError (cmd, consumed) ->
+                    let producerMb = producers.[%cmd.ProducerId]
+                    producerMb.Post(SendError cmd)   
+                    reader.AdvanceTo(consumed)  
                 | XCommandPing (cmd, consumed) ->
                     sendMb.Post(SocketMessageWithoutReply (connection, Commands.newPong()))
                     reader.AdvanceTo(consumed)         
@@ -176,23 +183,29 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                     raise ex
     }
 
-let private connect (address: EndPoint) =
-    Log.Logger.LogInformation("Connecting to {0}", address)
+let private connect (broker: Broker) =
+    Log.Logger.LogInformation("Connecting to {0}", broker)
     task {
-        let! socketConnection = SocketConnection.ConnectAsync(address)
+        let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
+        let (LogicalAddres logicalAddres) = broker.LogicalAddress
+        let! socketConnection = SocketConnection.ConnectAsync(physicalAddress)
         let writerStream = StreamConnection.GetWriter(socketConnection.Output)
         let connection = (socketConnection, writerStream)
         let initialConnectionTsc = TaskCompletionSource<Connection>()
         let listener = Task.Run(fun() -> (readSocket connection initialConnectionTsc).Wait())
+        let proxyToBroker = if physicalAddress = logicalAddres then None else Some logicalAddres
         let connectPayload = 
-            Commands.newConnect clientVersion protocolVersion
+            Commands.newConnect clientVersion protocolVersion proxyToBroker
         do! sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply ((connection, connectPayload), replyChannel))
         return! initialConnectionTsc.Task
     }    
 
 let getConnection (broker: Broker) =   
-    connections.GetOrAdd(broker.PhysicalAddress, fun(address) -> 
-        lazy connect address).Value
+    connections.GetOrAdd(broker.LogicalAddress, fun(address) -> 
+        lazy connect broker).Value
+
+let getBrokerlessConnection (address: DnsEndPoint) =   
+    getConnection { LogicalAddress = LogicalAddres address; PhysicalAddress = PhysicalAddress address }
 
 let send payload = 
     sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))

@@ -19,7 +19,7 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
     member __.GetPartitionedTopicMetadata topicName = 
         task {
             let endpoint = serviceNameResolver.ResolveHost()
-            let! connection = SocketManager.getConnection { PhysicalAddress = endpoint; LogicalAddress = endpoint }
+            let! connection = SocketManager.getBrokerlessConnection endpoint
             let requestId = Generators.getNextRequestId()
             let request = 
                 Commands.newPartitionMetadataRequest topicName requestId
@@ -37,8 +37,8 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
 
     member __.GetBroker(topicName: TopicName) = 
         task {
-            let endpoint = serviceNameResolver.ResolveHost()
-            let! connection = SocketManager.getConnection { PhysicalAddress = endpoint; LogicalAddress = endpoint }
+            let initialEndpoint = serviceNameResolver.ResolveHost()
+            let! connection = SocketManager.getBrokerlessConnection initialEndpoint
             let requestId = Generators.getNextRequestId()
             let request = Commands.newLookup (topicName.ToString()) requestId false
             let! result = SocketManager.sendAndWaitForReply requestId (connection, request)
@@ -47,8 +47,8 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
                 let uri = Uri(metadata.BrokerServiceUrl)
                 let address = DnsEndPoint(uri.Host, uri.Port)
                 return if metadata.Proxy
-                       then { LogicalAddress = address; PhysicalAddress = endpoint }
-                       else { LogicalAddress = address; PhysicalAddress = address }
+                       then { LogicalAddress = LogicalAddres address; PhysicalAddress = PhysicalAddress initialEndpoint }
+                       else { LogicalAddress = LogicalAddres address; PhysicalAddress = PhysicalAddress address }
             | _ -> 
                 return failwith "Incorrect return type"
         }

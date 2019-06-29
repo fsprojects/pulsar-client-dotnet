@@ -42,10 +42,13 @@ type MessageId =
                 Partition = messageIdData.Partition
             }
 
+type LogicalAddres = LogicalAddres of DnsEndPoint
+type PhysicalAddress = PhysicalAddress of DnsEndPoint
+
 type Broker = 
     {
-        LogicalAddress: EndPoint
-        PhysicalAddress: EndPoint
+        LogicalAddress: LogicalAddres
+        PhysicalAddress: PhysicalAddress
     }
 
 type SendAck =
@@ -75,6 +78,7 @@ type ProducerMessage =
     | Disconnected of Connection*MailboxProcessor<ProducerMessage>
     | SendReceipt of CommandSendReceipt
     | SendMessage of SerializedPayload * AsyncReplyChannel<unit>
+    | SendError of CommandSendError
 
 type ConsumerMessage =
     | Connect of (Broker*MailboxProcessor<ConsumerMessage>) * AsyncReplyChannel<unit>
