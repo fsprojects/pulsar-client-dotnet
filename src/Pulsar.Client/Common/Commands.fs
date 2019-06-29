@@ -7,9 +7,6 @@ open System
 open System.IO
 open System.Net
 open Microsoft.IO
-open System.IO.Pipelines
-open Pipelines.Sockets.Unofficial
-open System.Threading.Tasks
 open CRC32
 
 type internal CommandType = BaseCommand.Type
@@ -139,4 +136,13 @@ let newLookup (topicName : string) (requestId : RequestId) (authoritative : bool
 let newProducer (topicName : string) (producerName: string) (producerId : ProducerId) (requestId : RequestId) =
     let request = CommandProducer(Topic = topicName, ProducerId = %producerId, RequestId = %requestId, ProducerName = producerName)
     let command = BaseCommand(``type`` = CommandType.Producer, Producer = request)
+    command |> serializeSimpleCommand
+
+let newGetTopicsOfNamespaceRequest (ns : string) (requestId : RequestId) (mode : TopicDomain) =
+    let mode =
+        match mode with
+        | Persistent -> CommandGetTopicsOfNamespace.Mode.Persistent
+        | NonPersistent -> CommandGetTopicsOfNamespace.Mode.NonPersistent
+    let request = CommandGetTopicsOfNamespace(Namespace = ns, RequestId = uint64(%requestId), mode = mode)
+    let command = BaseCommand(``type`` = CommandType.GetTopicsOfNamespace, getTopicsOfNamespace = request)
     command |> serializeSimpleCommand

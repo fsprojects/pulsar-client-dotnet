@@ -18,9 +18,9 @@ open System.Reflection
 open Pulsar.Client.Api
 
 let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
-let protocolVersion = 
-    ProtocolVersion.GetValues(typeof<ProtocolVersion>) 
-    :?> ProtocolVersion[] 
+let protocolVersion =
+    ProtocolVersion.GetValues(typeof<ProtocolVersion>)
+    :?> ProtocolVersion[]
     |> Array.last
 
 
@@ -28,6 +28,7 @@ type PulsarTypes =
     | PartitionedTopicMetadata of PartitionedTopicMetadata
     | LookupTopicResult of LookupTopicResult
     | ProducerSuccess of ProducerSuccess
+    | TopicsOfNamespace of TopicsOfNamespace
 
 let connections = ConcurrentDictionary<LogicalAddres, Lazy<Task<Connection>>>()
 let requests = ConcurrentDictionary<RequestId, TaskCompletionSource<PulsarTypes>>()
@@ -44,19 +45,21 @@ type PulsarCommands =
     | XCommandLookupTopic of CommandLookupTopicResponse * SequencePosition
     | XCommandProducerSuccess of CommandProducerSuccess * SequencePosition
     | XCommandSendError of CommandSendError * SequencePosition
+    | XCommandGetTopicsOfNamespace of CommandGetTopicsOfNamespaceResponse * SequencePosition
     | IncompleteCommand
     | InvalidCommand of Exception
 
 
 type Payload = Connection*SerializedPayload
-type SocketMessage = 
+
+type SocketMessage =
     | SocketMessageWithReply of Payload * AsyncReplyChannel<unit>
     | SocketMessageWithoutReply of Payload
 
-let sendSerializedPayload ((connection, serializedPayload): Payload ) = 
+let sendSerializedPayload ((connection, serializedPayload): Payload ) =
     task {
         let (conn, streamWriter) = connection
-        do! streamWriter |> serializedPayload    
+        do! streamWriter |> serializedPayload
 
         if (not conn.Socket.Connected)
         then
@@ -65,7 +68,7 @@ let sendSerializedPayload ((connection, serializedPayload): Payload ) =
             producers |> Seq.iter (fun (kv) -> kv.Value.Post(ProducerMessage.Disconnected (connection, kv.Value)))
     }
 
-let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->    
+let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
     let rec loop () =
         async {
             match! inbox.Receive() with
@@ -77,7 +80,7 @@ let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
             | SocketMessageWithoutReply payload ->
                 Log.Logger.LogDebug("Sending payload without reply")
                 do! sendSerializedPayload payload |> Async.AwaitTask
-            return! loop ()             
+            return! loop ()
         }
     loop ()
 )
@@ -98,28 +101,30 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                 let command = Serializer.Deserialize<BaseCommand>(msgStream)
                 Log.Logger.LogDebug("Got message of type {0}", command.``type``)
                 match command.``type`` with
-                | BaseCommand.Type.Connected -> 
+                | BaseCommand.Type.Connected ->
                     XCommandConnected (command.Connected, buffer.GetPosition(int64 frameLength))
-                | BaseCommand.Type.PartitionedMetadataResponse -> 
+                | BaseCommand.Type.PartitionedMetadataResponse ->
                     XCommandPartitionedTopicMetadataResponse (command.partitionMetadataResponse, buffer.GetPosition(int64 frameLength))
-                | BaseCommand.Type.SendReceipt -> 
+                | BaseCommand.Type.SendReceipt ->
                     XCommandSendReceipt (command.SendReceipt, buffer.GetPosition(int64 frameLength))
-                | BaseCommand.Type.Message -> 
+                | BaseCommand.Type.Message ->
                     XCommandMessage (command.Message, buffer.GetPosition(int64 frameLength))
-                | BaseCommand.Type.LookupResponse -> 
+                | BaseCommand.Type.LookupResponse ->
                     XCommandLookupTopic (command.lookupTopicResponse, buffer.GetPosition(int64 frameLength))
-                | BaseCommand.Type.Ping -> 
+                | BaseCommand.Type.Ping ->
                     XCommandPing (command.Ping, buffer.GetPosition(int64 frameLength))
-                | BaseCommand.Type.ProducerSuccess -> 
+                | BaseCommand.Type.ProducerSuccess ->
                     XCommandProducerSuccess (command.ProducerSuccess, buffer.GetPosition(int64 frameLength))
-                | BaseCommand.Type.SendError -> 
+                | BaseCommand.Type.SendError ->
                     XCommandSendError (command.SendError, buffer.GetPosition(int64 frameLength))
-                | _ -> 
-                    InvalidCommand (Exception("Unknown command type"))
+                | BaseCommand.Type.GetTopicsOfNamespaceResponse ->
+                    XCommandGetTopicsOfNamespace (command.getTopicsOfNamespaceResponse, buffer.GetPosition(int64 frameLength))
+                | _ as unknownCommandType ->
+                    InvalidCommand (Exception(sprintf "Unknown command type: '%A'" unknownCommandType))
             with
             | ex ->
                 InvalidCommand ex
-        else    
+        else
             IncompleteCommand
     else
         IncompleteCommand
@@ -133,7 +138,7 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
             let! result = reader.ReadAsync()
             let buffer = result.Buffer
             if result.IsCompleted
-            then                
+            then
                 continueLooping <- false
             else
                 match tryParse buffer with
@@ -144,37 +149,44 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandPartitionedTopicMetadataResponse (cmd, consumed) ->
                     let requestId = %cmd.RequestId
                     let tsc = requests.[requestId]
-                    tsc.SetResult(PartitionedTopicMetadata { Partitions = cmd.Partitions })  
+                    tsc.SetResult(PartitionedTopicMetadata { Partitions = cmd.Partitions })
                     requests.TryRemove(requestId) |> ignore
                     reader.AdvanceTo(consumed)
                 | XCommandSendReceipt (cmd, consumed) ->
                     let producerMb = producers.[%cmd.ProducerId]
-                    producerMb.Post(SendReceipt cmd)   
-                    reader.AdvanceTo(consumed)  
+                    producerMb.Post(SendReceipt cmd)
+                    reader.AdvanceTo(consumed)
                 | XCommandSendError (cmd, consumed) ->
                     let producerMb = producers.[%cmd.ProducerId]
-                    producerMb.Post(SendError cmd)   
-                    reader.AdvanceTo(consumed)  
+                    producerMb.Post(SendError cmd)
+                    reader.AdvanceTo(consumed)
                 | XCommandPing (cmd, consumed) ->
                     sendMb.Post(SocketMessageWithoutReply (connection, Commands.newPong()))
-                    reader.AdvanceTo(consumed)         
+                    reader.AdvanceTo(consumed)
                 | XCommandMessage (cmd, consumed) ->
                     let consumerEvent = consumers.[%cmd.ConsumerId]
                     // TODO handle real messages
-                    consumerEvent.Post(AddMessage { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = [||] })        
+                    consumerEvent.Post(AddMessage { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = [||] })
                     reader.AdvanceTo(consumed)
                 | XCommandLookupTopic (cmd, consumed) ->
                     let requestId = %cmd.RequestId
                     let tsc = requests.[requestId]
                     let result = LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
-                    tsc.SetResult(result)  
+                    tsc.SetResult(result)
                     requests.TryRemove(requestId) |> ignore
                     reader.AdvanceTo(consumed)
                 | XCommandProducerSuccess (cmd, consumed) ->
                     let requestId = %cmd.RequestId
                     let tsc = requests.[requestId]
                     let result = ProducerSuccess { GeneratedProducerName = cmd.ProducerName }
-                    tsc.SetResult(result)  
+                    tsc.SetResult(result)
+                    requests.TryRemove(requestId) |> ignore
+                    reader.AdvanceTo(consumed)
+                | XCommandGetTopicsOfNamespace (cmd, consumed) ->
+                    let requestId = %cmd.RequestId
+                    let tsc = requests.[requestId]
+                    let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
+                    tsc.SetResult(result)
                     requests.TryRemove(requestId) |> ignore
                     reader.AdvanceTo(consumed)
                 | IncompleteCommand ->
@@ -194,28 +206,28 @@ let private connect (broker: Broker) =
         let initialConnectionTsc = TaskCompletionSource<Connection>()
         let listener = Task.Run(fun() -> (readSocket connection initialConnectionTsc).Wait())
         let proxyToBroker = if physicalAddress = logicalAddres then None else Some logicalAddres
-        let connectPayload = 
+        let connectPayload =
             Commands.newConnect clientVersion protocolVersion proxyToBroker
         do! sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply ((connection, connectPayload), replyChannel))
         return! initialConnectionTsc.Task
-    }    
+    }
 
-let getConnection (broker: Broker) =   
-    connections.GetOrAdd(broker.LogicalAddress, fun(address) -> 
+let getConnection (broker: Broker) =
+    connections.GetOrAdd(broker.LogicalAddress, fun(address) ->
         lazy connect broker).Value
 
-let getBrokerlessConnection (address: DnsEndPoint) =   
+let getBrokerlessConnection (address: DnsEndPoint) =
     getConnection { LogicalAddress = LogicalAddres address; PhysicalAddress = PhysicalAddress address }
 
-let send payload = 
+let send payload =
     sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
 
-let sendAndWaitForReply reqId payload = 
+let sendAndWaitForReply reqId payload =
     task {
         do! sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
         let tsc = TaskCompletionSource()
         if requests.TryAdd(reqId, tsc) |> not
-        then tsc.SetException(Exception("Duplicate request"))       
+        then tsc.SetException(Exception("Duplicate request"))
         return! tsc.Task
     }
 
@@ -225,14 +237,14 @@ let registerProducer (broker: Broker) (producerConfig: ProducerConfiguration) (p
         producers.TryAdd(producerId, producerMb) |> ignore
         Log.Logger.LogInformation("Connection established for producer")
         let requestId = Generators.getNextRequestId()
-        let payload = 
+        let payload =
             Commands.newProducer producerConfig.Topic producerConfig.ProducerName producerId requestId
         let! result = sendAndWaitForReply requestId (connection, payload)
         match result with
         | ProducerSuccess success ->
             Log.Logger.LogInformation("Producer registered with name {0}", success.GeneratedProducerName)
             return connection
-        | _ -> 
+        | _ ->
             return failwith "Incorrect return type"
     }
 

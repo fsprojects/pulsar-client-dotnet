@@ -29,6 +29,11 @@ type LookupTopicResult =
         BrokerServiceUrl : string
     }
 
+type TopicsOfNamespace = 
+    {
+        Topics : string list
+    }
+
 type MessageId =
     {
         LedgerId: LedgerId
