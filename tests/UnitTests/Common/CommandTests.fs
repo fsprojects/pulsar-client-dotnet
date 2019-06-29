@@ -140,4 +140,20 @@ module CommandsTests =
                 command.lookupTopic.RequestId |> Expect.equal "" (uint64(requestId))
                 command.lookupTopic.Authoritative |> Expect.equal "" authoritative
             }
+
+            test "newGetTopicsOfNamespaceRequest should return correct frame" {
+                let ns = "public/default"
+                let requestId = Generators.getNextRequestId()
+                let mode = TopicDomain.Persistent
+
+                let totalSize, commandSize, command = 
+                    serializeDeserializeSimpleCommand (newGetTopicsOfNamespaceRequest ns requestId mode )
+
+                totalSize |> Expect.equal "" 29
+                commandSize |> Expect.equal "" 25
+                command.``type``  |> Expect.equal "" CommandType.GetTopicsOfNamespace
+                command.getTopicsOfNamespace.Namespace |> Expect.equal "" ns
+                command.getTopicsOfNamespace.RequestId |> Expect.equal "" (uint64(requestId))
+                command.getTopicsOfNamespace.mode |> Expect.equal "" CommandGetTopicsOfNamespace.Mode.Persistent
+            }
         ]
