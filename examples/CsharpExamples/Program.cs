@@ -3,6 +3,7 @@ using System;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Logging;
+using System.Text;
 
 namespace CsharpExamples
 {
@@ -23,7 +24,7 @@ namespace CsharpExamples
                 await new ProducerBuilder(client)
                     .Topic("my-topic")
                     .CreateAsync();
-            var messageId = await producer.SendAndWaitAsync(new byte[0]);
+            var messageId = await producer.SendAndWaitAsync(Encoding.UTF8.GetBytes("Sent from C#"));
             Console.WriteLine(messageId);
 
             var consumer =

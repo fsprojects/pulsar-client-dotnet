@@ -12,6 +12,7 @@ open System.IO
 open ProtoBuf
 open System.Net
 open System.Threading.Tasks
+open CRC32
 
 module CommandsTests =    
         
@@ -119,7 +120,7 @@ module CommandsTests =
                 let crcArrayStart = 8 + commandSize + 6
                 let crcArray = bytes.AsSpan(crcArrayStart, 4 + medataSize + resultPayload.Length).ToArray()
 
-                let currentCrc32 = CRC32.CRC32.Get(uint32 0, crcArray, crcArray.Length) |> int32
+                let currentCrc32 = CRC32C.Get(uint32 0, crcArray, crcArray.Length) |> int32
 
                 magicNumber |> Expect.equal "" (int16 0x0e01)
                 crc32 |> Expect.equal "" currentCrc32

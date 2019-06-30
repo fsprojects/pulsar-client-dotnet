@@ -5,6 +5,7 @@ open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Microsoft.Extensions.Logging.Console
 open Microsoft.Extensions.Logging
+open System.Text
     
 
 [<EntryPoint>]
@@ -22,7 +23,7 @@ let main argv =
             ProducerBuilder(client)
                 .Topic("my-topic")
                 .CreateAsync()  
-        let! messageId = producer.SendAndWaitAsync([||])
+        let! messageId = producer.SendAndWaitAsync(Encoding.UTF8.GetBytes("Sent from F#"))
         printfn "%A" messageId
 
         let! consumer = 

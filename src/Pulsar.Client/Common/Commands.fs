@@ -89,7 +89,7 @@ let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageM
 
         //write CRC
         stream.Seek(int64 crcPayloadStart, SeekOrigin.Begin) |> ignore
-        let crc = int32 <| CRC32.Get(0u, stream, totalMetadataSize + payloadSize)
+        let crc = int32 <| CRC32C.Get(0u, stream, totalMetadataSize + payloadSize)
         stream.Seek(int64 crcStart, SeekOrigin.Begin) |> ignore
         binaryWriter.Write(int32ToBigEndian crc)
 
