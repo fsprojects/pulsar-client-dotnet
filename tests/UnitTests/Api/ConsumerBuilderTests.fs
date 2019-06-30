@@ -1,9 +1,10 @@
 ﻿namespace Pulsar.Client.UnitTests.Api
 
+open System
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Api
-open System
+open Pulsar.Client.UnitTests
 
 module ConsumerBuilderTests =
 
@@ -22,7 +23,7 @@ module ConsumerBuilderTests =
                 let checkTopic topic =
                     builder()
                     |> configure(fun b -> b.Topic topic)
-                    |> Expect.throwsT<ArgumentException> ""
+                    |> Expect.throwsWithMessage<ArgumentException> "Topic must not be blank."
 
                 [null; ""; " "] |> List.iter checkTopic
             }
@@ -31,7 +32,7 @@ module ConsumerBuilderTests =
                 let checkSubscriptionName subscriptionName =
                     builder()
                     |> configure(fun b -> b.SubscriptionName subscriptionName)
-                    |> Expect.throwsT<ArgumentException> ""
+                    |> Expect.throwsWithMessage<ArgumentException> "Subscription name must not be blank."
 
                 [null; ""; " "] |> List.iter checkSubscriptionName
             }
@@ -40,14 +41,15 @@ module ConsumerBuilderTests =
                 let builder' = builder().SubscriptionName("subscription-name")
 
                 fun() -> builder'.SubscribeAsync() |> ignore
-                |> Expect.throwsT<ConsumerException> ""
+                |> Expect.throwsWithMessage<ConsumerException> "Topic name must be set on the producer builder."
             }
 
             test "SubscribeAsync throws an exception if SubscriptionName is blank" {
                 let builder' = builder().Topic("topic-name")
                 
                 fun() -> builder'.SubscribeAsync() |> ignore
-                |> Expect.throwsT<ConsumerException> ""
+                |> Expect.throwsWithMessage<ConsumerException>
+                    "Subscription name name must be set on the producer builder."
             }
 
         ]

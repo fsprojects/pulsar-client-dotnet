@@ -1,9 +1,10 @@
 ﻿namespace Pulsar.Client.UnitTests.Api
 
+open System
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Api
-open System
+open Pulsar.Client.UnitTests
 
 module PulsarClientBuilderTests =
 
@@ -22,14 +23,15 @@ module PulsarClientBuilderTests =
                 let checkUrl url =
                     builder()
                     |> configure(fun b -> b.WithServiceUrl url)
-                    |> Expect.throwsT<ArgumentException> ""
+                    |> Expect.throwsWithMessage<ArgumentException> "ServiceUrl must not be blank."
 
                 [null; ""; " "] |> List.iter checkUrl
             }
 
             test "Build throws an exception if ServiceUrl is blank" {
                 fun() -> builder().Build() |> ignore
-                |> Expect.throwsT<PulsarClientException> ""
+                |> Expect.throwsWithMessage<PulsarClientException>
+                    "Service Url needs to be specified on the PulsarClientBuilder object."
             }
 
         ]
