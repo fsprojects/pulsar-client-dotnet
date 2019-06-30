@@ -1,9 +1,10 @@
 ﻿namespace Pulsar.Client.UnitTests.Api
 
+open System
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Api
-open System
+open Pulsar.Client.UnitTests
 
 module ProducerBuilderTests =
 
@@ -22,14 +23,14 @@ module ProducerBuilderTests =
                 let checkTopic topic =
                     builder()
                     |> configure(fun b -> b.Topic topic)
-                    |> Expect.throwsT<ArgumentException> ""
+                    |> Expect.throwsWithMessage<ArgumentException> "Topic must not be blank."
 
                 [null; ""; " "] |> List.iter checkTopic
             }
 
             test "CreateAsync throws an exception if Topic is blank" {
                 fun() -> builder().CreateAsync() |> ignore
-                |> Expect.throwsT<ProducerException> ""
+                |> Expect.throwsWithMessage<ProducerException> "Topic name must be set on the producer builder."
             }
 
         ]
