@@ -9,11 +9,13 @@
     <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="ExceptionHelper.fs" />
     <Compile Include="AssemblyInfo.fs" />
     <None Include="paket.references" />
     <Compile Include="Common\UMX.fs" />
     <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\Topic.fs" />
+    <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\Configuration.fs" />
     <Compile Include="Internal\Log.fs" />
@@ -25,7 +27,6 @@
     <Compile Include="Api\Consumer.fs" />
     <Compile Include="Api\Producer.fs" />
     <Compile Include="Api\PulsarClient.fs" />
-    <Compile Include="Api\ExceptionHelper.fs" />
     <Compile Include="Api\ConsumerBuilder.fs" />
     <Compile Include="Api\ProducerBuilder.fs" />
     <Compile Include="Api\PulsarClientBuilder.fs" />

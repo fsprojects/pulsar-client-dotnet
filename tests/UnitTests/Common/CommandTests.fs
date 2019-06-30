@@ -161,7 +161,7 @@ module CommandsTests =
             }
 
             test "newGetTopicsOfNamespaceRequest should return correct frame" {
-                let ns = "public/default"
+                let ns = NamespaceName("public/default")
                 let requestId = %1UL
                 let mode = TopicDomain.Persistent
 
@@ -171,7 +171,7 @@ module CommandsTests =
                 totalSize |> Expect.equal "" 29
                 commandSize |> Expect.equal "" 25
                 command.``type``  |> Expect.equal "" CommandType.GetTopicsOfNamespace
-                command.getTopicsOfNamespace.Namespace |> Expect.equal "" ns
+                command.getTopicsOfNamespace.Namespace |> Expect.equal "" (ns.ToString())
                 command.getTopicsOfNamespace.RequestId |> Expect.equal "" (uint64(requestId))
                 command.getTopicsOfNamespace.mode |> Expect.equal "" CommandGetTopicsOfNamespace.Mode.Persistent
             }
