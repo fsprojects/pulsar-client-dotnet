@@ -81,7 +81,7 @@ module CommandsTests =
 
             test "newPartitionMetadataRequest should return correct frame" {
                 let topicName = "test-topic"
-                let requestId = Generators.getNextRequestId()
+                let requestId = %1UL
                
                 let totalSize, commandSize, command = 
                     serializeDeserializeSimpleCommand (newPartitionMetadataRequest topicName requestId)
@@ -126,9 +126,27 @@ module CommandsTests =
                 crc32 |> Expect.equal "" currentCrc32
             }
 
+            test "newProducer should return correct frame" {
+                let topicName = "test-topic"
+                let producerName = "test-producer"
+                let producerId = %1UL
+                let requestId = %1UL
+               
+                let totalSize, commandSize, command = 
+                    serializeDeserializeSimpleCommand (newProducer topicName producerName producerId requestId)
+
+                totalSize |> Expect.equal "" 39
+                commandSize |> Expect.equal "" 35
+                command.``type``  |> Expect.equal "" CommandType.Producer
+                command.Producer.Topic |> Expect.equal "" topicName
+                command.Producer.RequestId |> Expect.equal "" %requestId
+                command.Producer.ProducerId |> Expect.equal "" %producerId
+                command.Producer.ProducerName |> Expect.equal "" %producerName
+            }
+
             test "newLookup should return correct frame" {
                 let topicName = "test-topic"
-                let requestId = Generators.getNextRequestId()
+                let requestId = %1UL
                 let authoritative = true
 
                 let totalSize, commandSize, command = 
@@ -144,7 +162,7 @@ module CommandsTests =
 
             test "newGetTopicsOfNamespaceRequest should return correct frame" {
                 let ns = "public/default"
-                let requestId = Generators.getNextRequestId()
+                let requestId = %1UL
                 let mode = TopicDomain.Persistent
 
                 let totalSize, commandSize, command = 

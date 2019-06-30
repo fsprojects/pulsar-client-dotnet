@@ -30,15 +30,23 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                 let! msg = inbox.Receive()
                 match msg with
                 | ConsumerMessage.Connect ((broker, mb), channel) ->
-                    let! connection = SocketManager.registerConsumer broker consumerId mb |> Async.AwaitTask
-                    channel.Reply()
-                    return! loop { state with Connection = Connected connection }  
+                    if state.Connection = NotConnected
+                    then
+                        let! connection = SocketManager.registerConsumer broker consumerId mb |> Async.AwaitTask
+                        channel.Reply()
+                        return! loop { state with Connection = Connected connection }
+                    else 
+                        return! loop state
                 | ConsumerMessage.Reconnect ->
                     // TODO backoff
-                    let topicName = TopicName(consumerConfig.Topic)
-                    let! broker = lookup.GetBroker(topicName) |> Async.AwaitTask
-                    let! connection = SocketManager.getConnection broker |> Async.AwaitTask
-                    return! loop { state with Connection = Connected connection }
+                    if state.Connection = NotConnected
+                    then
+                        let topicName = TopicName(consumerConfig.Topic)
+                        let! broker = lookup.GetBroker(topicName) |> Async.AwaitTask
+                        let! connection = SocketManager.getConnection broker |> Async.AwaitTask
+                        return! loop { state with Connection = Connected connection }
+                    else 
+                        return! loop state
                 | ConsumerMessage.Disconnected (connection, mb) ->
                     if state.Connection = Connected connection
                     then

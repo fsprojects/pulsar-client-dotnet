@@ -28,15 +28,23 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 let! msg = inbox.Receive()
                 match msg with
                 | ProducerMessage.Connect ((broker, mb), channel) ->
-                    let! connection = SocketManager.registerProducer broker producerConfig producerId mb |> Async.AwaitTask
-                    channel.Reply()
-                    return! loop { state with Connection = Connected connection }
+                    if state.Connection = NotConnected
+                    then
+                        let! connection = SocketManager.registerProducer broker producerConfig producerId mb |> Async.AwaitTask
+                        channel.Reply()
+                        return! loop { state with Connection = Connected connection }
+                    else
+                        return! loop state
                 | ProducerMessage.Reconnect ->
                     // TODO backoff
-                    let topicName = TopicName(producerConfig.Topic)
-                    let! broker = lookup.GetBroker(topicName) |> Async.AwaitTask
-                    let! connection = SocketManager.getConnection broker |> Async.AwaitTask
-                    return! loop { state with Connection = Connected connection }
+                    if state.Connection = NotConnected
+                    then
+                        let topicName = TopicName(producerConfig.Topic)
+                        let! broker = lookup.GetBroker(topicName) |> Async.AwaitTask
+                        let! connection = SocketManager.getConnection broker |> Async.AwaitTask
+                        return! loop { state with Connection = Connected connection }
+                    else
+                        return! loop state
                 | ProducerMessage.Disconnected (connection, mb) ->
                     if state.Connection = Connected connection
                     then

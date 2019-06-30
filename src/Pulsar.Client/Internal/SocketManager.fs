@@ -16,6 +16,7 @@ open System.IO
 open FSharp.UMX
 open System.Reflection
 open Pulsar.Client.Api
+open System.IO.Pipelines
 
 let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
 let protocolVersion =
@@ -42,10 +43,10 @@ type PulsarCommands =
     | XCommandSendReceipt of CommandSendReceipt * SequencePosition
     | XCommandMessage of CommandMessage * SequencePosition
     | XCommandPing of CommandPing * SequencePosition
-    | XCommandLookupTopic of CommandLookupTopicResponse * SequencePosition
+    | XCommandLookupTopicResponse of CommandLookupTopicResponse * SequencePosition
     | XCommandProducerSuccess of CommandProducerSuccess * SequencePosition
     | XCommandSendError of CommandSendError * SequencePosition
-    | XCommandGetTopicsOfNamespace of CommandGetTopicsOfNamespaceResponse * SequencePosition
+    | XCommandGetTopicsOfNamespaceResponse of CommandGetTopicsOfNamespaceResponse * SequencePosition
     | IncompleteCommand
     | InvalidCommand of Exception
 
@@ -110,7 +111,7 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                 | BaseCommand.Type.Message ->
                     XCommandMessage (command.Message, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.LookupResponse ->
-                    XCommandLookupTopic (command.lookupTopicResponse, buffer.GetPosition(int64 frameLength))
+                    XCommandLookupTopicResponse (command.lookupTopicResponse, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.Ping ->
                     XCommandPing (command.Ping, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.ProducerSuccess ->
@@ -118,7 +119,7 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                 | BaseCommand.Type.SendError ->
                     XCommandSendError (command.SendError, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.GetTopicsOfNamespaceResponse ->
-                    XCommandGetTopicsOfNamespace (command.getTopicsOfNamespaceResponse, buffer.GetPosition(int64 frameLength))
+                    XCommandGetTopicsOfNamespaceResponse (command.getTopicsOfNamespaceResponse, buffer.GetPosition(int64 frameLength))
                 | _ as unknownCommandType ->
                     InvalidCommand (Exception(sprintf "Unknown command type: '%A'" unknownCommandType))
             with
@@ -128,6 +129,13 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
             IncompleteCommand
     else
         IncompleteCommand
+
+
+let handleRespone requestId result (reader: PipeReader) consumed = 
+    let tsc = requests.[requestId]    
+    tsc.SetResult(result)
+    requests.TryRemove(requestId) |> ignore
+    reader.AdvanceTo(consumed)
 
 let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Connection>) =
     task {
@@ -147,11 +155,8 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                     tsc.SetResult(connection)
                     reader.AdvanceTo(consumed)
                 | XCommandPartitionedTopicMetadataResponse (cmd, consumed) ->
-                    let requestId = %cmd.RequestId
-                    let tsc = requests.[requestId]
-                    tsc.SetResult(PartitionedTopicMetadata { Partitions = cmd.Partitions })
-                    requests.TryRemove(requestId) |> ignore
-                    reader.AdvanceTo(consumed)
+                    let result = PartitionedTopicMetadata { Partitions = cmd.Partitions }
+                    handleRespone %cmd.RequestId result reader consumed
                 | XCommandSendReceipt (cmd, consumed) ->
                     let producerMb = producers.[%cmd.ProducerId]
                     producerMb.Post(SendReceipt cmd)
@@ -168,27 +173,15 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                     // TODO handle real messages
                     consumerEvent.Post(AddMessage { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = [||] })
                     reader.AdvanceTo(consumed)
-                | XCommandLookupTopic (cmd, consumed) ->
-                    let requestId = %cmd.RequestId
-                    let tsc = requests.[requestId]
+                | XCommandLookupTopicResponse (cmd, consumed) ->
                     let result = LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
-                    tsc.SetResult(result)
-                    requests.TryRemove(requestId) |> ignore
-                    reader.AdvanceTo(consumed)
+                    handleRespone %cmd.RequestId result reader consumed
                 | XCommandProducerSuccess (cmd, consumed) ->
-                    let requestId = %cmd.RequestId
-                    let tsc = requests.[requestId]
                     let result = ProducerSuccess { GeneratedProducerName = cmd.ProducerName }
-                    tsc.SetResult(result)
-                    requests.TryRemove(requestId) |> ignore
-                    reader.AdvanceTo(consumed)
-                | XCommandGetTopicsOfNamespace (cmd, consumed) ->
-                    let requestId = %cmd.RequestId
-                    let tsc = requests.[requestId]
+                    handleRespone %cmd.RequestId result reader consumed
+                | XCommandGetTopicsOfNamespaceResponse (cmd, consumed) ->
                     let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
-                    tsc.SetResult(result)
-                    requests.TryRemove(requestId) |> ignore
-                    reader.AdvanceTo(consumed)
+                    handleRespone %cmd.RequestId result reader consumed
                 | IncompleteCommand ->
                     reader.AdvanceTo(buffer.Start, buffer.End)
                 | InvalidCommand ex ->
