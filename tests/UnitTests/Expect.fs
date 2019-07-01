@@ -6,7 +6,7 @@ open Expecto.Flip
 
 module internal Expect =
 
-    let throwsTh<'texn> f =
+    let throwsT2<'texn> f =
         let thrown =
             try
                 f ()
@@ -22,6 +22,6 @@ module internal Expect =
         | _ -> failtestf "Expected f to throw."
 
     let throwsWithMessage<'texn> message f =
-        throwsTh<'texn> f
+        throwsT2<'texn> f
         |> (fun (e : Exception) -> e.Message)
         |> Expect.equal "" message
