@@ -81,6 +81,7 @@ type ProducerMessage =
     | Connect of (Broker*MailboxProcessor<ProducerMessage>) * AsyncReplyChannel<unit>
     | Reconnect
     | Disconnected of Connection*MailboxProcessor<ProducerMessage>
+    | ProducerClosed of MailboxProcessor<ProducerMessage>
     | SendReceipt of CommandSendReceipt
     | SendMessage of SerializedPayload * AsyncReplyChannel<unit>
     | SendError of CommandSendError

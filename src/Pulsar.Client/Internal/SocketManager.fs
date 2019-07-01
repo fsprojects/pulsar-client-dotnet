@@ -47,6 +47,7 @@ type PulsarCommands =
     | XCommandProducerSuccess of CommandProducerSuccess * SequencePosition
     | XCommandSendError of CommandSendError * SequencePosition
     | XCommandGetTopicsOfNamespaceResponse of CommandGetTopicsOfNamespaceResponse * SequencePosition
+    | XCommandCloseProducer of CommandCloseProducer * SequencePosition
     | IncompleteCommand
     | InvalidCommand of Exception
 
@@ -118,6 +119,8 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                     XCommandProducerSuccess (command.ProducerSuccess, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.SendError ->
                     XCommandSendError (command.SendError, buffer.GetPosition(int64 frameLength))
+                | BaseCommand.Type.CloseProducer ->
+                    XCommandCloseProducer (command.CloseProducer, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.GetTopicsOfNamespaceResponse ->
                     XCommandGetTopicsOfNamespaceResponse (command.getTopicsOfNamespaceResponse, buffer.GetPosition(int64 frameLength))
                 | _ as unknownCommandType ->
@@ -179,6 +182,10 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandProducerSuccess (cmd, consumed) ->
                     let result = ProducerSuccess { GeneratedProducerName = cmd.ProducerName }
                     handleRespone %cmd.RequestId result reader consumed
+                | XCommandCloseProducer (cmd, consumed) ->
+                    let producerMb = producers.[%cmd.ProducerId]
+                    producerMb.Post(ProducerClosed producerMb)
+                    reader.AdvanceTo(consumed)
                 | XCommandGetTopicsOfNamespaceResponse (cmd, consumed) ->
                     let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
                     handleRespone %cmd.RequestId result reader consumed
