@@ -1,6 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
-open Pulsar.Client.ExceptionHelper
+open Pulsar.Client.Common
 
 type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguration) =
 

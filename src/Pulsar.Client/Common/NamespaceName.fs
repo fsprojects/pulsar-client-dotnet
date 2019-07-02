@@ -1,7 +1,5 @@
 namespace Pulsar.Client.Common
 
-open Pulsar.Client.ExceptionHelper
-
 type NamespaceName(name : string) =
 
     let tenant, localName =

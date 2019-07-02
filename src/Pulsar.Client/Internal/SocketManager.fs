@@ -17,6 +17,7 @@ open FSharp.UMX
 open System.Reflection
 open Pulsar.Client.Api
 open System.IO.Pipelines
+open CRC32
 
 let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
 let protocolVersion =
@@ -41,7 +42,7 @@ type PulsarCommands =
     | XCommandConnected of CommandConnected * SequencePosition
     | XCommandPartitionedTopicMetadataResponse of CommandPartitionedTopicMetadataResponse * SequencePosition
     | XCommandSendReceipt of CommandSendReceipt * SequencePosition
-    | XCommandMessage of CommandMessage * SequencePosition
+    | XCommandMessage of (CommandMessage * MessageMetadata * byte[] ) * SequencePosition
     | XCommandPing of CommandPing * SequencePosition
     | XCommandLookupTopicResponse of CommandLookupTopicResponse * SequencePosition
     | XCommandProducerSuccess of CommandProducerSuccess * SequencePosition
@@ -90,17 +91,18 @@ let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
 
 let tryParse (buffer: ReadOnlySequence<byte>) =
     let array = buffer.ToArray()
-    let sp = ReadOnlySpan(array)
-    if (sp.Length >= 8)
+    if (array.Length >= 8)
     then
-        let totalength = BinaryPrimitives.ReadInt32BigEndian(sp)
+        use stream =  new MemoryStream(array)
+        use reader = new BinaryReader(stream)
+
+        let totalength = reader.ReadInt32() |> int32FromBigEndian
         let frameLength = totalength + 4
-        if (totalength <= sp.Length)
+
+        if (frameLength <= array.Length)
         then
-            let commandLength = BinaryPrimitives.ReadInt32BigEndian(sp.Slice(4))
-            let msgStream =  new MemoryStream(sp.Slice(8,commandLength).ToArray())
             try
-                let command = Serializer.Deserialize<BaseCommand>(msgStream)
+                let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
                 Log.Logger.LogDebug("Got message of type {0}", command.``type``)
                 match command.``type`` with
                 | BaseCommand.Type.Connected ->
@@ -110,7 +112,17 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                 | BaseCommand.Type.SendReceipt ->
                     XCommandSendReceipt (command.SendReceipt, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.Message ->
-                    XCommandMessage (command.Message, buffer.GetPosition(int64 frameLength))
+                    reader.ReadInt16() |> int16FromBigEndian |> invalidArgIf ((<>) magicNumber) "Invalid magicNumber" |> ignore
+                    let messageCheckSum  = reader.ReadInt32() |> int32FromBigEndian
+                    let metadataPointer = stream.Position
+                    let metatada = Serializer.DeserializeWithLengthPrefix<MessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
+                    let payloadPointer = stream.Position
+                    let metadataLength = payloadPointer - metadataPointer |> int
+                    let payloadLength = frameLength - (int payloadPointer)
+                    let payload = reader.ReadBytes(payloadLength)
+                    stream.Seek(metadataPointer, SeekOrigin.Begin) |> ignore
+                    CRC32C.Get(0u, stream, metadataLength + payloadLength) |> int32 |> invalidArgIf ((<>) messageCheckSum) "Invalid checksum" |> ignore
+                    XCommandMessage ((command.Message, metatada, payload), buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.LookupResponse ->
                     XCommandLookupTopicResponse (command.lookupTopicResponse, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.Ping ->
@@ -150,6 +162,7 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
             let buffer = result.Buffer
             if result.IsCompleted
             then
+                // TODO: handle closed socket
                 continueLooping <- false
             else
                 match tryParse buffer with
@@ -171,10 +184,9 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandPing (cmd, consumed) ->
                     sendMb.Post(SocketMessageWithoutReply (connection, Commands.newPong()))
                     reader.AdvanceTo(consumed)
-                | XCommandMessage (cmd, consumed) ->
+                | XCommandMessage ((cmd, metadata, payload), consumed) ->
                     let consumerEvent = consumers.[%cmd.ConsumerId]
-                    // TODO handle real messages
-                    consumerEvent.Post(AddMessage { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = [||] })
+                    consumerEvent.Post(AddMessage { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = payload })
                     reader.AdvanceTo(consumed)
                 | XCommandLookupTopicResponse (cmd, consumed) ->
                     let result = LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }

@@ -9,9 +9,9 @@
     <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="ExceptionHelper.fs" />
     <Compile Include="AssemblyInfo.fs" />
     <None Include="paket.references" />
+    <Compile Include="Common\Tools.fs" />
     <Compile Include="Common\UMX.fs" />
     <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\Topic.fs" />

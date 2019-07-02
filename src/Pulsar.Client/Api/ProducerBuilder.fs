@@ -1,6 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
-open Pulsar.Client.ExceptionHelper
+open Pulsar.Client.Common
 
 type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguration) =
 

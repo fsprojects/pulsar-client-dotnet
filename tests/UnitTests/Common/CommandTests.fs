@@ -15,13 +15,7 @@ open System.Threading.Tasks
 open CRC32
 
 module CommandsTests =    
-        
-    let int32FromBigEndian(num : Int32) =
-        IPAddress.NetworkToHostOrder(num)
-
-    let int16FromBigEndian(num : Int16) =
-        IPAddress.NetworkToHostOrder(num)
-    
+            
     let private protoDeserialize<'T> (bytes : byte[]) =
         use stream = new MemoryStream(bytes)
         Serializer.Deserialize<'T>(stream)

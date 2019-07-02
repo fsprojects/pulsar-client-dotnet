@@ -11,64 +11,58 @@ open CRC32
 
 type internal CommandType = BaseCommand.Type
 
-let private memoryStreamManager = RecyclableMemoryStreamManager()
+
 Serializer.PrepareSerializer<BaseCommand>()
 
-let inline int32ToBigEndian(num : Int32) =
-    IPAddress.HostToNetworkOrder(num)
+
 
 let internal serializeSimpleCommand(command : BaseCommand) =
     fun (output: Stream) ->
-        use stream = memoryStreamManager.GetStream()
+        use stream = MemoryStreamManager.GetStream()
 
         // write fake totalLength
-        for i in 1..8 do
+        for i in 1..4 do
             stream.WriteByte(0uy)
 
         // write commandPayload
-        Serializer.Serialize(stream, command)
+        Serializer.SerializeWithLengthPrefix(stream, command, PrefixStyle.Fixed32BigEndian)
         let frameSize = int stream.Length  
 
         let totalSize = frameSize - 4 
-        let commandSize = totalSize - 4
 
         //write total size and command size
         stream.Seek(0L,SeekOrigin.Begin) |> ignore
         use binaryWriter = new BinaryWriter(stream)
         binaryWriter.Write(int32ToBigEndian totalSize)
-        binaryWriter.Write(int32ToBigEndian commandSize)
         stream.Seek(0L, SeekOrigin.Begin) |> ignore
 
         stream.CopyToAsync(output)
 
 let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[]) =
     fun (output: Stream) ->
-        use stream = memoryStreamManager.GetStream()
+        use stream = MemoryStreamManager.GetStream()
 
         // write fake totalLength
-        for i in 1..8 do
+        for i in 1..4 do
             stream.WriteByte(0uy)
 
         // write commandPayload
-        Serializer.Serialize(stream, command)
+        Serializer.SerializeWithLengthPrefix(stream, command, PrefixStyle.Fixed32BigEndian)
 
         let stream1Size = int stream.Length  
-        let totalCommandSize = stream1Size - 4 
-        let commandSize = totalCommandSize - 4
 
         // write magic number 0x0e01
         stream.WriteByte(14uy)
         stream.WriteByte(1uy)
 
         // write fake CRC sum and fake metadata length
-        for i in 1..8 do
+        for i in 1..4 do
             stream.WriteByte(0uy)
         
         // write metadata
-        Serializer.Serialize(stream, metadata)
+        Serializer.SerializeWithLengthPrefix(stream, metadata, PrefixStyle.Fixed32BigEndian)
         let stream2Size = int stream.Length
         let totalMetadataSize = stream2Size - stream1Size - 6
-        let metadataSize = totalMetadataSize - 4 
 
         // write payload
         stream.Write(payload, 0, payload.Length)
@@ -83,10 +77,6 @@ let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageM
         // write missing sizes
         use binaryWriter = new BinaryWriter(stream)
 
-        //write Metadata size
-        stream.Seek(int64 crcPayloadStart, SeekOrigin.Begin) |> ignore
-        binaryWriter.Write(int32ToBigEndian metadataSize)
-
         //write CRC
         stream.Seek(int64 crcPayloadStart, SeekOrigin.Begin) |> ignore
         let crc = int32 <| CRC32C.Get(0u, stream, totalMetadataSize + payloadSize)
@@ -96,7 +86,6 @@ let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageM
         //write total size and command size
         stream.Seek(0L, SeekOrigin.Begin) |> ignore
         binaryWriter.Write(int32ToBigEndian totalSize)
-        binaryWriter.Write(int32ToBigEndian commandSize)
 
         stream.Seek(0L, SeekOrigin.Begin) |> ignore                
         stream.CopyToAsync(output)
