@@ -1,22 +1,22 @@
 ﻿[<AutoOpen>]
-module internal Pulsar.Client.Common.Tools
+module Pulsar.Client.Common.Tools
 
 open System.Net
 open System
 open Microsoft.IO
 
-let MemoryStreamManager = RecyclableMemoryStreamManager()
-let magicNumber = int16 0x0e01
+let internal MemoryStreamManager = RecyclableMemoryStreamManager()
+let MagicNumber = int16 0x0e01
 
 // Converts
 
 let inline int32ToBigEndian(num : Int32) =
     IPAddress.HostToNetworkOrder(num)
 
-let int32FromBigEndian(num : Int32) =
+let inline int32FromBigEndian(num : Int32) =
     IPAddress.NetworkToHostOrder(num)
 
-let int16FromBigEndian(num : Int16) =
+let inline int16FromBigEndian(num : Int16) =
     IPAddress.NetworkToHostOrder(num)
 
 // Exception helper

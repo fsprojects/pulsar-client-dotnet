@@ -116,8 +116,9 @@ module CommandsTests =
 
                 let currentCrc32 = CRC32C.Get(uint32 0, crcArray, crcArray.Length) |> int32
 
-                magicNumber |> Expect.equal "" (int16 0x0e01)
+                magicNumber |> Expect.equal "" MagicNumber
                 crc32 |> Expect.equal "" currentCrc32
+                resultPayload |> Expect.sequenceEqual "" payload
             }
 
             test "newProducer should return correct frame" {

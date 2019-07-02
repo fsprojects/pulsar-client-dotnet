@@ -112,7 +112,7 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                 | BaseCommand.Type.SendReceipt ->
                     XCommandSendReceipt (command.SendReceipt, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.Message ->
-                    reader.ReadInt16() |> int16FromBigEndian |> invalidArgIf ((<>) magicNumber) "Invalid magicNumber" |> ignore
+                    reader.ReadInt16() |> int16FromBigEndian |> invalidArgIf ((<>) MagicNumber) "Invalid magicNumber" |> ignore
                     let messageCheckSum  = reader.ReadInt32() |> int32FromBigEndian
                     let metadataPointer = stream.Position
                     let metatada = Serializer.DeserializeWithLengthPrefix<MessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
