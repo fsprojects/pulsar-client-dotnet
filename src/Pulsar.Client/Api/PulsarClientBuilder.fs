@@ -1,6 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
-open ExceptionHelper
+open Pulsar.Client.ExceptionHelper
 
 type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 

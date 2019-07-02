@@ -51,7 +51,7 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
                 return failwith "Incorrect return type"
         }
 
-    member __.GetTopicsUnderNamespace (ns : string, mode : TopicDomain) = task {
+    member __.GetTopicsUnderNamespace (ns : NamespaceName, mode : TopicDomain) = task {
         let makeRequest = fun requestId -> Commands.newGetTopicsOfNamespaceRequest ns requestId mode
         let! (response, _) = executeRequest makeRequest
         match response with

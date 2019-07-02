@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Api
+﻿namespace Pulsar.Client
 
 open System
 

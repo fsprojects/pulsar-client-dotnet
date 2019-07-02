@@ -138,11 +138,11 @@ let newProducer (topicName : string) (producerName: string) (producerId : Produc
     let command = BaseCommand(``type`` = CommandType.Producer, Producer = request)
     command |> serializeSimpleCommand
 
-let newGetTopicsOfNamespaceRequest (ns : string) (requestId : RequestId) (mode : TopicDomain) =
+let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) (mode : TopicDomain) =
     let mode =
         match mode with
         | Persistent -> CommandGetTopicsOfNamespace.Mode.Persistent
         | NonPersistent -> CommandGetTopicsOfNamespace.Mode.NonPersistent
-    let request = CommandGetTopicsOfNamespace(Namespace = ns, RequestId = uint64(%requestId), mode = mode)
+    let request = CommandGetTopicsOfNamespace(Namespace = ns.ToString(), RequestId = uint64(%requestId), mode = mode)
     let command = BaseCommand(``type`` = CommandType.GetTopicsOfNamespace, getTopicsOfNamespace = request)
     command |> serializeSimpleCommand
