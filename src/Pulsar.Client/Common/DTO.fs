@@ -34,6 +34,11 @@ type TopicsOfNamespace =
         Topics : string list
     }
 
+type SubscriptionType =
+    | Exclusive = 0
+    | Shared = 1
+    | Failover = 2
+
 type MessageId =
     {
         LedgerId: LedgerId
@@ -54,13 +59,6 @@ type Broker =
     {
         LogicalAddress: LogicalAddres
         PhysicalAddress: PhysicalAddress
-    }
-
-type SendAck =
-    {
-         SequenceId: SequenceId
-         LedgerId: LedgerId
-         EntryId: EntryId
     }
 
 type Message =

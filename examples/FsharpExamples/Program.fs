@@ -31,8 +31,9 @@ let main argv =
                 .Topic("my-topic")
                 .SubscriptionName("my-subscription")
                 .SubscribeAsync()  
+
         let! message = consumer.ReceiveAsync()
-        printfn "%A" message
+        printfn "Received: %A" (message.Payload |> Encoding.UTF8.GetString)
         do! consumer.AcknowledgeAsync(message)
     }
     t.Wait()

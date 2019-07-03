@@ -139,6 +139,51 @@ module CommandsTests =
                 command.Producer.ProducerName |> Expect.equal "" %producerName
             }
 
+            test "newSubscribe should return correct frame" {
+                let topicName = "test-topic"
+                let consumerName = "test-consumer"
+                let consumerId = %1UL
+                let requestId = %1UL
+               
+                let totalSize, commandSize, command = 
+                    serializeDeserializeSimpleCommand (newSubscribe topicName "test-subscription" consumerId requestId consumerName SubscriptionType.Exclusive)
+
+                totalSize |> Expect.equal "" 60
+                commandSize |> Expect.equal "" 56
+                command.``type``  |> Expect.equal "" CommandType.Subscribe
+                command.Subscribe.Topic |> Expect.equal "" topicName
+                command.Subscribe.RequestId |> Expect.equal "" %requestId
+                command.Subscribe.ConsumerId |> Expect.equal "" %consumerId
+                command.Subscribe.ConsumerName |> Expect.equal "" %consumerName
+            }
+
+            test "newFlow should return correct frame" {
+                let messagePermits = 100u
+                let consumerId = %1UL
+               
+                let totalSize, commandSize, command = 
+                    serializeDeserializeSimpleCommand (newFlow consumerId messagePermits)
+
+                totalSize |> Expect.equal "" 12
+                commandSize |> Expect.equal "" 8
+                command.Flow.ConsumerId |> Expect.equal "" %consumerId
+                command.Flow.messagePermits |> Expect.equal "" messagePermits
+            }
+
+            test "newAck should return correct frame" {
+                let messageId = { LedgerId = %1UL; EntryId = %2UL; Partition = 0 } 
+                let consumerId = %1UL
+               
+                let totalSize, commandSize, command = 
+                    serializeDeserializeSimpleCommand (newAck consumerId messageId CommandAck.AckType.Individual)
+
+                totalSize |> Expect.equal "" 18
+                commandSize |> Expect.equal "" 14
+                command.Ack.ConsumerId |> Expect.equal "" %consumerId
+                command.Ack.MessageIds.[0].entryId |> Expect.equal "" %messageId.EntryId
+                command.Ack.MessageIds.[0].ledgerId |> Expect.equal "" %messageId.LedgerId
+            }
+
             test "newLookup should return correct frame" {
                 let topicName = "test-topic"
                 let requestId = %1UL

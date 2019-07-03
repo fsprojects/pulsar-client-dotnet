@@ -31,6 +31,7 @@ type PulsarTypes =
     | LookupTopicResult of LookupTopicResult
     | ProducerSuccess of ProducerSuccess
     | TopicsOfNamespace of TopicsOfNamespace
+    | Empty
 
 let connections = ConcurrentDictionary<LogicalAddres, Lazy<Task<Connection>>>()
 let requests = ConcurrentDictionary<RequestId, TaskCompletionSource<PulsarTypes>>()
@@ -46,6 +47,7 @@ type PulsarCommands =
     | XCommandPing of CommandPing * SequencePosition
     | XCommandLookupTopicResponse of CommandLookupTopicResponse * SequencePosition
     | XCommandProducerSuccess of CommandProducerSuccess * SequencePosition
+    | XCommandSuccess of CommandSuccess * SequencePosition
     | XCommandSendError of CommandSendError * SequencePosition
     | XCommandGetTopicsOfNamespaceResponse of CommandGetTopicsOfNamespaceResponse * SequencePosition
     | XCommandCloseProducer of CommandCloseProducer * SequencePosition
@@ -129,6 +131,8 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                     XCommandPing (command.Ping, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.ProducerSuccess ->
                     XCommandProducerSuccess (command.ProducerSuccess, buffer.GetPosition(int64 frameLength))
+                | BaseCommand.Type.Success ->
+                    XCommandSuccess (command.Success, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.SendError ->
                     XCommandSendError (command.SendError, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.CloseProducer ->
@@ -194,6 +198,8 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandProducerSuccess (cmd, consumed) ->
                     let result = ProducerSuccess { GeneratedProducerName = cmd.ProducerName }
                     handleRespone %cmd.RequestId result reader consumed
+                | XCommandSuccess (cmd, consumed) ->
+                    handleRespone %cmd.RequestId Empty reader consumed
                 | XCommandCloseProducer (cmd, consumed) ->
                     let producerMb = producers.[%cmd.ProducerId]
                     producerMb.Post(ProducerClosed producerMb)
@@ -260,8 +266,23 @@ let registerProducer (broker: Broker) (producerConfig: ProducerConfiguration) (p
             return failwith "Incorrect return type"
     }
 
-let registerConsumer (broker: Broker) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
-    let connection = getConnection broker
-    consumers.TryAdd(consumerId, consumerMb) |> ignore
-    Log.Logger.LogInformation("Consumer registered")
-    connection
+let registerConsumer (broker: Broker) (consumerConfig: ConsumerConfiguration) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
+    task {
+        let! connection = getConnection broker
+        consumers.TryAdd(consumerId, consumerMb) |> ignore
+        Log.Logger.LogInformation("Connection established for consumer")
+        let requestId = Generators.getNextRequestId()
+        let payload =
+            Commands.newSubscribe consumerConfig.Topic consumerConfig.SubscriptionName consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
+        let! result = sendAndWaitForReply requestId (connection, payload)
+        match result with
+        | Empty ->
+            Log.Logger.LogInformation("Consumer registered")
+            let flowCommand =
+                Commands.newFlow consumerId 1000u
+            do! send (connection, flowCommand)
+            Log.Logger.LogInformation("Consumer initial flow sent")
+            return connection
+        | _ ->
+            return failwith "Incorrect return type"
+    }

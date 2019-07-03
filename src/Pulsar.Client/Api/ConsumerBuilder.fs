@@ -30,12 +30,24 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
             client,
             { config with
                 Topic = topic |> invalidArgIfBlankString "Topic must not be blank." })
+
+    member __.ConsumerName name = 
+        ConsumerBuilder(
+            client,
+            { config with
+                ConsumerName = name |> invalidArgIfBlankString "ConsumerName must not be blank." })
         
     member __.SubscriptionName subscriptionName =
         ConsumerBuilder(
             client,
             { config with
                 SubscriptionName = subscriptionName |> invalidArgIfBlankString "Subscription name must not be blank." })
+
+    member __.SubscriptionType subscriptionType =
+        ConsumerBuilder(
+            client,
+            { config with
+                SubscriptionName = subscriptionType })
 
     member __.SubscribeAsync() =
         config

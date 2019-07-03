@@ -100,9 +100,12 @@ let newSend (producerId : ProducerId) (sequenceId : SequenceId) (numMessages : i
     let command = BaseCommand(``type`` = CommandType.Send, Send = request)
     serializePayloadCommand command msgMetadata payload
 
-let newAck (consumerId : ConsumerId) (ledgerId : LedgerId) (entryId : EntryId)
+let newAck (consumerId : ConsumerId) (messageId: MessageId)
     (ackType : CommandAck.AckType) : SerializedPayload =
-    Unchecked.defaultof<SerializedPayload>
+    let request = CommandAck(ConsumerId = %consumerId, ack_type = ackType)
+    request.MessageIds.Add(MessageIdData(ledgerId = %messageId.LedgerId, entryId = %messageId.EntryId))
+    let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
+    serializeSimpleCommand command
 
 let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : SerializedPayload =    
     let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion)
@@ -134,4 +137,22 @@ let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) 
         | NonPersistent -> CommandGetTopicsOfNamespace.Mode.NonPersistent
     let request = CommandGetTopicsOfNamespace(Namespace = ns.ToString(), RequestId = uint64(%requestId), mode = mode)
     let command = BaseCommand(``type`` = CommandType.GetTopicsOfNamespace, getTopicsOfNamespace = request)
+    command |> serializeSimpleCommand
+
+let newSubscribe (topicName: string) (subscription: string) (consumerId: ConsumerId) (requestId: RequestId)
+    (consumerName: string) (subscriptionType: SubscriptionType) =
+    let subType =
+        match subscriptionType with
+        | SubscriptionType.Exclusive -> CommandSubscribe.SubType.Exclusive
+        | SubscriptionType.Shared -> CommandSubscribe.SubType.Shared
+        | SubscriptionType.Failover -> CommandSubscribe.SubType.Failover
+        | _ -> failwith "Unknown subscription type"
+    let request = CommandSubscribe(Topic = topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId, 
+                    RequestId = %requestId, ConsumerName =  consumerName)
+    let command = BaseCommand(``type`` = CommandType.Subscribe, Subscribe = request)
+    command |> serializeSimpleCommand
+
+let newFlow (consumerId: ConsumerId) (messagePermits: uint32) =
+    let request = CommandFlow(ConsumerId = %consumerId, messagePermits = messagePermits)
+    let command = BaseCommand(``type`` = CommandType.Flow, Flow = request)
     command |> serializeSimpleCommand

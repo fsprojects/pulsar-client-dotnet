@@ -33,7 +33,7 @@ namespace CsharpExamples
                         .SubscriptionName("my-subscription")
                         .SubscribeAsync();
             var message = await consumer.ReceiveAsync();
-            Console.WriteLine(message);
+            Console.WriteLine("Received: " + Encoding.UTF8.GetString(message.Payload));
             await consumer.AcknowledgeAsync(message);
 
             Console.WriteLine("Example ended");

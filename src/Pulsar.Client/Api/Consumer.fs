@@ -32,7 +32,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                 | ConsumerMessage.Connect ((broker, mb), channel) ->
                     if state.Connection = NotConnected
                     then
-                        let! connection = SocketManager.registerConsumer broker consumerId mb |> Async.AwaitTask
+                        let! connection = SocketManager.registerConsumer broker consumerConfig consumerId mb |> Async.AwaitTask
                         channel.Reply()
                         return! loop { state with Connection = Connected connection }
                     else 
@@ -93,7 +93,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
 
     member this.AcknowledgeAsync (msg: Message) =       
         task {
-            let command = Commands.newAck consumerId %msg.MessageId.LedgerId %msg.MessageId.EntryId CommandAck.AckType.Individual
+            let command = Commands.newAck consumerId msg.MessageId CommandAck.AckType.Individual
             do! mb.PostAndAsyncReply(fun channel -> Ack (command, channel))
             return! Task.FromResult()
         }

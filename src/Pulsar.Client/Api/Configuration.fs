@@ -1,5 +1,7 @@
 ﻿namespace Pulsar.Client.Api
 
+open Pulsar.Client.Common
+
 type PulsarClientConfiguration =
     {
         ServiceUrl: string
@@ -12,12 +14,16 @@ type PulsarClientConfiguration =
 type ConsumerConfiguration =
     {
         Topic: string
+        ConsumerName: string
         SubscriptionName: string
+        SubscriptionType: SubscriptionType
     }
     static member Default =
         {
             Topic = ""
+            ConsumerName = ""
             SubscriptionName = ""
+            SubscriptionType = SubscriptionType.Exclusive
         }
 
 type ProducerConfiguration =
