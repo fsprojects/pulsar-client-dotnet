@@ -33,6 +33,14 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
             { config with
                 ProducerName = topic |> invalidArgIfBlankString "ProducerName must not be blank." })
 
+    member __.MaxPendingMessages maxPendingMessages =
+        ProducerBuilder(
+            client,
+            { config with
+                MaxPendingMessages =
+                    maxPendingMessages
+                    |> invalidArgIfNotGreaterThanZero "MaxPendingMessages needs to be greater than 0." })
+
     member __.CreateAsync() =
         config
         |> verify
