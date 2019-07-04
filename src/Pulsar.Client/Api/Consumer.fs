@@ -20,16 +20,18 @@ type ConsumerStatus =
 type ConsumerState = {
     Connection: ConnectionState
     Status: ConsumerStatus
+    WaitingChannel: AsyncReplyChannel<Message>
 }
 
-type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =    
+type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
 
     let consumerId = Generators.getNextConsumerId()
     let queue = new ConcurrentQueue<Message>()
-    let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>  
+    let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
+    let mutable messageCounter = 0
 
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
-        let mutable channel: AsyncReplyChannel<Message> = nullChannel
+
         let rec loop (state: ConsumerState) =
             async {
                 let! msg = inbox.Receive()
@@ -44,7 +46,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                             let! connection = SocketManager.registerConsumer broker consumerConfig consumerId mb |> Async.AwaitTask
                             channel.Reply()
                             return! loop { state with Connection = Connected connection }
-                        else 
+                        else
                             return! loop state
                     | ConsumerMessage.Reconnect ->
                         // TODO backoff
@@ -54,30 +56,30 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                             let! broker = lookup.GetBroker(topicName) |> Async.AwaitTask
                             let! connection = SocketManager.getConnection broker |> Async.AwaitTask
                             return! loop { state with Connection = Connected connection }
-                        else 
+                        else
                             return! loop state
                     | ConsumerMessage.Disconnected (connection, mb) ->
                         if state.Connection = Connected connection
                         then
                             mb.Post(ConsumerMessage.Reconnect)
                             return! loop { state with Connection = NotConnected }
-                        else 
+                        else
                             return! loop state
                     | ConsumerMessage.MessageRecieved x ->
-                        if channel = nullChannel
-                        then 
+                        if state.WaitingChannel = nullChannel
+                        then
                             queue.Enqueue(x)
-                        else 
-                            channel.Reply(x)
-                            channel <- nullChannel
-                        return! loop state
+                            return! loop state
+                        else
+                            state.WaitingChannel.Reply(x)
+                            return! loop { state with WaitingChannel = nullChannel }
                     | ConsumerMessage.GetMessage ch ->
                         match queue.TryDequeue() with
                         | true, msg ->
                             ch.Reply msg
+                            return! loop state
                         | false, _ ->
-                            channel <- ch                    
-                        return! loop state
+                            return! loop { state with WaitingChannel = ch }
                     | ConsumerMessage.Ack (payload, channel) ->
                         match state.Connection with
                         | Connected conn ->
@@ -91,11 +93,11 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         let! broker = lookup.GetBroker(consumerConfig.Topic) |> Async.AwaitTask
                         let! newConnection = SocketManager.registerConsumer broker consumerConfig consumerId mb |> Async.AwaitTask
                         return! loop { state with Connection = Connected newConnection }
-                    | ConsumerMessage.ReachedEndOfTheTopic ->                        
+                    | ConsumerMessage.ReachedEndOfTheTopic ->
                         return! loop { state with Status = Terminated }
             }
-        loop { Connection = NotConnected; Status = Normal }
-    )    
+        loop { Connection = NotConnected; Status = Normal; WaitingChannel = nullChannel }
+    )
 
     member this.ReceiveAsync() =
         task {
@@ -103,10 +105,10 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
             | true, msg ->
                 return msg
             | false, _ ->
-                 return! mb.PostAndAsyncReply(GetMessage)           
+                 return! mb.PostAndAsyncReply(GetMessage)
         }
 
-    member this.AcknowledgeAsync (msg: Message) =       
+    member this.AcknowledgeAsync (msg: Message) =
         task {
             let command = Commands.newAck consumerId msg.MessageId CommandAck.AckType.Individual
             do! mb.PostAndAsyncReply(fun channel -> Ack (command, channel))
@@ -125,6 +127,6 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
             do! consumer.InitInternal()
             return consumer
         }
-       
 
-        
+
+

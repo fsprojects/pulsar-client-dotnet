@@ -17,6 +17,7 @@ type ConsumerConfiguration =
         ConsumerName: string
         SubscriptionName: string
         SubscriptionType: SubscriptionType
+        ReceiverQueueSize: int
     }
     static member Default =
         {
@@ -24,6 +25,7 @@ type ConsumerConfiguration =
             ConsumerName = ""
             SubscriptionName = ""
             SubscriptionType = SubscriptionType.Exclusive
+            ReceiverQueueSize = 1000
         }
 
 type ProducerConfiguration =

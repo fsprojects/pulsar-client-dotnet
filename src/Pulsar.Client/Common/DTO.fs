@@ -23,13 +23,13 @@ type ProducerSuccess =
         GeneratedProducerName: string
     }
 
-type LookupTopicResult = 
+type LookupTopicResult =
     {
         Proxy: bool
         BrokerServiceUrl : string
     }
 
-type TopicsOfNamespace = 
+type TopicsOfNamespace =
     {
         Topics : string list
     }
@@ -44,7 +44,7 @@ type MessageId =
         LedgerId: LedgerId
         EntryId: EntryId
         Partition: int
-    } 
+    }
     with static member FromMessageIdData(messageIdData: MessageIdData) =
             {
                 LedgerId = %messageIdData.ledgerId
@@ -55,7 +55,7 @@ type MessageId =
 type LogicalAddres = LogicalAddres of DnsEndPoint
 type PhysicalAddress = PhysicalAddress of DnsEndPoint
 
-type Broker = 
+type Broker =
     {
         LogicalAddress: LogicalAddres
         PhysicalAddress: PhysicalAddress
@@ -66,16 +66,16 @@ type Message =
         MessageId: MessageId
         Payload: byte[]
     }
-    
+
 type WriterStream = Stream
 type SerializedPayload = WriterStream -> Task
 type Connection = SocketConnection * WriterStream
 
 type ConnectionState =
     | NotConnected
-    | Connected of Connection    
+    | Connected of Connection
 
-type ProducerMessage = 
+type ProducerMessage =
     | Connect of (Broker*MailboxProcessor<ProducerMessage>) * AsyncReplyChannel<unit>
     | Reconnect
     | Disconnected of Connection*MailboxProcessor<ProducerMessage>

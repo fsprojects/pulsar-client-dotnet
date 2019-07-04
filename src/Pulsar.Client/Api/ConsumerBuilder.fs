@@ -25,18 +25,18 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
 
     new(client: PulsarClient) = ConsumerBuilder(client, ConsumerConfiguration.Default)
 
-    member __.Topic topic = 
+    member __.Topic topic =
         ConsumerBuilder(
             client,
             { config with
                 Topic = topic |> invalidArgIfBlankString "Topic must not be blank." })
 
-    member __.ConsumerName name = 
+    member __.ConsumerName name =
         ConsumerBuilder(
             client,
             { config with
-                ConsumerName = name |> invalidArgIfBlankString "ConsumerName must not be blank." })
-        
+                ConsumerName = name |> invalidArgIfBlankString "Consumer name must not be blank." })
+
     member __.SubscriptionName subscriptionName =
         ConsumerBuilder(
             client,
@@ -47,7 +47,13 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
         ConsumerBuilder(
             client,
             { config with
-                SubscriptionName = subscriptionType })
+                SubscriptionType = subscriptionType  })
+
+    member __.ReceiverQueueSize receiverQueueSize =
+        ConsumerBuilder(
+            client,
+            { config with
+                ReceiverQueueSize = receiverQueueSize |> invalidArgIfNotGreaterThanZero "ReceiverQueueSize should be greater than 0."  })
 
     member __.SubscribeAsync() =
         config

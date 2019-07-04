@@ -156,8 +156,8 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
         IncompleteCommand
 
 
-let handleRespone requestId result (reader: PipeReader) consumed = 
-    let tsc = requests.[requestId]    
+let handleRespone requestId result (reader: PipeReader) consumed =
+    let tsc = requests.[requestId]
     tsc.SetResult(result)
     requests.TryRemove(requestId) |> ignore
     reader.AdvanceTo(consumed)
