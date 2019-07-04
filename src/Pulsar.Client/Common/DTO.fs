@@ -88,6 +88,7 @@ type ConsumerMessage =
     | Connect of (Broker*MailboxProcessor<ConsumerMessage>) * AsyncReplyChannel<unit>
     | Reconnect
     | Disconnected of Connection*MailboxProcessor<ConsumerMessage>
-    | AddMessage of Message
+    | ConsumerClosed of MailboxProcessor<ConsumerMessage>
+    | MessageRecieved of Message
     | GetMessage of AsyncReplyChannel<Message>
     | Ack of SerializedPayload * AsyncReplyChannel<unit>

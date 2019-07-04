@@ -51,6 +51,7 @@ type PulsarCommands =
     | XCommandSendError of CommandSendError * SequencePosition
     | XCommandGetTopicsOfNamespaceResponse of CommandGetTopicsOfNamespaceResponse * SequencePosition
     | XCommandCloseProducer of CommandCloseProducer * SequencePosition
+    | XCommandCloseConsumer of CommandCloseConsumer * SequencePosition
     | IncompleteCommand
     | InvalidCommand of Exception
 
@@ -189,8 +190,8 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                     sendMb.Post(SocketMessageWithoutReply (connection, Commands.newPong()))
                     reader.AdvanceTo(consumed)
                 | XCommandMessage ((cmd, metadata, payload), consumed) ->
-                    let consumerEvent = consumers.[%cmd.ConsumerId]
-                    consumerEvent.Post(AddMessage { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = payload })
+                    let consumerMb = consumers.[%cmd.ConsumerId]
+                    consumerMb.Post(MessageRecieved { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = payload })
                     reader.AdvanceTo(consumed)
                 | XCommandLookupTopicResponse (cmd, consumed) ->
                     let result = LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
@@ -203,6 +204,10 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandCloseProducer (cmd, consumed) ->
                     let producerMb = producers.[%cmd.ProducerId]
                     producerMb.Post(ProducerClosed producerMb)
+                    reader.AdvanceTo(consumed)
+                | XCommandCloseConsumer (cmd, consumed) ->
+                    let consumerMb = consumers.[%cmd.ConsumerId]
+                    consumerMb.Post(ConsumerClosed consumerMb)
                     reader.AdvanceTo(consumed)
                 | XCommandGetTopicsOfNamespaceResponse (cmd, consumed) ->
                     let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }

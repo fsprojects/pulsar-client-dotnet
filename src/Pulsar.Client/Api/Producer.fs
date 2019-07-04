@@ -21,13 +21,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
     let producerId = Generators.getNextProducerId()
     let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
     let partitionIndex = -1
-
-    let getBroker() =
-        task {
-            let topicName = TopicName(producerConfig.Topic)
-            return! lookup.GetBroker(topicName)
-        }
-
+    
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
         let rec loop (state: ProducerState) =
             async {
@@ -45,7 +39,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     // TODO backoff
                     if state.Connection = NotConnected
                     then
-                        let! broker = getBroker() |> Async.AwaitTask
+                        let! broker = lookup.GetBroker(producerConfig.Topic) |> Async.AwaitTask
                         let! connection = SocketManager.getConnection broker |> Async.AwaitTask
                         return! loop { state with Connection = Connected connection }
                     else
@@ -75,7 +69,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     | false, _ -> ()
                     return! loop state
                 | ProducerMessage.ProducerClosed mb ->
-                    let! broker = getBroker() |> Async.AwaitTask
+                    let! broker = lookup.GetBroker(producerConfig.Topic) |> Async.AwaitTask
                     let! newConnection = SocketManager.registerProducer broker producerConfig producerId mb |> Async.AwaitTask
                     return! loop { state with Connection = Connected newConnection }
                 | ProducerMessage.SendError error ->
@@ -133,7 +127,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
     member private __.InitInternal() =
         task {
-            let! broker = getBroker()
+            let! broker = lookup.GetBroker(producerConfig.Topic)
             return! mb.PostAndAsyncReply(fun channel -> ProducerMessage.Connect ((broker, mb), channel))
         }
 

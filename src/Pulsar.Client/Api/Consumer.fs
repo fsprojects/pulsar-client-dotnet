@@ -54,7 +54,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         return! loop { state with Connection = NotConnected }
                     else 
                         return! loop state
-                | ConsumerMessage.AddMessage x ->
+                | ConsumerMessage.MessageRecieved x ->
                     if channel = nullChannel
                     then 
                         queue.Enqueue(x)
@@ -77,7 +77,11 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         return! loop state
                     | NotConnected ->
                         //TODO put message on schedule
-                        return! loop state                             
+                        return! loop state
+                | ConsumerMessage.ConsumerClosed mb ->
+                    let! broker = lookup.GetBroker(consumerConfig.Topic) |> Async.AwaitTask
+                    let! newConnection = SocketManager.registerConsumer broker consumerConfig consumerId mb |> Async.AwaitTask
+                    return! loop { state with Connection = Connected newConnection }
             }
         loop { Connection = NotConnected }
     )    
@@ -100,8 +104,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
 
     member private __.InitInternal() =
         task {
-            let topicName = TopicName(consumerConfig.Topic)
-            let! broker = lookup.GetBroker(topicName)
+            let! broker = lookup.GetBroker(consumerConfig.Topic)
             return! mb.PostAndAsyncReply(fun channel -> Connect ((broker, mb), channel))
         }
 
