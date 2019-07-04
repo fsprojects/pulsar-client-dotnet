@@ -69,7 +69,7 @@ type Message =
 
 type WriterStream = Stream
 type SerializedPayload = WriterStream -> Task
-type Connection = SocketConnection * WriterStream
+type Connection = SocketConnection * WriterStream * Broker
 
 type ConnectionState =
     | NotConnected

@@ -63,14 +63,15 @@ type SocketMessage =
     | SocketMessageWithReply of Payload * AsyncReplyChannel<unit>
     | SocketMessageWithoutReply of Payload
 
-let sendSerializedPayload ((connection, serializedPayload): Payload ) =
+let private sendSerializedPayload ((connection, serializedPayload): Payload ) =
     task {
-        let (conn, streamWriter) = connection
+        let (conn, streamWriter, broker) = connection
         do! streamWriter |> serializedPayload
 
         if (not conn.Socket.Connected)
         then
             Log.Logger.LogWarning("Socket was disconnected")
+            connections.TryRemove(broker.LogicalAddress) |> ignore
             consumers |> Seq.iter (fun (kv) -> kv.Value.Post(ConsumerMessage.Disconnected (connection, kv.Value)))
             producers |> Seq.iter (fun (kv) -> kv.Value.Post(ProducerMessage.Disconnected (connection, kv.Value)))
     }
@@ -164,7 +165,7 @@ let handleRespone requestId result (reader: PipeReader) consumed =
 
 let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Connection>) =
     task {
-        let (conn, _) = connection
+        let (conn, _, _) = connection
         let mutable continueLooping = true
         let reader = conn.Input
         while continueLooping do
@@ -234,7 +235,7 @@ let private connect (broker: Broker) =
         let (LogicalAddres logicalAddres) = broker.LogicalAddress
         let! socketConnection = SocketConnection.ConnectAsync(physicalAddress)
         let writerStream = StreamConnection.GetWriter(socketConnection.Output)
-        let connection = (socketConnection, writerStream)
+        let connection = (socketConnection, writerStream, broker)
         let initialConnectionTsc = TaskCompletionSource<Connection>()
         let listener = Task.Run(fun() -> (readSocket connection initialConnectionTsc).Wait())
         let proxyToBroker = if physicalAddress = logicalAddres then None else Some logicalAddres
