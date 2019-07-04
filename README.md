@@ -7,7 +7,7 @@ Supported pulsar version: **2.3.2**
 
 Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix):
 
-- [ ] Basic Producer/Consumer API
+- [X] Basic Producer/Consumer API
 - [ ] Partitioned topics
 - [ ] Batching
 - [ ] Compression
@@ -15,7 +15,7 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 - [ ] Authentication
 - [ ] Authentication
 - [ ] Reader API
-- [ ] Proxy Support
+- [X] Proxy Support
 - [ ] Effectively-Once
 - [ ] Schema
 - [ ] Consumer seek
