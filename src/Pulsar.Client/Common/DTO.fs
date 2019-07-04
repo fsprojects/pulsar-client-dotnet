@@ -89,6 +89,7 @@ type ConsumerMessage =
     | Reconnect
     | Disconnected of Connection*MailboxProcessor<ConsumerMessage>
     | ConsumerClosed of MailboxProcessor<ConsumerMessage>
+    | ReachedEndOfTheTopic
     | MessageRecieved of Message
     | GetMessage of AsyncReplyChannel<Message>
     | Ack of SerializedPayload * AsyncReplyChannel<unit>

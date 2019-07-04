@@ -52,6 +52,7 @@ type PulsarCommands =
     | XCommandGetTopicsOfNamespaceResponse of CommandGetTopicsOfNamespaceResponse * SequencePosition
     | XCommandCloseProducer of CommandCloseProducer * SequencePosition
     | XCommandCloseConsumer of CommandCloseConsumer * SequencePosition
+    | XCommandReachedEndOfTopic of CommandReachedEndOfTopic * SequencePosition
     | IncompleteCommand
     | InvalidCommand of Exception
 
@@ -138,6 +139,10 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                     XCommandSendError (command.SendError, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.CloseProducer ->
                     XCommandCloseProducer (command.CloseProducer, buffer.GetPosition(int64 frameLength))
+                | BaseCommand.Type.CloseConsumer ->
+                    XCommandCloseConsumer (command.CloseConsumer, buffer.GetPosition(int64 frameLength))
+                | BaseCommand.Type.ReachedEndOfTopic ->
+                    XCommandReachedEndOfTopic (command.reachedEndOfTopic, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.GetTopicsOfNamespaceResponse ->
                     XCommandGetTopicsOfNamespaceResponse (command.getTopicsOfNamespaceResponse, buffer.GetPosition(int64 frameLength))
                 | _ as unknownCommandType ->
@@ -208,6 +213,10 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandCloseConsumer (cmd, consumed) ->
                     let consumerMb = consumers.[%cmd.ConsumerId]
                     consumerMb.Post(ConsumerClosed consumerMb)
+                    reader.AdvanceTo(consumed)
+                | XCommandReachedEndOfTopic (cmd, consumed) ->
+                    let consumerMb = consumers.[%cmd.ConsumerId]
+                    consumerMb.Post ReachedEndOfTheTopic
                     reader.AdvanceTo(consumed)
                 | XCommandGetTopicsOfNamespaceResponse (cmd, consumed) ->
                     let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
