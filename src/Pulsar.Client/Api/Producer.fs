@@ -17,11 +17,11 @@ type ProducerState = {
     Connection: ConnectionState
 }
 
-type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =    
+type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
     let producerId = Generators.getNextProducerId()
     let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
     let partitionIndex = -1
-    
+
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
         let rec loop (state: ProducerState) =
             async {
@@ -40,7 +40,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     if state.Connection = NotConnected
                     then
                         let! broker = lookup.GetBroker(producerConfig.Topic) |> Async.AwaitTask
-                        let! connection = SocketManager.getConnection broker |> Async.AwaitTask
+                        let! connection = SocketManager.reconnectProducer broker producerId |> Async.AwaitTask
                         return! loop { state with Connection = Connected connection }
                     else
                         return! loop state
@@ -49,7 +49,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     then
                         mb.Post(ProducerMessage.Reconnect)
                         return! loop { state with Connection = NotConnected }
-                    else 
+                    else
                         return! loop state
                 | ProducerMessage.SendMessage (payload, channel) ->
                     match state.Connection with
@@ -82,28 +82,28 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     | false, _ -> ()
                     return! loop state
             }
-        loop { Connection = NotConnected }  
-    )    
+        loop { Connection = NotConnected }
+    )
 
     member this.SendAndWaitAsync (msg: byte[]) =
         task {
             let payload = msg;
             let sequenceId = Generators.getNextSequenceId()
-            let metadata = 
+            let metadata =
                 MessageMetadata (
                     SequenceId = %sequenceId,
                     PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
                     ProducerName = producerConfig.ProducerName,
                     UncompressedSize = (payload.Length |> uint32)
                 )
-            let command = 
+            let command =
                 Commands.newSend producerId sequenceId 1 metadata payload
             do! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
             let tsc = TaskCompletionSource()
             if messages.TryAdd(sequenceId, tsc)
             then
                 return! tsc.Task
-            else 
+            else
                 return failwith "Unable to add tsc"
         }
 
@@ -113,17 +113,17 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
         task {
             let payload = msg;
             let sequenceId = Generators.getNextSequenceId()
-            let metadata = 
+            let metadata =
                 MessageMetadata (
                     SequenceId = %sequenceId,
                     PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
                     ProducerName = producerConfig.ProducerName,
                     UncompressedSize = (payload.Length |> uint32)
                 )
-            let command = 
+            let command =
                 Commands.newSend producerId sequenceId 1 metadata payload
             return! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
-        }    
+        }
 
     member private __.InitInternal() =
         task {
@@ -137,4 +137,3 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
             do! producer.InitInternal()
             return producer
         }
-        

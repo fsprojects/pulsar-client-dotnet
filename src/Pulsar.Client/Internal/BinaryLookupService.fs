@@ -51,8 +51,8 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
                 let uri = Uri(metadata.BrokerServiceUrl)
                 let address = DnsEndPoint(uri.Host, uri.Port)
                 return if metadata.Proxy
-                       then { LogicalAddress = LogicalAddres address; PhysicalAddress = PhysicalAddress endpoint }
-                       else { LogicalAddress = LogicalAddres address; PhysicalAddress = PhysicalAddress address }
+                       then { LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress endpoint }
+                       else { LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address }
             | _ -> 
                 return failwith "Incorrect return type"
         }

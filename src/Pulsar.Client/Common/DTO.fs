@@ -52,12 +52,12 @@ type MessageId =
                 Partition = messageIdData.Partition
             }
 
-type LogicalAddres = LogicalAddres of DnsEndPoint
+type LogicalAddress = LogicalAddress of DnsEndPoint
 type PhysicalAddress = PhysicalAddress of DnsEndPoint
 
 type Broker =
     {
-        LogicalAddress: LogicalAddres
+        LogicalAddress: LogicalAddress
         PhysicalAddress: PhysicalAddress
     }
 

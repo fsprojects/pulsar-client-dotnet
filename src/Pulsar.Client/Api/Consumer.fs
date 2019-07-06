@@ -54,7 +54,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         then
                             let topicName = TopicName(consumerConfig.Topic)
                             let! broker = lookup.GetBroker(topicName) |> Async.AwaitTask
-                            let! connection = SocketManager.getConnection broker |> Async.AwaitTask
+                            let! connection = SocketManager.reconnectConsumer broker consumerId |> Async.AwaitTask
                             return! loop { state with Connection = Connected connection }
                         else
                             return! loop state

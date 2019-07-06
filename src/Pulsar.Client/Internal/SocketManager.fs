@@ -18,6 +18,7 @@ open System.Reflection
 open Pulsar.Client.Api
 open System.IO.Pipelines
 open CRC32
+open System.Collections.Generic
 
 let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
 let protocolVersion =
@@ -33,10 +34,12 @@ type PulsarTypes =
     | TopicsOfNamespace of TopicsOfNamespace
     | Empty
 
-let connections = ConcurrentDictionary<LogicalAddres, Lazy<Task<Connection>>>()
+let connections = ConcurrentDictionary<LogicalAddress, Lazy<Task<Connection>>>()
 let requests = ConcurrentDictionary<RequestId, TaskCompletionSource<PulsarTypes>>()
-let consumers = ConcurrentDictionary<ConsumerId, MailboxProcessor<ConsumerMessage>>()
-let producers = ConcurrentDictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
+let consumers = Dictionary<ConsumerId, MailboxProcessor<ConsumerMessage>>()
+let consumersByAddress = Dictionary<LogicalAddress, HashSet<ConsumerId>>()
+let producers = Dictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
+let producersByAddress = Dictionary<LogicalAddress, HashSet<ProducerId>>()
 
 
 type PulsarCommands =
@@ -57,11 +60,68 @@ type PulsarCommands =
     | InvalidCommand of Exception
 
 
-type Payload = Connection*SerializedPayload
+type Payload = Connection * SerializedPayload
 
 type SocketMessage =
     | SocketMessageWithReply of Payload * AsyncReplyChannel<unit>
     | SocketMessageWithoutReply of Payload
+
+type OperationsMessage =
+    | AddConsumer of ConsumerId * MailboxProcessor<ConsumerMessage> * LogicalAddress
+    | ReconnectConsumer of ConsumerId * LogicalAddress
+    | AddProducer of ProducerId * MailboxProcessor<ProducerMessage> * LogicalAddress
+    | ReconnectProducer of ProducerId * LogicalAddress
+    | SocketDisconnected of Connection * LogicalAddress
+
+let private addToAddresses (dictionary: Dictionary<LogicalAddress, HashSet<'a>>) address value =
+    match dictionary.TryGetValue address with
+    | true, collection ->
+        collection.Add(value) |> ignore
+    | _ ->
+        let collection = HashSet<'a>()
+        collection.Add(value) |> ignore
+        dictionary.Add(address, collection)
+
+
+let operationsMb = MailboxProcessor<OperationsMessage>.Start(fun inbox ->
+    let rec loop () =
+        async {
+            match! inbox.Receive() with
+            | AddConsumer (consumerId, mb, logicalAddress) ->
+                consumers.Add(consumerId, mb)
+                addToAddresses consumersByAddress logicalAddress consumerId
+            | ReconnectConsumer(consumerId, logicalAddress) ->
+                addToAddresses consumersByAddress logicalAddress consumerId
+            | AddProducer (producerId, mb, logicalAddress) ->
+                producers.Add(producerId, mb)
+                addToAddresses producersByAddress logicalAddress producerId
+            | ReconnectProducer(producerId, logicalAddress) ->
+                addToAddresses producersByAddress logicalAddress producerId
+            | SocketDisconnected (connection, logicalAddress) ->
+                connections.TryRemove(logicalAddress) |> ignore
+                match consumersByAddress.TryGetValue(logicalAddress) with
+                | true, consumerIds ->
+                    consumerIds
+                    |> Seq.iter (fun consumerId ->
+                        match consumers.TryGetValue(consumerId) with
+                        | true, mb ->
+                            mb.Post(ConsumerMessage.Disconnected (connection, mb))
+                        | _  -> ())
+                    consumersByAddress.Remove(logicalAddress) |> ignore
+                | _ -> ()
+                match producersByAddress.TryGetValue(logicalAddress) with
+                | true, consumerIds ->
+                    consumerIds
+                    |> Seq.iter (fun producerId ->
+                        match producers.TryGetValue(producerId) with
+                        | true, mb -> mb.Post(ProducerMessage.Disconnected (connection, mb))
+                        | _  -> ())
+                    producersByAddress.Remove(logicalAddress) |> ignore
+                | _ -> ()
+            return! loop ()
+        }
+    loop ()
+)
 
 let private sendSerializedPayload ((connection, serializedPayload): Payload ) =
     task {
@@ -70,10 +130,8 @@ let private sendSerializedPayload ((connection, serializedPayload): Payload ) =
 
         if (not conn.Socket.Connected)
         then
-            Log.Logger.LogWarning("Socket was disconnected")
-            connections.TryRemove(broker.LogicalAddress) |> ignore
-            consumers |> Seq.iter (fun (kv) -> kv.Value.Post(ConsumerMessage.Disconnected (connection, kv.Value)))
-            producers |> Seq.iter (fun (kv) -> kv.Value.Post(ProducerMessage.Disconnected (connection, kv.Value)))
+            Log.Logger.LogWarning("Socket was disconnected on writing")
+            operationsMb.Post(SocketDisconnected(connection, broker.LogicalAddress))
     }
 
 let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
@@ -163,7 +221,7 @@ let handleRespone requestId result (reader: PipeReader) consumed =
     requests.TryRemove(requestId) |> ignore
     reader.AdvanceTo(consumed)
 
-let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Connection>) =
+let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Connection>) (logicalAddress: LogicalAddress)  =
     task {
         let (conn, _, _) = connection
         let mutable continueLooping = true
@@ -173,7 +231,8 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
             let buffer = result.Buffer
             if result.IsCompleted
             then
-                // TODO: handle closed socket
+                Log.Logger.LogWarning("Socket was disconnected while reading")
+                operationsMb.Post(SocketDisconnected(connection, logicalAddress))
                 continueLooping <- false
             else
                 match tryParse buffer with
@@ -232,12 +291,12 @@ let private connect (broker: Broker) =
     Log.Logger.LogInformation("Connecting to {0}", broker)
     task {
         let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
-        let (LogicalAddres logicalAddres) = broker.LogicalAddress
+        let (LogicalAddress logicalAddres) = broker.LogicalAddress
         let! socketConnection = SocketConnection.ConnectAsync(physicalAddress)
         let writerStream = StreamConnection.GetWriter(socketConnection.Output)
         let connection = (socketConnection, writerStream, broker)
         let initialConnectionTsc = TaskCompletionSource<Connection>()
-        let listener = Task.Run(fun() -> (readSocket connection initialConnectionTsc).Wait())
+        let listener = Task.Run(fun() -> (readSocket connection initialConnectionTsc broker.LogicalAddress).Wait())
         let proxyToBroker = if physicalAddress = logicalAddres then None else Some logicalAddres
         let connectPayload =
             Commands.newConnect clientVersion protocolVersion proxyToBroker
@@ -245,12 +304,26 @@ let private connect (broker: Broker) =
         return! initialConnectionTsc.Task
     }
 
-let getConnection (broker: Broker) =
+let private getConnection (broker: Broker) =
     connections.GetOrAdd(broker.LogicalAddress, fun(address) ->
         lazy connect broker).Value
 
+let reconnectProducer (broker: Broker) (producerId: ProducerId) =
+    task {
+        let! connection = getConnection broker
+        operationsMb.Post(ReconnectProducer (producerId, broker.LogicalAddress))
+        return connection
+    }
+
+let reconnectConsumer (broker: Broker) (consumerId: ConsumerId) =
+    task {
+        let! connection = getConnection broker
+        operationsMb.Post(ReconnectConsumer (consumerId, broker.LogicalAddress))
+        return connection
+    }
+
 let getBrokerlessConnection (address: DnsEndPoint) =
-    getConnection { LogicalAddress = LogicalAddres address; PhysicalAddress = PhysicalAddress address }
+    getConnection { LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address }
 
 let send payload =
     sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
@@ -267,7 +340,7 @@ let sendAndWaitForReply reqId payload =
 let registerProducer (broker: Broker) (producerConfig: ProducerConfiguration) (producerId: ProducerId) (producerMb: MailboxProcessor<ProducerMessage>) =
     task {
         let! connection = getConnection broker
-        producers.TryAdd(producerId, producerMb) |> ignore
+        operationsMb.Post(AddProducer (producerId, producerMb, broker.LogicalAddress))
         Log.Logger.LogInformation("Connection established for producer")
         let requestId = Generators.getNextRequestId()
         let payload =
@@ -284,7 +357,7 @@ let registerProducer (broker: Broker) (producerConfig: ProducerConfiguration) (p
 let registerConsumer (broker: Broker) (consumerConfig: ConsumerConfiguration) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
     task {
         let! connection = getConnection broker
-        consumers.TryAdd(consumerId, consumerMb) |> ignore
+        operationsMb.Post(AddConsumer (consumerId, consumerMb, broker.LogicalAddress))
         Log.Logger.LogInformation("Connection established for consumer")
         let requestId = Generators.getNextRequestId()
         let payload =
