@@ -77,8 +77,8 @@ type ConnectionState =
 
 type ProducerMessage =
     | Connect of (Broker*MailboxProcessor<ProducerMessage>) * AsyncReplyChannel<unit>
-    | Reconnect
-    | Disconnected of Connection*MailboxProcessor<ProducerMessage>
+    | Reconnect of MailboxProcessor<ProducerMessage>
+    | Disconnected of Connection * MailboxProcessor<ProducerMessage>
     | ProducerClosed of MailboxProcessor<ProducerMessage>
     | SendReceipt of CommandSendReceipt
     | SendMessage of SerializedPayload * AsyncReplyChannel<unit>
@@ -86,8 +86,8 @@ type ProducerMessage =
 
 type ConsumerMessage =
     | Connect of (Broker*MailboxProcessor<ConsumerMessage>) * AsyncReplyChannel<unit>
-    | Reconnect
-    | Disconnected of Connection*MailboxProcessor<ConsumerMessage>
+    | Reconnect of MailboxProcessor<ConsumerMessage>
+    | Disconnected of Connection * MailboxProcessor<ConsumerMessage>
     | ConsumerClosed of MailboxProcessor<ConsumerMessage>
     | ReachedEndOfTheTopic
     | MessageRecieved of Message

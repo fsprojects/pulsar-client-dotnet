@@ -9,6 +9,7 @@ open Pulsar.Client.Internal
 open System.Runtime.CompilerServices
 open Pulsar.Client.Common
 open pulsar.proto
+open Microsoft.Extensions.Logging
 
 type ConsumerException(message) =
     inherit Exception(message)
@@ -48,20 +49,25 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                             return! loop { state with Connection = Connected connection }
                         else
                             return! loop state
-                    | ConsumerMessage.Reconnect ->
+                    | ConsumerMessage.Reconnect mb ->
                         // TODO backoff
                         if state.Connection = NotConnected
                         then
-                            let topicName = TopicName(consumerConfig.Topic)
-                            let! broker = lookup.GetBroker(topicName) |> Async.AwaitTask
-                            let! connection = SocketManager.reconnectConsumer broker consumerId |> Async.AwaitTask
-                            return! loop { state with Connection = Connected connection }
+                            try
+                                let! broker = lookup.GetBroker(consumerConfig.Topic) |> Async.AwaitTask
+                                let! connection = SocketManager.reconnectConsumer broker consumerId |> Async.AwaitTask
+                                return! loop { state with Connection = Connected connection }
+                            with
+                            | ex ->
+                                mb.Post(ConsumerMessage.Reconnect mb)
+                                Log.Logger.LogError(ex, "Error reconnecting")
+                                return! loop state
                         else
                             return! loop state
                     | ConsumerMessage.Disconnected (connection, mb) ->
                         if state.Connection = Connected connection
                         then
-                            mb.Post(ConsumerMessage.Reconnect)
+                            mb.Post(ConsumerMessage.Reconnect mb)
                             return! loop { state with Connection = NotConnected }
                         else
                             return! loop state

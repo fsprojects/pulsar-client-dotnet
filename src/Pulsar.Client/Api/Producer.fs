@@ -35,19 +35,25 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         return! loop { state with Connection = Connected connection }
                     else
                         return! loop state
-                | ProducerMessage.Reconnect ->
+                | ProducerMessage.Reconnect mb ->
                     // TODO backoff
                     if state.Connection = NotConnected
                     then
-                        let! broker = lookup.GetBroker(producerConfig.Topic) |> Async.AwaitTask
-                        let! connection = SocketManager.reconnectProducer broker producerId |> Async.AwaitTask
-                        return! loop { state with Connection = Connected connection }
+                        try
+                            let! broker = lookup.GetBroker(producerConfig.Topic) |> Async.AwaitTask
+                            let! connection = SocketManager.reconnectProducer broker producerId |> Async.AwaitTask
+                            return! loop { state with Connection = Connected connection }
+                        with
+                        | ex ->
+                            mb.Post(ProducerMessage.Reconnect mb)
+                            Log.Logger.LogError(ex, "Error reconnecting")
+                            return! loop state
                     else
                         return! loop state
                 | ProducerMessage.Disconnected (connection, mb) ->
                     if state.Connection = Connected connection
                     then
-                        mb.Post(ProducerMessage.Reconnect)
+                        mb.Post(ProducerMessage.Reconnect mb)
                         return! loop { state with Connection = NotConnected }
                     else
                         return! loop state
@@ -59,6 +65,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         return! loop state
                     | NotConnected ->
                         //TODO put message on schedule
+                        Log.Logger.LogWarning("NotConnected, skipping send")
                         return! loop state
                 | ProducerMessage.SendReceipt receipt ->
                     let sequenceId = %receipt.SequenceId

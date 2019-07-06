@@ -19,6 +19,7 @@ open Pulsar.Client.Api
 open System.IO.Pipelines
 open CRC32
 open System.Collections.Generic
+open Pulsar.Client.Internal
 
 let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
 let protocolVersion =
@@ -57,6 +58,7 @@ type PulsarCommands =
     | XCommandCloseProducer of CommandCloseProducer * SequencePosition
     | XCommandCloseConsumer of CommandCloseConsumer * SequencePosition
     | XCommandReachedEndOfTopic of CommandReachedEndOfTopic * SequencePosition
+    | XCommandError of CommandError * SequencePosition
     | IncompleteCommand
     | InvalidCommand of Exception
 
@@ -99,6 +101,8 @@ let operationsMb = MailboxProcessor<OperationsMessage>.Start(fun inbox ->
             | ReconnectProducer(producerId, logicalAddress) ->
                 addToAddresses producersByAddress logicalAddress producerId
             | SocketDisconnected (connection, logicalAddress) ->
+                let (socketConnection, _, _) = connection
+                socketConnection.Dispose()
                 connections.TryRemove(logicalAddress) |> ignore
                 match consumersByAddress.TryGetValue(logicalAddress) with
                 | true, consumerIds ->
@@ -131,7 +135,7 @@ let private sendSerializedPayload ((connection, serializedPayload): Payload ) =
 
         if (not conn.Socket.Connected)
         then
-            Log.Logger.LogWarning("Socket was disconnected on writing")
+            Log.Logger.LogWarning("Socket was disconnected on writing {0}", broker.LogicalAddress)
             operationsMb.Post(SocketDisconnected(connection, broker.LogicalAddress))
     }
 
@@ -202,6 +206,8 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
                     XCommandReachedEndOfTopic (command.reachedEndOfTopic, buffer.GetPosition(int64 frameLength))
                 | BaseCommand.Type.GetTopicsOfNamespaceResponse ->
                     XCommandGetTopicsOfNamespaceResponse (command.getTopicsOfNamespaceResponse, buffer.GetPosition(int64 frameLength))
+                | BaseCommand.Type.Error ->
+                    XCommandError (command.Error, buffer.GetPosition(int64 frameLength))
                 | _ as unknownCommandType ->
                     InvalidCommand (Exception(sprintf "Unknown command type: '%A'" unknownCommandType))
             with
@@ -221,6 +227,8 @@ let handleRespone requestId result (reader: PipeReader) consumed =
 
 let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Connection>) (logicalAddress: LogicalAddress)  =
     task {
+        let readerId = Generators.getNextSocketReaderId()
+        Log.Logger.LogDebug("[{0}] Starting read socket for {1}", readerId, logicalAddress)
         let (conn, _, _) = connection
         let mutable continueLooping = true
         let reader = conn.Input
@@ -229,7 +237,11 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
             let buffer = result.Buffer
             if result.IsCompleted
             then
-                Log.Logger.LogWarning("Socket was disconnected while reading")
+                if
+                    tsc.TrySetException(Exception("Unable to initiate connection"))
+                then
+                    Log.Logger.LogWarning("[{0}] New connection to {1} was aborted", readerId, logicalAddress)
+                Log.Logger.LogWarning("[{0}] Socket was disconnected while reading {1}", readerId, logicalAddress)
                 operationsMb.Post(SocketDisconnected(connection, logicalAddress))
                 continueLooping <- false
             else
@@ -291,6 +303,10 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 | XCommandGetTopicsOfNamespaceResponse (cmd, consumed) ->
                     let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
                     handleRespone %cmd.RequestId result reader consumed
+                | XCommandError (cmd, consumed) ->
+                    Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
+                    let result = Error
+                    handleRespone %cmd.RequestId result reader consumed
                 | IncompleteCommand ->
                     reader.AdvanceTo(buffer.Start, buffer.End)
                 | InvalidCommand ex ->
@@ -320,15 +336,19 @@ let private getConnection (broker: Broker) =
 
 let reconnectProducer (broker: Broker) (producerId: ProducerId) =
     task {
+        Log.Logger.LogInformation("Producer {0} reconnecting", producerId)
         let! connection = getConnection broker
         operationsMb.Post(ReconnectProducer (producerId, broker.LogicalAddress))
+        Log.Logger.LogInformation("Producer {0} reconnected", producerId)
         return connection
     }
 
 let reconnectConsumer (broker: Broker) (consumerId: ConsumerId) =
     task {
+        Log.Logger.LogInformation("Consumer {0} reconnecting", consumerId)
         let! connection = getConnection broker
         operationsMb.Post(ReconnectConsumer (consumerId, broker.LogicalAddress))
+        Log.Logger.LogInformation("Consumer {0} reconnected", consumerId)
         return connection
     }
 
@@ -351,14 +371,14 @@ let registerProducer (broker: Broker) (producerConfig: ProducerConfiguration) (p
     task {
         let! connection = getConnection broker
         operationsMb.Post(AddProducer (producerId, producerMb, broker.LogicalAddress))
-        Log.Logger.LogInformation("Connection established for producer")
+        Log.Logger.LogInformation("Connection established for producer {0}", producerId)
         let requestId = Generators.getNextRequestId()
         let payload =
             Commands.newProducer producerConfig.Topic producerConfig.ProducerName producerId requestId
         let! result = sendAndWaitForReply requestId (connection, payload)
         match result with
         | ProducerSuccess success ->
-            Log.Logger.LogInformation("Producer registered with name {0}", success.GeneratedProducerName)
+            Log.Logger.LogInformation("Producer {0} registered with name {1}", producerId, success.GeneratedProducerName)
             return connection
         | _ ->
             return failwith "Incorrect return type"
@@ -368,14 +388,14 @@ let registerConsumer (broker: Broker) (consumerConfig: ConsumerConfiguration) (c
     task {
         let! connection = getConnection broker
         operationsMb.Post(AddConsumer (consumerId, consumerMb, broker.LogicalAddress))
-        Log.Logger.LogInformation("Connection established for consumer")
+        Log.Logger.LogInformation("Connection established for consumer {0}", consumerId)
         let requestId = Generators.getNextRequestId()
         let payload =
             Commands.newSubscribe consumerConfig.Topic consumerConfig.SubscriptionName consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
         let! result = sendAndWaitForReply requestId (connection, payload)
         match result with
         | Empty ->
-            Log.Logger.LogInformation("Consumer registered")
+            Log.Logger.LogInformation("Consumer {0} registered", consumerId)
             let flowCommand =
                 Commands.newFlow consumerId 1000u
             do! send (connection, flowCommand)
