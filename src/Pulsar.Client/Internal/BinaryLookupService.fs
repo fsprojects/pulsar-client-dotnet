@@ -21,28 +21,31 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
         return (response, endpoint)
     }
 
-    member __.GetPartitionedTopicMetadata topicName = 
+    member __.GetPartitionedTopicMetadata topicName =
         task {
             let makeRequest = fun requestId -> Commands.newPartitionMetadataRequest topicName requestId
             let! (response, _) = executeRequest makeRequest
             match response with
             | PartitionedTopicMetadata metadata ->
                 return metadata
-            | _ -> 
+            | Error ->
+                // TODO backoff
+                return! __.GetPartitionedTopicMetadata(topicName)
+            | _ ->
                 return failwith "Incorrect return type"
         }
 
     member __.GetServiceUrl() = serviceNameResolver.GetServiceUrl()
- 
+
     member __.UpdateServiceUrl(serviceUrl) = serviceNameResolver.UpdateServiceUrl(serviceUrl)
 
-    member __.GetBroker(topic: string) = 
+    member __.GetBroker(topic: string) =
         task {
             let topicName = TopicName topic
             return! __.GetBroker(topicName)
         }
 
-    member __.GetBroker(topicName: TopicName) = 
+    member __.GetBroker(topicName: TopicName) =
         task {
             let makeRequest = fun requestId -> Commands.newLookup (topicName.ToString()) requestId false
             let! (response, endpoint) = executeRequest makeRequest
@@ -53,7 +56,10 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
                 return if metadata.Proxy
                        then { LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress endpoint }
                        else { LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address }
-            | _ -> 
+            | Error ->
+                // TODO backoff
+                return! __.GetBroker(topicName)
+            | _ ->
                 return failwith "Incorrect return type"
         }
 
@@ -63,6 +69,6 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
         match response with
         | TopicsOfNamespace topics ->
             return topics
-        | _ -> 
+        | _ ->
             return failwith "Incorrect return type"
     }

@@ -8,6 +8,8 @@ open System.IO
 open System.Net
 open Microsoft.IO
 open CRC32
+open Microsoft.Extensions.Logging
+open Pulsar.Client.Internal
 
 type internal CommandType = BaseCommand.Type
 
@@ -26,9 +28,9 @@ let internal serializeSimpleCommand(command : BaseCommand) =
 
         // write commandPayload
         Serializer.SerializeWithLengthPrefix(stream, command, PrefixStyle.Fixed32BigEndian)
-        let frameSize = int stream.Length  
+        let frameSize = int stream.Length
 
-        let totalSize = frameSize - 4 
+        let totalSize = frameSize - 4
 
         //write total size and command size
         stream.Seek(0L,SeekOrigin.Begin) |> ignore
@@ -36,6 +38,8 @@ let internal serializeSimpleCommand(command : BaseCommand) =
         binaryWriter.Write(int32ToBigEndian totalSize)
         stream.Seek(0L, SeekOrigin.Begin) |> ignore
 
+
+        Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
         stream.CopyToAsync(output)
 
 let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[]) =
@@ -49,7 +53,7 @@ let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageM
         // write commandPayload
         Serializer.SerializeWithLengthPrefix(stream, command, PrefixStyle.Fixed32BigEndian)
 
-        let stream1Size = int stream.Length  
+        let stream1Size = int stream.Length
 
         // write magic number 0x0e01
         stream.WriteByte(14uy)
@@ -58,7 +62,7 @@ let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageM
         // write fake CRC sum and fake metadata length
         for i in 1..4 do
             stream.WriteByte(0uy)
-        
+
         // write metadata
         Serializer.SerializeWithLengthPrefix(stream, metadata, PrefixStyle.Fixed32BigEndian)
         let stream2Size = int stream.Length
@@ -66,13 +70,13 @@ let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageM
 
         // write payload
         stream.Write(payload, 0, payload.Length)
-        
-        let frameSize = int stream.Length  
-        let totalSize = frameSize - 4 
+
+        let frameSize = int stream.Length
+        let totalSize = frameSize - 4
         let payloadSize = frameSize - stream2Size
 
         let crcStart = stream1Size + 2
-        let crcPayloadStart = crcStart + 4       
+        let crcPayloadStart = crcStart + 4
 
         // write missing sizes
         use binaryWriter = new BinaryWriter(stream)
@@ -87,7 +91,9 @@ let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageM
         stream.Seek(0L, SeekOrigin.Begin) |> ignore
         binaryWriter.Write(int32ToBigEndian totalSize)
 
-        stream.Seek(0L, SeekOrigin.Begin) |> ignore                
+        stream.Seek(0L, SeekOrigin.Begin) |> ignore
+
+        Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
         stream.CopyToAsync(output)
 
 let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : SerializedPayload =
@@ -95,7 +101,7 @@ let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : Se
     let command = BaseCommand(``type`` = CommandType.PartitionedMetadata, partitionMetadata = request)
     serializeSimpleCommand command
 
-let newSend (producerId : ProducerId) (sequenceId : SequenceId) (numMessages : int) (msgMetadata : MessageMetadata) (payload: byte[]) : SerializedPayload =    
+let newSend (producerId : ProducerId) (sequenceId : SequenceId) (numMessages : int) (msgMetadata : MessageMetadata) (payload: byte[]) : SerializedPayload =
     let request = CommandSend(ProducerId = %producerId, SequenceId = %sequenceId, NumMessages = numMessages)
     let command = BaseCommand(``type`` = CommandType.Send, Send = request)
     serializePayloadCommand command msgMetadata payload
@@ -107,7 +113,7 @@ let newAck (consumerId : ConsumerId) (messageId: MessageId)
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 
-let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : SerializedPayload =    
+let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : SerializedPayload =
     let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion)
     match proxyToBroker with
     | Some logicalAddress -> request.ProxyToBrokerUrl <- sprintf "%s:%d" logicalAddress.Host logicalAddress.Port
@@ -147,7 +153,7 @@ let newSubscribe (topicName: string) (subscription: string) (consumerId: Consume
         | SubscriptionType.Shared -> CommandSubscribe.SubType.Shared
         | SubscriptionType.Failover -> CommandSubscribe.SubType.Failover
         | _ -> failwith "Unknown subscription type"
-    let request = CommandSubscribe(Topic = topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId, 
+    let request = CommandSubscribe(Topic = topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId,
                     RequestId = %requestId, ConsumerName =  consumerName)
     let command = BaseCommand(``type`` = CommandType.Subscribe, Subscribe = request)
     command |> serializeSimpleCommand

@@ -32,6 +32,7 @@ type PulsarTypes =
     | LookupTopicResult of LookupTopicResult
     | ProducerSuccess of ProducerSuccess
     | TopicsOfNamespace of TopicsOfNamespace
+    | Error
     | Empty
 
 let connections = ConcurrentDictionary<LogicalAddress, Lazy<Task<Connection>>>()
@@ -139,12 +140,9 @@ let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
         async {
             match! inbox.Receive() with
             | SocketMessageWithReply (payload, replyChannel) ->
-                Log.Logger.LogDebug("Sending payload with reply")
                 do! sendSerializedPayload payload |> Async.AwaitTask
-                // TODO handle failure properly
                 replyChannel.Reply()
             | SocketMessageWithoutReply payload ->
-                Log.Logger.LogDebug("Sending payload without reply")
                 do! sendSerializedPayload payload |> Async.AwaitTask
             return! loop ()
         }
@@ -241,7 +239,13 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                     tsc.SetResult(connection)
                     reader.AdvanceTo(consumed)
                 | XCommandPartitionedTopicMetadataResponse (cmd, consumed) ->
-                    let result = PartitionedTopicMetadata { Partitions = cmd.Partitions }
+                    let result =
+                        if (cmd.ShouldSerializeError())
+                        then
+                            Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
+                            Error
+                        else
+                            PartitionedTopicMetadata { Partitions = cmd.Partitions }
                     handleRespone %cmd.RequestId result reader consumed
                 | XCommandSendReceipt (cmd, consumed) ->
                     let producerMb = producers.[%cmd.ProducerId]
@@ -259,7 +263,13 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                     consumerMb.Post(MessageRecieved { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = payload })
                     reader.AdvanceTo(consumed)
                 | XCommandLookupTopicResponse (cmd, consumed) ->
-                    let result = LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
+                    let result =
+                        if (cmd.ShouldSerializeError())
+                        then
+                            Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
+                            Error
+                        else
+                            LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
                     handleRespone %cmd.RequestId result reader consumed
                 | XCommandProducerSuccess (cmd, consumed) ->
                     let result = ProducerSuccess { GeneratedProducerName = cmd.ProducerName }
