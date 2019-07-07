@@ -6,11 +6,14 @@ open Pulsar.Client.Common
 open System
 open SocketManager
 open System.Net
+open System.Threading
 
 
 type BinaryLookupService (config: PulsarClientConfiguration) =
 
     let serviceNameResolver = ServiceNameResolver(config)
+    let mutable retryPartitionedTopicMetadataCount = 0
+    let mutable retryGetBrokerCount = 0
 
     let executeRequest createRequest = task {
         let endpoint = serviceNameResolver.ResolveHost()
@@ -27,10 +30,15 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
             let! (response, _) = executeRequest makeRequest
             match response with
             | PartitionedTopicMetadata metadata ->
+                retryPartitionedTopicMetadataCount <- 0
                 return metadata
             | Error ->
                 // TODO backoff
-                return! __.GetPartitionedTopicMetadata(topicName)
+                if (Interlocked.Increment(&retryPartitionedTopicMetadataCount) > 3)
+                then
+                    return failwith "Couldn't retry GetPartitionedTopicMetadata"
+                else
+                    return! __.GetPartitionedTopicMetadata(topicName)
             | _ ->
                 return failwith "Incorrect return type"
         }
@@ -51,6 +59,7 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
             let! (response, endpoint) = executeRequest makeRequest
             match response with
             | LookupTopicResult metadata ->
+                retryGetBrokerCount <- 0
                 let uri = Uri(metadata.BrokerServiceUrl)
                 let address = DnsEndPoint(uri.Host, uri.Port)
                 return if metadata.Proxy
@@ -58,7 +67,11 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
                        else { LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address }
             | Error ->
                 // TODO backoff
-                return! __.GetBroker(topicName)
+                if (Interlocked.Increment(&retryGetBrokerCount) > 3)
+                then
+                    return failwith "Couldn't retry GetBroker"
+                else
+                    return! __.GetBroker(topicName)
             | _ ->
                 return failwith "Incorrect return type"
         }

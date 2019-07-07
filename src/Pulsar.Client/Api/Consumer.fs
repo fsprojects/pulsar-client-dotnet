@@ -22,6 +22,7 @@ type ConsumerState = {
     Connection: ConnectionState
     Status: ConsumerStatus
     WaitingChannel: AsyncReplyChannel<Message>
+    ReconnectCount: int
 }
 
 type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
@@ -56,12 +57,16 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                             try
                                 let! broker = lookup.GetBroker(consumerConfig.Topic) |> Async.AwaitTask
                                 let! connection = SocketManager.reconnectConsumer broker consumerId |> Async.AwaitTask
-                                return! loop { state with Connection = Connected connection }
+                                return! loop { state with Connection = Connected connection; ReconnectCount = 0 }
                             with
                             | ex ->
                                 mb.Post(ConsumerMessage.Reconnect mb)
                                 Log.Logger.LogError(ex, "Error reconnecting")
-                                return! loop state
+                                if state.ReconnectCount > 3
+                                then
+                                    raise ex
+                                else
+                                    return! loop { state with ReconnectCount = state.ReconnectCount + 1 }
                         else
                             return! loop state
                     | ConsumerMessage.Disconnected (connection, mb) ->
@@ -102,7 +107,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     | ConsumerMessage.ReachedEndOfTheTopic ->
                         return! loop { state with Status = Terminated }
             }
-        loop { Connection = NotConnected; Status = Normal; WaitingChannel = nullChannel }
+        loop { Connection = NotConnected; Status = Normal; WaitingChannel = nullChannel; ReconnectCount = 0 }
     )
 
     member this.ReceiveAsync() =

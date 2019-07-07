@@ -15,6 +15,7 @@ type ProducerException(message) =
 
 type ProducerState = {
     Connection: ConnectionState
+    ReconnectCount: int
 }
 
 type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
@@ -42,12 +43,16 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         try
                             let! broker = lookup.GetBroker(producerConfig.Topic) |> Async.AwaitTask
                             let! connection = SocketManager.reconnectProducer broker producerId |> Async.AwaitTask
-                            return! loop { state with Connection = Connected connection }
+                            return! loop { state with Connection = Connected connection; ReconnectCount = 0 }
                         with
                         | ex ->
                             mb.Post(ProducerMessage.Reconnect mb)
                             Log.Logger.LogError(ex, "Error reconnecting")
-                            return! loop state
+                            if state.ReconnectCount > 3
+                            then
+                                raise ex
+                            else
+                                return! loop { state with ReconnectCount = state.ReconnectCount + 1 }
                     else
                         return! loop state
                 | ProducerMessage.Disconnected (connection, mb) ->
@@ -89,7 +94,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     | false, _ -> ()
                     return! loop state
             }
-        loop { Connection = NotConnected }
+        loop { Connection = NotConnected; ReconnectCount = 0 }
     )
 
     member this.SendAndWaitAsync (msg: byte[]) =

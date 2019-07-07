@@ -154,7 +154,7 @@ let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
 )
 
 
-let tryParse (buffer: ReadOnlySequence<byte>) =
+let tryParse (buffer: ReadOnlySequence<byte>) readerId =
     let array = buffer.ToArray()
     if (array.Length >= 8)
     then
@@ -168,7 +168,7 @@ let tryParse (buffer: ReadOnlySequence<byte>) =
         then
             try
                 let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
-                Log.Logger.LogDebug("Got message of type {0}", command.``type``)
+                Log.Logger.LogDebug("[{0}] Got message of type {1}", readerId, command.``type``)
                 match command.``type`` with
                 | BaseCommand.Type.Connected ->
                     XCommandConnected (command.Connected, buffer.GetPosition(int64 frameLength))
@@ -245,7 +245,7 @@ let private readSocket (connection: Connection) (tsc: TaskCompletionSource<Conne
                 operationsMb.Post(SocketDisconnected(connection, logicalAddress))
                 continueLooping <- false
             else
-                match tryParse buffer with
+                match tryParse buffer readerId with
                 | XCommandConnected (cmd, consumed) ->
                     //TODO check server protocol version
                     tsc.SetResult(connection)
@@ -396,10 +396,11 @@ let registerConsumer (broker: Broker) (consumerConfig: ConsumerConfiguration) (c
         match result with
         | Empty ->
             Log.Logger.LogInformation("Consumer {0} registered", consumerId)
+            let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
             let flowCommand =
-                Commands.newFlow consumerId 1000u
+                Commands.newFlow consumerId initialFlowCount
             do! send (connection, flowCommand)
-            Log.Logger.LogInformation("Consumer initial flow sent")
+            Log.Logger.LogInformation("Consumer initial flow sent {0}", initialFlowCount)
             return connection
         | _ ->
             return failwith "Incorrect return type"
