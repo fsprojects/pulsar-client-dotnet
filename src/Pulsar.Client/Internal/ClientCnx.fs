@@ -296,7 +296,8 @@ type ClientCnx (broker: Broker,
             | ProducerSuccess success ->
                 Log.Logger.LogInformation("Producer {0} registered with name {1}", producerId, success.GeneratedProducerName)
             | _ ->
-                failwith "Incorrect return type"
+                // TODO: implement correct error handling
+                () // failwith "Incorrect return type"
         }
 
     member __.RegisterConsumer (consumerConfig: ConsumerConfiguration) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
@@ -316,5 +317,6 @@ type ClientCnx (broker: Broker,
                 do! __.Send flowCommand
                 Log.Logger.LogInformation("Consumer initial flow sent {0}", initialFlowCount)
             | _ ->
-                failwith "Incorrect return type"
+                // TODO: implement correct error handling
+                () // failwith "Incorrect return type"
         }
