@@ -9,6 +9,7 @@ open Pulsar.Client.Internal
 open System
 open System.Collections.Concurrent
 open Microsoft.Extensions.Logging
+open System.Collections.Generic
 
 type ProducerException(message) =
     inherit Exception(message)
@@ -21,6 +22,7 @@ type ProducerState = {
 type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) as this =
     let producerId = Generators.getNextProducerId()
     let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
+    let pendingMessages = Queue<ProducerMessage>()
     let partitionIndex = -1
 
     let registerProducer() =
@@ -50,6 +52,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     then
                         try
                             let! clientCnx = registerProducer() |> Async.AwaitTask
+                            this.Mb.Post(ProducerMessage.SendPendingMessages)
                             return! loop { state with Connection = Connected clientCnx; ReconnectCount = 0 }
                         with
                         | ex ->
@@ -72,9 +75,18 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         channel.Reply()
                         return! loop state
                     | NotConnected ->
-                        //TODO put message on schedule
-                        Log.Logger.LogWarning("NotConnected, skipping send")
+                        pendingMessages.Enqueue msg
+                        Log.Logger.LogWarning("NotConnected, skipping sending and add message to pending messages queue")
                         return! loop state
+                 | ProducerMessage.SendPendingMessages ->
+                    Log.Logger.LogInformation("Try re-send pending messages")
+                    let mutable sentCount = 0
+                    while pendingMessages.Count > 0 do
+                        let message = pendingMessages.Dequeue()
+                        this.Mb.Post(message)
+                        sentCount <- sentCount + 1
+                    Log.Logger.LogInformation("{0} pending messages was sent", sentCount)
+                    return! loop state
                 | ProducerMessage.SendReceipt receipt ->
                     let sequenceId = %receipt.SequenceId
                     match messages.TryGetValue(sequenceId) with

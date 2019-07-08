@@ -77,6 +77,7 @@ type ProducerMessage =
     | Disconnected
     | SendReceipt of CommandSendReceipt
     | SendMessage of SerializedPayload * AsyncReplyChannel<unit>
+    | SendPendingMessages
     | SendError of CommandSendError
 
 type ConsumerMessage =

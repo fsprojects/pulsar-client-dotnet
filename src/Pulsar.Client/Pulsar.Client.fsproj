@@ -5,6 +5,10 @@
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <WarningLevel>3</WarningLevel>
+    <WarningsAsErrors>3239;0025</WarningsAsErrors>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" />
   </ItemGroup>
