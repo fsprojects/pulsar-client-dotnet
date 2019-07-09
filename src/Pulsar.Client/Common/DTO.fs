@@ -69,26 +69,20 @@ type Message =
 
 type WriterStream = Stream
 type SerializedPayload = WriterStream -> Task
-type Connection = SocketConnection * WriterStream * Broker
-
-type ConnectionState =
-    | NotConnected
-    | Connected of Connection
+type Connection = SocketConnection * WriterStream
 
 type ProducerMessage =
-    | Connect of (Broker*MailboxProcessor<ProducerMessage>) * AsyncReplyChannel<unit>
+    | Connect of MailboxProcessor<ProducerMessage> * AsyncReplyChannel<unit>
     | Reconnect of MailboxProcessor<ProducerMessage>
-    | Disconnected of Connection * MailboxProcessor<ProducerMessage>
-    | ProducerClosed of MailboxProcessor<ProducerMessage>
+    | Disconnected of MailboxProcessor<ProducerMessage>
     | SendReceipt of CommandSendReceipt
     | SendMessage of SerializedPayload * AsyncReplyChannel<unit>
     | SendError of CommandSendError
 
 type ConsumerMessage =
-    | Connect of (Broker*MailboxProcessor<ConsumerMessage>) * AsyncReplyChannel<unit>
+    | Connect of MailboxProcessor<ConsumerMessage> * AsyncReplyChannel<unit>
     | Reconnect of MailboxProcessor<ConsumerMessage>
-    | Disconnected of Connection * MailboxProcessor<ConsumerMessage>
-    | ConsumerClosed of MailboxProcessor<ConsumerMessage>
+    | Disconnected of MailboxProcessor<ConsumerMessage>
     | ReachedEndOfTheTopic
     | MessageRecieved of Message
     | GetMessage of AsyncReplyChannel<Message>

@@ -21,6 +21,7 @@
     <Compile Include="Api\Configuration.fs" />
     <Compile Include="Internal\Generators.fs" />
     <Compile Include="Internal\ServiceNameResolver.fs" />
+    <Compile Include="Internal\ClientCnx.fs" />
     <Compile Include="Internal\SocketManager.fs" />
     <Compile Include="Internal\BinaryLookupService.fs" />
 

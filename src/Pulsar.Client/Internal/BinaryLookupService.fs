@@ -17,10 +17,10 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
 
     let executeRequest createRequest = task {
         let endpoint = serviceNameResolver.ResolveHost()
-        let! connection = SocketManager.getBrokerlessConnection endpoint
+        let! clientCnx = SocketManager.getBrokerlessConnection endpoint
         let requestId = Generators.getNextRequestId()
         let request = createRequest requestId
-        let! response = SocketManager.sendAndWaitForReply requestId (connection, request)
+        let! response = clientCnx.SendAndWaitForReply requestId request
         return (response, endpoint)
     }
 

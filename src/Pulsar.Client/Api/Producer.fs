@@ -23,17 +23,25 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
     let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
     let partitionIndex = -1
 
+    let registerProducer mb =
+        task {
+            let! broker = lookup.GetBroker(producerConfig.Topic)
+            let! clientCnx = SocketManager.getConnection broker
+            do! clientCnx.RegisterProducer producerConfig producerId mb
+            return clientCnx
+        }
+
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
         let rec loop (state: ProducerState) =
             async {
                 let! msg = inbox.Receive()
                 match msg with
-                | ProducerMessage.Connect ((broker, mb), channel) ->
+                | ProducerMessage.Connect (mb, channel) ->
                     if state.Connection = NotConnected
                     then
-                        let! connection = SocketManager.registerProducer broker producerConfig producerId mb |> Async.AwaitTask
+                        let! clientCnx = registerProducer mb |> Async.AwaitTask
                         channel.Reply()
-                        return! loop { state with Connection = Connected connection }
+                        return! loop { state with Connection = Connected clientCnx }
                     else
                         return! loop state
                 | ProducerMessage.Reconnect mb ->
@@ -41,9 +49,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     if state.Connection = NotConnected
                     then
                         try
-                            let! broker = lookup.GetBroker(producerConfig.Topic) |> Async.AwaitTask
-                            let! connection = SocketManager.reconnectProducer broker producerId |> Async.AwaitTask
-                            return! loop { state with Connection = Connected connection; ReconnectCount = 0 }
+                            let! clientCnx = registerProducer mb |> Async.AwaitTask
+                            return! loop { state with Connection = Connected clientCnx; ReconnectCount = 0 }
                         with
                         | ex ->
                             mb.Post(ProducerMessage.Reconnect mb)
@@ -55,17 +62,13 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                                 return! loop { state with ReconnectCount = state.ReconnectCount + 1 }
                     else
                         return! loop state
-                | ProducerMessage.Disconnected (connection, mb) ->
-                    if state.Connection = Connected connection
-                    then
-                        mb.Post(ProducerMessage.Reconnect mb)
-                        return! loop { state with Connection = NotConnected }
-                    else
-                        return! loop state
+                | ProducerMessage.Disconnected mb ->
+                    mb.Post(ProducerMessage.Reconnect mb)
+                    return! loop { state with Connection = NotConnected }
                 | ProducerMessage.SendMessage (payload, channel) ->
                     match state.Connection with
-                    | Connected conn ->
-                        do! SocketManager.send (conn, payload)
+                    | Connected clientCnx ->
+                        do! clientCnx.Send payload
                         channel.Reply()
                         return! loop state
                     | NotConnected ->
@@ -80,10 +83,6 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         messages.TryRemove(sequenceId) |> ignore
                     | false, _ -> ()
                     return! loop state
-                | ProducerMessage.ProducerClosed mb ->
-                    let! broker = lookup.GetBroker(producerConfig.Topic) |> Async.AwaitTask
-                    let! newConnection = SocketManager.registerProducer broker producerConfig producerId mb |> Async.AwaitTask
-                    return! loop { state with Connection = Connected newConnection }
                 | ProducerMessage.SendError error ->
                     let sequenceId = %error.SequenceId
                     match messages.TryGetValue(sequenceId) with
@@ -138,10 +137,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
         }
 
     member private __.InitInternal() =
-        task {
-            let! broker = lookup.GetBroker(producerConfig.Topic)
-            return! mb.PostAndAsyncReply(fun channel -> ProducerMessage.Connect ((broker, mb), channel))
-        }
+        mb.PostAndAsyncReply(fun channel -> ProducerMessage.Connect (mb, channel))
 
     static member Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
         task {

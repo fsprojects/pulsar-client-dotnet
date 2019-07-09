@@ -32,6 +32,14 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
     let mutable messageCounter = 0
 
+    let registerConsumer mb =
+        task {
+            let! broker = lookup.GetBroker(consumerConfig.Topic)
+            let! clientCnx = SocketManager.getConnection broker
+            do! clientCnx.RegisterConsumer consumerConfig consumerId mb
+            return clientCnx
+        }
+
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
         let rec loop (state: ConsumerState) =
@@ -42,12 +50,12 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     failwith (sprintf "Consumer status: %A" state.Status)
                 else
                     match msg with
-                    | ConsumerMessage.Connect ((broker, mb), channel) ->
+                    | ConsumerMessage.Connect (mb, channel) ->
                         if state.Connection = NotConnected
                         then
-                            let! connection = SocketManager.registerConsumer broker consumerConfig consumerId mb |> Async.AwaitTask
+                            let! clientCnx = registerConsumer mb |> Async.AwaitTask
                             channel.Reply()
-                            return! loop { state with Connection = Connected connection }
+                            return! loop { state with Connection = Connected clientCnx }
                         else
                             return! loop state
                     | ConsumerMessage.Reconnect mb ->
@@ -55,9 +63,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         if state.Connection = NotConnected
                         then
                             try
-                                let! broker = lookup.GetBroker(consumerConfig.Topic) |> Async.AwaitTask
-                                let! connection = SocketManager.reconnectConsumer broker consumerId |> Async.AwaitTask
-                                return! loop { state with Connection = Connected connection; ReconnectCount = 0 }
+                                let! clientCnx = registerConsumer mb |> Async.AwaitTask
+                                return! loop { state with Connection = Connected clientCnx; ReconnectCount = 0 }
                             with
                             | ex ->
                                 mb.Post(ConsumerMessage.Reconnect mb)
@@ -69,13 +76,9 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                                     return! loop { state with ReconnectCount = state.ReconnectCount + 1 }
                         else
                             return! loop state
-                    | ConsumerMessage.Disconnected (connection, mb) ->
-                        if state.Connection = Connected connection
-                        then
-                            mb.Post(ConsumerMessage.Reconnect mb)
-                            return! loop { state with Connection = NotConnected }
-                        else
-                            return! loop state
+                    | ConsumerMessage.Disconnected mb ->
+                        mb.Post(ConsumerMessage.Reconnect mb)
+                        return! loop { state with Connection = NotConnected }
                     | ConsumerMessage.MessageRecieved x ->
                         if state.WaitingChannel = nullChannel
                         then
@@ -94,16 +97,12 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     | ConsumerMessage.Ack (payload, channel) ->
                         match state.Connection with
                         | Connected conn ->
-                            do! SocketManager.send (conn, payload)
+                            do! conn.Send payload
                             channel.Reply()
                             return! loop state
                         | NotConnected ->
                             //TODO put message on schedule
                             return! loop state
-                    | ConsumerMessage.ConsumerClosed mb ->
-                        let! broker = lookup.GetBroker(consumerConfig.Topic) |> Async.AwaitTask
-                        let! newConnection = SocketManager.registerConsumer broker consumerConfig consumerId mb |> Async.AwaitTask
-                        return! loop { state with Connection = Connected newConnection }
                     | ConsumerMessage.ReachedEndOfTheTopic ->
                         return! loop { state with Status = Terminated }
             }
@@ -129,7 +128,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
     member private __.InitInternal() =
         task {
             let! broker = lookup.GetBroker(consumerConfig.Topic)
-            return! mb.PostAndAsyncReply(fun channel -> Connect ((broker, mb), channel))
+            return! mb.PostAndAsyncReply(fun channel -> Connect (mb, channel))
         }
 
     static member Init(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
