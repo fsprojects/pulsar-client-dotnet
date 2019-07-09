@@ -365,6 +365,16 @@ namespace pulsar.proto
         public void ResetOrderingKey() => __pbn__OrderingKey = null;
         private byte[] __pbn__OrderingKey;
 
+        [global::ProtoBuf.ProtoMember(8, Name = @"sequence_id")]
+        public ulong SequenceId
+        {
+            get { return __pbn__SequenceId.GetValueOrDefault(); }
+            set { __pbn__SequenceId = value; }
+        }
+        public bool ShouldSerializeSequenceId() => __pbn__SequenceId != null;
+        public void ResetSequenceId() => __pbn__SequenceId = null;
+        private ulong? __pbn__SequenceId;
+
     }
 
     [global::ProtoBuf.ProtoContract()]
