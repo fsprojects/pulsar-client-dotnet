@@ -25,18 +25,17 @@ type ConsumerState = {
     ReconnectCount: int
 }
 
-type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
+type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) as this =
 
     let consumerId = Generators.getNextConsumerId()
     let queue = new ConcurrentQueue<Message>()
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
-    let mutable messageCounter = 0
 
-    let registerConsumer mb =
+    let registerConsumer() =
         task {
             let! broker = lookup.GetBroker(consumerConfig.Topic)
             let! clientCnx = SocketManager.getConnection broker
-            do! clientCnx.RegisterConsumer consumerConfig consumerId mb
+            do! clientCnx.RegisterConsumer consumerConfig consumerId this.Mb
             return clientCnx
         }
 
@@ -50,24 +49,24 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     failwith (sprintf "Consumer status: %A" state.Status)
                 else
                     match msg with
-                    | ConsumerMessage.Connect (mb, channel) ->
+                    | ConsumerMessage.Connect channel ->
                         if state.Connection = NotConnected
                         then
-                            let! clientCnx = registerConsumer mb |> Async.AwaitTask
+                            let! clientCnx = registerConsumer() |> Async.AwaitTask
                             channel.Reply()
                             return! loop { state with Connection = Connected clientCnx }
                         else
                             return! loop state
-                    | ConsumerMessage.Reconnect mb ->
+                    | ConsumerMessage.Reconnect ->
                         // TODO backoff
                         if state.Connection = NotConnected
                         then
                             try
-                                let! clientCnx = registerConsumer mb |> Async.AwaitTask
+                                let! clientCnx = registerConsumer() |> Async.AwaitTask
                                 return! loop { state with Connection = Connected clientCnx; ReconnectCount = 0 }
                             with
                             | ex ->
-                                mb.Post(ConsumerMessage.Reconnect mb)
+                                this.Mb.Post(ConsumerMessage.Reconnect)
                                 Log.Logger.LogError(ex, "Error reconnecting")
                                 if state.ReconnectCount > 3
                                 then
@@ -76,8 +75,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                                     return! loop { state with ReconnectCount = state.ReconnectCount + 1 }
                         else
                             return! loop state
-                    | ConsumerMessage.Disconnected mb ->
-                        mb.Post(ConsumerMessage.Reconnect mb)
+                    | ConsumerMessage.Disconnected ->
+                        this.Mb.Post(ConsumerMessage.Reconnect)
                         return! loop { state with Connection = NotConnected }
                     | ConsumerMessage.MessageRecieved x ->
                         if state.WaitingChannel = nullChannel
@@ -109,7 +108,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
         loop { Connection = NotConnected; Status = Normal; WaitingChannel = nullChannel; ReconnectCount = 0 }
     )
 
-    member this.ReceiveAsync() =
+    member __.ReceiveAsync() =
         task {
             match queue.TryDequeue() with
             | true, msg ->
@@ -118,7 +117,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                  return! mb.PostAndAsyncReply(GetMessage)
         }
 
-    member this.AcknowledgeAsync (msg: Message) =
+    member __.AcknowledgeAsync (msg: Message) =
         task {
             let command = Commands.newAck consumerId msg.MessageId CommandAck.AckType.Individual
             do! mb.PostAndAsyncReply(fun channel -> Ack (command, channel))
@@ -128,8 +127,10 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
     member private __.InitInternal() =
         task {
             let! broker = lookup.GetBroker(consumerConfig.Topic)
-            return! mb.PostAndAsyncReply(fun channel -> Connect (mb, channel))
+            return! mb.PostAndAsyncReply(Connect)
         }
+
+    member private __.Mb with get() = mb
 
     static member Init(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
         task {

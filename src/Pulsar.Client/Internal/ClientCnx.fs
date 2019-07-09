@@ -78,8 +78,8 @@ type ClientCnx (broker: Broker,
                 | Disconnected ->
                     cts.Cancel()
                     removeConnection(broker)
-                    consumers |> Seq.iter(fun kv -> kv.Value.Post(ConsumerMessage.Disconnected kv.Value))
-                    producers |> Seq.iter(fun kv -> kv.Value.Post(ProducerMessage.Disconnected kv.Value))
+                    consumers |> Seq.iter(fun kv -> kv.Value.Post(ConsumerMessage.Disconnected))
+                    producers |> Seq.iter(fun kv -> kv.Value.Post(ProducerMessage.Disconnected))
             }
         loop ()
     )
@@ -250,12 +250,12 @@ type ClientCnx (broker: Broker,
                     | XCommandCloseProducer (cmd, consumed) ->
                         let producerMb = producers.[%cmd.ProducerId]
                         producers.Remove(%cmd.ProducerId) |> ignore
-                        producerMb.Post(ProducerMessage.Disconnected producerMb)
+                        producerMb.Post(ProducerMessage.Disconnected)
                         reader.AdvanceTo(consumed)
                     | XCommandCloseConsumer (cmd, consumed) ->
                         let consumerMb = consumers.[%cmd.ConsumerId]
                         consumers.Remove(%cmd.ConsumerId) |> ignore
-                        consumerMb.Post(ConsumerMessage.Disconnected consumerMb)
+                        consumerMb.Post(ConsumerMessage.Disconnected)
                         reader.AdvanceTo(consumed)
                     | XCommandReachedEndOfTopic (cmd, consumed) ->
                         let consumerMb = consumers.[%cmd.ConsumerId]

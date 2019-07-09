@@ -72,17 +72,17 @@ type SerializedPayload = WriterStream -> Task
 type Connection = SocketConnection * WriterStream
 
 type ProducerMessage =
-    | Connect of MailboxProcessor<ProducerMessage> * AsyncReplyChannel<unit>
-    | Reconnect of MailboxProcessor<ProducerMessage>
-    | Disconnected of MailboxProcessor<ProducerMessage>
+    | Connect of AsyncReplyChannel<unit>
+    | Reconnect
+    | Disconnected
     | SendReceipt of CommandSendReceipt
     | SendMessage of SerializedPayload * AsyncReplyChannel<unit>
     | SendError of CommandSendError
 
 type ConsumerMessage =
-    | Connect of MailboxProcessor<ConsumerMessage> * AsyncReplyChannel<unit>
-    | Reconnect of MailboxProcessor<ConsumerMessage>
-    | Disconnected of MailboxProcessor<ConsumerMessage>
+    | Connect of AsyncReplyChannel<unit>
+    | Reconnect
+    | Disconnected
     | ReachedEndOfTheTopic
     | MessageRecieved of Message
     | GetMessage of AsyncReplyChannel<Message>

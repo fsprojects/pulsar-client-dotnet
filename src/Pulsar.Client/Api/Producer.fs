@@ -18,16 +18,16 @@ type ProducerState = {
     ReconnectCount: int
 }
 
-type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
+type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) as this =
     let producerId = Generators.getNextProducerId()
     let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
     let partitionIndex = -1
 
-    let registerProducer mb =
+    let registerProducer() =
         task {
             let! broker = lookup.GetBroker(producerConfig.Topic)
             let! clientCnx = SocketManager.getConnection broker
-            do! clientCnx.RegisterProducer producerConfig producerId mb
+            do! clientCnx.RegisterProducer producerConfig producerId this.Mb
             return clientCnx
         }
 
@@ -36,24 +36,24 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
             async {
                 let! msg = inbox.Receive()
                 match msg with
-                | ProducerMessage.Connect (mb, channel) ->
+                | ProducerMessage.Connect channel ->
                     if state.Connection = NotConnected
                     then
-                        let! clientCnx = registerProducer mb |> Async.AwaitTask
+                        let! clientCnx = registerProducer() |> Async.AwaitTask
                         channel.Reply()
                         return! loop { state with Connection = Connected clientCnx }
                     else
                         return! loop state
-                | ProducerMessage.Reconnect mb ->
+                | ProducerMessage.Reconnect ->
                     // TODO backoff
                     if state.Connection = NotConnected
                     then
                         try
-                            let! clientCnx = registerProducer mb |> Async.AwaitTask
+                            let! clientCnx = registerProducer() |> Async.AwaitTask
                             return! loop { state with Connection = Connected clientCnx; ReconnectCount = 0 }
                         with
                         | ex ->
-                            mb.Post(ProducerMessage.Reconnect mb)
+                            this.Mb.Post(ProducerMessage.Reconnect)
                             Log.Logger.LogError(ex, "Error reconnecting")
                             if state.ReconnectCount > 3
                             then
@@ -62,8 +62,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                                 return! loop { state with ReconnectCount = state.ReconnectCount + 1 }
                     else
                         return! loop state
-                | ProducerMessage.Disconnected mb ->
-                    mb.Post(ProducerMessage.Reconnect mb)
+                | ProducerMessage.Disconnected ->
+                    this.Mb.Post(ProducerMessage.Reconnect)
                     return! loop { state with Connection = NotConnected }
                 | ProducerMessage.SendMessage (payload, channel) ->
                     match state.Connection with
@@ -96,7 +96,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
         loop { Connection = NotConnected; ReconnectCount = 0 }
     )
 
-    member this.SendAndWaitAsync (msg: byte[]) =
+    member __.SendAndWaitAsync (msg: byte[]) =
         task {
             let payload = msg;
             let sequenceId = Generators.getNextSequenceId()
@@ -118,7 +118,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 return failwith "Unable to add tsc"
         }
 
-    member this.SendAsync (msg: byte[]) =
+    member __.SendAsync (msg: byte[]) =
         Log.Logger.LogDebug("Sending Async")
 
         task {
@@ -137,7 +137,9 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
         }
 
     member private __.InitInternal() =
-        mb.PostAndAsyncReply(fun channel -> ProducerMessage.Connect (mb, channel))
+        mb.PostAndAsyncReply(fun channel -> ProducerMessage.Connect channel)
+
+    member private __.Mb with get() = mb
 
     static member Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
         task {
