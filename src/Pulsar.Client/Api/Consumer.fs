@@ -34,7 +34,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
     let registerConsumer() =
         task {
             let! broker = lookup.GetBroker(consumerConfig.Topic)
-            let! clientCnx = SocketManager.getConnection broker
+            let! clientCnx = ConnectionPool.getConnection broker
             do! clientCnx.RegisterConsumer consumerConfig consumerId this.Mb
             return clientCnx
         }

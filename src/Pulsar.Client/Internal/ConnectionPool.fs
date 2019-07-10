@@ -1,4 +1,4 @@
-﻿module internal Pulsar.Client.Internal.SocketManager
+﻿module internal Pulsar.Client.Internal.ConnectionPool
 
 open Pulsar.Client.Common
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -38,9 +38,10 @@ let private connect (broker: Broker) =
         let writerStream = StreamConnection.GetWriter(socketConnection.Output)
         let connection = (socketConnection, writerStream)
         let initialConnectionTsc = TaskCompletionSource<ClientCnx>()
-        let removeConnection (broker: Broker) =
+
+        let unregisterClientCnx (broker: Broker) =
             connections.TryRemove(broker.LogicalAddress) |> ignore
-        let clientCnx = ClientCnx(broker, connection, initialConnectionTsc, removeConnection)
+        let clientCnx = ClientCnx(broker, connection, initialConnectionTsc, unregisterClientCnx)
 
         let proxyToBroker = if physicalAddress = logicalAddress then None else Some logicalAddress
         let connectPayload =

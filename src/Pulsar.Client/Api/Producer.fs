@@ -26,7 +26,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
     let registerProducer() =
         task {
             let! broker = lookup.GetBroker(producerConfig.Topic)
-            let! clientCnx = SocketManager.getConnection broker
+            let! clientCnx = ConnectionPool.getConnection broker
             do! clientCnx.RegisterProducer producerConfig producerId this.Mb
             return clientCnx
         }

@@ -39,8 +39,6 @@ type PulsarCommands =
     | IncompleteCommand
     | InvalidCommand of Exception
 
-// type Payload = Connection * SerializedPayload
-
 type PulsarTypes =
     | PartitionedTopicMetadata of PartitionedTopicMetadata
     | LookupTopicResult of LookupTopicResult
@@ -51,15 +49,15 @@ type PulsarTypes =
 
 
 type SocketMessage =
-    | SocketMessageWithReply of SerializedPayload * AsyncReplyChannel<unit>
-    | SocketMessageWithoutReply of SerializedPayload
-    | SocketRequestMessageWithReply of RequestId * SerializedPayload * AsyncReplyChannel<Task<PulsarTypes>>
+    | SocketMessageWithReply of Payload * AsyncReplyChannel<unit>
+    | SocketMessageWithoutReply of Payload
+    | SocketRequestMessageWithReply of RequestId * Payload * AsyncReplyChannel<Task<PulsarTypes>>
 
 
 type ClientCnx (broker: Broker,
                 connection: Connection,
                 initialConnectionTsc: TaskCompletionSource<ClientCnx>,
-                removeConnection: Broker -> unit) as this =
+                unregisterClientCnx: Broker -> unit) as this =
     let consumers = Dictionary<ConsumerId, MailboxProcessor<ConsumerMessage>>()
     let producers = Dictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
     let requests = Dictionary<RequestId, TaskCompletionSource<PulsarTypes>>()
@@ -77,14 +75,14 @@ type ClientCnx (broker: Broker,
                     return! loop()
                 | Disconnected ->
                     cts.Cancel()
-                    removeConnection(broker)
+                    unregisterClientCnx(broker)
                     consumers |> Seq.iter(fun kv -> kv.Value.Post(ConsumerMessage.Disconnected))
                     producers |> Seq.iter(fun kv -> kv.Value.Post(ProducerMessage.Disconnected))
             }
         loop ()
     )
 
-    let sendSerializedPayload (serializedPayload: SerializedPayload ) =
+    let sendSerializedPayload (serializedPayload: Payload ) =
         task {
             let (conn, streamWriter) = connection
             do! streamWriter |> serializedPayload

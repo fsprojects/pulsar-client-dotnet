@@ -4,7 +4,7 @@ open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Common
 open System
-open SocketManager
+open ConnectionPool
 open System.Net
 open System.Threading
 
@@ -17,7 +17,7 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
 
     let executeRequest createRequest = task {
         let endpoint = serviceNameResolver.ResolveHost()
-        let! clientCnx = SocketManager.getBrokerlessConnection endpoint
+        let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint
         let requestId = Generators.getNextRequestId()
         let request = createRequest requestId
         let! response = clientCnx.SendAndWaitForReply requestId request

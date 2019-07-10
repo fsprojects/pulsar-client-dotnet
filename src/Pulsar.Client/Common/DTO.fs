@@ -68,7 +68,7 @@ type Message =
     }
 
 type WriterStream = Stream
-type SerializedPayload = WriterStream -> Task
+type Payload = WriterStream -> Task
 type Connection = SocketConnection * WriterStream
 
 type ProducerMessage =
@@ -76,7 +76,7 @@ type ProducerMessage =
     | Reconnect
     | Disconnected
     | SendReceipt of CommandSendReceipt
-    | SendMessage of SerializedPayload * AsyncReplyChannel<unit>
+    | SendMessage of Payload * AsyncReplyChannel<unit>
     | SendError of CommandSendError
 
 type ConsumerMessage =
@@ -86,4 +86,4 @@ type ConsumerMessage =
     | ReachedEndOfTheTopic
     | MessageRecieved of Message
     | GetMessage of AsyncReplyChannel<Message>
-    | Ack of SerializedPayload * AsyncReplyChannel<unit>
+    | Ack of Payload * AsyncReplyChannel<unit>

@@ -96,24 +96,24 @@ let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageM
         Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
         stream.CopyToAsync(output)
 
-let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : SerializedPayload =
+let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : Payload =
     let request = CommandPartitionedTopicMetadata(Topic = topicName, RequestId = %requestId)
     let command = BaseCommand(``type`` = CommandType.PartitionedMetadata, partitionMetadata = request)
     serializeSimpleCommand command
 
-let newSend (producerId : ProducerId) (sequenceId : SequenceId) (numMessages : int) (msgMetadata : MessageMetadata) (payload: byte[]) : SerializedPayload =
+let newSend (producerId : ProducerId) (sequenceId : SequenceId) (numMessages : int) (msgMetadata : MessageMetadata) (payload: byte[]) : Payload =
     let request = CommandSend(ProducerId = %producerId, SequenceId = %sequenceId, NumMessages = numMessages)
     let command = BaseCommand(``type`` = CommandType.Send, Send = request)
     serializePayloadCommand command msgMetadata payload
 
 let newAck (consumerId : ConsumerId) (messageId: MessageId)
-    (ackType : CommandAck.AckType) : SerializedPayload =
+    (ackType : CommandAck.AckType) : Payload =
     let request = CommandAck(ConsumerId = %consumerId, ack_type = ackType)
     request.MessageIds.Add(MessageIdData(ledgerId = %messageId.LedgerId, entryId = %messageId.EntryId))
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 
-let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : SerializedPayload =
+let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : Payload =
     let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion)
     match proxyToBroker with
     | Some logicalAddress -> request.ProxyToBrokerUrl <- sprintf "%s:%d" logicalAddress.Host logicalAddress.Port
@@ -121,7 +121,7 @@ let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) (proxy
     let command = BaseCommand(``type`` = CommandType.Connect, Connect = request)
     command |> serializeSimpleCommand
 
-let newPong () : SerializedPayload =
+let newPong () : Payload =
     let request = CommandPong()
     let command = BaseCommand(``type`` = CommandType.Pong, Pong = request)
     command |> serializeSimpleCommand
