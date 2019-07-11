@@ -13,11 +13,6 @@ open Microsoft.Extensions.Logging
 type ProducerException(message) =
     inherit Exception(message)
 
-type ProducerState = {
-    Connection: ConnectionState
-    ReconnectCount: int
-}
-
 type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) as this =
     let producerId = Generators.getNextProducerId()
     let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
@@ -31,50 +26,28 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
             return clientCnx
         }
 
+    let connectionHandler = ConnectionHandler registerProducer
+
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
-        let rec loop (state: ProducerState) =
+        let rec loop () =
             async {
                 let! msg = inbox.Receive()
                 match msg with
                 | ProducerMessage.Connect channel ->
-                    if state.Connection = NotConnected
-                    then
-                        let! clientCnx = registerProducer() |> Async.AwaitTask
-                        channel.Reply()
-                        return! loop { state with Connection = Connected clientCnx }
-                    else
-                        return! loop state
+                    do! connectionHandler.Connect()
+                    channel.Reply()
                 | ProducerMessage.Reconnect ->
-                    // TODO backoff
-                    if state.Connection = NotConnected
-                    then
-                        try
-                            let! clientCnx = registerProducer() |> Async.AwaitTask
-                            return! loop { state with Connection = Connected clientCnx; ReconnectCount = 0 }
-                        with
-                        | ex ->
-                            this.Mb.Post(ProducerMessage.Reconnect)
-                            Log.Logger.LogError(ex, "Error reconnecting")
-                            if state.ReconnectCount > 3
-                            then
-                                raise ex
-                            else
-                                return! loop { state with ReconnectCount = state.ReconnectCount + 1 }
-                    else
-                        return! loop state
+                    connectionHandler.Reconnect()
                 | ProducerMessage.Disconnected ->
-                    this.Mb.Post(ProducerMessage.Reconnect)
-                    return! loop { state with Connection = NotConnected }
+                    connectionHandler.Disconnected()
                 | ProducerMessage.SendMessage (payload, channel) ->
-                    match state.Connection with
-                    | Connected clientCnx ->
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
                         do! clientCnx.Send payload
                         channel.Reply()
-                        return! loop state
-                    | NotConnected ->
+                    | _ ->
                         //TODO put message on schedule
                         Log.Logger.LogWarning("NotConnected, skipping send")
-                        return! loop state
                 | ProducerMessage.SendReceipt receipt ->
                     let sequenceId = %receipt.SequenceId
                     match messages.TryGetValue(sequenceId) with
@@ -82,7 +55,6 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         tsc.SetResult(MessageId.FromMessageIdData(receipt.MessageId))
                         messages.TryRemove(sequenceId) |> ignore
                     | false, _ -> ()
-                    return! loop state
                 | ProducerMessage.SendError error ->
                     let sequenceId = %error.SequenceId
                     match messages.TryGetValue(sequenceId) with
@@ -91,9 +63,9 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         tsc.SetException(Exception(error.Message))
                         messages.TryRemove(sequenceId) |> ignore
                     | false, _ -> ()
-                    return! loop state
+                return! loop ()
             }
-        loop { Connection = NotConnected; ReconnectCount = 0 }
+        loop ()
     )
 
     member __.SendAndWaitAsync (msg: byte[]) =

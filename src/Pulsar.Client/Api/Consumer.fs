@@ -19,10 +19,8 @@ type ConsumerStatus =
     | Terminated
 
 type ConsumerState = {
-    Connection: ConnectionState
     Status: ConsumerStatus
     WaitingChannel: AsyncReplyChannel<Message>
-    ReconnectCount: int
 }
 
 type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) as this =
@@ -39,6 +37,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
             return clientCnx
         }
 
+    let connectionHandler = ConnectionHandler registerConsumer
+
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
         let rec loop (state: ConsumerState) =
@@ -50,34 +50,15 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                 else
                     match msg with
                     | ConsumerMessage.Connect channel ->
-                        if state.Connection = NotConnected
-                        then
-                            let! clientCnx = registerConsumer() |> Async.AwaitTask
-                            channel.Reply()
-                            return! loop { state with Connection = Connected clientCnx }
-                        else
-                            return! loop state
+                        do! connectionHandler.Connect()
+                        channel.Reply()
+                        return! loop state
                     | ConsumerMessage.Reconnect ->
-                        // TODO backoff
-                        if state.Connection = NotConnected
-                        then
-                            try
-                                let! clientCnx = registerConsumer() |> Async.AwaitTask
-                                return! loop { state with Connection = Connected clientCnx; ReconnectCount = 0 }
-                            with
-                            | ex ->
-                                this.Mb.Post(ConsumerMessage.Reconnect)
-                                Log.Logger.LogError(ex, "Error reconnecting")
-                                if state.ReconnectCount > 3
-                                then
-                                    raise ex
-                                else
-                                    return! loop { state with ReconnectCount = state.ReconnectCount + 1 }
-                        else
-                            return! loop state
+                        connectionHandler.Reconnect()
+                        return! loop state
                     | ConsumerMessage.Disconnected ->
-                        this.Mb.Post(ConsumerMessage.Reconnect)
-                        return! loop { state with Connection = NotConnected }
+                        connectionHandler.Disconnected()
+                        return! loop state
                     | ConsumerMessage.MessageRecieved x ->
                         if state.WaitingChannel = nullChannel
                         then
@@ -94,18 +75,18 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         | false, _ ->
                             return! loop { state with WaitingChannel = ch }
                     | ConsumerMessage.Ack (payload, channel) ->
-                        match state.Connection with
-                        | Connected conn ->
+                        match connectionHandler.ConnectionState with
+                        | Ready conn ->
                             do! conn.Send payload
                             channel.Reply()
                             return! loop state
-                        | NotConnected ->
+                        | _ ->
                             //TODO put message on schedule
                             return! loop state
                     | ConsumerMessage.ReachedEndOfTheTopic ->
                         return! loop { state with Status = Terminated }
             }
-        loop { Connection = NotConnected; Status = Normal; WaitingChannel = nullChannel; ReconnectCount = 0 }
+        loop { Status = Normal; WaitingChannel = nullChannel}
     )
 
     member __.ReceiveAsync() =

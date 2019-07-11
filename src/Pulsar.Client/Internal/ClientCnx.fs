@@ -318,7 +318,3 @@ type ClientCnx (broker: Broker,
             | _ ->
                 failwith "Incorrect return type"
         }
-
-type ConnectionState =
-    | NotConnected
-    | Connected of ClientCnx
