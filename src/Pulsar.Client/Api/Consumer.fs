@@ -35,7 +35,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
             let! clientCnx = ConnectionPool.getConnection broker
             do! clientCnx.RegisterConsumer consumerConfig consumerId this.Mb
             return clientCnx
-        }
+        } |> Async.AwaitTask
 
     let connectionHandler = ConnectionHandler registerConsumer
 
@@ -53,11 +53,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         do! connectionHandler.Connect()
                         channel.Reply()
                         return! loop state
-                    | ConsumerMessage.Reconnect ->
-                        connectionHandler.Reconnect()
-                        return! loop state
                     | ConsumerMessage.Disconnected ->
-                        connectionHandler.Disconnected()
+                        do! connectionHandler.Disconnected()
                         return! loop state
                     | ConsumerMessage.MessageRecieved x ->
                         if state.WaitingChannel = nullChannel

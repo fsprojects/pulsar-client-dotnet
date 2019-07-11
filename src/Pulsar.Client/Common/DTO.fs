@@ -73,7 +73,6 @@ type Connection = SocketConnection * WriterStream
 
 type ProducerMessage =
     | Connect of AsyncReplyChannel<unit>
-    | Reconnect
     | Disconnected
     | SendReceipt of CommandSendReceipt
     | SendMessage of Payload * AsyncReplyChannel<unit>
@@ -81,7 +80,6 @@ type ProducerMessage =
 
 type ConsumerMessage =
     | Connect of AsyncReplyChannel<unit>
-    | Reconnect
     | Disconnected
     | ReachedEndOfTheTopic
     | MessageRecieved of Message

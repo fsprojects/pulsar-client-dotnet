@@ -24,7 +24,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
             let! clientCnx = ConnectionPool.getConnection broker
             do! clientCnx.RegisterProducer producerConfig producerId this.Mb
             return clientCnx
-        }
+        } |> Async.AwaitTask
 
     let connectionHandler = ConnectionHandler registerProducer
 
@@ -36,10 +36,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 | ProducerMessage.Connect channel ->
                     do! connectionHandler.Connect()
                     channel.Reply()
-                | ProducerMessage.Reconnect ->
-                    connectionHandler.Reconnect()
                 | ProducerMessage.Disconnected ->
-                    connectionHandler.Disconnected()
+                    do! connectionHandler.Disconnected()
                 | ProducerMessage.SendMessage (payload, channel) ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->

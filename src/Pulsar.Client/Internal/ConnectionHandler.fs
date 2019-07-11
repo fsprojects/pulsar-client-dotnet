@@ -1,11 +1,12 @@
 ﻿namespace Pulsar.Client.Internal
 
 open Microsoft.Extensions.Logging
+open System.Threading
 
 type ConnectionHandlerMessage =
     | Connect of AsyncReplyChannel<unit>
     | Reconnect
-    | Disconnected
+    | Disconnected of AsyncReplyChannel<unit>
 
 type ConnectionState =
     | Ready of ClientCnx
@@ -18,7 +19,7 @@ type ConnectionState =
 
 type ConnectionHandler(registerFunction) as this =
 
-    let mutable connectionState = ConnectionState.Uninitialized
+    let mutable connectionState = Uninitialized
     let mutable reconnectCount = 0
 
     let isValidStateForReconnection state =
@@ -36,7 +37,7 @@ type ConnectionHandler(registerFunction) as this =
                 let! msg = inbox.Receive()
                 match msg with
                 | Connect channel ->
-                    let! clientCnx = registerFunction() |> Async.AwaitTask
+                    let! clientCnx = registerFunction()
                     connectionState <- Ready clientCnx
                     channel.Reply()
                 | Reconnect ->
@@ -44,7 +45,7 @@ type ConnectionHandler(registerFunction) as this =
                     if isValidStateForReconnection connectionState
                     then
                         try
-                            let! clientCnx = registerFunction() |> Async.AwaitTask
+                            let! clientCnx = registerFunction()
                             connectionState <- Ready clientCnx
                             reconnectCount <- 0
                         with
@@ -54,9 +55,10 @@ type ConnectionHandler(registerFunction) as this =
                             if reconnectCount > 3
                             then
                                 raise ex
-                | Disconnected ->
-                    this.Mb.Post(Reconnect)
+                | Disconnected channel ->
                     connectionState <- Connecting
+                    this.Mb.Post(Reconnect)
+                    channel.Reply()
                 return! loop ()
             }
         loop  ()
@@ -67,10 +69,7 @@ type ConnectionHandler(registerFunction) as this =
     member __.Connect() =
         mb.PostAndAsyncReply(Connect)
 
-    member __.Reconnect() =
-        mb.Post(Reconnect)
-
     member __.Disconnected() =
-        mb.Post(Disconnected)
+        mb.PostAndAsyncReply(Disconnected)
 
     member __.ConnectionState with get() = connectionState
