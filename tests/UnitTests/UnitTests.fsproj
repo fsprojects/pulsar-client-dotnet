@@ -9,6 +9,7 @@
     <Compile Include="Expect.fs" />
     <Compile Include="Common\CommandTests.fs" />
     <Compile Include="Common\NamespaceNameTests.fs" />
+    <Compile Include="Api\ConfigurationTests.fs" />
     <Compile Include="Api\ConsumerBuilderTests.fs" />
     <Compile Include="Api\ProducerBuilderTests.fs" />
     <Compile Include="Api\PulsarClientBuilderTests.fs" />

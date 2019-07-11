@@ -28,6 +28,24 @@ module ProducerBuilderTests =
                 [null; ""; " "] |> List.iter checkTopic
             }
 
+            test "ProducerName throws an exception for blank producer name" {
+                let checkProducerName producerName =
+                    builder()
+                    |> configure(fun b -> b.ProducerName producerName)
+                    |> Expect.throwsWithMessage<ArgumentException> "ProducerName must not be blank."
+
+                [null; ""; " "] |> List.iter checkProducerName
+            }
+
+            test "MaxPendingMessages throws an exception for non positive integer" {
+                let checkMaxPendingMessages maxPendingMessages =
+                    builder()
+                    |> configure(fun b -> b.MaxPendingMessages maxPendingMessages)
+                    |> Expect.throwsWithMessage<ArgumentException> "MaxPendingMessages needs to be greater than 0."
+
+                [-1; 0] |> List.iter checkMaxPendingMessages
+            }
+
             test "CreateAsync throws an exception if Topic is blank" {
                 fun() -> builder().CreateAsync() |> ignore
                 |> Expect.throwsWithMessage<ProducerException> "Topic name must be set on the producer builder."

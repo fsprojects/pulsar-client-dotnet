@@ -32,9 +32,11 @@ type ProducerConfiguration =
     {
         Topic: string
         ProducerName: string
+        MaxPendingMessages: int
     }
     static member Default =
         {
             Topic = ""
             ProducerName = ""
+            MaxPendingMessages = 1000
         }

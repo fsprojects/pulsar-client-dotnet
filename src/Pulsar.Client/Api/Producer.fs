@@ -9,6 +9,7 @@ open Pulsar.Client.Internal
 open System
 open System.Collections.Concurrent
 open Microsoft.Extensions.Logging
+open System.Collections.Generic
 
 type ProducerException(message) =
     inherit Exception(message)
@@ -16,6 +17,7 @@ type ProducerException(message) =
 type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) as this =
     let producerId = Generators.getNextProducerId()
     let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
+    let pendingMessages = Queue<Payload>()
     let partitionIndex = -1
 
     let registerProducer() =
@@ -38,14 +40,32 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     channel.Reply()
                 | ProducerMessage.ConnectionClosed ->
                     do! connectionHandler.ConnectionClosed()
+
+                    Log.Logger.LogInformation("Try re-send pending messages")
+                    Log.Logger.LogDebug("Pending mesages count: {0}", pendingMessages.Count)
+
+                    let mutable sentCount = 0
+
+                    while pendingMessages.Count > 0 do
+                        let message = pendingMessages.Dequeue()
+                        this.Mb.PostAndAsyncReply(fun channel -> SendMessage(message, channel)) |> ignore
+                        sentCount <- sentCount + 1
+
+                    Log.Logger.LogInformation("{0} pending messages was sent", sentCount)
+
                 | ProducerMessage.SendMessage (payload, channel) ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         do! clientCnx.Send payload
-                        channel.Reply()
                     | _ ->
-                        //TODO put message on schedule
                         Log.Logger.LogWarning("NotConnected, skipping send")
+
+                        if producerConfig.MaxPendingMessages = pendingMessages.Count then
+                            raise <| ProducerException("Producer send queue is full.")
+
+                        pendingMessages.Enqueue payload
+
+                    channel.Reply()
                 | ProducerMessage.SendReceipt receipt ->
                     let sequenceId = %receipt.SequenceId
                     match messages.TryGetValue(sequenceId) with
