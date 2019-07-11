@@ -53,8 +53,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         do! connectionHandler.Connect()
                         channel.Reply()
                         return! loop state
-                    | ConsumerMessage.Disconnected ->
-                        do! connectionHandler.Disconnected()
+                    | ConsumerMessage.ConnectionClosed ->
+                        do! connectionHandler.ConnectionClosed()
                         return! loop state
                     | ConsumerMessage.MessageRecieved x ->
                         if state.WaitingChannel = nullChannel

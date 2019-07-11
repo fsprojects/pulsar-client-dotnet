@@ -6,7 +6,7 @@ open System.Threading
 type ConnectionHandlerMessage =
     | Connect of AsyncReplyChannel<unit>
     | Reconnect
-    | Disconnected of AsyncReplyChannel<unit>
+    | ConnectionClosed of AsyncReplyChannel<unit>
 
 type ConnectionState =
     | Ready of ClientCnx
@@ -22,8 +22,8 @@ type ConnectionHandler(registerFunction) as this =
     let mutable connectionState = Uninitialized
     let mutable reconnectCount = 0
 
-    let isValidStateForReconnection state =
-        match state with
+    let isValidStateForReconnection() =
+        match connectionState with
         | Uninitialized | Connecting | Ready _ ->
             // Ok
             true
@@ -41,8 +41,7 @@ type ConnectionHandler(registerFunction) as this =
                     connectionState <- Ready clientCnx
                     channel.Reply()
                 | Reconnect ->
-                    // TODO backoff
-                    if isValidStateForReconnection connectionState
+                    if isValidStateForReconnection()
                     then
                         try
                             let! clientCnx = registerFunction()
@@ -50,14 +49,22 @@ type ConnectionHandler(registerFunction) as this =
                             reconnectCount <- 0
                         with
                         | ex ->
+                            // TODO backoff
                             this.Mb.Post(ConnectionHandlerMessage.Reconnect)
-                            Log.Logger.LogError(ex, "Error reconnecting")
+                            Log.Logger.LogWarning(ex, "Error reconnecting")
                             if reconnectCount > 3
                             then
                                 raise ex
-                | Disconnected channel ->
-                    connectionState <- Connecting
-                    this.Mb.Post(Reconnect)
+                    else
+                        // Ignore connection closed when we are shutting down
+                        Log.Logger.LogInformation("Skipped reconnecting for state {0} on Reconnect", connectionState)
+                | ConnectionClosed channel ->
+                    if isValidStateForReconnection()
+                    then
+                        connectionState <- Connecting
+                        this.Mb.Post(Reconnect)
+                    else
+                        Log.Logger.LogInformation("Skipped reconnecting for state {0} on ConnectionClosed", connectionState)
                     channel.Reply()
                 return! loop ()
             }
@@ -69,7 +76,7 @@ type ConnectionHandler(registerFunction) as this =
     member __.Connect() =
         mb.PostAndAsyncReply(Connect)
 
-    member __.Disconnected() =
-        mb.PostAndAsyncReply(Disconnected)
+    member __.ConnectionClosed() =
+        mb.PostAndAsyncReply(ConnectionClosed)
 
     member __.ConnectionState with get() = connectionState

@@ -73,14 +73,14 @@ type Connection = SocketConnection * WriterStream
 
 type ProducerMessage =
     | Connect of AsyncReplyChannel<unit>
-    | Disconnected
+    | ConnectionClosed
     | SendReceipt of CommandSendReceipt
     | SendMessage of Payload * AsyncReplyChannel<unit>
     | SendError of CommandSendError
 
 type ConsumerMessage =
     | Connect of AsyncReplyChannel<unit>
-    | Disconnected
+    | ConnectionClosed
     | ReachedEndOfTheTopic
     | MessageRecieved of Message
     | GetMessage of AsyncReplyChannel<Message>

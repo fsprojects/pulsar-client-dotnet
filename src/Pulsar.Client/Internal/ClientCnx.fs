@@ -19,7 +19,7 @@ open Pulsar.Client.Api
 type CnxOperation =
     | AddProducer of ProducerId * MailboxProcessor<ProducerMessage>
     | AddConsumer of ConsumerId * MailboxProcessor<ConsumerMessage>
-    | Disconnected
+    | ChannelInactive
 
 type PulsarCommands =
     | XCommandConnected of CommandConnected * SequencePosition
@@ -73,11 +73,11 @@ type ClientCnx (broker: Broker,
                 | AddConsumer (consumerId, mb) ->
                     consumers.Add(consumerId, mb)
                     return! loop()
-                | Disconnected ->
+                | ChannelInactive ->
                     cts.Cancel()
                     unregisterClientCnx(broker)
-                    consumers |> Seq.iter(fun kv -> kv.Value.Post(ConsumerMessage.Disconnected))
-                    producers |> Seq.iter(fun kv -> kv.Value.Post(ProducerMessage.Disconnected))
+                    consumers |> Seq.iter(fun kv -> kv.Value.Post(ConsumerMessage.ConnectionClosed))
+                    producers |> Seq.iter(fun kv -> kv.Value.Post(ProducerMessage.ConnectionClosed))
             }
         loop ()
     )
@@ -90,7 +90,7 @@ type ClientCnx (broker: Broker,
             if (not conn.Socket.Connected)
             then
                 Log.Logger.LogWarning("Socket was disconnected on writing {0}", broker.LogicalAddress)
-                operationsMb.Post(Disconnected)
+                operationsMb.Post(ChannelInactive)
         }
 
     let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
@@ -199,7 +199,7 @@ type ClientCnx (broker: Broker,
                     then
                         Log.Logger.LogWarning("[{0}] New connection to {1} was aborted", readerId, broker)
                     Log.Logger.LogWarning("[{0}] Socket was disconnected while reading {1}", readerId, broker)
-                    operationsMb.Post(Disconnected)
+                    operationsMb.Post(ChannelInactive)
                     continueLooping <- false
                 else
                     match tryParse buffer readerId with
@@ -248,12 +248,12 @@ type ClientCnx (broker: Broker,
                     | XCommandCloseProducer (cmd, consumed) ->
                         let producerMb = producers.[%cmd.ProducerId]
                         producers.Remove(%cmd.ProducerId) |> ignore
-                        producerMb.Post(ProducerMessage.Disconnected)
+                        producerMb.Post(ProducerMessage.ConnectionClosed)
                         reader.AdvanceTo(consumed)
                     | XCommandCloseConsumer (cmd, consumed) ->
                         let consumerMb = consumers.[%cmd.ConsumerId]
                         consumers.Remove(%cmd.ConsumerId) |> ignore
-                        consumerMb.Post(ConsumerMessage.Disconnected)
+                        consumerMb.Post(ConsumerMessage.ConnectionClosed)
                         reader.AdvanceTo(consumed)
                     | XCommandReachedEndOfTopic (cmd, consumed) ->
                         let consumerMb = consumers.[%cmd.ConsumerId]

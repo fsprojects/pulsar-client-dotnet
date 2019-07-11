@@ -36,8 +36,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 | ProducerMessage.Connect channel ->
                     do! connectionHandler.Connect()
                     channel.Reply()
-                | ProducerMessage.Disconnected ->
-                    do! connectionHandler.Disconnected()
+                | ProducerMessage.ConnectionClosed ->
+                    do! connectionHandler.ConnectionClosed()
                 | ProducerMessage.SendMessage (payload, channel) ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
