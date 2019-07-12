@@ -72,14 +72,14 @@ type Payload = WriterStream -> Task
 type Connection = SocketConnection * WriterStream
 
 type ProducerMessage =
-    | Connect of AsyncReplyChannel<unit>
+    | ConnectionOpened
     | ConnectionClosed
     | SendReceipt of CommandSendReceipt
     | SendMessage of Payload * AsyncReplyChannel<unit>
     | SendError of CommandSendError
 
 type ConsumerMessage =
-    | Connect of AsyncReplyChannel<unit>
+    | ConnectionOpened
     | ConnectionClosed
     | ReachedEndOfTheTopic
     | MessageRecieved of Message

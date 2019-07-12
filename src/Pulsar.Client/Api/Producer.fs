@@ -20,51 +20,45 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
     let pendingMessages = Queue<Payload>()
     let partitionIndex = -1
 
-    let registerProducer() =
-        task {
-            let! broker = lookup.GetBroker(producerConfig.Topic)
-            let! clientCnx = ConnectionPool.getConnection broker
-            do! clientCnx.RegisterProducer producerConfig producerId this.Mb
-            return clientCnx
-        } |> Async.AwaitTask
+    let connectionOpened() =
+        this.Mb.Post(ProducerMessage.ConnectionOpened)
 
-    let connectionHandler = ConnectionHandler registerProducer
+    let connectionHandler = ConnectionHandler(lookup, producerConfig.Topic, connectionOpened)
 
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
         let rec loop () =
             async {
                 let! msg = inbox.Receive()
                 match msg with
-                | ProducerMessage.Connect channel ->
-                    do! connectionHandler.Connect()
-                    channel.Reply()
+                | ProducerMessage.ConnectionOpened ->
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        do! clientCnx.RegisterProducer producerConfig producerId this.Mb |> Async.AwaitTask
+                        // process pending messages
+                        if pendingMessages.Count > 0
+                        then
+                            Log.Logger.LogInformation("Resending {0} pending messages", pendingMessages.Count)
+                            let mutable sentCount = 0
+                            while pendingMessages.Count > 0 do
+                                let payload = pendingMessages.Dequeue()
+                                do! clientCnx.Send payload
+                                sentCount <- sentCount + 1
+                            Log.Logger.LogInformation("{0} pending messages was sent", sentCount)
+                    | _ ->
+                        Log.Logger.LogWarning("Connection opened but connection is not ready")
                 | ProducerMessage.ConnectionClosed ->
                     do! connectionHandler.ConnectionClosed()
-
-                    Log.Logger.LogInformation("Try re-send pending messages")
-                    Log.Logger.LogDebug("Pending mesages count: {0}", pendingMessages.Count)
-
-                    let mutable sentCount = 0
-
-                    while pendingMessages.Count > 0 do
-                        let message = pendingMessages.Dequeue()
-                        this.Mb.PostAndAsyncReply(fun channel -> SendMessage(message, channel)) |> ignore
-                        sentCount <- sentCount + 1
-
-                    Log.Logger.LogInformation("{0} pending messages was sent", sentCount)
-
                 | ProducerMessage.SendMessage (payload, channel) ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         do! clientCnx.Send payload
                     | _ ->
                         Log.Logger.LogWarning("NotConnected, skipping send")
-
-                        if producerConfig.MaxPendingMessages = pendingMessages.Count then
+                        if pendingMessages.Count < producerConfig.MaxPendingMessages
+                        then
+                            pendingMessages.Enqueue payload
+                        else
                             raise <| ProducerException("Producer send queue is full.")
-
-                        pendingMessages.Enqueue payload
-
                     channel.Reply()
                 | ProducerMessage.SendReceipt receipt ->
                     let sequenceId = %receipt.SequenceId
@@ -127,13 +121,11 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
         }
 
     member private __.InitInternal() =
-        mb.PostAndAsyncReply(fun channel -> ProducerMessage.Connect channel)
+       connectionHandler.Connect()
 
-    member private __.Mb with get() = mb
+    member private __.Mb with get(): MailboxProcessor<ProducerMessage> = mb
 
     static member Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
-        task {
-            let producer = Producer(producerConfig, lookup)
-            do! producer.InitInternal()
-            return producer
-        }
+        let producer = Producer(producerConfig, lookup)
+        producer.InitInternal()
+        producer

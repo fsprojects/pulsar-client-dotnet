@@ -27,9 +27,9 @@ type PulsarClient(config: PulsarClientConfiguration) =
             let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic
             if (metadata.Partitions > 1u)
             then
-                return! Consumer.Init(consumerConfig, lookupSerivce)
+                return Consumer.Init(consumerConfig, lookupSerivce)
             else
-                return! Consumer.Init(consumerConfig, lookupSerivce)
+                return Consumer.Init(consumerConfig, lookupSerivce)
         }
 
     member this.CreateProducerAsync (producerConfig: ProducerConfiguration) =
@@ -37,7 +37,7 @@ type PulsarClient(config: PulsarClientConfiguration) =
             let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic
             if (metadata.Partitions > 1u)
             then
-                return! Producer.Init(producerConfig, lookupSerivce)
+                return Producer.Init(producerConfig, lookupSerivce)
             else
-                return! Producer.Init(producerConfig, lookupSerivce)
+                return Producer.Init(producerConfig, lookupSerivce)
         }

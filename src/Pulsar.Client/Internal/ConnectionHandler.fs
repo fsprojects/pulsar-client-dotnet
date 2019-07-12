@@ -4,7 +4,6 @@ open Microsoft.Extensions.Logging
 open System.Threading
 
 type ConnectionHandlerMessage =
-    | Connect of AsyncReplyChannel<unit>
     | Reconnect
     | ConnectionClosed of AsyncReplyChannel<unit>
 
@@ -17,54 +16,42 @@ type ConnectionState =
     | Failed
     | Uninitialized
 
-type ConnectionHandler(registerFunction) as this =
+type ConnectionHandler(lookup: BinaryLookupService, topic: string, connectionOpened: unit -> unit) as this =
 
     let mutable connectionState = Uninitialized
     let mutable reconnectCount = 0
-
-    let isValidStateForReconnection() =
-        match connectionState with
-        | Uninitialized | Connecting | Ready _ ->
-            // Ok
-            true
-
-        | Closing | Closed | Failed | Terminated ->
-            false
 
     let mb = MailboxProcessor<ConnectionHandlerMessage>.Start(fun inbox ->
         let rec loop () =
             async {
                 let! msg = inbox.Receive()
                 match msg with
-                | Connect channel ->
-                    let! clientCnx = registerFunction()
-                    connectionState <- Ready clientCnx
-                    channel.Reply()
                 | Reconnect ->
-                    if isValidStateForReconnection()
-                    then
+                    match this.ConnectionState with
+                    | Uninitialized | Connecting ->
                         try
-                            let! clientCnx = registerFunction()
-                            connectionState <- Ready clientCnx
+                            let! broker = lookup.GetBroker(topic) |> Async.AwaitTask
+                            let! clientCnx = ConnectionPool.getConnection broker |> Async.AwaitTask
+                            Volatile.Write(&connectionState, Ready clientCnx)
                             reconnectCount <- 0
+                            connectionOpened()
                         with
                         | ex ->
                             // TODO backoff
                             this.Mb.Post(ConnectionHandlerMessage.Reconnect)
-                            Log.Logger.LogWarning(ex, "Error reconnecting")
-                            if reconnectCount > 3
+                            Log.Logger.LogWarning(ex, "Error reconnecting on try {0}", reconnectCount)
+                            if Interlocked.Increment(&reconnectCount) > 3
                             then
                                 raise ex
-                    else
-                        // Ignore connection closed when we are shutting down
-                        Log.Logger.LogInformation("Skipped reconnecting for state {0} on Reconnect", connectionState)
+                    | _ ->
+                        Log.Logger.LogInformation("Skipped reconnecting for state {0} on Reconnect", this.ConnectionState)
                 | ConnectionClosed channel ->
-                    if isValidStateForReconnection()
-                    then
-                        connectionState <- Connecting
+                    match this.ConnectionState with
+                    | Uninitialized | Ready _ ->
+                        Volatile.Write(&connectionState, Connecting)
                         this.Mb.Post(Reconnect)
-                    else
-                        Log.Logger.LogInformation("Skipped reconnecting for state {0} on ConnectionClosed", connectionState)
+                    | _ ->
+                        Log.Logger.LogInformation("Skipped reconnecting for state {0} on ConnectionClosed", this.ConnectionState)
                     channel.Reply()
                 return! loop ()
             }
@@ -74,9 +61,9 @@ type ConnectionHandler(registerFunction) as this =
     member private __.Mb with get() : MailboxProcessor<ConnectionHandlerMessage> = mb
 
     member __.Connect() =
-        mb.PostAndAsyncReply(Connect)
+        mb.Post(Reconnect)
 
     member __.ConnectionClosed() =
         mb.PostAndAsyncReply(ConnectionClosed)
 
-    member __.ConnectionState with get() = connectionState
+    member __.ConnectionState with get() = Volatile.Read(&connectionState)

@@ -29,15 +29,10 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
     let queue = new ConcurrentQueue<Message>()
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
 
-    let registerConsumer() =
-        task {
-            let! broker = lookup.GetBroker(consumerConfig.Topic)
-            let! clientCnx = ConnectionPool.getConnection broker
-            do! clientCnx.RegisterConsumer consumerConfig consumerId this.Mb
-            return clientCnx
-        } |> Async.AwaitTask
+    let connectionOpened() =
+        this.Mb.Post(ConsumerMessage.ConnectionOpened)
 
-    let connectionHandler = ConnectionHandler registerConsumer
+    let connectionHandler = ConnectionHandler(lookup, consumerConfig.Topic, connectionOpened)
 
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
@@ -49,9 +44,12 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     failwith (sprintf "Consumer status: %A" state.Status)
                 else
                     match msg with
-                    | ConsumerMessage.Connect channel ->
-                        do! connectionHandler.Connect()
-                        channel.Reply()
+                    | ConsumerMessage.ConnectionOpened ->
+                        match connectionHandler.ConnectionState with
+                        | Ready clientCnx ->
+                            do! clientCnx.RegisterConsumer consumerConfig consumerId this.Mb |> Async.AwaitTask
+                        | _ ->
+                            Log.Logger.LogWarning("Connection opened but connection is not ready")
                         return! loop state
                     | ConsumerMessage.ConnectionClosed ->
                         do! connectionHandler.ConnectionClosed()
@@ -103,19 +101,14 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
         }
 
     member private __.InitInternal() =
-        task {
-            let! broker = lookup.GetBroker(consumerConfig.Topic)
-            return! mb.PostAndAsyncReply(Connect)
-        }
+        connectionHandler.Connect()
 
-    member private __.Mb with get() = mb
+    member private __.Mb with get(): MailboxProcessor<ConsumerMessage> = mb
 
     static member Init(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
-        task {
-            let consumer = Consumer(consumerConfig, lookup)
-            do! consumer.InitInternal()
-            return consumer
-        }
+        let consumer = Consumer(consumerConfig, lookup)
+        consumer.InitInternal()
+        consumer
 
 
 
