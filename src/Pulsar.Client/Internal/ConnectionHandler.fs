@@ -32,7 +32,7 @@ type ConnectionHandler(lookup: BinaryLookupService, topic: string, connectionOpe
                         try
                             let! broker = lookup.GetBroker(topic) |> Async.AwaitTask
                             let! clientCnx = ConnectionPool.getConnection broker |> Async.AwaitTask
-                            Volatile.Write(&connectionState, Ready clientCnx)
+                            this.ConnectionState <- Ready clientCnx
                             reconnectCount <- 0
                             connectionOpened()
                         with
@@ -48,7 +48,7 @@ type ConnectionHandler(lookup: BinaryLookupService, topic: string, connectionOpe
                 | ConnectionClosed channel ->
                     match this.ConnectionState with
                     | Uninitialized | Ready _ ->
-                        Volatile.Write(&connectionState, Connecting)
+                        this.ConnectionState <- Connecting
                         this.Mb.Post(Reconnect)
                     | _ ->
                         Log.Logger.LogInformation("Skipped reconnecting for state {0} on ConnectionClosed", this.ConnectionState)
@@ -66,4 +66,6 @@ type ConnectionHandler(lookup: BinaryLookupService, topic: string, connectionOpe
     member __.ConnectionClosed() =
         mb.PostAndAsyncReply(ConnectionClosed)
 
-    member __.ConnectionState with get() = Volatile.Read(&connectionState)
+    member __.ConnectionState
+        with get() = Volatile.Read(&connectionState)
+        and private set(value) = Volatile.Write(&connectionState, value)
