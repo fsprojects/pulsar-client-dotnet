@@ -109,7 +109,7 @@ let newSend (producerId : ProducerId) (sequenceId : SequenceId) (numMessages : i
 let newAck (consumerId : ConsumerId) (messageId: MessageId)
     (ackType : CommandAck.AckType) : Payload =
     let request = CommandAck(ConsumerId = %consumerId, ack_type = ackType)
-    request.MessageIds.Add(MessageIdData(ledgerId = %messageId.LedgerId, entryId = %messageId.EntryId))
+    request.MessageIds.Add(messageId.ToMessageIdData())
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 
@@ -161,4 +161,22 @@ let newSubscribe (topicName: string) (subscription: string) (consumerId: Consume
 let newFlow (consumerId: ConsumerId) (messagePermits: uint32) =
     let request = CommandFlow(ConsumerId = %consumerId, messagePermits = messagePermits)
     let command = BaseCommand(``type`` = CommandType.Flow, Flow = request)
+    command |> serializeSimpleCommand
+
+let newCloseConsumer (consumerId: ConsumerId) (requestId : RequestId) =
+    let request = CommandCloseConsumer(ConsumerId = %consumerId, RequestId = %requestId)
+    let command = BaseCommand(``type`` = CommandType.CloseConsumer, CloseConsumer = request)
+    command |> serializeSimpleCommand
+
+let newCloseProducer (producerId: ProducerId) (requestId : RequestId) =
+    let request = CommandCloseProducer(ProducerId = %producerId, RequestId = %requestId)
+    let command = BaseCommand(``type`` = CommandType.CloseProducer, CloseProducer = request)
+    command |> serializeSimpleCommand
+
+let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<MessageId list>) =
+    let request = CommandRedeliverUnacknowledgedMessages(ConsumerId = %consumerId)
+    match messageIds with
+    | Some ids -> ids |> List.iter (fun msgId -> request.MessageIds.Add(msgId.ToMessageIdData()))
+    | None -> ()
+    let command = BaseCommand(``type`` = CommandType.RedeliverUnacknowledgedMessages, redeliverUnacknowledgedMessages = request)
     command |> serializeSimpleCommand

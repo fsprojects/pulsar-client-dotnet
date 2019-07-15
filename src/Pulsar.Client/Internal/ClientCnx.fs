@@ -19,6 +19,8 @@ open Pulsar.Client.Api
 type CnxOperation =
     | AddProducer of ProducerId * MailboxProcessor<ProducerMessage>
     | AddConsumer of ConsumerId * MailboxProcessor<ConsumerMessage>
+    | RemoveConsumer of ConsumerId
+    | RemoveProducer of ProducerId
     | ChannelInactive
 
 type PulsarCommands =
@@ -72,6 +74,12 @@ type ClientCnx (broker: Broker,
                     return! loop()
                 | AddConsumer (consumerId, mb) ->
                     consumers.Add(consumerId, mb)
+                    return! loop()
+                | RemoveConsumer consumerId ->
+                    consumers.Remove(consumerId) |> ignore
+                    return! loop()
+                | RemoveProducer producerId ->
+                    producers.Remove(producerId) |> ignore
                     return! loop()
                 | ChannelInactive ->
                     cts.Cancel()
@@ -278,6 +286,9 @@ type ClientCnx (broker: Broker,
     member __.Send payload =
         sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
 
+    member __.SendAndForget payload =
+        sendMb.Post(SocketMessageWithoutReply payload)
+
     member __.SendAndWaitForReply reqId payload =
         task {
             let! task = sendMb.PostAndAsyncReply(fun replyChannel -> SocketRequestMessageWithReply(reqId, payload, replyChannel))
@@ -297,8 +308,10 @@ type ClientCnx (broker: Broker,
                 Log.Logger.LogInformation("Producer {0} registered with name {1}", producerId, success.GeneratedProducerName)
             | _ ->
                 // TODO: implement correct error handling
-                () // failwith "Incorrect return type"
+                failwith "Incorrect return type"
         }
+
+
 
     member __.RegisterConsumer (consumerConfig: ConsumerConfiguration) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
         task {
@@ -318,5 +331,35 @@ type ClientCnx (broker: Broker,
                 Log.Logger.LogInformation("Consumer initial flow sent {0}", initialFlowCount)
             | _ ->
                 // TODO: implement correct error handling
-                () // failwith "Incorrect return type"
+                failwith "Incorrect return type"
+        }
+
+    member __.UnregisterProducer (producerId: ProducerId) =
+        task {
+            Log.Logger.LogInformation("Starting unregister producer {0}", producerId)
+            let requestId = Generators.getNextRequestId()
+            let payload = Commands.newCloseProducer producerId requestId
+            let! result =  __.SendAndWaitForReply requestId payload
+            match result with
+            | Empty ->
+                operationsMb.Post(RemoveProducer(producerId))
+                Log.Logger.LogInformation("ProducerId {0} unregistered", producerId)
+            | _ ->
+                // TODO: implement correct error handling
+                failwith "Incorrect return type"
+        }
+
+    member __.UnregisterConsumer (consumerId: ConsumerId) =
+        task {
+            Log.Logger.LogInformation("Starting unregister consumer {0}", consumerId)
+            let requestId = Generators.getNextRequestId()
+            let payload = Commands.newCloseConsumer consumerId requestId
+            let! result =  __.SendAndWaitForReply requestId payload
+            match result with
+            | Empty ->
+                operationsMb.Post(RemoveConsumer(consumerId))
+                Log.Logger.LogInformation("Consumer {0} unregistered", consumerId)
+            | _ ->
+                // TODO: implement correct error handling
+                failwith "Incorrect return type"
         }

@@ -15,7 +15,7 @@ let main argv =
     PulsarClient.Logger <- ConsoleLogger("PulsarLogger", Func<string,LogLevel,bool>(fun x y -> true), true)
     let client =
         PulsarClientBuilder()
-            .WithServiceUrl("pulsar://pulsar-broker:31002")
+            .WithServiceUrl("pulsar://my-pulsar-cluster:31002")
             .Build()
     let t = task {
 

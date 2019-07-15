@@ -75,6 +75,15 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         tsc.SetException(Exception(error.Message))
                         messages.TryRemove(sequenceId) |> ignore
                     | false, _ -> ()
+                | ProducerMessage.Close channel ->
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        connectionHandler.Closing()
+                        do! clientCnx.UnregisterProducer producerId |> Async.AwaitTask
+                        connectionHandler.Closed()
+                    | _ ->
+                        connectionHandler.Closed()
+                    channel.Reply()
                 return! loop ()
             }
         loop ()
@@ -120,12 +129,15 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
             return! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
         }
 
+    member __.CloseAsync() =
+        mb.PostAndAsyncReply(ProducerMessage.Close)
+
     member private __.InitInternal() =
        connectionHandler.Connect()
 
     member private __.Mb with get(): MailboxProcessor<ProducerMessage> = mb
 
     static member Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
-        let producer = Producer(producerConfig, lookup)
+        let producer = new Producer(producerConfig, lookup)
         producer.InitInternal()
         producer

@@ -45,12 +45,19 @@ type MessageId =
         EntryId: EntryId
         Partition: int
     }
-    with static member FromMessageIdData(messageIdData: MessageIdData) =
+    with
+        static member FromMessageIdData(messageIdData: MessageIdData) =
             {
                 LedgerId = %messageIdData.ledgerId
                 EntryId = %messageIdData.entryId
                 Partition = messageIdData.Partition
             }
+        member this.ToMessageIdData() =
+            MessageIdData(
+                ledgerId = %this.LedgerId,
+                entryId = %this.EntryId,
+                Partition = this.Partition
+            )
 
 type LogicalAddress = LogicalAddress of DnsEndPoint
 type PhysicalAddress = PhysicalAddress of DnsEndPoint
@@ -77,6 +84,7 @@ type ProducerMessage =
     | SendReceipt of CommandSendReceipt
     | SendMessage of Payload * AsyncReplyChannel<unit>
     | SendError of CommandSendError
+    | Close of AsyncReplyChannel<unit>
 
 type ConsumerMessage =
     | ConnectionOpened
@@ -85,3 +93,5 @@ type ConsumerMessage =
     | MessageRecieved of Message
     | GetMessage of AsyncReplyChannel<Message>
     | Ack of Payload * AsyncReplyChannel<unit>
+    | SendAndForget of Payload
+    | Close of AsyncReplyChannel<unit>

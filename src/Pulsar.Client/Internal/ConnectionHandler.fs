@@ -5,6 +5,9 @@ open System.Threading
 
 type ConnectionHandlerMessage =
     | Reconnect
+    | Terminate
+    | StartClose
+    | EndClose
     | ConnectionClosed of AsyncReplyChannel<unit>
 
 type ConnectionState =
@@ -53,6 +56,12 @@ type ConnectionHandler(lookup: BinaryLookupService, topic: string, connectionOpe
                     | _ ->
                         Log.Logger.LogInformation("Skipped reconnecting for state {0} on ConnectionClosed", this.ConnectionState)
                     channel.Reply()
+                | Terminate ->
+                    this.ConnectionState <- Terminated
+                | StartClose ->
+                    this.ConnectionState <- Closing
+                | EndClose ->
+                    this.ConnectionState <- Closed
                 return! loop ()
             }
         loop  ()
@@ -62,6 +71,15 @@ type ConnectionHandler(lookup: BinaryLookupService, topic: string, connectionOpe
 
     member __.Connect() =
         mb.Post(Reconnect)
+
+    member __.Terminate() =
+        mb.Post(Terminate)
+
+    member __.Closed() =
+        mb.Post(EndClose)
+
+    member __.Closing() =
+        mb.Post(StartClose)
 
     member __.ConnectionClosed() =
         mb.PostAndAsyncReply(ConnectionClosed)

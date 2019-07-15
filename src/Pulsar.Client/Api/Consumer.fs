@@ -10,16 +10,12 @@ open System.Runtime.CompilerServices
 open Pulsar.Client.Common
 open pulsar.proto
 open Microsoft.Extensions.Logging
+open System.Threading
 
 type ConsumerException(message) =
     inherit Exception(message)
 
-type ConsumerStatus =
-    | Normal
-    | Terminated
-
 type ConsumerState = {
-    Status: ConsumerStatus
     WaitingChannel: AsyncReplyChannel<Message>
 }
 
@@ -39,49 +35,62 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
         let rec loop (state: ConsumerState) =
             async {
                 let! msg = inbox.Receive()
-                if (state.Status <> ConsumerStatus.Normal)
-                then
-                    failwith (sprintf "Consumer status: %A" state.Status)
-                else
-                    match msg with
-                    | ConsumerMessage.ConnectionOpened ->
-                        match connectionHandler.ConnectionState with
-                        | Ready clientCnx ->
-                            do! clientCnx.RegisterConsumer consumerConfig consumerId this.Mb |> Async.AwaitTask
-                        | _ ->
-                            Log.Logger.LogWarning("Connection opened but connection is not ready")
+                match msg with
+                | ConsumerMessage.ConnectionOpened ->
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        do! clientCnx.RegisterConsumer consumerConfig consumerId this.Mb |> Async.AwaitTask
+                    | _ ->
+                        Log.Logger.LogWarning("Connection opened but connection is not ready")
+                    return! loop state
+                | ConsumerMessage.ConnectionClosed ->
+                    do! connectionHandler.ConnectionClosed()
+                    return! loop state
+                | ConsumerMessage.MessageRecieved x ->
+                    if state.WaitingChannel = nullChannel
+                    then
+                        queue.Enqueue(x)
                         return! loop state
-                    | ConsumerMessage.ConnectionClosed ->
-                        do! connectionHandler.ConnectionClosed()
+                    else
+                        state.WaitingChannel.Reply(x)
+                        return! loop { state with WaitingChannel = nullChannel }
+                | ConsumerMessage.GetMessage ch ->
+                    match queue.TryDequeue() with
+                    | true, msg ->
+                        ch.Reply msg
                         return! loop state
-                    | ConsumerMessage.MessageRecieved x ->
-                        if state.WaitingChannel = nullChannel
-                        then
-                            queue.Enqueue(x)
-                            return! loop state
-                        else
-                            state.WaitingChannel.Reply(x)
-                            return! loop { state with WaitingChannel = nullChannel }
-                    | ConsumerMessage.GetMessage ch ->
-                        match queue.TryDequeue() with
-                        | true, msg ->
-                            ch.Reply msg
-                            return! loop state
-                        | false, _ ->
-                            return! loop { state with WaitingChannel = ch }
-                    | ConsumerMessage.Ack (payload, channel) ->
-                        match connectionHandler.ConnectionState with
-                        | Ready conn ->
-                            do! conn.Send payload
-                            channel.Reply()
-                            return! loop state
-                        | _ ->
-                            //TODO put message on schedule
-                            return! loop state
-                    | ConsumerMessage.ReachedEndOfTheTopic ->
-                        return! loop { state with Status = Terminated }
+                    | false, _ ->
+                        return! loop { state with WaitingChannel = ch }
+                | ConsumerMessage.Ack (payload, channel) ->
+                    match connectionHandler.ConnectionState with
+                    | Ready conn ->
+                        do! conn.Send payload
+                        channel.Reply()
+                    | _ ->
+                        //TODO put message on schedule
+                    return! loop state
+                | ConsumerMessage.SendAndForget payload ->
+                    match connectionHandler.ConnectionState with
+                    | Ready conn ->
+                        conn.SendAndForget payload
+                    | _ -> ()
+                    return! loop state
+                | ConsumerMessage.ReachedEndOfTheTopic ->
+                    //TODO notify client app that topic end reached
+                    connectionHandler.Terminate()
+                | ConsumerMessage.Close channel ->
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        //TODO check if we should block mb on closing
+                        connectionHandler.Closing()
+                        do! clientCnx.UnregisterConsumer consumerId |> Async.AwaitTask
+                        connectionHandler.Closed()
+                    | _ ->
+                        connectionHandler.Closed()
+                    channel.Reply()
+                    return! loop state
             }
-        loop { Status = Normal; WaitingChannel = nullChannel}
+        loop { WaitingChannel = nullChannel }
     )
 
     member __.ReceiveAsync() =
@@ -99,6 +108,13 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
             do! mb.PostAndAsyncReply(fun channel -> Ack (command, channel))
             return! Task.FromResult()
         }
+
+    member __.RedeliverUnacknowledgedMessages () =
+        let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
+        mb.Post(SendAndForget command)
+
+    member __.CloseAsync() =
+        mb.PostAndAsyncReply(ConsumerMessage.Close)
 
     member private __.InitInternal() =
         connectionHandler.Connect()

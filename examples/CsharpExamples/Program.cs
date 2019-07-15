@@ -17,7 +17,7 @@ namespace CsharpExamples
 
             var client =
                 new PulsarClientBuilder()
-                    .WithServiceUrl("pulsar://pulsar-broker:31002")
+                    .WithServiceUrl("pulsar://my-pulsar-cluster:31002")
                     .Build();
 
             var producer =

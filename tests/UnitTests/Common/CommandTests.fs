@@ -14,32 +14,32 @@ open System.Net
 open System.Threading.Tasks
 open CRC32
 
-module CommandsTests =    
-            
+module CommandsTests =
+
     let private protoDeserialize<'T> (bytes : byte[]) =
         use stream = new MemoryStream(bytes)
         Serializer.Deserialize<'T>(stream)
-    
+
     let deserializeSimpleCommand(bytes : byte[]) =
         use stream = new MemoryStream(bytes)
         use reader = new BinaryReader(stream)
-    
+
         let totalSize = reader.ReadInt32() |> int32FromBigEndian
         let commandSize = reader.ReadInt32() |> int32FromBigEndian
-    
+
         let command =
             reader.ReadBytes(commandSize)
             |> protoDeserialize<BaseCommand>
-    
+
         (totalSize, commandSize, command)
 
     let deserializePayloadCommand(bytes : byte[]) =
         use stream = new MemoryStream(bytes)
         use reader = new BinaryReader(stream)
-    
+
         let totalSize = reader.ReadInt32() |> int32FromBigEndian
         let commandSize = reader.ReadInt32() |> int32FromBigEndian
-    
+
         let command =
             reader.ReadBytes(commandSize)
             |> protoDeserialize<BaseCommand>
@@ -53,18 +53,18 @@ module CommandsTests =
             |> protoDeserialize<MessageMetadata>
 
         let payload = reader.ReadBytes(bytes.Length - 8 - commandSize - 10 - medataSize)
-    
+
         (bytes, totalSize, commandSize, command, magicNumber, crc32, medataSize, metadata, payload)
 
-    let serializeDeserializeSimpleCommand (cmd: (MemoryStream -> Task)) = 
+    let serializeDeserializeSimpleCommand (cmd: (MemoryStream -> Task)) =
         let stream = new MemoryStream()
-        (cmd stream).Wait() 
+        (cmd stream).Wait()
         let commandBytes = stream.ToArray()
         commandBytes |> deserializeSimpleCommand
 
-    let serializeDeserializePayloadCommand (cmd: (MemoryStream -> Task)) = 
+    let serializeDeserializePayloadCommand (cmd: (MemoryStream -> Task)) =
         let stream = new MemoryStream()
-        (cmd stream).Wait() 
+        (cmd stream).Wait()
         let commandBytes = stream.ToArray()
         commandBytes |> deserializePayloadCommand
 
@@ -76,8 +76,8 @@ module CommandsTests =
             test "newPartitionMetadataRequest should return correct frame" {
                 let topicName = "test-topic"
                 let requestId = %1UL
-               
-                let totalSize, commandSize, command = 
+
+                let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand (newPartitionMetadataRequest topicName requestId)
 
                 totalSize |> Expect.equal "" 23
@@ -91,7 +91,7 @@ module CommandsTests =
                 let clientVersion = "client-version"
                 let protocolVersion = ProtocolVersion.V1
 
-                let totalSize, commandSize, command = 
+                let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand (newConnect clientVersion protocolVersion None)
 
                 totalSize |> Expect.equal "" 26
@@ -108,9 +108,9 @@ module CommandsTests =
                 let metadata = MessageMetadata(ProducerName = "TestMe")
                 let payload = [| 1uy; 17uy; |]
 
-                let (bytes, totalSize, commandSize, command, magicNumber, crc32, medataSize, resultMetadata, resultPayload) = 
+                let (bytes, totalSize, commandSize, command, magicNumber, crc32, medataSize, resultMetadata, resultPayload) =
                     serializeDeserializePayloadCommand (newSend producerId sequenceId numMessages metadata payload)
-                
+
                 let crcArrayStart = 8 + commandSize + 6
                 let crcArray = bytes.AsSpan(crcArrayStart, 4 + medataSize + resultPayload.Length).ToArray()
 
@@ -126,8 +126,8 @@ module CommandsTests =
                 let producerName = "test-producer"
                 let producerId = %1UL
                 let requestId = %1UL
-               
-                let totalSize, commandSize, command = 
+
+                let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand (newProducer topicName producerName producerId requestId)
 
                 totalSize |> Expect.equal "" 39
@@ -144,8 +144,8 @@ module CommandsTests =
                 let consumerName = "test-consumer"
                 let consumerId = %1UL
                 let requestId = %1UL
-               
-                let totalSize, commandSize, command = 
+
+                let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand (newSubscribe topicName "test-subscription" consumerId requestId consumerName SubscriptionType.Exclusive)
 
                 totalSize |> Expect.equal "" 60
@@ -160,8 +160,8 @@ module CommandsTests =
             test "newFlow should return correct frame" {
                 let messagePermits = 100u
                 let consumerId = %1UL
-               
-                let totalSize, commandSize, command = 
+
+                let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand (newFlow consumerId messagePermits)
 
                 totalSize |> Expect.equal "" 12
@@ -171,17 +171,18 @@ module CommandsTests =
             }
 
             test "newAck should return correct frame" {
-                let messageId = { LedgerId = %1UL; EntryId = %2UL; Partition = 0 } 
+                let messageId = { LedgerId = %1UL; EntryId = %2UL; Partition = -1 }
                 let consumerId = %1UL
-               
-                let totalSize, commandSize, command = 
+
+                let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand (newAck consumerId messageId CommandAck.AckType.Individual)
 
-                totalSize |> Expect.equal "" 18
-                commandSize |> Expect.equal "" 14
+                totalSize |> Expect.equal "" 29
+                commandSize |> Expect.equal "" 25
                 command.Ack.ConsumerId |> Expect.equal "" %consumerId
                 command.Ack.MessageIds.[0].entryId |> Expect.equal "" %messageId.EntryId
                 command.Ack.MessageIds.[0].ledgerId |> Expect.equal "" %messageId.LedgerId
+                command.Ack.MessageIds.[0].Partition |> Expect.equal "" %messageId.Partition
             }
 
             test "newLookup should return correct frame" {
@@ -189,7 +190,7 @@ module CommandsTests =
                 let requestId = %1UL
                 let authoritative = true
 
-                let totalSize, commandSize, command = 
+                let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand (newLookup topicName requestId authoritative )
 
                 totalSize |> Expect.equal "" 25
@@ -205,7 +206,7 @@ module CommandsTests =
                 let requestId = %1UL
                 let mode = TopicDomain.Persistent
 
-                let totalSize, commandSize, command = 
+                let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand (newGetTopicsOfNamespaceRequest ns requestId mode )
 
                 totalSize |> Expect.equal "" 29
