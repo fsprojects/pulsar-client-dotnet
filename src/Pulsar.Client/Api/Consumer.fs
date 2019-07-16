@@ -83,7 +83,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     | Ready clientCnx ->
                         //TODO check if we should block mb on closing
                         connectionHandler.Closing()
-                        do! clientCnx.UnregisterConsumer consumerId |> Async.AwaitTask
+                        // TODO failPendingReceive
+                        do! clientCnx.CloseConsumer consumerId |> Async.AwaitTask
                         connectionHandler.Closed()
                     | _ ->
                         connectionHandler.Closed()

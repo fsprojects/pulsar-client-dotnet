@@ -79,7 +79,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         connectionHandler.Closing()
-                        do! clientCnx.UnregisterProducer producerId |> Async.AwaitTask
+                        do! clientCnx.CloseProducer producerId |> Async.AwaitTask
                         connectionHandler.Closed()
                     | _ ->
                         connectionHandler.Closed()

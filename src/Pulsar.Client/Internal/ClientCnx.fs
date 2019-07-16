@@ -334,7 +334,7 @@ type ClientCnx (broker: Broker,
                 failwith "Incorrect return type"
         }
 
-    member __.UnregisterProducer (producerId: ProducerId) =
+    member __.CloseProducer (producerId: ProducerId) =
         task {
             Log.Logger.LogInformation("Starting unregister producer {0}", producerId)
             let requestId = Generators.getNextRequestId()
@@ -349,7 +349,7 @@ type ClientCnx (broker: Broker,
                 failwith "Incorrect return type"
         }
 
-    member __.UnregisterConsumer (consumerId: ConsumerId) =
+    member __.CloseConsumer (consumerId: ConsumerId) =
         task {
             Log.Logger.LogInformation("Starting unregister consumer {0}", consumerId)
             let requestId = Generators.getNextRequestId()
