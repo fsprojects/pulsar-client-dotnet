@@ -216,4 +216,18 @@ module CommandsTests =
                 command.getTopicsOfNamespace.RequestId |> Expect.equal "" (uint64(requestId))
                 command.getTopicsOfNamespace.mode |> Expect.equal "" CommandGetTopicsOfNamespace.Mode.Persistent
             }
+
+            test "newUnsubscribe should return correct frame" {
+                let consumerId = %1UL
+                let requestId = %1UL
+
+                let totalSize, commandSize, command =
+                    serializeDeserializeSimpleCommand (newUnsubscribeConsumer consumerId requestId)
+
+                totalSize |> Expect.equal "" 12
+                commandSize |> Expect.equal "" 8
+                command.``type``  |> Expect.equal "" CommandType.Unsubscribe
+                command.Unsubscribe.ConsumerId |> Expect.equal "" %consumerId
+                command.Unsubscribe.RequestId |> Expect.equal "" %requestId
+            }
         ]

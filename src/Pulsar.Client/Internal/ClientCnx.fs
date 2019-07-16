@@ -363,3 +363,18 @@ type ClientCnx (broker: Broker,
                 // TODO: implement correct error handling
                 failwith "Incorrect return type"
         }
+
+    member __.UnsubscribeConsumer (consumerId: ConsumerId) =
+        task {
+            Log.Logger.LogInformation("Starting unsubscribe consumer {0}", consumerId)
+            let requestId = Generators.getNextRequestId()
+            let payload = Commands.newUnsubscribeConsumer consumerId requestId
+            let! result =  __.SendAndWaitForReply requestId payload
+            match result with
+            | Empty ->
+                operationsMb.Post(RemoveConsumer(consumerId))
+                Log.Logger.LogInformation("Consumer {0} unsubscribed", consumerId)
+            | _ ->
+                // TODO: implement correct error handling
+                failwith "Incorrect return type"
+        }

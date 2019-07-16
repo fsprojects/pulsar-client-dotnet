@@ -168,6 +168,11 @@ let newCloseConsumer (consumerId: ConsumerId) (requestId : RequestId) =
     let command = BaseCommand(``type`` = CommandType.CloseConsumer, CloseConsumer = request)
     command |> serializeSimpleCommand
 
+let newUnsubscribeConsumer (consumerId: ConsumerId) (requestId : RequestId) =
+    let request = CommandUnsubscribe(ConsumerId = %consumerId, RequestId = %requestId)
+    let command = BaseCommand(``type`` = CommandType.Unsubscribe, Unsubscribe = request)
+    command |> serializeSimpleCommand
+
 let newCloseProducer (producerId: ProducerId) (requestId : RequestId) =
     let request = CommandCloseProducer(ProducerId = %producerId, RequestId = %requestId)
     let command = BaseCommand(``type`` = CommandType.CloseProducer, CloseProducer = request)

@@ -95,3 +95,4 @@ type ConsumerMessage =
     | Ack of Payload * AsyncReplyChannel<unit>
     | SendAndForget of Payload
     | Close of AsyncReplyChannel<unit>
+    | Unsubscribe of AsyncReplyChannel<unit>

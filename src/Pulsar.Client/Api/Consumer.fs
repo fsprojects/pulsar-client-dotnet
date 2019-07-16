@@ -89,6 +89,17 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         connectionHandler.Closed()
                     channel.Reply()
                     return! loop state
+                | ConsumerMessage.Unsubscribe channel ->
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        //TODO check if we should block mb on closing
+                        connectionHandler.Closing()
+                        do! clientCnx.UnsubscribeConsumer consumerId |> Async.AwaitTask
+                        connectionHandler.Closed()
+                    | _ ->
+                        connectionHandler.Closed()
+                    channel.Reply()
+                    return! loop state
             }
         loop { WaitingChannel = nullChannel }
     )
@@ -115,6 +126,9 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
 
     member __.CloseAsync() =
         mb.PostAndAsyncReply(ConsumerMessage.Close)
+
+    member __.UnsubscribeAsync() =
+        mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
 
     member private __.InitInternal() =
         connectionHandler.Connect()
