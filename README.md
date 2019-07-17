@@ -3,7 +3,7 @@
 ## IN EARLY DEVELOPMENT, doesn't work yet
 
 
-Supported pulsar version: **2.3.2**
+Supported pulsar version: **2.4.0**
 
 Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix):
 
