@@ -39,6 +39,10 @@ type SubscriptionType =
     | Shared = 1
     | Failover = 2
 
+type TopicDomain =
+    | Persistent
+    | NonPersistent
+
 type MessageId =
     {
         LedgerId: LedgerId

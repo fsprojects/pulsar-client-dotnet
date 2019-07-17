@@ -96,8 +96,8 @@ let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageM
         Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
         stream.CopyToAsync(output)
 
-let newPartitionMetadataRequest(topicName : string) (requestId : RequestId) : Payload =
-    let request = CommandPartitionedTopicMetadata(Topic = topicName, RequestId = %requestId)
+let newPartitionMetadataRequest(topicName : CompleteTopicName) (requestId : RequestId) : Payload =
+    let request = CommandPartitionedTopicMetadata(Topic = %topicName, RequestId = %requestId)
     let command = BaseCommand(``type`` = CommandType.PartitionedMetadata, partitionMetadata = request)
     serializeSimpleCommand command
 
@@ -126,13 +126,13 @@ let newPong () : Payload =
     let command = BaseCommand(``type`` = CommandType.Pong, Pong = request)
     command |> serializeSimpleCommand
 
-let newLookup (topicName : string) (requestId : RequestId) (authoritative : bool) =
-    let request = CommandLookupTopic(Topic = topicName, Authoritative = authoritative, RequestId = uint64(%requestId))
+let newLookup (topicName : CompleteTopicName) (requestId : RequestId) (authoritative : bool) =
+    let request = CommandLookupTopic(Topic = %topicName, Authoritative = authoritative, RequestId = uint64(%requestId))
     let command = BaseCommand(``type`` = CommandType.Lookup, lookupTopic = request)
     command |> serializeSimpleCommand
 
-let newProducer (topicName : string) (producerName: string) (producerId : ProducerId) (requestId : RequestId) =
-    let request = CommandProducer(Topic = topicName, ProducerId = %producerId, RequestId = %requestId, ProducerName = producerName)
+let newProducer (topicName : CompleteTopicName) (producerName: string) (producerId : ProducerId) (requestId : RequestId) =
+    let request = CommandProducer(Topic = %topicName, ProducerId = %producerId, RequestId = %requestId, ProducerName = producerName)
     let command = BaseCommand(``type`` = CommandType.Producer, Producer = request)
     command |> serializeSimpleCommand
 
@@ -145,7 +145,7 @@ let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) 
     let command = BaseCommand(``type`` = CommandType.GetTopicsOfNamespace, getTopicsOfNamespace = request)
     command |> serializeSimpleCommand
 
-let newSubscribe (topicName: string) (subscription: string) (consumerId: ConsumerId) (requestId: RequestId)
+let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumerId: ConsumerId) (requestId: RequestId)
     (consumerName: string) (subscriptionType: SubscriptionType) =
     let subType =
         match subscriptionType with
@@ -153,7 +153,7 @@ let newSubscribe (topicName: string) (subscription: string) (consumerId: Consume
         | SubscriptionType.Shared -> CommandSubscribe.SubType.Shared
         | SubscriptionType.Failover -> CommandSubscribe.SubType.Failover
         | _ -> failwith "Unknown subscription type"
-    let request = CommandSubscribe(Topic = topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId,
+    let request = CommandSubscribe(Topic = %topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId,
                     RequestId = %requestId, ConsumerName =  consumerName)
     let command = BaseCommand(``type`` = CommandType.Subscribe, Subscribe = request)
     command |> serializeSimpleCommand

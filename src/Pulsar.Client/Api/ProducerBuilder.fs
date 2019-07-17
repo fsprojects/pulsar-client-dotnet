@@ -1,12 +1,9 @@
 ﻿namespace Pulsar.Client.Api
 
 open Pulsar.Client.Common
+open FSharp.UMX
 
 type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguration) =
-
-    let producerExceptionIfBlankString message arg =
-        arg
-        |> throwIfBlankString (fun() -> ProducerException(message))
 
     let verify(config : ProducerConfiguration) =
         let checkValue check config =
@@ -17,17 +14,19 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
         |> checkValue
             (fun c ->
                 c.Topic
-                |> producerExceptionIfBlankString "Topic name must be set on the producer builder.")
+                |> throwIfDefault (fun() ->  ProducerException("Topic name must be set on the producer builder.")))
 
     new(client: PulsarClient) = ProducerBuilder(client, ProducerConfiguration.Default)
 
-    member __.Topic topic = 
+    member __.Topic topic =
         ProducerBuilder(
             client,
             { config with
-                Topic = topic |> invalidArgIfBlankString "Topic must not be blank." })
+                Topic = topic
+                    |> invalidArgIfBlankString "Topic must not be blank."
+                    |> TopicName })
 
-    member __.ProducerName topic = 
+    member __.ProducerName topic =
         ProducerBuilder(
             client,
             { config with

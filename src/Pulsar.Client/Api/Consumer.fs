@@ -28,7 +28,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
     let connectionOpened() =
         this.Mb.Post(ConsumerMessage.ConnectionOpened)
 
-    let connectionHandler = ConnectionHandler(lookup, consumerConfig.Topic, connectionOpened)
+    let connectionHandler = ConnectionHandler(lookup, consumerConfig.Topic.CompleteTopicName, connectionOpened)
 
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 

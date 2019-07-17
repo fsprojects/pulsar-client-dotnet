@@ -24,7 +24,7 @@ type PulsarClient(config: PulsarClientConfiguration) =
 
     member private this.SingleTopicSubscribeAsync (consumerConfig: ConsumerConfiguration) =
         task {
-            let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic
+            let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic.CompleteTopicName
             if (metadata.Partitions > 1u)
             then
                 return Consumer.Init(consumerConfig, lookupSerivce)
@@ -34,7 +34,7 @@ type PulsarClient(config: PulsarClientConfiguration) =
 
     member this.CreateProducerAsync (producerConfig: ProducerConfiguration) =
         task {
-            let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic
+            let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
             if (metadata.Partitions > 1u)
             then
                 return Producer.Init(producerConfig, lookupSerivce)

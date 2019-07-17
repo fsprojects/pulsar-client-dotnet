@@ -19,7 +19,7 @@
     <Compile Include="Common\Tools.fs" />
     <Compile Include="Common\UMX.fs" />
     <Compile Include="Common\DTO.fs" />
-    <Compile Include="Common\Topic.fs" />
+    <Compile Include="Common\TopicName.fs" />
     <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\Configuration.fs" />

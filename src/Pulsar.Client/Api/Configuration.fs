@@ -1,6 +1,7 @@
 ﻿namespace Pulsar.Client.Api
 
 open Pulsar.Client.Common
+open FSharp.UMX
 
 type PulsarClientConfiguration =
     {
@@ -13,7 +14,7 @@ type PulsarClientConfiguration =
 
 type ConsumerConfiguration =
     {
-        Topic: string
+        Topic: TopicName
         ConsumerName: string
         SubscriptionName: string
         SubscriptionType: SubscriptionType
@@ -21,7 +22,7 @@ type ConsumerConfiguration =
     }
     static member Default =
         {
-            Topic = ""
+            Topic = Unchecked.defaultof<TopicName>
             ConsumerName = ""
             SubscriptionName = ""
             SubscriptionType = SubscriptionType.Exclusive
@@ -30,13 +31,13 @@ type ConsumerConfiguration =
 
 type ProducerConfiguration =
     {
-        Topic: string
+        Topic: TopicName
         ProducerName: string
         MaxPendingMessages: int
     }
     static member Default =
         {
-            Topic = ""
+            Topic = Unchecked.defaultof<TopicName>
             ProducerName = ""
             MaxPendingMessages = 1000
         }

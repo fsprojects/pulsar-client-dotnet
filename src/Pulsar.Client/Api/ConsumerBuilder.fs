@@ -1,12 +1,9 @@
 ﻿namespace Pulsar.Client.Api
 
 open Pulsar.Client.Common
+open FSharp.UMX
 
 type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguration) =
-
-    let consumerExceptionIfBlankString message arg =
-        arg
-        |> throwIfBlankString (fun() -> ConsumerException(message))
 
     let verify(config : ConsumerConfiguration) =
         let checkValue check config =
@@ -17,11 +14,11 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
         |> checkValue
             (fun c ->
                 c.Topic
-                |> consumerExceptionIfBlankString "Topic name must be set on the producer builder.")
+                |> throwIfDefault (fun() ->  ConsumerException("Topic name must be set on the producer builder.")))
         |> checkValue
             (fun c ->
                 c.SubscriptionName
-                |> consumerExceptionIfBlankString "Subscription name name must be set on the producer builder.")
+                |> throwIfBlankString (fun() -> ConsumerException("Subscription name name must be set on the producer builder.")))
 
     new(client: PulsarClient) = ConsumerBuilder(client, ConsumerConfiguration.Default)
 
@@ -29,7 +26,9 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
         ConsumerBuilder(
             client,
             { config with
-                Topic = topic |> invalidArgIfBlankString "Topic must not be blank." })
+                Topic = topic
+                    |> invalidArgIfBlankString "Topic must not be blank."
+                    |> TopicName })
 
     member __.ConsumerName name =
         ConsumerBuilder(

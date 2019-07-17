@@ -301,7 +301,7 @@ type ClientCnx (broker: Broker,
             operationsMb.Post(AddProducer (producerId, producerMb))
             let requestId = Generators.getNextRequestId()
             let payload =
-                Commands.newProducer producerConfig.Topic producerConfig.ProducerName producerId requestId
+                Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName producerId requestId
             let! result = __.SendAndWaitForReply requestId payload
             match result with
             | ProducerSuccess success ->
@@ -319,7 +319,7 @@ type ClientCnx (broker: Broker,
             operationsMb.Post(AddConsumer (consumerId, consumerMb))
             let requestId = Generators.getNextRequestId()
             let payload =
-                Commands.newSubscribe consumerConfig.Topic consumerConfig.SubscriptionName consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
+                Commands.newSubscribe consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
             let! result =  __.SendAndWaitForReply requestId payload
             match result with
             | Empty ->

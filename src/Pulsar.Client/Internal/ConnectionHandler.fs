@@ -2,6 +2,7 @@
 
 open Microsoft.Extensions.Logging
 open System.Threading
+open Pulsar.Client.Common
 
 type ConnectionHandlerMessage =
     | Reconnect
@@ -19,7 +20,7 @@ type ConnectionState =
     | Failed
     | Uninitialized
 
-type ConnectionHandler(lookup: BinaryLookupService, topic: string, connectionOpened: unit -> unit) as this =
+type ConnectionHandler(lookup: BinaryLookupService, topic: CompleteTopicName, connectionOpened: unit -> unit) as this =
 
     let mutable connectionState = Uninitialized
     let mutable reconnectCount = 0

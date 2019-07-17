@@ -47,15 +47,9 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
 
     member __.UpdateServiceUrl(serviceUrl) = serviceNameResolver.UpdateServiceUrl(serviceUrl)
 
-    member __.GetBroker(topic: string) =
+    member __.GetBroker(topicName: CompleteTopicName) =
         task {
-            let topicName = TopicName topic
-            return! __.GetBroker(topicName)
-        }
-
-    member __.GetBroker(topicName: TopicName) =
-        task {
-            let makeRequest = fun requestId -> Commands.newLookup (topicName.ToString()) requestId false
+            let makeRequest = fun requestId -> Commands.newLookup topicName requestId false
             let! (response, endpoint) = executeRequest makeRequest
             match response with
             | LookupTopicResult metadata ->

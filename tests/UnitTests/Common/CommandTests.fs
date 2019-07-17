@@ -74,7 +74,7 @@ module CommandsTests =
         testList "CommandsTests" [
 
             test "newPartitionMetadataRequest should return correct frame" {
-                let topicName = "test-topic"
+                let topicName = %"test-topic"
                 let requestId = %1UL
 
                 let totalSize, commandSize, command =
@@ -83,7 +83,7 @@ module CommandsTests =
                 totalSize |> Expect.equal "" 23
                 commandSize |> Expect.equal "" 19
                 command.``type``  |> Expect.equal "" CommandType.PartitionedMetadata
-                command.partitionMetadata.Topic |> Expect.equal "" topicName
+                command.partitionMetadata.Topic |> Expect.equal "" %topicName
                 command.partitionMetadata.RequestId |> Expect.equal "" (uint64(requestId))
             }
 
@@ -122,7 +122,7 @@ module CommandsTests =
             }
 
             test "newProducer should return correct frame" {
-                let topicName = "test-topic"
+                let topicName = %"test-topic"
                 let producerName = "test-producer"
                 let producerId = %1UL
                 let requestId = %1UL
@@ -133,14 +133,14 @@ module CommandsTests =
                 totalSize |> Expect.equal "" 39
                 commandSize |> Expect.equal "" 35
                 command.``type``  |> Expect.equal "" CommandType.Producer
-                command.Producer.Topic |> Expect.equal "" topicName
+                command.Producer.Topic |> Expect.equal "" %topicName
                 command.Producer.RequestId |> Expect.equal "" %requestId
                 command.Producer.ProducerId |> Expect.equal "" %producerId
                 command.Producer.ProducerName |> Expect.equal "" %producerName
             }
 
             test "newSubscribe should return correct frame" {
-                let topicName = "test-topic"
+                let topicName = %"test-topic"
                 let consumerName = "test-consumer"
                 let consumerId = %1UL
                 let requestId = %1UL
@@ -151,7 +151,7 @@ module CommandsTests =
                 totalSize |> Expect.equal "" 60
                 commandSize |> Expect.equal "" 56
                 command.``type``  |> Expect.equal "" CommandType.Subscribe
-                command.Subscribe.Topic |> Expect.equal "" topicName
+                command.Subscribe.Topic |> Expect.equal "" %topicName
                 command.Subscribe.RequestId |> Expect.equal "" %requestId
                 command.Subscribe.ConsumerId |> Expect.equal "" %consumerId
                 command.Subscribe.ConsumerName |> Expect.equal "" %consumerName
@@ -186,7 +186,7 @@ module CommandsTests =
             }
 
             test "newLookup should return correct frame" {
-                let topicName = "test-topic"
+                let topicName = %"test-topic"
                 let requestId = %1UL
                 let authoritative = true
 
@@ -196,7 +196,7 @@ module CommandsTests =
                 totalSize |> Expect.equal "" 25
                 commandSize |> Expect.equal "" 21
                 command.``type``  |> Expect.equal "" CommandType.Lookup
-                command.lookupTopic.Topic |> Expect.equal "" topicName
+                command.lookupTopic.Topic |> Expect.equal "" %topicName
                 command.lookupTopic.RequestId |> Expect.equal "" (uint64(requestId))
                 command.lookupTopic.Authoritative |> Expect.equal "" authoritative
             }

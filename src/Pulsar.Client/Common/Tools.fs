@@ -38,3 +38,5 @@ let invalidArgIfNotGreaterThanZero =
 let throwIfBlankString createException =
     throwIf (String.IsNullOrWhiteSpace) createException
 
+let throwIfDefault createException (value: 'a) =
+    throwIf (fun (arg) -> arg = Unchecked.defaultof<'a>) createException value

@@ -23,7 +23,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
     let connectionOpened() =
         this.Mb.Post(ProducerMessage.ConnectionOpened)
 
-    let connectionHandler = ConnectionHandler(lookup, producerConfig.Topic, connectionOpened)
+    let connectionHandler = ConnectionHandler(lookup, producerConfig.Topic.CompleteTopicName, connectionOpened)
 
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
         let rec loop () =
