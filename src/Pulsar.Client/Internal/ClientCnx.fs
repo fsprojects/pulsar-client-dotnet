@@ -315,7 +315,7 @@ type ClientCnx (broker: Broker,
 
     member __.RegisterConsumer (consumerConfig: ConsumerConfiguration) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
         task {
-            Log.Logger.LogInformation("Starting register consumer {0}", consumerId)
+            Log.Logger.LogInformation("Starting subscribe consumer {0}", consumerId)
             operationsMb.Post(AddConsumer (consumerId, consumerMb))
             let requestId = Generators.getNextRequestId()
             let payload =
@@ -323,7 +323,7 @@ type ClientCnx (broker: Broker,
             let! result =  __.SendAndWaitForReply requestId payload
             match result with
             | Empty ->
-                Log.Logger.LogInformation("Consumer {0} registered", consumerId)
+                Log.Logger.LogInformation("Consumer {0} subscribed", consumerId)
                 let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
                 let flowCommand =
                     Commands.newFlow consumerId initialFlowCount
@@ -336,14 +336,14 @@ type ClientCnx (broker: Broker,
 
     member __.CloseProducer (producerId: ProducerId) =
         task {
-            Log.Logger.LogInformation("Starting unregister producer {0}", producerId)
+            Log.Logger.LogInformation("Starting close producer {0}", producerId)
             let requestId = Generators.getNextRequestId()
             let payload = Commands.newCloseProducer producerId requestId
             let! result =  __.SendAndWaitForReply requestId payload
             match result with
             | Empty ->
                 operationsMb.Post(RemoveProducer(producerId))
-                Log.Logger.LogInformation("ProducerId {0} unregistered", producerId)
+                Log.Logger.LogInformation("ProducerId {0} closed", producerId)
             | _ ->
                 // TODO: implement correct error handling
                 failwith "Incorrect return type"
@@ -351,14 +351,14 @@ type ClientCnx (broker: Broker,
 
     member __.CloseConsumer (consumerId: ConsumerId) =
         task {
-            Log.Logger.LogInformation("Starting unregister consumer {0}", consumerId)
+            Log.Logger.LogInformation("Starting close consumer {0}", consumerId)
             let requestId = Generators.getNextRequestId()
             let payload = Commands.newCloseConsumer consumerId requestId
             let! result =  __.SendAndWaitForReply requestId payload
             match result with
             | Empty ->
                 operationsMb.Post(RemoveConsumer(consumerId))
-                Log.Logger.LogInformation("Consumer {0} unregistered", consumerId)
+                Log.Logger.LogInformation("Consumer {0} closed", consumerId)
             | _ ->
                 // TODO: implement correct error handling
                 failwith "Incorrect return type"
