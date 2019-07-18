@@ -39,3 +39,5 @@ type TopicName(topic: string) =
 
     member __.CompleteTopicName
         with get() : CompleteTopicName = %completeTopicName
+
+    override this.ToString() = %this.CompleteTopicName

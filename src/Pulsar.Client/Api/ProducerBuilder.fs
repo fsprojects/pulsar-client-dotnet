@@ -26,11 +26,11 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                     |> invalidArgIfBlankString "Topic must not be blank."
                     |> TopicName })
 
-    member __.ProducerName topic =
+    member __.ProducerName producerName =
         ProducerBuilder(
             client,
             { config with
-                ProducerName = topic |> invalidArgIfBlankString "ProducerName must not be blank." })
+                ProducerName = producerName |> invalidArgIfBlankString "ProducerName must not be blank." })
 
     member __.MaxPendingMessages maxPendingMessages =
         ProducerBuilder(

@@ -378,3 +378,7 @@ type ClientCnx (broker: Broker,
                 // TODO: implement correct error handling
                 failwith "Incorrect return type"
         }
+
+    member __.Disconnect() =
+        let (conn, _) = connection
+        conn.Dispose()
