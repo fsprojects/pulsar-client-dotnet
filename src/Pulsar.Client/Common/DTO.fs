@@ -82,12 +82,19 @@ type WriterStream = Stream
 type Payload = WriterStream -> Task
 type Connection = SocketConnection * WriterStream
 
+type PendingMessage =
+    {
+        SequenceId: SequenceId
+        Payload: Payload
+        Tcs : TaskCompletionSource<MessageId>
+    }
+
 type ProducerMessage =
     | ConnectionOpened
     | ConnectionClosed
     | SendReceipt of CommandSendReceipt
     | BeginSendMessage of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
-    | SendMessage of SequenceId * Payload * TaskCompletionSource<MessageId>
+    | SendMessage of PendingMessage
     | SendError of CommandSendError
     | Close of AsyncReplyChannel<unit>
 

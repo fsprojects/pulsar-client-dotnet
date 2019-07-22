@@ -13,11 +13,6 @@ open System.Collections.Generic
 type ProducerException(message) =
     inherit Exception(message)
 
-type private PendingMessage =
-    { SequenceId: SequenceId
-      Payload: Payload
-      Tcs : TaskCompletionSource<MessageId> }
-
 type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) as this =
     let producerId = Generators.getNextProducerId()
 
@@ -39,14 +34,13 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     | Ready clientCnx ->
                         do! clientCnx.RegisterProducer producerConfig producerId this.Mb |> Async.AwaitTask
                         // process pending messages
-                        if pendingMessages.Count > 0
-                        then
+                        if pendingMessages.Count > 0 then
                             Log.Logger.LogInformation("Resending {0} pending messages", pendingMessages.Count)
                             let mutable sentCount = 0
 
                             while pendingMessages.Count > 0 do
                                 let pendingMessage = pendingMessages.Dequeue()
-                                this.Mb.Post(SendMessage (pendingMessage.SequenceId, pendingMessage.Payload, pendingMessage.Tcs))
+                                this.Mb.Post(SendMessage pendingMessage)
                                 sentCount <- sentCount + 1
 
                             Log.Logger.LogInformation("{0} pending messages was sent", sentCount)
@@ -67,23 +61,22 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                             UncompressedSize = (message.Length |> uint32)
                         )
 
-                    let command = Commands.newSend producerId sequenceId 1 metadata message
+                    let payload = Commands.newSend producerId sequenceId 1 metadata message
                     let tcs = TaskCompletionSource()
-                    this.Mb.Post(SendMessage (sequenceId, command, tcs))
+                    this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Tcs = tcs })
                     channel.Reply(tcs)
 
-                | ProducerMessage.SendMessage (sequenceId, payload, tcs) ->
+                | ProducerMessage.SendMessage pendingMessage ->
 
-                    if pendingMessages.Count <= producerConfig.MaxPendingMessages
-                    then
-                        let pendingMessage = { SequenceId = sequenceId; Payload = payload; Tcs = tcs }
+                    if pendingMessages.Count <= producerConfig.MaxPendingMessages then
                         pendingMessages.Enqueue(pendingMessage)
                     else
                         raise <| ProducerException("Producer send queue is full.")
 
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
-                        do! clientCnx.Send payload
+                        do! clientCnx.Send pendingMessage.Payload
+                        Log.Logger.LogDebug("Send complete")
                     | _ ->
                         Log.Logger.LogWarning("NotConnected, skipping send")
 
@@ -100,7 +93,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
                         // Force connection closing so that messages can be re-transmitted in a new connection
                         match connectionHandler.ConnectionState with
-                        | Ready clientCnx -> clientCnx.Disconnect()
+                        | Ready clientCnx -> clientCnx.Close()
                         | _ -> ()
 
                     elif sequenceId < expectedSequenceId then
@@ -118,7 +111,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 | ProducerMessage.SendError error ->
 
                     match connectionHandler.ConnectionState with
-                    | Ready clientCnx -> clientCnx.Disconnect()
+                    | Ready clientCnx -> clientCnx.Close()
                     | _ -> ()
 
                 | ProducerMessage.Close channel ->

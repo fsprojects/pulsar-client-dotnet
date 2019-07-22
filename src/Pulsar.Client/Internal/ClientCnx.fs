@@ -13,7 +13,6 @@ open System.Buffers
 open System.IO
 open ProtoBuf
 open CRC32
-open System.Threading
 open Pulsar.Client.Api
 
 type CnxOperation =
@@ -49,21 +48,20 @@ type PulsarTypes =
     | Error
     | Empty
 
-
 type SocketMessage =
     | SocketMessageWithReply of Payload * AsyncReplyChannel<unit>
     | SocketMessageWithoutReply of Payload
     | SocketRequestMessageWithReply of RequestId * Payload * AsyncReplyChannel<Task<PulsarTypes>>
-
+    | Stop
 
 type ClientCnx (broker: Broker,
                 connection: Connection,
                 initialConnectionTsc: TaskCompletionSource<ClientCnx>,
                 unregisterClientCnx: Broker -> unit) as this =
+
     let consumers = Dictionary<ConsumerId, MailboxProcessor<ConsumerMessage>>()
     let producers = Dictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
     let requests = Dictionary<RequestId, TaskCompletionSource<PulsarTypes>>()
-    let cts = new CancellationTokenSource()
 
     let operationsMb = MailboxProcessor<CnxOperation>.Start(fun inbox ->
         let rec loop () =
@@ -82,10 +80,12 @@ type ClientCnx (broker: Broker,
                     producers.Remove(producerId) |> ignore
                     return! loop()
                 | ChannelInactive ->
-                    cts.Cancel()
                     unregisterClientCnx(broker)
-                    consumers |> Seq.iter(fun kv -> kv.Value.Post(ConsumerMessage.ConnectionClosed))
-                    producers |> Seq.iter(fun kv -> kv.Value.Post(ProducerMessage.ConnectionClosed))
+                    this.SendMb.Post(Stop)
+                    consumers |> Seq.iter(fun kv ->
+                        kv.Value.Post(ConsumerMessage.ConnectionClosed))
+                    producers |> Seq.iter(fun kv ->
+                        kv.Value.Post(ProducerMessage.ConnectionClosed))
             }
         loop ()
     )
@@ -95,10 +95,11 @@ type ClientCnx (broker: Broker,
             let (conn, streamWriter) = connection
             do! streamWriter |> serializedPayload
 
-            if (not conn.Socket.Connected)
-            then
+            let connected = conn.Socket.Connected
+            if (not connected) then
                 Log.Logger.LogWarning("Socket was disconnected on writing {0}", broker.LogicalAddress)
                 operationsMb.Post(ChannelInactive)
+            return connected
         }
 
     let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
@@ -106,19 +107,27 @@ type ClientCnx (broker: Broker,
             async {
                 match! inbox.Receive() with
                 | SocketMessageWithReply (payload, replyChannel) ->
-                    do! sendSerializedPayload payload |> Async.AwaitTask
+                    let! connected = sendSerializedPayload payload |> Async.AwaitTask
                     replyChannel.Reply()
+                    if connected then
+                        return! loop ()
                 | SocketMessageWithoutReply payload ->
-                    do! sendSerializedPayload payload |> Async.AwaitTask
+                    let! connected = sendSerializedPayload payload |> Async.AwaitTask
+                    if connected then
+                        return! loop ()
                 | SocketRequestMessageWithReply (reqId, payload, replyChannel) ->
-                    do! sendSerializedPayload payload |> Async.AwaitTask
+                    let! connected = sendSerializedPayload payload |> Async.AwaitTask
                     let tsc = TaskCompletionSource()
                     requests.Add(reqId, tsc)
                     replyChannel.Reply(tsc.Task)
-                return! loop ()
+                    if connected then
+                        return! loop ()
+                    else
+                        tsc.SetException(Exception("Disconnected"))
+                | Stop -> ()
             }
         loop ()
-    , cts.Token)
+    )
 
     let tryParse (buffer: ReadOnlySequence<byte>) readerId =
         let array = buffer.ToArray()
@@ -197,7 +206,7 @@ type ClientCnx (broker: Broker,
             let (conn, _) = connection
             let mutable continueLooping = true
             let reader = conn.Input
-            while continueLooping && (cts.IsCancellationRequested |> not) do
+            while continueLooping do
                 let! result = reader.ReadAsync()
                 let buffer = result.Buffer
                 if result.IsCompleted
@@ -281,7 +290,9 @@ type ClientCnx (broker: Broker,
             Log.Logger.LogDebug("[{0}] Finished read socket for {1}", readerId, broker)
         }
 
-    do Task.Run(fun () -> readSocket().Wait(), cts.Token) |> ignore
+    do Task.Run(fun () -> readSocket().Wait()) |> ignore
+
+    member private __.SendMb with get(): MailboxProcessor<SocketMessage> = sendMb
 
     member __.Send payload =
         sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
@@ -310,8 +321,6 @@ type ClientCnx (broker: Broker,
                 // TODO: implement correct error handling
                 failwith "Incorrect return type"
         }
-
-
 
     member __.RegisterConsumer (consumerConfig: ConsumerConfiguration) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
         task {
@@ -379,6 +388,7 @@ type ClientCnx (broker: Broker,
                 failwith "Incorrect return type"
         }
 
-    member __.Disconnect() =
-        let (conn, _) = connection
+    member __.Close() =
+        let (conn, writeStream) = connection
         conn.Dispose()
+        writeStream.Dispose()
