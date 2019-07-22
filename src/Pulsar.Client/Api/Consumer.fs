@@ -68,6 +68,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         channel.Reply()
                     | _ ->
                         //TODO put message on schedule
+                        ()
                     return! loop state
                 | ConsumerMessage.SendAndForget payload ->
                     match connectionHandler.ConnectionState with
