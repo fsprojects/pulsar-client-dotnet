@@ -86,7 +86,8 @@ type ProducerMessage =
     | ConnectionOpened
     | ConnectionClosed
     | SendReceipt of CommandSendReceipt
-    | SendMessage of Payload * AsyncReplyChannel<unit>
+    | BeginSendMessage of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
+    | SendMessage of SequenceId * Payload * TaskCompletionSource<MessageId>
     | SendError of CommandSendError
     | Close of AsyncReplyChannel<unit>
 

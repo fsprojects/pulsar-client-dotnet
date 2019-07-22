@@ -50,4 +50,11 @@ let tests =
 
             Expect.throws "" tryBuildTopic
         }
+
+        test "to string returns raw topic name string" {
+            let input = "persistent://tenant/namespace/topic"
+            let topicName = TopicName(input)
+
+            topicName.ToString() |> Expect.equal "" input
+        }
     ]

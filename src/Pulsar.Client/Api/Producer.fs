@@ -7,29 +7,33 @@ open pulsar.proto
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open System
-open System.Collections.Concurrent
 open Microsoft.Extensions.Logging
 open System.Collections.Generic
 
 type ProducerException(message) =
     inherit Exception(message)
 
+type private PendingMessage =
+    { SequenceId: SequenceId
+      Payload: Payload
+      Tcs : TaskCompletionSource<MessageId> }
+
 type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) as this =
     let producerId = Generators.getNextProducerId()
-    let messages = ConcurrentDictionary<SequenceId, TaskCompletionSource<MessageId>>()
-    let pendingMessages = Queue<Payload>()
-    let partitionIndex = -1
 
     let connectionOpened() =
         this.Mb.Post(ProducerMessage.ConnectionOpened)
 
     let connectionHandler = ConnectionHandler(lookup, producerConfig.Topic.CompleteTopicName, connectionOpened)
-
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
+
+        let pendingMessages = Queue<PendingMessage>()
+
         let rec loop () =
             async {
                 let! msg = inbox.Receive()
                 match msg with
+
                 | ProducerMessage.ConnectionOpened ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
@@ -39,42 +43,84 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         then
                             Log.Logger.LogInformation("Resending {0} pending messages", pendingMessages.Count)
                             let mutable sentCount = 0
+
                             while pendingMessages.Count > 0 do
-                                let payload = pendingMessages.Dequeue()
-                                do! clientCnx.Send payload
+                                let pendingMessage = pendingMessages.Dequeue()
+                                this.Mb.Post(SendMessage (pendingMessage.SequenceId, pendingMessage.Payload, pendingMessage.Tcs))
                                 sentCount <- sentCount + 1
+
                             Log.Logger.LogInformation("{0} pending messages was sent", sentCount)
                     | _ ->
                         Log.Logger.LogWarning("Connection opened but connection is not ready")
+
                 | ProducerMessage.ConnectionClosed ->
                     do! connectionHandler.ConnectionClosed()
-                | ProducerMessage.SendMessage (payload, channel) ->
+
+                | ProducerMessage.BeginSendMessage (message, channel) ->
+
+                    let sequenceId = Generators.getNextSequenceId()
+                    let metadata =
+                        MessageMetadata (
+                            SequenceId = %sequenceId,
+                            PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
+                            ProducerName = producerConfig.ProducerName,
+                            UncompressedSize = (message.Length |> uint32)
+                        )
+
+                    let command = Commands.newSend producerId sequenceId 1 metadata message
+                    let tcs = TaskCompletionSource()
+                    this.Mb.Post(SendMessage (sequenceId, command, tcs))
+                    channel.Reply(tcs)
+
+                | ProducerMessage.SendMessage (sequenceId, payload, tcs) ->
+
+                    if pendingMessages.Count <= producerConfig.MaxPendingMessages
+                    then
+                        let pendingMessage = { SequenceId = sequenceId; Payload = payload; Tcs = tcs }
+                        pendingMessages.Enqueue(pendingMessage)
+                    else
+                        raise <| ProducerException("Producer send queue is full.")
+
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         do! clientCnx.Send payload
                     | _ ->
                         Log.Logger.LogWarning("NotConnected, skipping send")
-                        if pendingMessages.Count < producerConfig.MaxPendingMessages
-                        then
-                            pendingMessages.Enqueue payload
-                        else
-                            raise <| ProducerException("Producer send queue is full.")
-                    channel.Reply()
+
                 | ProducerMessage.SendReceipt receipt ->
+
                     let sequenceId = %receipt.SequenceId
-                    match messages.TryGetValue(sequenceId) with
-                    | true, tsc ->
-                        tsc.SetResult(MessageId.FromMessageIdData(receipt.MessageId))
-                        messages.TryRemove(sequenceId) |> ignore
-                    | false, _ -> ()
+                    let pendingMessage = pendingMessages.Peek()
+                    let expectedSequenceId = pendingMessage.SequenceId
+
+                    if sequenceId > expectedSequenceId then
+                        Log.Logger.LogWarning(
+                            "[{0}] [{1}] Got ack for message. Expecting: {2} - got: {3} - queue-size: {4}",
+                            producerConfig.Topic, producerConfig.ProducerName, expectedSequenceId, sequenceId, pendingMessages.Count)
+
+                        // Force connection closing so that messages can be re-transmitted in a new connection
+                        match connectionHandler.ConnectionState with
+                        | Ready clientCnx -> clientCnx.Disconnect()
+                        | _ -> ()
+
+                    elif sequenceId < expectedSequenceId then
+                        Log.Logger.LogDebug(
+                            "[{0}] [{1}] Got ack for timed out message {2} last-seq: {3}",
+                            producerConfig.Topic, producerConfig.ProducerName, sequenceId, expectedSequenceId)
+                    else
+                        Log.Logger.LogDebug(
+                            "[{0}] [{1}] Received ack for message {2}",
+                            producerConfig.Topic, producerConfig.ProducerName, sequenceId)
+
+                        pendingMessage.Tcs.SetResult(MessageId.FromMessageIdData(receipt.MessageId))
+                        pendingMessages.Dequeue() |> ignore
+
                 | ProducerMessage.SendError error ->
-                    let sequenceId = %error.SequenceId
-                    match messages.TryGetValue(sequenceId) with
-                    | true, tsc ->
-                        Log.Logger.LogError("SendError code: {0} message: {1}", error.Error, error.Message)
-                        tsc.SetException(Exception(error.Message))
-                        messages.TryRemove(sequenceId) |> ignore
-                    | false, _ -> ()
+
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx -> clientCnx.Disconnect()
+                    | _ -> ()
+
                 | ProducerMessage.Close channel ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
@@ -91,42 +137,14 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
     member __.SendAndWaitAsync (msg: byte[]) =
         task {
-            let payload = msg;
-            let sequenceId = Generators.getNextSequenceId()
-            let metadata =
-                MessageMetadata (
-                    SequenceId = %sequenceId,
-                    PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
-                    ProducerName = producerConfig.ProducerName,
-                    UncompressedSize = (payload.Length |> uint32)
-                )
-            let command =
-                Commands.newSend producerId sequenceId 1 metadata payload
-            do! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
-            let tsc = TaskCompletionSource()
-            if messages.TryAdd(sequenceId, tsc)
-            then
-                return! tsc.Task
-            else
-                return failwith "Unable to add tsc"
+            let! tcs = mb.PostAndAsyncReply(fun channel -> BeginSendMessage (msg, channel))
+            return! tcs.Task
         }
 
     member __.SendAsync (msg: byte[]) =
         Log.Logger.LogDebug("Sending Async")
-
         task {
-            let payload = msg;
-            let sequenceId = Generators.getNextSequenceId()
-            let metadata =
-                MessageMetadata (
-                    SequenceId = %sequenceId,
-                    PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
-                    ProducerName = producerConfig.ProducerName,
-                    UncompressedSize = (payload.Length |> uint32)
-                )
-            let command =
-                Commands.newSend producerId sequenceId 1 metadata payload
-            return! mb.PostAndAsyncReply(fun channel -> SendMessage (command, channel))
+            mb.PostAndAsyncReply(fun channel -> BeginSendMessage (msg, channel)) |> ignore
         }
 
     member __.CloseAsync() =
