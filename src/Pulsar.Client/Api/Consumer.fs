@@ -131,6 +131,9 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
     member __.UnsubscribeAsync() =
         mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
 
+    member __.SendFlowPermitsToBroker consumerId permits =
+        Commands.newFlow consumerId permits |> SendAndForget |> mb.Post
+
     member private __.InitInternal() =
         connectionHandler.Connect()
 
