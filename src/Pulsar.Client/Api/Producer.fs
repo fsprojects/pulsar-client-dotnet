@@ -117,12 +117,34 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 | ProducerMessage.Close channel ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
+                        //TODO check if we should block mb on closing
                         connectionHandler.Closing()
-                        do! clientCnx.CloseProducer producerId |> Async.AwaitTask
-                        connectionHandler.Closed()
+                        // TODO failPendingReceive
+                        Log.Logger.LogInformation("Starting close producer {0}", producerId)
+                        let requestId = Generators.getNextRequestId()
+                        let payload = Commands.newCloseProducer producerId requestId
+                        let result = clientCnx.SendAndWaitForReply requestId payload
+                        let newTask =
+                            result.ContinueWith(
+                                Action<Task<PulsarTypes>>(
+                                    fun t ->
+                                        if t.Status = TaskStatus.RanToCompletion then
+                                            match t.Result with
+                                                | Empty ->
+                                                    clientCnx.RemoveProducer(producerId)
+                                                    connectionHandler.Closed()
+                                                    Log.Logger.LogInformation("Producer {0} closed", producerId)
+                                                | _ ->
+                                                    // TODO: implement correct error handling
+                                                    failwith "Incorrect return type"
+                                        else
+                                            Log.Logger.LogError("Failed to close producer: {0}", producerId)
+                                )
+                            )
+                        channel.Reply(newTask)
                     | _ ->
                         connectionHandler.Closed()
-                    channel.Reply()
+                        channel.Reply(Task.FromResult())
                 return! loop ()
             }
         loop ()
@@ -141,7 +163,10 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
         }
 
     member __.CloseAsync() =
-        mb.PostAndAsyncReply(ProducerMessage.Close)
+        task {
+            let! result = mb.PostAndAsyncReply(ProducerMessage.Close)
+            return! result
+        }
 
     member private __.InitInternal() =
        connectionHandler.Connect()

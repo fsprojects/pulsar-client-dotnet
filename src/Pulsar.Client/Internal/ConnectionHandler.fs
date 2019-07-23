@@ -6,9 +6,6 @@ open Pulsar.Client.Common
 
 type ConnectionHandlerMessage =
     | Reconnect
-    | Terminate
-    | StartClose
-    | EndClose
     | ConnectionClosed of AsyncReplyChannel<unit>
 
 type ConnectionState =
@@ -57,12 +54,6 @@ type ConnectionHandler(lookup: BinaryLookupService, topic: CompleteTopicName, co
                     | _ ->
                         Log.Logger.LogInformation("Skipped reconnecting for state {0} on ConnectionClosed", this.ConnectionState)
                     channel.Reply()
-                | Terminate ->
-                    this.ConnectionState <- Terminated
-                | StartClose ->
-                    this.ConnectionState <- Closing
-                | EndClose ->
-                    this.ConnectionState <- Closed
                 return! loop ()
             }
         loop  ()
@@ -74,13 +65,16 @@ type ConnectionHandler(lookup: BinaryLookupService, topic: CompleteTopicName, co
         mb.Post(Reconnect)
 
     member __.Terminate() =
-        mb.Post(Terminate)
+        __.ConnectionState <- Terminated
 
     member __.Closed() =
-        mb.Post(EndClose)
+        __.ConnectionState <- Closed
 
     member __.Closing() =
-        mb.Post(StartClose)
+        __.ConnectionState <- Closing
+
+    member __.SetReady connection =
+        __.ConnectionState <- Ready connection
 
     member __.ConnectionClosed() =
         mb.PostAndAsyncReply(ConnectionClosed)

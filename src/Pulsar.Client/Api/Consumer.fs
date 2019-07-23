@@ -85,22 +85,63 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         //TODO check if we should block mb on closing
                         connectionHandler.Closing()
                         // TODO failPendingReceive
-                        do! clientCnx.CloseConsumer consumerId |> Async.AwaitTask
-                        connectionHandler.Closed()
+                        Log.Logger.LogInformation("Starting close consumer {0}", consumerId)
+                        let requestId = Generators.getNextRequestId()
+                        let payload = Commands.newCloseConsumer consumerId requestId
+                        let result = clientCnx.SendAndWaitForReply requestId payload
+                        let newTask =
+                            result.ContinueWith(
+                                Action<Task<PulsarTypes>>(
+                                    fun t ->
+                                        if t.Status = TaskStatus.RanToCompletion then
+                                            match t.Result with
+                                            | Empty ->
+                                                clientCnx.RemoveConsumer(consumerId)
+                                                connectionHandler.Closed()
+                                                Log.Logger.LogInformation("Consumer {0} closed", consumerId)
+                                            | _ ->
+                                                // TODO: implement correct error handling
+                                                failwith "Incorrect return type"
+                                        else
+                                            Log.Logger.LogError("Failed to close consumer: {0}", consumerId)
+                                )
+                            )
+                        channel.Reply(newTask)
                     | _ ->
                         connectionHandler.Closed()
-                    channel.Reply()
+                        channel.Reply(Task.FromResult())
+
                     return! loop state
                 | ConsumerMessage.Unsubscribe channel ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         //TODO check if we should block mb on closing
-                        connectionHandler.Closing()
-                        do! clientCnx.UnsubscribeConsumer consumerId |> Async.AwaitTask
-                        connectionHandler.Closed()
+                        Log.Logger.LogInformation("Starting unsubscribe consumer {0}", consumerId)
+                        let requestId = Generators.getNextRequestId()
+                        let payload = Commands.newUnsubscribeConsumer consumerId requestId
+                        let result = clientCnx.SendAndWaitForReply requestId payload
+                        let newTask =
+                            result.ContinueWith(
+                                Action<Task<PulsarTypes>>(
+                                    fun t ->
+                                        if t.Status = TaskStatus.RanToCompletion then
+                                            match t.Result with
+                                            | Empty ->
+                                                clientCnx.RemoveConsumer(consumerId)
+                                                connectionHandler.Closed()
+                                                Log.Logger.LogInformation("Consumer {0} unsubscribed", consumerId)
+                                            | _ ->
+                                                // TODO: implement correct error handling
+                                                failwith "Incorrect return type"
+                                        else
+                                            connectionHandler.SetReady clientCnx
+                                            Log.Logger.LogError("Failed to unsubscribe consumer: {0}", consumerId)
+                                )
+                            )
+                        channel.Reply(newTask)
                     | _ ->
                         connectionHandler.Closed()
-                    channel.Reply()
+                        channel.Reply(Task.FromResult<unit>())
                     return! loop state
             }
         loop { WaitingChannel = nullChannel }
@@ -127,10 +168,16 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
         mb.Post(SendAndForget command)
 
     member __.CloseAsync() =
-        mb.PostAndAsyncReply(ConsumerMessage.Close)
+        task {
+            let! result = mb.PostAndAsyncReply(ConsumerMessage.Close)
+            return! result
+        }
 
     member __.UnsubscribeAsync() =
-        mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
+        task {
+            let! result = mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
+            return! result
+        }
 
     member private __.InitInternal() =
         connectionHandler.Connect()

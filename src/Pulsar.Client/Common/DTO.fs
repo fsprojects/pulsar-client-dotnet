@@ -89,6 +89,14 @@ type PendingMessage =
         Tcs : TaskCompletionSource<MessageId>
     }
 
+type PulsarTypes =
+    | PartitionedTopicMetadata of PartitionedTopicMetadata
+    | LookupTopicResult of LookupTopicResult
+    | ProducerSuccess of ProducerSuccess
+    | TopicsOfNamespace of TopicsOfNamespace
+    | Error
+    | Empty
+
 type ProducerMessage =
     | ConnectionOpened
     | ConnectionClosed
@@ -96,7 +104,7 @@ type ProducerMessage =
     | BeginSendMessage of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
     | SendMessage of PendingMessage
     | SendError of CommandSendError
-    | Close of AsyncReplyChannel<unit>
+    | Close of AsyncReplyChannel<Task>
 
 type ConsumerMessage =
     | ConnectionOpened
@@ -106,5 +114,5 @@ type ConsumerMessage =
     | GetMessage of AsyncReplyChannel<Message>
     | Ack of Payload * AsyncReplyChannel<unit>
     | SendAndForget of Payload
-    | Close of AsyncReplyChannel<unit>
-    | Unsubscribe of AsyncReplyChannel<unit>
+    | Close of AsyncReplyChannel<Task>
+    | Unsubscribe of AsyncReplyChannel<Task>

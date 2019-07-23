@@ -40,14 +40,6 @@ type PulsarCommands =
     | IncompleteCommand
     | InvalidCommand of Exception
 
-type PulsarTypes =
-    | PartitionedTopicMetadata of PartitionedTopicMetadata
-    | LookupTopicResult of LookupTopicResult
-    | ProducerSuccess of ProducerSuccess
-    | TopicsOfNamespace of TopicsOfNamespace
-    | Error
-    | Empty
-
 type SocketMessage =
     | SocketMessageWithReply of Payload * AsyncReplyChannel<unit>
     | SocketMessageWithoutReply of Payload
@@ -343,50 +335,11 @@ type ClientCnx (broker: Broker,
                 failwith "Incorrect return type"
         }
 
-    member __.CloseProducer (producerId: ProducerId) =
-        task {
-            Log.Logger.LogInformation("Starting close producer {0}", producerId)
-            let requestId = Generators.getNextRequestId()
-            let payload = Commands.newCloseProducer producerId requestId
-            let! result =  __.SendAndWaitForReply requestId payload
-            match result with
-            | Empty ->
-                operationsMb.Post(RemoveProducer(producerId))
-                Log.Logger.LogInformation("ProducerId {0} closed", producerId)
-            | _ ->
-                // TODO: implement correct error handling
-                failwith "Incorrect return type"
-        }
+    member __.RemoveConsumer (consumerId: ConsumerId) =
+        operationsMb.Post(RemoveConsumer(consumerId))
 
-    member __.CloseConsumer (consumerId: ConsumerId) =
-        task {
-            Log.Logger.LogInformation("Starting close consumer {0}", consumerId)
-            let requestId = Generators.getNextRequestId()
-            let payload = Commands.newCloseConsumer consumerId requestId
-            let! result =  __.SendAndWaitForReply requestId payload
-            match result with
-            | Empty ->
-                operationsMb.Post(RemoveConsumer(consumerId))
-                Log.Logger.LogInformation("Consumer {0} closed", consumerId)
-            | _ ->
-                // TODO: implement correct error handling
-                failwith "Incorrect return type"
-        }
-
-    member __.UnsubscribeConsumer (consumerId: ConsumerId) =
-        task {
-            Log.Logger.LogInformation("Starting unsubscribe consumer {0}", consumerId)
-            let requestId = Generators.getNextRequestId()
-            let payload = Commands.newUnsubscribeConsumer consumerId requestId
-            let! result =  __.SendAndWaitForReply requestId payload
-            match result with
-            | Empty ->
-                operationsMb.Post(RemoveConsumer(consumerId))
-                Log.Logger.LogInformation("Consumer {0} unsubscribed", consumerId)
-            | _ ->
-                // TODO: implement correct error handling
-                failwith "Incorrect return type"
-        }
+    member __.RemoveProducer (consumerId: ProducerId) =
+        operationsMb.Post(RemoveProducer(consumerId))
 
     member __.Close() =
         let (conn, writeStream) = connection
