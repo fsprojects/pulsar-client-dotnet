@@ -117,30 +117,27 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 | ProducerMessage.Close channel ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
-                        //TODO check if we should block mb on closing
                         connectionHandler.Closing()
                         // TODO failPendingReceive
                         Log.Logger.LogInformation("Starting close producer {0}", producerId)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newCloseProducer producerId requestId
-                        let result = clientCnx.SendAndWaitForReply requestId payload
                         let newTask =
-                            result.ContinueWith(
-                                Action<Task<PulsarTypes>>(
-                                    fun t ->
-                                        if t.Status = TaskStatus.RanToCompletion then
-                                            match t.Result with
-                                                | Empty ->
-                                                    clientCnx.RemoveProducer(producerId)
-                                                    connectionHandler.Closed()
-                                                    Log.Logger.LogInformation("Producer {0} closed", producerId)
-                                                | _ ->
-                                                    // TODO: implement correct error handling
-                                                    failwith "Incorrect return type"
-                                        else
-                                            Log.Logger.LogError(t.Exception, "Failed to close producer: {0}", producerId)
-                                )
-                            )
+                            task {
+                                try
+                                    match! clientCnx.SendAndWaitForReply requestId payload with
+                                    | Empty ->
+                                        clientCnx.RemoveProducer(producerId)
+                                        connectionHandler.Closed()
+                                        Log.Logger.LogInformation("Producer {0} closed", producerId)
+                                    | _ ->
+                                        // TODO: implement correct error handling
+                                        failwith "Incorrect return type"
+                                with
+                                | ex ->
+                                    Log.Logger.LogError(ex, "Failed to close producer: {0}", producerId)
+                                    raise ex
+                            }
                         channel.Reply(newTask)
                     | _ ->
                         connectionHandler.Closed()

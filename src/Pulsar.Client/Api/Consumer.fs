@@ -82,30 +82,27 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                 | ConsumerMessage.Close channel ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
-                        //TODO check if we should block mb on closing
                         connectionHandler.Closing()
                         // TODO failPendingReceive
                         Log.Logger.LogInformation("Starting close consumer {0}", consumerId)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newCloseConsumer consumerId requestId
-                        let result = clientCnx.SendAndWaitForReply requestId payload
                         let newTask =
-                            result.ContinueWith(
-                                Action<Task<PulsarTypes>>(
-                                    fun t ->
-                                        if t.Status = TaskStatus.RanToCompletion then
-                                            match t.Result with
-                                            | Empty ->
-                                                clientCnx.RemoveConsumer(consumerId)
-                                                connectionHandler.Closed()
-                                                Log.Logger.LogInformation("Consumer {0} closed", consumerId)
-                                            | _ ->
-                                                // TODO: implement correct error handling
-                                                failwith "Incorrect return type"
-                                        else
-                                            Log.Logger.LogError(t.Exception, "Failed to close consumer: {0}", consumerId)
-                                )
-                            )
+                            task {
+                                try
+                                    match! clientCnx.SendAndWaitForReply requestId payload with
+                                    | Empty ->
+                                        clientCnx.RemoveConsumer(consumerId)
+                                        connectionHandler.Closed()
+                                        Log.Logger.LogInformation("Consumer {0} closed", consumerId)
+                                    | _ ->
+                                        // TODO: implement correct error handling
+                                        failwith "Incorrect return type"
+                                with
+                                | ex ->
+                                    Log.Logger.LogError(ex, "Failed to close consumer: {0}", consumerId)
+                                    raise ex
+                            }
                         channel.Reply(newTask)
                     | _ ->
                         connectionHandler.Closed()
@@ -115,29 +112,27 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                 | ConsumerMessage.Unsubscribe channel ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
-                        //TODO check if we should block mb on closing
+                        connectionHandler.Closing()
                         Log.Logger.LogInformation("Starting unsubscribe consumer {0}", consumerId)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newUnsubscribeConsumer consumerId requestId
-                        let result = clientCnx.SendAndWaitForReply requestId payload
                         let newTask =
-                            result.ContinueWith(
-                                Action<Task<PulsarTypes>>(
-                                    fun t ->
-                                        if t.Status = TaskStatus.RanToCompletion then
-                                            match t.Result with
-                                            | Empty ->
-                                                clientCnx.RemoveConsumer(consumerId)
-                                                connectionHandler.Closed()
-                                                Log.Logger.LogInformation("Consumer {0} unsubscribed", consumerId)
-                                            | _ ->
-                                                // TODO: implement correct error handling
-                                                failwith "Incorrect return type"
-                                        else
-                                            connectionHandler.SetReady clientCnx
-                                            Log.Logger.LogError(t.Exception, "Failed to unsubscribe consumer: {0}", consumerId)
-                                )
-                            )
+                            task {
+                                try
+                                    match! clientCnx.SendAndWaitForReply requestId payload with
+                                    | Empty ->
+                                        clientCnx.RemoveConsumer(consumerId)
+                                        connectionHandler.Closed()
+                                        Log.Logger.LogInformation("Consumer {0} unsubscribed", consumerId)
+                                    | _ ->
+                                        // TODO: implement correct error handling
+                                        failwith "Incorrect return type"
+                                with
+                                | ex ->
+                                    connectionHandler.SetReady clientCnx
+                                    Log.Logger.LogError(ex, "Failed to unsubscribe consumer: {0}", consumerId)
+                                    raise ex
+                            }
                         channel.Reply(newTask)
                     | _ ->
                         connectionHandler.Closed()
