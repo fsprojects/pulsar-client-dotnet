@@ -30,6 +30,9 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
 
     let connectionHandler = ConnectionHandler(lookup, consumerConfig.Topic.CompleteTopicName, connectionOpened)
 
+    let sendPermitsToBroker consumerId permits (post: ConsumerMessage -> unit) =
+        Commands.newFlow consumerId permits |> SendAndForget |> post
+
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
         let rec loop (state: ConsumerState) =
@@ -39,6 +42,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                 | ConsumerMessage.ConnectionOpened ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
+                        if consumerConfig.ReceiverQueueSize <> 0 then
+                            sendPermitsToBroker consumerId (uint32 consumerConfig.ReceiverQueueSize) inbox.Post
                         do! clientCnx.RegisterConsumer consumerConfig consumerId this.Mb |> Async.AwaitTask
                     | _ ->
                         Log.Logger.LogWarning("Connection opened but connection is not ready")
@@ -105,6 +110,10 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
         loop { WaitingChannel = nullChannel }
     )
 
+    member __.IncreasePermits size = sendPermitsToBroker consumerId size mb.Post
+
+    member this.IncreasePermits () = this.IncreasePermits 1u
+
     member __.ReceiveAsync() =
         task {
             match queue.TryDequeue() with
@@ -121,18 +130,17 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
             return! Task.FromResult()
         }
 
-    member __.RedeliverUnacknowledgedMessages () =
+    member this.RedeliverUnacknowledgedMessages () =
         let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
-        mb.Post(SendAndForget command)
+        let size = queue.Count |> uint32 // TODO: clean queue
+        do mb.Post(SendAndForget command)
+        if size > 0u then this.IncreasePermits size
 
     member __.CloseAsync() =
         mb.PostAndAsyncReply(ConsumerMessage.Close)
 
     member __.UnsubscribeAsync() =
         mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
-
-    member __.SendFlowPermitsToBroker consumerId permits =
-        Commands.newFlow consumerId permits |> SendAndForget |> mb.Post
 
     member private __.InitInternal() =
         connectionHandler.Connect()
