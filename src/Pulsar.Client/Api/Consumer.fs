@@ -103,7 +103,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                                                 // TODO: implement correct error handling
                                                 failwith "Incorrect return type"
                                         else
-                                            Log.Logger.LogError("Failed to close consumer: {0}", consumerId)
+                                            Log.Logger.LogError(t.Exception, "Failed to close consumer: {0}", consumerId)
                                 )
                             )
                         channel.Reply(newTask)
@@ -135,7 +135,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                                                 failwith "Incorrect return type"
                                         else
                                             connectionHandler.SetReady clientCnx
-                                            Log.Logger.LogError("Failed to unsubscribe consumer: {0}", consumerId)
+                                            Log.Logger.LogError(t.Exception, "Failed to unsubscribe consumer: {0}", consumerId)
                                 )
                             )
                         channel.Reply(newTask)

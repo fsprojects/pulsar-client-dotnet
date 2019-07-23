@@ -138,7 +138,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                                                     // TODO: implement correct error handling
                                                     failwith "Incorrect return type"
                                         else
-                                            Log.Logger.LogError("Failed to close producer: {0}", producerId)
+                                            Log.Logger.LogError(t.Exception, "Failed to close producer: {0}", producerId)
                                 )
                             )
                         channel.Reply(newTask)
