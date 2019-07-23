@@ -101,7 +101,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                                 with
                                 | ex ->
                                     Log.Logger.LogError(ex, "Failed to close consumer: {0}", consumerId)
-                                    raise ex
+                                    reraize ex
                             }
                         channel.Reply(newTask)
                     | _ ->
@@ -131,7 +131,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                                 | ex ->
                                     connectionHandler.SetReady clientCnx
                                     Log.Logger.LogError(ex, "Failed to unsubscribe consumer: {0}", consumerId)
-                                    raise ex
+                                    reraize ex
                             }
                         channel.Reply(newTask)
                     | _ ->

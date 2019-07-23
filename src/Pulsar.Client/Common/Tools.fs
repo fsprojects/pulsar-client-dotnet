@@ -4,6 +4,7 @@ module Pulsar.Client.Common.Tools
 open System.Net
 open System
 open Microsoft.IO
+open System.Runtime.ExceptionServices
 
 let internal MemoryStreamManager = RecyclableMemoryStreamManager()
 let MagicNumber = int16 0x0e01
@@ -40,3 +41,6 @@ let throwIfBlankString createException =
 
 let throwIfDefault createException (value: 'a) =
     throwIf (fun (arg) -> arg = Unchecked.defaultof<'a>) createException value
+
+let reraize ex =
+    (ExceptionDispatchInfo.Capture ex).Throw()

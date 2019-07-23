@@ -136,7 +136,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                                 with
                                 | ex ->
                                     Log.Logger.LogError(ex, "Failed to close producer: {0}", producerId)
-                                    raise ex
+                                    reraize ex
                             }
                         channel.Reply(newTask)
                     | _ ->
