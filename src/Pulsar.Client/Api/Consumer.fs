@@ -55,6 +55,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     if state.WaitingChannel = nullChannel
                     then
                         queue.Enqueue(x)
+                        sendPermitsToBroker consumerId (uint32 x.Payload.Length) inbox.Post
                         return! loop state
                     else
                         state.WaitingChannel.Reply(x)
@@ -110,9 +111,13 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
         loop { WaitingChannel = nullChannel }
     )
 
-    member __.IncreasePermits size = sendPermitsToBroker consumerId size mb.Post
+    let increasePermits size = sendPermitsToBroker consumerId size mb.Post
 
-    member this.IncreasePermits () = this.IncreasePermits 1u
+    let redeliverUnacknowledgedMessages () =
+        let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
+        let size = queue.Count |> uint32 // TODO: clean queue
+        do mb.Post(SendAndForget command)
+        if size > 0u then increasePermits size
 
     member __.ReceiveAsync() =
         task {
@@ -130,11 +135,6 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
             return! Task.FromResult()
         }
 
-    member this.RedeliverUnacknowledgedMessages () =
-        let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
-        let size = queue.Count |> uint32 // TODO: clean queue
-        do mb.Post(SendAndForget command)
-        if size > 0u then this.IncreasePermits size
 
     member __.CloseAsync() =
         mb.PostAndAsyncReply(ConsumerMessage.Close)
