@@ -36,6 +36,9 @@ let invalidArgIfBlankString =
 let invalidArgIfNotGreaterThanZero =
     invalidArgIf ((>=) 0)
 
+let invalidArgIfLessThanZero =
+    invalidArgIf ((>) 0)
+
 let throwIfBlankString createException =
     throwIf (String.IsNullOrWhiteSpace) createException
 

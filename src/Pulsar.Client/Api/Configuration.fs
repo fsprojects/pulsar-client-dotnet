@@ -44,6 +44,9 @@ type ProducerConfiguration =
         Topic: TopicName
         ProducerName: string
         MaxPendingMessages: int
+        BatchingEnabled: bool
+        MaxMessagesPerBatch: int
+        MaxBatchingPublishDelay: TimeSpan
         SendTimeout: TimeSpan
     }
     static member Default =
@@ -51,5 +54,8 @@ type ProducerConfiguration =
             Topic = Unchecked.defaultof<TopicName>
             ProducerName = ""
             MaxPendingMessages = 1000
+            BatchingEnabled = false
+            MaxMessagesPerBatch = 1000
+            MaxBatchingPublishDelay = TimeSpan.Zero
             SendTimeout = TimeSpan.FromMilliseconds(30000.0)
         }
