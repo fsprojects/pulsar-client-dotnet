@@ -51,4 +51,13 @@ module ProducerBuilderTests =
                 |> Expect.throwsWithMessage<ProducerException> "Topic name must be set on the producer builder."
             }
 
+            test "BatchingMaxMessages throws an exception for negative integer" {
+                let checkBatchingMaxMessages batchingMaxMessages =
+                    builder()
+                    |> configure(fun b -> b.BatchingMaxMessages batchingMaxMessages)
+                    |> Expect.throwsWithMessage<ArgumentException> "BatchingMaxMessages needs to be non negative integer."
+
+                -1 |> checkBatchingMaxMessages
+            }
+
         ]

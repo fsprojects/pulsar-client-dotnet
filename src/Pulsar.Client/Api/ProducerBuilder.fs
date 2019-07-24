@@ -1,7 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
 open Pulsar.Client.Common
-open FSharp.UMX
 
 type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguration) =
 
@@ -40,7 +39,25 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                     maxPendingMessages
                     |> invalidArgIfNotGreaterThanZero "MaxPendingMessages needs to be greater than 0." })
 
-    member this.SendTimeout sendTimeout =
+    member __.EnableBatching batchMessagesEnabled =
+        ProducerBuilder(
+            client,
+            { config with BatchingEnabled = batchMessagesEnabled })
+
+    member __.BatchingMaxMessages maxMessagesPerBatch =
+        ProducerBuilder(
+            client,
+            { config with
+                MaxMessagesPerBatch =
+                    maxMessagesPerBatch
+                    |> invalidArgIfLessThanZero "BatchingMaxMessages needs to be non negative integer." })
+
+    member __.BatchingMaxPublishDelay batchingMaxPublishDelay =
+        ProducerBuilder(
+            client,
+            { config with MaxBatchingPublishDelay = batchingMaxPublishDelay })
+
+    member __.SendTimeout sendTimeout =
         ProducerBuilder(
             client,
             { config with

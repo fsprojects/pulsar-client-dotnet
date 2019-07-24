@@ -23,6 +23,9 @@ module ConfigurationTests =
                 config.Topic |> Expect.equal (incorrectDefault "Topic") Unchecked.defaultof<TopicName>
                 config.ProducerName |> Expect.equal (incorrectDefault "ProducerName") String.Empty
                 config.MaxPendingMessages |> Expect.equal (incorrectDefault "MaxPendingMessages") 1000
+                config.BatchingEnabled |> Expect.equal (incorrectDefault "BatchingEnabled") true
+                config.MaxMessagesPerBatch |> Expect.equal (incorrectDefault "BatchingMaxMessages") 1000
+                config.MaxBatchingPublishDelay |> Expect.equal (incorrectDefault "MaxBatchingPublishDelay") (TimeSpan.FromMilliseconds(1.))
             }
 
         ]
