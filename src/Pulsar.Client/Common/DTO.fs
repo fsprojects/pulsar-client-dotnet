@@ -112,7 +112,6 @@ type ConsumerMessage =
     | ReachedEndOfTheTopic
     | MessageRecieved of Message
     | GetMessage of AsyncReplyChannel<Message>
-    | Ack of Payload * AsyncReplyChannel<unit>
-    | SendAndForget of Payload
+    | Send of Payload * AsyncReplyChannel<unit>
     | Close of AsyncReplyChannel<Task>
     | Unsubscribe of AsyncReplyChannel<Task>

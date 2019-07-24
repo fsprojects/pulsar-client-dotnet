@@ -289,50 +289,10 @@ type ClientCnx (broker: Broker,
     member __.Send payload =
         sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
 
-    member __.SendAndForget payload =
-        sendMb.Post(SocketMessageWithoutReply payload)
-
     member __.SendAndWaitForReply reqId payload =
         task {
             let! task = sendMb.PostAndAsyncReply(fun replyChannel -> SocketRequestMessageWithReply(reqId, payload, replyChannel))
             return! task
-        }
-
-    member __.RegisterProducer (producerConfig: ProducerConfiguration) (producerId: ProducerId) (producerMb: MailboxProcessor<ProducerMessage>) =
-        task {
-            Log.Logger.LogInformation("Starting register producer {0}", producerId)
-            operationsMb.Post(AddProducer (producerId, producerMb))
-            let requestId = Generators.getNextRequestId()
-            let payload =
-                Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName producerId requestId
-            let! result = __.SendAndWaitForReply requestId payload
-            match result with
-            | ProducerSuccess success ->
-                Log.Logger.LogInformation("Producer {0} registered with name {1}", producerId, success.GeneratedProducerName)
-            | _ ->
-                // TODO: implement correct error handling
-                failwith "Incorrect return type"
-        }
-
-    member __.RegisterConsumer (consumerConfig: ConsumerConfiguration) (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
-        task {
-            Log.Logger.LogInformation("Starting subscribe consumer {0}", consumerId)
-            operationsMb.Post(AddConsumer (consumerId, consumerMb))
-            let requestId = Generators.getNextRequestId()
-            let payload =
-                Commands.newSubscribe consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
-            let! result =  __.SendAndWaitForReply requestId payload
-            match result with
-            | Empty ->
-                Log.Logger.LogInformation("Consumer {0} subscribed", consumerId)
-                let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
-                let flowCommand =
-                    Commands.newFlow consumerId initialFlowCount
-                do! __.Send flowCommand
-                Log.Logger.LogInformation("Consumer initial flow sent {0}", initialFlowCount)
-            | _ ->
-                // TODO: implement correct error handling
-                failwith "Incorrect return type"
         }
 
     member __.RemoveConsumer (consumerId: ConsumerId) =
@@ -340,6 +300,12 @@ type ClientCnx (broker: Broker,
 
     member __.RemoveProducer (consumerId: ProducerId) =
         operationsMb.Post(RemoveProducer(consumerId))
+
+    member __.AddProducer (producerId: ProducerId) (producerMb: MailboxProcessor<ProducerMessage>) =
+        operationsMb.Post(AddProducer (producerId, producerMb))
+
+    member __.AddConsumer (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
+        operationsMb.Post(AddConsumer (consumerId, consumerMb))
 
     member __.Close() =
         let (conn, writeStream) = connection

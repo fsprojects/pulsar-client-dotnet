@@ -37,12 +37,30 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                 let! msg = inbox.Receive()
                 match msg with
                 | ConsumerMessage.ConnectionOpened ->
+
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
-                        do! clientCnx.RegisterConsumer consumerConfig consumerId this.Mb |> Async.AwaitTask
+                        Log.Logger.LogInformation("Starting subscribe consumer {0}", consumerId)
+                        clientCnx.AddConsumer consumerId this.Mb
+                        let requestId = Generators.getNextRequestId()
+                        let payload =
+                            Commands.newSubscribe consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
+                        let! result =  clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                        match result with
+                        | Empty ->
+                            Log.Logger.LogInformation("Consumer {0} subscribed", consumerId)
+                            let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
+                            let flowCommand =
+                                Commands.newFlow consumerId initialFlowCount
+                            do! clientCnx.Send flowCommand
+                            Log.Logger.LogInformation("Consumer initial flow sent {0}", initialFlowCount)
+                        | _ ->
+                            // TODO: implement correct error handling
+                            failwith "Incorrect return type"
                     | _ ->
                         Log.Logger.LogWarning("Connection opened but connection is not ready")
                     return! loop state
+
                 | ConsumerMessage.ConnectionClosed ->
                     do! connectionHandler.ConnectionClosed()
                     return! loop state
@@ -61,7 +79,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         return! loop state
                     | false, _ ->
                         return! loop { state with WaitingChannel = ch }
-                | ConsumerMessage.Ack (payload, channel) ->
+                | ConsumerMessage.Send (payload, channel) ->
                     match connectionHandler.ConnectionState with
                     | Ready conn ->
                         do! conn.Send payload
@@ -69,12 +87,6 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     | _ ->
                         //TODO put message on schedule
                         ()
-                    return! loop state
-                | ConsumerMessage.SendAndForget payload ->
-                    match connectionHandler.ConnectionState with
-                    | Ready conn ->
-                        conn.SendAndForget payload
-                    | _ -> ()
                     return! loop state
                 | ConsumerMessage.ReachedEndOfTheTopic ->
                     //TODO notify client app that topic end reached
@@ -154,13 +166,16 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
     member __.AcknowledgeAsync (msg: Message) =
         task {
             let command = Commands.newAck consumerId msg.MessageId CommandAck.AckType.Individual
-            do! mb.PostAndAsyncReply(fun channel -> Ack (command, channel))
+            do! mb.PostAndAsyncReply(fun channel -> Send (command, channel))
             return! Task.FromResult()
         }
 
-    member __.RedeliverUnacknowledgedMessages () =
-        let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
-        mb.Post(SendAndForget command)
+    member __.RedeliverUnacknowledgedMessagesAsync () =
+        task {
+            let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
+            do! mb.PostAndAsyncReply(fun channel -> Send (command, channel))
+            return! Task.FromResult()
+        }
 
     member __.CloseAsync() =
         task {

@@ -32,18 +32,26 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 | ProducerMessage.ConnectionOpened ->
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
-                        do! clientCnx.RegisterProducer producerConfig producerId this.Mb |> Async.AwaitTask
+
+                        Log.Logger.LogInformation("Starting register producer {0}", producerId)
+                        clientCnx.AddProducer producerId this.Mb
+                        let requestId = Generators.getNextRequestId()
+                        let payload =
+                            Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName producerId requestId
+                        let! result = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                        match result with
+                        | ProducerSuccess success ->
+                            Log.Logger.LogInformation("Producer {0} registered with name {1}", producerId, success.GeneratedProducerName)
+                        | _ ->
+                            // TODO: implement correct error handling
+                            failwith "Incorrect return type"
+
                         // process pending messages
                         if pendingMessages.Count > 0 then
                             Log.Logger.LogInformation("Resending {0} pending messages", pendingMessages.Count)
-                            let mutable sentCount = 0
-
                             while pendingMessages.Count > 0 do
                                 let pendingMessage = pendingMessages.Dequeue()
                                 this.Mb.Post(SendMessage pendingMessage)
-                                sentCount <- sentCount + 1
-
-                            Log.Logger.LogInformation("{0} pending messages was sent", sentCount)
                     | _ ->
                         Log.Logger.LogWarning("Connection opened but connection is not ready")
 
