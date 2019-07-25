@@ -1,5 +1,6 @@
 source https://api.nuget.org/v3/index.json
 storage: none
+framework: netstandard2.0, netcoreapp2.2
 
 nuget Expecto.FsCheck
 nuget FSharp.Core
@@ -24,6 +25,6 @@ group Build
   nuget Fake.Core.Target
   nuget Fake.IO.FileSystem
   nuget Fake.DotNet.Cli
-  
+
   source https://dotnet.myget.org/F/roslyn-tools/api/v3/index.json
   nuget RoslynTools.MSBuild prerelease
