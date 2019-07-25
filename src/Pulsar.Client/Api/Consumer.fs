@@ -45,18 +45,16 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         let requestId = Generators.getNextRequestId()
                         let payload =
                             Commands.newSubscribe consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
-                        let! result =  clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
-                        match result with
-                        | Empty ->
-                            Log.Logger.LogInformation("Consumer {0} subscribed", consumerId)
-                            let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
-                            let flowCommand =
-                                Commands.newFlow consumerId initialFlowCount
-                            do! clientCnx.Send flowCommand
-                            Log.Logger.LogInformation("Consumer initial flow sent {0}", initialFlowCount)
-                        | _ ->
-                            // TODO: implement correct error handling
-                            failwith "Incorrect return type"
+                        do!
+                            fun () -> clientCnx.SendAndWaitForReply requestId payload
+                            |> PulsarTypes.GetEmpty
+                            |> Async.AwaitTask
+                        Log.Logger.LogInformation("Consumer {0} subscribed", consumerId)
+                        let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
+                        let flowCommand =
+                            Commands.newFlow consumerId initialFlowCount
+                        do! clientCnx.Send flowCommand
+                        Log.Logger.LogInformation("Consumer initial flow sent {0}", initialFlowCount)
                     | _ ->
                         Log.Logger.LogWarning("Connection opened but connection is not ready")
                     return! loop state
@@ -99,23 +97,20 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         Log.Logger.LogInformation("Starting close consumer {0}", consumerId)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newCloseConsumer consumerId requestId
-                        let newTask =
-                            task {
-                                try
-                                    match! clientCnx.SendAndWaitForReply requestId payload with
-                                    | Empty ->
-                                        clientCnx.RemoveConsumer(consumerId)
-                                        connectionHandler.Closed()
-                                        Log.Logger.LogInformation("Consumer {0} closed", consumerId)
-                                    | _ ->
-                                        // TODO: implement correct error handling
-                                        failwith "Incorrect return type"
-                                with
-                                | ex ->
-                                    Log.Logger.LogError(ex, "Failed to close consumer: {0}", consumerId)
-                                    reraize ex
-                            }
-                        channel.Reply(newTask)
+                        task {
+                            try
+                                do!
+                                    fun () -> clientCnx.SendAndWaitForReply requestId payload
+                                    |> PulsarTypes.GetEmpty
+                                    |> Async.AwaitTask
+                                clientCnx.RemoveConsumer(consumerId)
+                                connectionHandler.Closed()
+                                Log.Logger.LogInformation("Consumer {0} closed", consumerId)
+                            with
+                            | ex ->
+                                Log.Logger.LogError(ex, "Failed to close consumer: {0}", consumerId)
+                                reraize ex
+                        } |> channel.Reply
                     | _ ->
                         connectionHandler.Closed()
                         channel.Reply(Task.FromResult())
@@ -131,14 +126,13 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         let newTask =
                             task {
                                 try
-                                    match! clientCnx.SendAndWaitForReply requestId payload with
-                                    | Empty ->
-                                        clientCnx.RemoveConsumer(consumerId)
-                                        connectionHandler.Closed()
-                                        Log.Logger.LogInformation("Consumer {0} unsubscribed", consumerId)
-                                    | _ ->
-                                        // TODO: implement correct error handling
-                                        failwith "Incorrect return type"
+                                    do!
+                                        fun () -> clientCnx.SendAndWaitForReply requestId payload
+                                        |> PulsarTypes.GetEmpty
+                                        |> Async.AwaitTask
+                                    clientCnx.RemoveConsumer(consumerId)
+                                    connectionHandler.Closed()
+                                    Log.Logger.LogInformation("Consumer {0} unsubscribed", consumerId)
                                 with
                                 | ex ->
                                     connectionHandler.SetReady clientCnx
