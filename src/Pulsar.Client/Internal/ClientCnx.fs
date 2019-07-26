@@ -125,21 +125,19 @@ type ClientCnx (broker: Broker,
 
     let tryParse (buffer: ReadOnlySequence<byte>) readerId =
         let array = buffer.ToArray()
-        if (array.Length <= 8)
-        then Result.Error IncompleteCommand
-        else
+        if (array.Length >= 8)
+        then
             use stream =  new MemoryStream(array)
             use reader = new BinaryReader(stream)
 
             let totalength = reader.ReadInt32() |> int32FromBigEndian
             let frameLength = totalength + 4
 
-            if (array.Length <= frameLength)
-            then Result.Error IncompleteCommand
-            else
+            if (array.Length >= frameLength)
+            then
                 let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
                 Log.Logger.LogDebug("[{0}] Got message of type {1}", readerId, command.``type``)
-                let consumed = int64 frameLength |> buffer.GetPosition
+                let consumed : SequencePosition = int64 frameLength |> buffer.GetPosition
                 match command.``type`` with
                 | BaseCommand.Type.Connected ->
                     Ok (XCommandConnected command.Connected, consumed)
@@ -181,6 +179,8 @@ type ClientCnx (broker: Broker,
                     Ok (XCommandError command.Error, consumed)
                 | unknownType ->
                     Result.Error (UnknownCommandType unknownType)
+            else Result.Error IncompleteCommand
+        else Result.Error IncompleteCommand
 
     let handleRespone requestId result (reader: PipeReader) consumed =
         let tsc = requests.[requestId]
@@ -209,10 +209,6 @@ type ClientCnx (broker: Broker,
                     continueLooping <- false
                 else
                     match tryParse buffer readerId with
-                    | Result.Error IncompleteCommand ->
-                        reader.AdvanceTo(buffer.Start, buffer.End)
-                    | Result.Error (UnknownCommandType unknownType) ->
-                        failwithf "Unknown command type %A" unknownType
                     | Result.Ok (xcmd, consumed) ->
                         match xcmd with
                         | XCommandConnected _ ->
@@ -278,6 +274,10 @@ type ClientCnx (broker: Broker,
                             Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
                             let result = Error
                             handleRespone %cmd.RequestId result reader consumed
+                    | Result.Error IncompleteCommand ->
+                        reader.AdvanceTo(buffer.Start, buffer.End)
+                    | Result.Error (UnknownCommandType unknownType) ->
+                        failwithf "Unknown command type %A" unknownType
             Log.Logger.LogDebug("[{0}] Finished read socket for {1}", readerId, broker)
         }
 
