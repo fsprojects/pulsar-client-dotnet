@@ -44,7 +44,10 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         clientCnx.AddConsumer consumerId this.Mb
                         let requestId = Generators.getNextRequestId()
                         let payload =
-                            Commands.newSubscribe consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
+                            Commands.newSubscribe
+                                consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName
+                                consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
+                                consumerConfig.SubscriptionInitialPosition
                         do!
                             fun () -> clientCnx.SendAndWaitForReply requestId payload
                             |> PulsarTypes.GetEmpty

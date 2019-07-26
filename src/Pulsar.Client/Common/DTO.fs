@@ -40,6 +40,10 @@ type SubscriptionType =
     | Shared = 1
     | Failover = 2
 
+type SubscriptionInitialPosition =
+    | Latest = 0
+    | Earliest = 1
+
 type TopicDomain =
     | Persistent
     | NonPersistent

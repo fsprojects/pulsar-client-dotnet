@@ -54,6 +54,12 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
             { config with
                 ReceiverQueueSize = receiverQueueSize |> invalidArgIfNotGreaterThanZero "ReceiverQueueSize should be greater than 0."  })
 
+    member __.SubscriptionInitialPosition subscriptionInitialPosition =
+        ConsumerBuilder(
+            client,
+            { config with
+                SubscriptionInitialPosition = subscriptionInitialPosition  })
+
     member __.SubscribeAsync() =
         config
         |> verify

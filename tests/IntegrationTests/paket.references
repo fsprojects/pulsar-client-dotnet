@@ -2,3 +2,4 @@ Expecto
 Microsoft.NET.Test.Sdk
 YoloDev.Expecto.TestSdk
 FSharp.Core
+Microsoft.Extensions.Logging.Console
