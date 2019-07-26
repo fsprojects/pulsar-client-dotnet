@@ -18,7 +18,7 @@ let pulsarAddress = "pulsar://my-pulsar-cluster:31002"
 [<Tests>]
 let tests =
 
-    //PulsarClient.Logger <- ConsoleLogger("PulsarLogger", Func<string,LogLevel,bool>(fun x y -> y >= LogLevel.Warning), true)
+    // PulsarClient.Logger <- ConsoleLogger("PulsarLogger", Func<string,LogLevel,bool>(fun x y -> y >= LogLevel.Debug), true)
 
     let getClient() =
         PulsarClientBuilder()

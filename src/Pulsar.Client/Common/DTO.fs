@@ -125,8 +125,7 @@ type PulsarTypes =
         task {
             match! req() with
             | LookupTopicResult x -> return x
-            | Error ->
-                return! PulsarTypes.GetLookupTopicResult(req, reconnectCount |> PulsarTypes.GetAttempt)
+            | Error -> return! PulsarTypes.GetLookupTopicResult(req, reconnectCount |> PulsarTypes.GetAttempt)
             | _ -> return failwith "Impossible"
         }
 
