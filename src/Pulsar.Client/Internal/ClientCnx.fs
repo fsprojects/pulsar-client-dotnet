@@ -123,6 +123,40 @@ type ClientCnx (broker: Broker,
         loop ()
     )
 
+    let wrapCommand readMessage (command: BaseCommand) =
+        match command.``type`` with
+        | BaseCommand.Type.Connected ->
+            Ok (XCommandConnected command.Connected)
+        | BaseCommand.Type.PartitionedMetadataResponse ->
+            Ok (XCommandPartitionedTopicMetadataResponse command.partitionMetadataResponse)
+        | BaseCommand.Type.SendReceipt ->
+            Ok (XCommandSendReceipt command.SendReceipt)
+        | BaseCommand.Type.Message ->
+           let metadata,payload = readMessage()
+           Ok (XCommandMessage (command.Message, metadata, payload))
+        | BaseCommand.Type.LookupResponse ->
+            Ok (XCommandLookupTopicResponse command.lookupTopicResponse)
+        | BaseCommand.Type.Ping ->
+            Ok (XCommandPing command.Ping)
+        | BaseCommand.Type.ProducerSuccess ->
+            Ok (XCommandProducerSuccess command.ProducerSuccess)
+        | BaseCommand.Type.Success ->
+            Ok (XCommandSuccess command.Success)
+        | BaseCommand.Type.SendError ->
+            Ok (XCommandSendError command.SendError)
+        | BaseCommand.Type.CloseProducer ->
+            Ok (XCommandCloseProducer command.CloseProducer)
+        | BaseCommand.Type.CloseConsumer ->
+            Ok (XCommandCloseConsumer command.CloseConsumer)
+        | BaseCommand.Type.ReachedEndOfTopic ->
+            Ok (XCommandReachedEndOfTopic command.reachedEndOfTopic)
+        | BaseCommand.Type.GetTopicsOfNamespaceResponse ->
+            Ok (XCommandGetTopicsOfNamespaceResponse command.getTopicsOfNamespaceResponse)
+        | BaseCommand.Type.Error ->
+            Ok (XCommandError command.Error)
+        | unknownType ->
+            Result.Error (UnknownCommandType unknownType)
+
     let tryParse (buffer: ReadOnlySequence<byte>) readerId =
         let array = buffer.ToArray()
         if (array.Length >= 8)
@@ -135,57 +169,87 @@ type ClientCnx (broker: Broker,
 
             if (array.Length >= frameLength)
             then
-                let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
-                Log.Logger.LogDebug("[{0}] Got message of type {1}", readerId, command.``type``)
-                let consumed : SequencePosition = int64 frameLength |> buffer.GetPosition
-                match command.``type`` with
-                | BaseCommand.Type.Connected ->
-                    Ok (XCommandConnected command.Connected, consumed)
-                | BaseCommand.Type.PartitionedMetadataResponse ->
-                    Ok (XCommandPartitionedTopicMetadataResponse command.partitionMetadataResponse, consumed)
-                | BaseCommand.Type.SendReceipt ->
-                    Ok (XCommandSendReceipt command.SendReceipt, consumed)
-                | BaseCommand.Type.Message ->
+                let readMessage() =
                     reader.ReadInt16() |> int16FromBigEndian |> invalidArgIf ((<>) MagicNumber) "Invalid magicNumber" |> ignore
                     let messageCheckSum  = reader.ReadInt32() |> int32FromBigEndian
                     let metadataPointer = stream.Position
-                    let metatada = Serializer.DeserializeWithLengthPrefix<MessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
+                    let metadata = Serializer.DeserializeWithLengthPrefix<MessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
                     let payloadPointer = stream.Position
                     let metadataLength = payloadPointer - metadataPointer |> int
                     let payloadLength = frameLength - (int payloadPointer)
                     let payload = reader.ReadBytes(payloadLength)
                     stream.Seek(metadataPointer, SeekOrigin.Begin) |> ignore
                     CRC32C.Get(0u, stream, metadataLength + payloadLength) |> int32 |> invalidArgIf ((<>) messageCheckSum) "Invalid checksum" |> ignore
-                    Ok (XCommandMessage (command.Message, metatada, payload), consumed)
-                | BaseCommand.Type.LookupResponse ->
-                    Ok (XCommandLookupTopicResponse command.lookupTopicResponse, consumed)
-                | BaseCommand.Type.Ping ->
-                    Ok (XCommandPing command.Ping, consumed)
-                | BaseCommand.Type.ProducerSuccess ->
-                    Ok (XCommandProducerSuccess command.ProducerSuccess, consumed)
-                | BaseCommand.Type.Success ->
-                    Ok (XCommandSuccess command.Success, consumed)
-                | BaseCommand.Type.SendError ->
-                    Ok (XCommandSendError command.SendError, consumed)
-                | BaseCommand.Type.CloseProducer ->
-                    Ok (XCommandCloseProducer command.CloseProducer, consumed)
-                | BaseCommand.Type.CloseConsumer ->
-                    Ok (XCommandCloseConsumer command.CloseConsumer, consumed)
-                | BaseCommand.Type.ReachedEndOfTopic ->
-                    Ok (XCommandReachedEndOfTopic command.reachedEndOfTopic, consumed)
-                | BaseCommand.Type.GetTopicsOfNamespaceResponse ->
-                    Ok (XCommandGetTopicsOfNamespaceResponse command.getTopicsOfNamespaceResponse, consumed)
-                | BaseCommand.Type.Error ->
-                    Ok (XCommandError command.Error, consumed)
-                | unknownType ->
-                    Result.Error (UnknownCommandType unknownType)
-            else Result.Error IncompleteCommand
-        else Result.Error IncompleteCommand
+                    metadata, payload
+                let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
+                Log.Logger.LogDebug("[{0}] Got message of type {1}", readerId, command.``type``)
+                let consumed = int64 frameLength |> buffer.GetPosition
+                wrapCommand readMessage command, consumed
+            else Result.Error IncompleteCommand, SequencePosition()
+        else Result.Error IncompleteCommand, SequencePosition()
 
     let handleRespone requestId result =
         let tsc = requests.[requestId]
         tsc.SetResult result
         requests.Remove requestId |> ignore
+
+    let handleCommand xcmd =
+        match xcmd with
+        | XCommandConnected _ ->
+            //TODO check server protocol version
+            initialConnectionTsc.SetResult(this)
+        | XCommandPartitionedTopicMetadataResponse cmd ->
+            let result =
+                if (cmd.ShouldSerializeError())
+                then
+                    Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
+                    Error
+                else
+                    PartitionedTopicMetadata { Partitions = cmd.Partitions }
+            handleRespone %cmd.RequestId result
+        | XCommandSendReceipt cmd ->
+            let producerMb = producers.[%cmd.ProducerId]
+            producerMb.Post(SendReceipt cmd)
+        | XCommandSendError cmd ->
+            let producerMb = producers.[%cmd.ProducerId]
+            producerMb.Post(SendError cmd)
+        | XCommandPing _ ->
+            Commands.newPong() |> SocketMessageWithoutReply |> sendMb.Post
+        | XCommandMessage (cmd, _, payload) ->
+            let consumerMb = consumers.[%cmd.ConsumerId]
+            consumerMb.Post(MessageRecieved { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = payload })
+        | XCommandLookupTopicResponse cmd ->
+            let result =
+                if (cmd.ShouldSerializeError())
+                then
+                    Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
+                    Error
+                else
+                    LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
+            handleRespone %cmd.RequestId result
+        | XCommandProducerSuccess cmd ->
+            let result = ProducerSuccess { GeneratedProducerName = cmd.ProducerName }
+            handleRespone %cmd.RequestId result
+        | XCommandSuccess cmd ->
+            handleRespone %cmd.RequestId Empty
+        | XCommandCloseProducer cmd ->
+            let producerMb = producers.[%cmd.ProducerId]
+            producers.Remove(%cmd.ProducerId) |> ignore
+            producerMb.Post ProducerMessage.ConnectionClosed
+        | XCommandCloseConsumer cmd ->
+            let consumerMb = consumers.[%cmd.ConsumerId]
+            consumers.Remove(%cmd.ConsumerId) |> ignore
+            consumerMb.Post ConnectionClosed
+        | XCommandReachedEndOfTopic cmd ->
+            let consumerMb = consumers.[%cmd.ConsumerId]
+            consumerMb.Post ReachedEndOfTheTopic
+        | XCommandGetTopicsOfNamespaceResponse cmd ->
+            let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
+            handleRespone %cmd.RequestId result
+        | XCommandError cmd ->
+            Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
+            let result = Error
+            handleRespone %cmd.RequestId result
 
     let readSocket () =
         task {
@@ -208,69 +272,12 @@ type ClientCnx (broker: Broker,
                     continueLooping <- false
                 else
                     match tryParse buffer readerId with
-                    | Result.Ok (xcmd, consumed) ->
-                        match xcmd with
-                        | XCommandConnected _ ->
-                            //TODO check server protocol version
-                            initialConnectionTsc.SetResult(this)
-                        | XCommandPartitionedTopicMetadataResponse cmd ->
-                            let result =
-                                if (cmd.ShouldSerializeError())
-                                then
-                                    Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
-                                    Error
-                                else
-                                    PartitionedTopicMetadata { Partitions = cmd.Partitions }
-                            handleRespone %cmd.RequestId result
-                        | XCommandSendReceipt cmd ->
-                            let producerMb = producers.[%cmd.ProducerId]
-                            producerMb.Post(SendReceipt cmd)
-                        | XCommandSendError cmd ->
-                            let producerMb = producers.[%cmd.ProducerId]
-                            producerMb.Post(SendError cmd)
-                        | XCommandPing _ ->
-                            Commands.newPong() |> SocketMessageWithoutReply |> sendMb.Post
-                        | XCommandMessage (cmd, _, payload) ->
-                            let consumerMb = consumers.[%cmd.ConsumerId]
-                            consumerMb.Post(MessageRecieved { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = payload })
-                        | XCommandLookupTopicResponse cmd ->
-                            let result =
-                                if (cmd.ShouldSerializeError())
-                                then
-                                    Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
-                                    Error
-                                else
-                                    LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
-                            handleRespone %cmd.RequestId result
-                        | XCommandProducerSuccess cmd ->
-                            let result = ProducerSuccess { GeneratedProducerName = cmd.ProducerName }
-                            handleRespone %cmd.RequestId result
-                        | XCommandSuccess cmd ->
-                            handleRespone %cmd.RequestId Empty
-                        | XCommandCloseProducer cmd ->
-                            let producerMb = producers.[%cmd.ProducerId]
-                            producers.Remove(%cmd.ProducerId) |> ignore
-                            producerMb.Post ProducerMessage.ConnectionClosed
-                        | XCommandCloseConsumer cmd ->
-                            let consumerMb = consumers.[%cmd.ConsumerId]
-                            consumers.Remove(%cmd.ConsumerId) |> ignore
-                            consumerMb.Post ConnectionClosed
-                        | XCommandReachedEndOfTopic cmd ->
-                            let consumerMb = consumers.[%cmd.ConsumerId]
-                            consumerMb.Post ReachedEndOfTheTopic
-                        | XCommandGetTopicsOfNamespaceResponse cmd ->
-                            let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
-                            handleRespone %cmd.RequestId result
-                        | XCommandError cmd ->
-                            Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
-                            let result = Error
-                            handleRespone %cmd.RequestId result
-
+                    | Result.Ok (xcmd), consumed ->
+                        handleCommand xcmd
                         reader.AdvanceTo consumed
-
-                    | Result.Error IncompleteCommand ->
+                    | Result.Error IncompleteCommand, _ ->
                         reader.AdvanceTo(buffer.Start, buffer.End)
-                    | Result.Error (UnknownCommandType unknownType) ->
+                    | Result.Error (UnknownCommandType unknownType), _ ->
                         failwithf "Unknown command type %A" unknownType
             Log.Logger.LogDebug("[{0}] Finished read socket for {1}", readerId, broker)
         }
