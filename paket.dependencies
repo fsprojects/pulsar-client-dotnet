@@ -5,10 +5,15 @@ framework: netstandard2.0, netcoreapp2.2
 nuget Expecto.FsCheck
 nuget FSharp.Core
 nuget FSharp.UMX
+nuget Microsoft.Extensions.DependencyInjection
 nuget Microsoft.Extensions.Logging.Abstractions
 nuget Microsoft.Extensions.Logging.Console
 nuget Microsoft.IO.RecyclableMemoryStream
 nuget Pipelines.Sockets.Unofficial
+nuget Serilog
+nuget Serilog.Enrichers.Thread
+nuget Serilog.Extensions.Logging
+nuget Serilog.Sinks.Console
 nuget TaskBuilder.fs
 nuget UTF8Json
 nuget Expecto

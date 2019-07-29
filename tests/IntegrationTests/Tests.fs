@@ -8,17 +8,39 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
 open System.Threading.Tasks
 open Pulsar.Client.Common
+open Serilog
+open Serilog.Sinks.SystemConsole
+open Serilog.Configuration
 open Microsoft.Extensions.Logging.Console
 open Microsoft.Extensions.Logging
+open Microsoft.Extensions.DependencyInjection
+open Serilog.Sinks.SystemConsole.Themes
+open Serilog.Core
 
 
 [<Literal>]
 let pulsarAddress = "pulsar://my-pulsar-cluster:31002"
 
+let configureLogging() =
+    Log.Logger <-
+        LoggerConfiguration()
+            .MinimumLevel.Debug()
+            .WriteTo.Console(theme = AnsiConsoleTheme.Code, outputTemplate="[{Timestamp:HH:mm:ss} {Level:u3} {ThreadId}] {Message:lj}{NewLine}{Exception}")
+            .Enrich.FromLogContext()
+            .Enrich.WithThreadId()
+            .CreateLogger()
+    let serviceCollection = new ServiceCollection()
+    let sp =
+        serviceCollection
+            .AddLogging(fun configure -> configure.AddSerilog(dispose = true) |> ignore)
+            .BuildServiceProvider()
+    let logger = sp.GetService<ILogger<PulsarClient>>()
+    PulsarClient.Logger <- logger
+
 [<Tests>]
 let tests =
 
-    // PulsarClient.Logger <- ConsoleLogger("PulsarLogger", Func<string,LogLevel,bool>(fun x y -> y >= LogLevel.Debug), true)
+    configureLogging()
 
     let getClient() =
         PulsarClientBuilder()
@@ -44,18 +66,22 @@ let tests =
 
     testList "basic" [
         testCase "Send and receive 100 messages concurrently works fine in default configuration" <| fun () ->
+
+            Log.Debug( "Send and receive 100 messages concurrently works fine in default configuration")
             let client = getClient()
             let topicName = "public/default/topic-" + DateTimeOffset.UtcNow.UtcTicks.ToString()
 
             let producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
+                    .ProducerName("concurrent")
                     .CreateAsync()
                     .Result
 
             let consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
+                    .ConsumerName("concurrent")
                     .SubscriptionName("test-subscription")
                     .SubscribeAsync()
                     .Result
@@ -74,12 +100,15 @@ let tests =
 
             Task.WaitAll(producerTask, consumerTask)
 
-        testCase "Send 100 messages and then receiving them works fine when retention is set on namespace " <| fun () ->
+        testCase "Send 100 messages and then receiving them works fine when retention is set on namespace" <| fun () ->
+
+            Log.Debug("Send 100 messages and then receiving them works fine when retention is set on namespace")
             let client = getClient()
             let topicName = "public/retention/topic-" + DateTimeOffset.UtcNow.UtcTicks.ToString()
 
             let producer =
                 ProducerBuilder(client)
+                    .ProducerName("sequential")
                     .Topic(topicName)
                     .CreateAsync()
                     .Result
@@ -89,6 +118,7 @@ let tests =
             let consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
+                    .ConsumerName("sequential")
                     .SubscriptionName("test-subscription")
                     .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
                     .SubscribeAsync()

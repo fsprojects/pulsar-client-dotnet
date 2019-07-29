@@ -2,6 +2,7 @@
 
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Internal
+open Microsoft.Extensions.Logging
 
 open System
 
@@ -24,6 +25,7 @@ type PulsarClient(config: PulsarClientConfiguration) =
 
     member private this.SingleTopicSubscribeAsync (consumerConfig: ConsumerConfiguration) =
         task {
+            Log.Logger.LogDebug("SingleTopicSubscribeAsync started")
             let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic.CompleteTopicName
             if (metadata.Partitions > 1u)
             then
@@ -34,6 +36,7 @@ type PulsarClient(config: PulsarClientConfiguration) =
 
     member this.CreateProducerAsync (producerConfig: ProducerConfiguration) =
         task {
+            Log.Logger.LogDebug("CreateProducerAsync started")
             let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
             if (metadata.Partitions > 1u)
             then

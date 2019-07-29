@@ -30,6 +30,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
 
     let connectionHandler = ConnectionHandler(lookup, consumerConfig.Topic.CompleteTopicName, connectionOpened)
 
+    let prefix = sprintf "consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
+
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
         let rec loop (state: ConsumerState) =
@@ -40,7 +42,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
 
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
-                        Log.Logger.LogInformation("Starting subscribe consumer {0}", consumerId)
+                        Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, consumerConfig.Topic)
                         clientCnx.AddConsumer consumerId this.Mb
                         let requestId = Generators.getNextRequestId()
                         let payload =
@@ -52,25 +54,27 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                             fun () -> clientCnx.SendAndWaitForReply requestId payload
                             |> PulsarTypes.GetEmpty
                             |> Async.AwaitTask
-                        Log.Logger.LogInformation("Consumer {0} subscribed", consumerId)
+                        Log.Logger.LogInformation("{0} subscribed", prefix)
                         let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
                         let flowCommand =
                             Commands.newFlow consumerId initialFlowCount
                         do! clientCnx.Send flowCommand
-                        Log.Logger.LogInformation("Consumer initial flow sent {0}", initialFlowCount)
+                        Log.Logger.LogInformation("{0} initial flow sent {1}", prefix, initialFlowCount)
                     | _ ->
-                        Log.Logger.LogWarning("Connection opened but connection is not ready")
+                        Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
                     return! loop state
 
                 | ConsumerMessage.ConnectionClosed ->
+                    Log.Logger.LogInformation("{0} ConnectionClosed", prefix)
                     do! connectionHandler.ConnectionClosed()
                     return! loop state
                 | ConsumerMessage.MessageRecieved x ->
-                    if state.WaitingChannel = nullChannel
-                    then
+                    if state.WaitingChannel = nullChannel then
+                        Log.Logger.LogInformation("{0} MessageRecieved nullchannel", prefix)
                         queue.Enqueue(x)
                         return! loop state
                     else
+                        Log.Logger.LogInformation("{0} MessageRecieved direct reply", prefix)
                         state.WaitingChannel.Reply(x)
                         return! loop { state with WaitingChannel = nullChannel }
                 | ConsumerMessage.GetMessage ch ->
@@ -79,17 +83,21 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         ch.Reply msg
                         return! loop state
                     | false, _ ->
+                        Log.Logger.LogInformation("{0} GetMessage waiting", prefix)
                         return! loop { state with WaitingChannel = ch }
                 | ConsumerMessage.Send (payload, channel) ->
                     match connectionHandler.ConnectionState with
                     | Ready conn ->
                         do! conn.Send payload
+                        Log.Logger.LogInformation("{0} Send complete", prefix)
                         channel.Reply()
                     | _ ->
+                        Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                         //TODO put message on schedule
                         ()
                     return! loop state
                 | ConsumerMessage.ReachedEndOfTheTopic ->
+                    Log.Logger.LogWarning("{0} ReachedEndOfTheTopic", prefix)
                     //TODO notify client app that topic end reached
                     connectionHandler.Terminate()
                 | ConsumerMessage.Close channel ->
@@ -97,7 +105,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     | Ready clientCnx ->
                         connectionHandler.Closing()
                         // TODO failPendingReceive
-                        Log.Logger.LogInformation("Starting close consumer {0}", consumerId)
+                        Log.Logger.LogInformation("{0} starting close", prefix)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newCloseConsumer consumerId requestId
                         task {
@@ -108,13 +116,14 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                                     |> Async.AwaitTask
                                 clientCnx.RemoveConsumer(consumerId)
                                 connectionHandler.Closed()
-                                Log.Logger.LogInformation("Consumer {0} closed", consumerId)
+                                Log.Logger.LogInformation("{0} closed", prefix)
                             with
                             | ex ->
-                                Log.Logger.LogError(ex, "Failed to close consumer: {0}", consumerId)
+                                Log.Logger.LogError(ex, "{0} failed to close", prefix)
                                 reraize ex
                         } |> channel.Reply
                     | _ ->
+                        Log.Logger.LogInformation("{0} can't close since connection already closed", prefix)
                         connectionHandler.Closed()
                         channel.Reply(Task.FromResult())
 
@@ -123,7 +132,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         connectionHandler.Closing()
-                        Log.Logger.LogInformation("Starting unsubscribe consumer {0}", consumerId)
+                        Log.Logger.LogInformation("{0} starting unsubscribe ", prefix)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newUnsubscribeConsumer consumerId requestId
                         let newTask =
@@ -135,15 +144,16 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                                         |> Async.AwaitTask
                                     clientCnx.RemoveConsumer(consumerId)
                                     connectionHandler.Closed()
-                                    Log.Logger.LogInformation("Consumer {0} unsubscribed", consumerId)
+                                    Log.Logger.LogInformation("{0} unsubscribed", prefix)
                                 with
                                 | ex ->
                                     connectionHandler.SetReady clientCnx
-                                    Log.Logger.LogError(ex, "Failed to unsubscribe consumer: {0}", consumerId)
+                                    Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
                                     reraize ex
                             }
                         channel.Reply(newTask)
                     | _ ->
+                        Log.Logger.LogInformation("{0} can't unsubscribe since connection already closed", prefix)
                         connectionHandler.Closed()
                         channel.Reply(Task.FromResult<unit>())
                     return! loop state

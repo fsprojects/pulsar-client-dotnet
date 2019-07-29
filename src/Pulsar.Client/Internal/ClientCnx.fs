@@ -56,24 +56,32 @@ type ClientCnx (broker: Broker,
     let consumers = Dictionary<ConsumerId, MailboxProcessor<ConsumerMessage>>()
     let producers = Dictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
     let requests = Dictionary<RequestId, TaskCompletionSource<PulsarTypes>>()
+    let clientCnxId = Generators.getNextClientCnxId()
+    let prefix = sprintf "clientCnx(%i, %A)" clientCnxId broker.LogicalAddress
 
     let operationsMb = MailboxProcessor<CnxOperation>.Start(fun inbox ->
         let rec loop () =
             async {
                 match! inbox.Receive() with
                 | AddProducer (producerId, mb) ->
+                    let z = prefix
+                    Log.Logger.LogDebug("{0} adding producer {1}", prefix, producerId)
                     producers.Add(producerId, mb)
                     return! loop()
                 | AddConsumer (consumerId, mb) ->
+                    Log.Logger.LogDebug("{0} adding consumer {1}", prefix, consumerId)
                     consumers.Add(consumerId, mb)
                     return! loop()
                 | RemoveConsumer consumerId ->
+                    Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
                     consumers.Remove(consumerId) |> ignore
                     return! loop()
                 | RemoveProducer producerId ->
+                    Log.Logger.LogDebug("{0} removing producer {1}", prefix, producerId)
                     producers.Remove(producerId) |> ignore
                     return! loop()
                 | ChannelInactive ->
+                    Log.Logger.LogDebug("{0} ChannelInactive", prefix)
                     unregisterClientCnx(broker)
                     this.SendMb.Post(Stop)
                     consumers |> Seq.iter(fun kv ->
@@ -91,7 +99,7 @@ type ClientCnx (broker: Broker,
 
             let connected = conn.Socket.Connected
             if (not connected) then
-                Log.Logger.LogWarning("Socket was disconnected on writing {0}", broker.LogicalAddress)
+                Log.Logger.LogWarning("{0} socket was disconnected on writing", prefix)
                 operationsMb.Post(ChannelInactive)
             return connected
         }
@@ -157,18 +165,16 @@ type ClientCnx (broker: Broker,
         | unknownType ->
             Result.Error (UnknownCommandType unknownType)
 
-    let tryParse (buffer: ReadOnlySequence<byte>) readerId =
+    let tryParse (buffer: ReadOnlySequence<byte>) =
         let array = buffer.ToArray()
-        if (array.Length >= 8)
-        then
+        if (array.Length >= 8) then
             use stream =  new MemoryStream(array)
             use reader = new BinaryReader(stream)
 
             let totalength = reader.ReadInt32() |> int32FromBigEndian
             let frameLength = totalength + 4
 
-            if (array.Length >= frameLength)
-            then
+            if (array.Length >= frameLength) then
                 let readMessage() =
                     reader.ReadInt16() |> int16FromBigEndian |> invalidArgIf ((<>) MagicNumber) "Invalid magicNumber" |> ignore
                     let messageCheckSum  = reader.ReadInt32() |> int32FromBigEndian
@@ -182,11 +188,13 @@ type ClientCnx (broker: Broker,
                     CRC32C.Get(0u, stream, metadataLength + payloadLength) |> int32 |> invalidArgIf ((<>) messageCheckSum) "Invalid checksum" |> ignore
                     metadata, payload
                 let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
-                Log.Logger.LogDebug("[{0}] Got message of type {1}", readerId, command.``type``)
+                Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
                 let consumed = int64 frameLength |> buffer.GetPosition
                 wrapCommand readMessage command, consumed
-            else Result.Error IncompleteCommand, SequencePosition()
-        else Result.Error IncompleteCommand, SequencePosition()
+            else
+                Result.Error IncompleteCommand, SequencePosition()
+        else
+            Result.Error IncompleteCommand, SequencePosition()
 
     let handleRespone requestId result =
         let tsc = requests.[requestId]
@@ -200,9 +208,8 @@ type ClientCnx (broker: Broker,
             initialConnectionTsc.SetResult(this)
         | XCommandPartitionedTopicMetadataResponse cmd ->
             let result =
-                if (cmd.ShouldSerializeError())
-                then
-                    Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
+                if (cmd.ShouldSerializeError()) then
+                    Log.Logger.LogError("{0} CommandPartitionedTopicMetadataResponse Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
                     Error
                 else
                     PartitionedTopicMetadata { Partitions = cmd.Partitions }
@@ -220,9 +227,8 @@ type ClientCnx (broker: Broker,
             consumerMb.Post(MessageRecieved { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = payload })
         | XCommandLookupTopicResponse cmd ->
             let result =
-                if (cmd.ShouldSerializeError())
-                then
-                    Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
+                if (cmd.ShouldSerializeError()) then
+                    Log.Logger.LogError("{0} CommandLookupTopicResponse Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
                     Error
                 else
                     LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
@@ -247,39 +253,36 @@ type ClientCnx (broker: Broker,
             let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
             handleRespone %cmd.RequestId result
         | XCommandError cmd ->
-            Log.Logger.LogError("Error: {0}. Message: {1}", cmd.Error, cmd.Message)
+            Log.Logger.LogError("{0} CommandError Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
             let result = Error
             handleRespone %cmd.RequestId result
 
     let readSocket () =
         task {
-            let readerId = Generators.getNextSocketReaderId()
-            Log.Logger.LogDebug("[{0}] Started read socket for {1}", readerId, broker)
+            Log.Logger.LogDebug("{0} Started read socket", prefix)
             let (conn, _) = connection
             let mutable continueLooping = true
             let reader = conn.Input
             while continueLooping do
                 let! result = reader.ReadAsync()
                 let buffer = result.Buffer
-                if result.IsCompleted
-                then
-                    if
-                        initialConnectionTsc.TrySetException(Exception("Unable to initiate connection"))
-                    then
-                        Log.Logger.LogWarning("[{0}] New connection to {1} was aborted", readerId, broker)
-                    Log.Logger.LogWarning("[{0}] Socket was disconnected while reading {1}", readerId, broker)
+                if result.IsCompleted then
+                    if initialConnectionTsc.TrySetException(Exception("Unable to initiate connection")) then
+                        Log.Logger.LogWarning("{0} New connection was aborted", prefix)
+                    Log.Logger.LogWarning("{0} Socket was disconnected while reading", prefix)
                     operationsMb.Post(ChannelInactive)
                     continueLooping <- false
                 else
-                    match tryParse buffer readerId with
+                    match tryParse buffer with
                     | Result.Ok (xcmd), consumed ->
                         handleCommand xcmd
                         reader.AdvanceTo consumed
                     | Result.Error IncompleteCommand, _ ->
+                        Log.Logger.LogDebug("{0} IncompleteCommand received", prefix)
                         reader.AdvanceTo(buffer.Start, buffer.End)
                     | Result.Error (UnknownCommandType unknownType), _ ->
                         failwithf "Unknown command type %A" unknownType
-            Log.Logger.LogDebug("[{0}] Finished read socket for {1}", readerId, broker)
+            Log.Logger.LogDebug("{0} Finished read socket", prefix)
         }
 
     do Task.Run(fun () -> readSocket().Wait()) |> ignore

@@ -19,6 +19,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
     let connectionOpened() =
         this.Mb.Post(ProducerMessage.ConnectionOpened)
 
+    let prefix = sprintf "producer(%u, %s)" %producerId producerConfig.ProducerName
+
     let connectionHandler = ConnectionHandler(lookup, producerConfig.Topic.CompleteTopicName, connectionOpened)
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
 
@@ -33,7 +35,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
 
-                        Log.Logger.LogInformation("Starting register producer {0}", producerId)
+                        Log.Logger.LogInformation("{0} starting register to topic {1}", prefix, producerConfig.Topic)
                         clientCnx.AddProducer producerId this.Mb
                         let requestId = Generators.getNextRequestId()
                         let payload =
@@ -42,22 +44,25 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                             fun () -> clientCnx.SendAndWaitForReply requestId payload
                             |> PulsarTypes.GetProducerSuccess
                             |> Async.AwaitTask
-                        Log.Logger.LogInformation("Producer {0} registered with name {1}", producerId, success.GeneratedProducerName)
+                        Log.Logger.LogInformation("{0} registered with name {1}", prefix, success.GeneratedProducerName)
 
                         // process pending messages
                         if pendingMessages.Count > 0 then
-                            Log.Logger.LogInformation("Resending {0} pending messages", pendingMessages.Count)
+                            Log.Logger.LogInformation("{0} resending {1} pending messages", prefix, pendingMessages.Count)
                             while pendingMessages.Count > 0 do
                                 let pendingMessage = pendingMessages.Dequeue()
                                 this.Mb.Post(SendMessage pendingMessage)
                     | _ ->
-                        Log.Logger.LogWarning("Connection opened but connection is not ready")
+                        Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
 
                 | ProducerMessage.ConnectionClosed ->
+
+                    Log.Logger.LogInformation("{0} ConnectionClosed", prefix)
                     do! connectionHandler.ConnectionClosed()
 
                 | ProducerMessage.BeginSendMessage (message, channel) ->
 
+                    Log.Logger.LogInformation("{0} BeginSendMessage", prefix)
                     let sequenceId = Generators.getNextSequenceId()
                     let metadata =
                         MessageMetadata (
@@ -74,6 +79,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
                 | ProducerMessage.SendMessage pendingMessage ->
 
+                    Log.Logger.LogInformation("{0} SendMessage id={1}", prefix, %pendingMessage.SequenceId)
                     if pendingMessages.Count <= producerConfig.MaxPendingMessages then
                         pendingMessages.Enqueue(pendingMessage)
                     else
@@ -82,9 +88,9 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         do! clientCnx.Send pendingMessage.Payload
-                        Log.Logger.LogDebug("Send complete")
+                        Log.Logger.LogDebug("{0} send complete", prefix)
                     | _ ->
-                        Log.Logger.LogWarning("NotConnected, skipping send")
+                        Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
 
                 | ProducerMessage.SendReceipt receipt ->
 
@@ -94,8 +100,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
                     if sequenceId > expectedSequenceId then
                         Log.Logger.LogWarning(
-                            "[{0}] [{1}] Got ack for message. Expecting: {2} - got: {3} - queue-size: {4}",
-                            producerConfig.Topic, producerConfig.ProducerName, expectedSequenceId, sequenceId, pendingMessages.Count)
+                            "{0} Got ack for message. Expecting: {1} - got: {2} - queue-size: {3}",
+                            prefix, expectedSequenceId, sequenceId, pendingMessages.Count)
 
                         // Force connection closing so that messages can be re-transmitted in a new connection
                         match connectionHandler.ConnectionState with
@@ -104,18 +110,19 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
                     elif sequenceId < expectedSequenceId then
                         Log.Logger.LogDebug(
-                            "[{0}] [{1}] Got ack for timed out message {2} last-seq: {3}",
-                            producerConfig.Topic, producerConfig.ProducerName, sequenceId, expectedSequenceId)
+                            "{0} Got ack for timed out message {1} last-seq: {2}",
+                            prefix, sequenceId, expectedSequenceId)
                     else
                         Log.Logger.LogDebug(
-                            "[{0}] [{1}] Received ack for message {2}",
-                            producerConfig.Topic, producerConfig.ProducerName, sequenceId)
+                            "{0} Received ack for message {1}",
+                            prefix, sequenceId)
 
                         pendingMessage.Tcs.SetResult(MessageId.FromMessageIdData(receipt.MessageId))
                         pendingMessages.Dequeue() |> ignore
 
                 | ProducerMessage.SendError error ->
 
+                    Log.Logger.LogError("{0} SendError {1}", prefix, error.Message)
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx -> clientCnx.Close()
                     | _ -> ()
@@ -125,7 +132,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     | Ready clientCnx ->
                         connectionHandler.Closing()
                         // TODO failPendingReceive
-                        Log.Logger.LogInformation("Starting close producer {0}", producerId)
+                        Log.Logger.LogInformation("{0} starting close", prefix)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newCloseProducer producerId requestId
                         task {
@@ -137,13 +144,14 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
                                 clientCnx.RemoveProducer(producerId)
                                 connectionHandler.Closed()
-                                Log.Logger.LogInformation("Producer {0} closed", producerId)
+                                Log.Logger.LogInformation("{0} closed", prefix)
                             with
                             | ex ->
-                                Log.Logger.LogError(ex, "Failed to close producer: {0}", producerId)
+                                Log.Logger.LogError(ex, "{0} failed to close", prefix)
                                 reraize ex
                         } |> channel.Reply
                     | _ ->
+                        Log.Logger.LogInformation("{0} can't close since connection already closed", prefix)
                         connectionHandler.Closed()
                         channel.Reply(Task.FromResult())
                 return! loop ()
@@ -158,7 +166,6 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
         }
 
     member __.SendAsync (msg: byte[]) =
-        Log.Logger.LogDebug("Sending Async")
         task {
             mb.PostAndAsyncReply(fun channel -> BeginSendMessage (msg, channel)) |> ignore
         }

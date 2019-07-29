@@ -2,4 +2,9 @@ Expecto
 Microsoft.NET.Test.Sdk
 YoloDev.Expecto.TestSdk
 FSharp.Core
+Microsoft.Extensions.DependencyInjection
 Microsoft.Extensions.Logging.Console
+Serilog
+Serilog.Extensions.Logging
+Serilog.Enrichers.Thread
+Serilog.Sinks.Console
