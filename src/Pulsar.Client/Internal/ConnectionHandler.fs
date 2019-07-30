@@ -20,7 +20,6 @@ type ConnectionState =
 type ConnectionHandler(lookup: BinaryLookupService, topic: CompleteTopicName, connectionOpened: unit -> unit) as this =
 
     let mutable connectionState = Uninitialized
-    let mutable reconnectCount = 0
 
     let mb = MailboxProcessor<ConnectionHandlerMessage>.Start(fun inbox ->
         let rec loop () =
@@ -34,16 +33,12 @@ type ConnectionHandler(lookup: BinaryLookupService, topic: CompleteTopicName, co
                             let! broker = lookup.GetBroker(topic) |> Async.AwaitTask
                             let! clientCnx = ConnectionPool.getConnection broker |> Async.AwaitTask
                             this.ConnectionState <- Ready clientCnx
-                            reconnectCount <- 0
                             connectionOpened()
                         with
                         | ex ->
                             // TODO backoff
                             this.Mb.Post(ConnectionHandlerMessage.Reconnect)
-                            Log.Logger.LogWarning(ex, "Error reconnecting on try {0}", reconnectCount)
-                            if Interlocked.Increment(&reconnectCount) > 3
-                            then
-                                raise ex
+                            Log.Logger.LogWarning(ex, "Error reconnecting")
                     | _ ->
                         Log.Logger.LogInformation("Skipped reconnecting for state {0} on Reconnect", this.ConnectionState)
                 | ConnectionClosed channel ->

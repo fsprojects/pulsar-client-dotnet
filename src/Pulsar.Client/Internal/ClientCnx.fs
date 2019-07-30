@@ -224,7 +224,7 @@ type ClientCnx (broker: Broker,
             Commands.newPong() |> SocketMessageWithoutReply |> sendMb.Post
         | XCommandMessage (cmd, _, payload) ->
             let consumerMb = consumers.[%cmd.ConsumerId]
-            consumerMb.Post(MessageRecieved { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = payload })
+            consumerMb.Post(MessageReceived { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = payload })
         | XCommandLookupTopicResponse cmd ->
             let result =
                 if (cmd.ShouldSerializeError()) then

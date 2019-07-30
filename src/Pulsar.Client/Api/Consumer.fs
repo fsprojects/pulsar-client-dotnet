@@ -3,7 +3,7 @@
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
 open FSharp.UMX
-open System.Collections.Concurrent
+open System.Collections.Generic
 open System
 open Pulsar.Client.Internal
 open System.Runtime.CompilerServices
@@ -22,7 +22,7 @@ type ConsumerState = {
 type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) as this =
 
     let consumerId = Generators.getNextConsumerId()
-    let queue = new ConcurrentQueue<Message>()
+    let queue = new Queue<Message>()
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
 
     let connectionOpened() =
@@ -68,21 +68,25 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     Log.Logger.LogInformation("{0} ConnectionClosed", prefix)
                     do! connectionHandler.ConnectionClosed()
                     return! loop state
-                | ConsumerMessage.MessageRecieved x ->
+                | ConsumerMessage.MessageReceived message ->
                     if state.WaitingChannel = nullChannel then
-                        Log.Logger.LogInformation("{0} MessageRecieved nullchannel", prefix)
-                        queue.Enqueue(x)
+                        Log.Logger.LogInformation("{0} MessageReceived nullchannel", prefix)
+                        queue.Enqueue(message)
                         return! loop state
                     else
-                        Log.Logger.LogInformation("{0} MessageRecieved direct reply", prefix)
-                        state.WaitingChannel.Reply(x)
+                        let queueLength = queue.Count
+                        Log.Logger.LogInformation("{0} MessageReceived reply queueLength={1}", prefix, queueLength)
+                        if (queueLength = 0) then
+                            state.WaitingChannel.Reply <| message
+                        else
+                            queue.Enqueue(message)
+                            state.WaitingChannel.Reply <| queue.Dequeue()
                         return! loop { state with WaitingChannel = nullChannel }
                 | ConsumerMessage.GetMessage ch ->
-                    match queue.TryDequeue() with
-                    | true, msg ->
-                        ch.Reply msg
+                    if queue.Count > 0 then
+                        ch.Reply <| queue.Dequeue()
                         return! loop state
-                    | false, _ ->
+                    else
                         Log.Logger.LogInformation("{0} GetMessage waiting", prefix)
                         return! loop { state with WaitingChannel = ch }
                 | ConsumerMessage.Send (payload, channel) ->
@@ -94,7 +98,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                         //TODO put message on schedule
-                        ()
+                        channel.Reply()
                     return! loop state
                 | ConsumerMessage.ReachedEndOfTheTopic ->
                     Log.Logger.LogWarning("{0} ReachedEndOfTheTopic", prefix)
@@ -163,25 +167,19 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
 
     member __.ReceiveAsync() =
         task {
-            match queue.TryDequeue() with
-            | true, msg ->
-                return msg
-            | false, _ ->
-                 return! mb.PostAndAsyncReply(GetMessage)
+            return! mb.PostAndAsyncReply(GetMessage)
         }
 
     member __.AcknowledgeAsync (msg: Message) =
         task {
             let command = Commands.newAck consumerId msg.MessageId CommandAck.AckType.Individual
-            do! mb.PostAndAsyncReply(fun channel -> Send (command, channel))
-            return! Task.FromResult()
+            return! mb.PostAndAsyncReply(fun channel -> Send (command, channel))
         }
 
     member __.RedeliverUnacknowledgedMessagesAsync () =
         task {
             let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
-            do! mb.PostAndAsyncReply(fun channel -> Send (command, channel))
-            return! Task.FromResult()
+            return! mb.PostAndAsyncReply(fun channel -> Send (command, channel))
         }
 
     member __.CloseAsync() =

@@ -16,12 +16,9 @@ type ProducerException(message) =
 type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) as this =
     let producerId = Generators.getNextProducerId()
 
-    let connectionOpened() =
-        this.Mb.Post(ProducerMessage.ConnectionOpened)
-
     let prefix = sprintf "producer(%u, %s)" %producerId producerConfig.ProducerName
 
-    let connectionHandler = ConnectionHandler(lookup, producerConfig.Topic.CompleteTopicName, connectionOpened)
+    let connectionHandler = ConnectionHandler(lookup, producerConfig.Topic.CompleteTopicName, fun() -> this.Mb.Post(ProducerMessage.ConnectionOpened))
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
 
         let pendingMessages = Queue<PendingMessage>()

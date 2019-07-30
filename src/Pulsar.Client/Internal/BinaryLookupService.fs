@@ -6,32 +6,27 @@ open Pulsar.Client.Common
 open System
 open ConnectionPool
 open System.Net
-open System.Threading
+open System.Threading.Tasks
 
 
 type BinaryLookupService (config: PulsarClientConfiguration) =
 
     let serviceNameResolver = ServiceNameResolver(config)
 
-    let executeRequest createRequest castResponse = task {
-        let endpoint = serviceNameResolver.ResolveHost()
-        let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint
-        let requestId = Generators.getNextRequestId()
-        let payload = createRequest requestId
-
-        let! response =
-            fun () -> clientCnx.SendAndWaitForReply requestId payload
-            |> castResponse
-            |> Async.AwaitTask
-
-        return (response, endpoint)
-    }
+    let prepareRequest createRequest =
+        task {
+            let endpoint = serviceNameResolver.ResolveHost()
+            let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint
+            let requestId = Generators.getNextRequestId()
+            let payload = createRequest requestId
+            return (endpoint, fun () -> clientCnx.SendAndWaitForReply requestId payload)
+        }
 
     member __.GetPartitionedTopicMetadata topicName =
         task {
             let makeRequest = fun requestId -> Commands.newPartitionMetadataRequest topicName requestId
-            let! (response, _) = executeRequest makeRequest PulsarTypes.GetPartitionedTopicMetadata
-            return response
+            let! (_, req) = prepareRequest makeRequest
+            return! PulsarTypes.GetPartitionedTopicMetadata req
         }
 
     member __.GetServiceUrl() = serviceNameResolver.GetServiceUrl()
@@ -41,7 +36,8 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
     member __.GetBroker(topicName: CompleteTopicName) =
         task {
             let makeRequest = fun requestId -> Commands.newLookup topicName requestId false
-            let! (lookupTopicResult, endpoint) = executeRequest makeRequest PulsarTypes.GetLookupTopicResult
+            let! (endpoint, req) = prepareRequest makeRequest
+            let! lookupTopicResult = PulsarTypes.GetLookupTopicResult req
             let uri = Uri(lookupTopicResult.BrokerServiceUrl)
             let address = DnsEndPoint(uri.Host, uri.Port)
             return if lookupTopicResult.Proxy
@@ -51,6 +47,6 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
 
     member __.GetTopicsUnderNamespace (ns : NamespaceName, mode : TopicDomain) = task {
         let makeRequest = fun requestId -> Commands.newGetTopicsOfNamespaceRequest ns requestId mode
-        let! (response, _) = executeRequest makeRequest PulsarTypes.GetTopicsOfNamespace
-        return response
+        let! (_, req) = prepareRequest makeRequest
+        return! PulsarTypes.GetTopicsOfNamespace req
     }

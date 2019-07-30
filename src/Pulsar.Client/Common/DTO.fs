@@ -9,6 +9,8 @@ open System.IO
 open System.Threading.Tasks
 open FSharp.UMX
 open FSharp.Control.Tasks.V2.ContextInsensitive
+open Pulsar.Client.Internal
+open Microsoft.Extensions.Logging
 
 type ChecksumType =
     | Crc32c
@@ -109,6 +111,7 @@ type PulsarTypes =
             | Some i -> i + 1
             | None -> 1
         if attempt > 3 then
+            Log.Logger.LogError("Failed after 3 attempts")
             failwith "Failed after 3 attempts"
         else
             attempt
@@ -123,9 +126,12 @@ type PulsarTypes =
 
     static member GetLookupTopicResult (req: unit -> Task<PulsarTypes>, ?reconnectCount: int) =
         task {
+            Log.Logger.LogDebug("GetLookupTopicResult start")
             match! req() with
             | LookupTopicResult x -> return x
-            | Error -> return! PulsarTypes.GetLookupTopicResult(req, reconnectCount |> PulsarTypes.GetAttempt)
+            | Error ->
+                Log.Logger.LogWarning("GetLookupTopicResult attempt {0}", reconnectCount)
+                return! PulsarTypes.GetLookupTopicResult(req, reconnectCount |> PulsarTypes.GetAttempt)
             | _ -> return failwith "Impossible"
         }
 
@@ -166,7 +172,7 @@ type ConsumerMessage =
     | ConnectionOpened
     | ConnectionClosed
     | ReachedEndOfTheTopic
-    | MessageRecieved of Message
+    | MessageReceived of Message
     | GetMessage of AsyncReplyChannel<Message>
     | Send of Payload * AsyncReplyChannel<unit>
     | Close of AsyncReplyChannel<Task>

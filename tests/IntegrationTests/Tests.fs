@@ -47,29 +47,31 @@ let tests =
             .WithServiceUrl(pulsarAddress)
             .Build()
 
-    let produceMessages (producer: Producer) number topicName =
+    let produceMessages (producer: Producer) number producerName =
         task {
             for i in [1..number] do
-                let! _ = producer.SendAndWaitAsync(Encoding.UTF8.GetBytes("Message #" + string i))
+                let! _ = producer.SendAndWaitAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %A" i producerName (DateTime.Now.ToLongTimeString()) ))
                 ()
         }
 
-    let consumeMessages (consumer: Consumer) number topicName =
+    let consumeMessages (consumer: Consumer) number consumerName =
         task {
             for i in [1..number] do
                 let! message = consumer.ReceiveAsync()
                 let received = Encoding.UTF8.GetString(message.Payload)
-                Expect.equal "" ("Message #" + string i) received
                 do! consumer.AcknowledgeAsync(message)
-                ()
+                Log.Debug("{0} received {1}", consumerName, received)
+                let expected = "Message #" + string i
+                if received.StartsWith(expected) |> not then
+                    failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
         }
 
     testList "basic" [
         testCase "Send and receive 100 messages concurrently works fine in default configuration" <| fun () ->
 
-            Log.Debug( "Send and receive 100 messages concurrently works fine in default configuration")
+            Log.Debug("Started Send and receive 100 messages concurrently works fine in default configuration")
             let client = getClient()
-            let topicName = "public/default/topic-" + DateTimeOffset.UtcNow.UtcTicks.ToString()
+            let topicName = "public/default/test"
 
             let producer =
                 ProducerBuilder(client)
@@ -89,20 +91,22 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer 100 topicName
+                        do! produceMessages producer 100 "concurrent"
                     }:> Task)
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages consumer 100 topicName
+                        do! consumeMessages consumer 100 "concurrent"
                     }:> Task)
 
             Task.WaitAll(producerTask, consumerTask)
 
+            Log.Debug("Finished Send and receive 100 messages concurrently works fine in default configuration")
+
         testCase "Send 100 messages and then receiving them works fine when retention is set on namespace" <| fun () ->
 
-            Log.Debug("Send 100 messages and then receiving them works fine when retention is set on namespace")
+            Log.Debug("Started send 100 messages and then receiving them works fine when retention is set on namespace")
             let client = getClient()
             let topicName = "public/retention/topic-" + DateTimeOffset.UtcNow.UtcTicks.ToString()
 
@@ -113,7 +117,7 @@ let tests =
                     .CreateAsync()
                     .Result
 
-            (produceMessages producer 100 topicName).Wait()
+            (produceMessages producer 100 "sequential").Wait()
 
             let consumer =
                 ConsumerBuilder(client)
@@ -124,5 +128,6 @@ let tests =
                     .SubscribeAsync()
                     .Result
 
-            (consumeMessages consumer 100 topicName).Wait()
+            (consumeMessages consumer 100 "sequential").Wait()
+            Log.Debug("Finished send 100 messages and then receiving them works fine when retention is set on namespace")
     ]
