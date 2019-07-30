@@ -105,33 +105,31 @@ type PulsarTypes =
     | Empty
 
     // TODO backoff
-    static member private GetAttempt reconnectCount =
+    static member private GetAttempt (reconnectCount, name) =
+        let maxAttempts = 2
         let attempt =
             match reconnectCount with
             | Some i -> i + 1
             | None -> 1
-        if attempt > 3 then
-            Log.Logger.LogError("Failed after 3 attempts")
-            failwith "Failed after 3 attempts"
+        if attempt > maxAttempts then
+            failwith <| sprintf "%s failed after %i attempts" name maxAttempts
         else
+            Log.Logger.LogDebug("Retry {0} attempt {1}", name, attempt)
             attempt
 
     static member GetPartitionedTopicMetadata (req: unit -> Task<PulsarTypes>, ?reconnectCount: int) =
         task {
             match! req() with
             | PartitionedTopicMetadata x -> return x
-            | Error -> return! PulsarTypes.GetPartitionedTopicMetadata(req, reconnectCount |> PulsarTypes.GetAttempt)
+            | Error -> return! PulsarTypes.GetPartitionedTopicMetadata(req, PulsarTypes.GetAttempt(reconnectCount, "GetPartitionedTopicMetadata"))
             | _ -> return failwith "Impossible"
         }
 
     static member GetLookupTopicResult (req: unit -> Task<PulsarTypes>, ?reconnectCount: int) =
         task {
-            Log.Logger.LogDebug("GetLookupTopicResult start")
             match! req() with
             | LookupTopicResult x -> return x
-            | Error ->
-                Log.Logger.LogWarning("GetLookupTopicResult attempt {0}", reconnectCount)
-                return! PulsarTypes.GetLookupTopicResult(req, reconnectCount |> PulsarTypes.GetAttempt)
+            | Error -> return! PulsarTypes.GetLookupTopicResult(req, PulsarTypes.GetAttempt(reconnectCount, "GetLookupTopicResult"))
             | _ -> return failwith "Impossible"
         }
 
@@ -139,7 +137,7 @@ type PulsarTypes =
         task {
             match! req() with
             | ProducerSuccess x -> return x
-            | Error -> return! PulsarTypes.GetProducerSuccess(req, reconnectCount |> PulsarTypes.GetAttempt)
+            | Error -> return! PulsarTypes.GetProducerSuccess(req, PulsarTypes.GetAttempt(reconnectCount, "GetProducerSuccess"))
             | _ -> return failwith "Impossible"
         }
 
@@ -147,7 +145,7 @@ type PulsarTypes =
         task {
             match! req() with
             | TopicsOfNamespace x -> return x
-            | Error -> return! PulsarTypes.GetTopicsOfNamespace(req, reconnectCount |> PulsarTypes.GetAttempt)
+            | Error -> return! PulsarTypes.GetTopicsOfNamespace(req, PulsarTypes.GetAttempt(reconnectCount, "GetTopicsOfNamespace"))
             | _ -> return failwith "Impossible"
         }
 
@@ -155,7 +153,7 @@ type PulsarTypes =
         task {
             match! req() with
             | Empty -> return ()
-            | Error -> return! PulsarTypes.GetEmpty(req, reconnectCount |> PulsarTypes.GetAttempt)
+            | Error -> return! PulsarTypes.GetEmpty(req, PulsarTypes.GetAttempt(reconnectCount, "GetEmpty"))
             | _ -> return failwith "Impossible"
         }
 
