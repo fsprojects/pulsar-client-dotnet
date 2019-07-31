@@ -44,3 +44,11 @@ let throwIfDefault createException (value: 'a) =
 
 let reraize ex =
     (ExceptionDispatchInfo.Capture ex).Throw()
+
+// Mix
+
+let asyncDelay delay work =
+    async {
+        do! Async.Sleep delay
+        work()
+    } |> Async.StartImmediate

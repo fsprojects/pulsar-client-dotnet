@@ -232,10 +232,7 @@ type ClientCnx (broker: Broker,
             let rejectedRequests = Interlocked.Increment(&numberOfRejectedRequests)
             if (rejectedRequests = 1) then
                 // schedule timer
-                async {
-                    do! Async.Sleep (rejectedRequestResetTimeSec*1000)
-                    Interlocked.Exchange(&numberOfRejectedRequests, 0) |> ignore
-                } |> Async.StartImmediate
+                asyncDelay (rejectedRequestResetTimeSec*1000) (fun() -> Interlocked.Exchange(&numberOfRejectedRequests, 0) |> ignore)
             elif (rejectedRequests >= maxNumberOfRejectedRequestPerConnection) then
                 Log.Logger.LogError("{0} Close connection because received {1} rejected request in {2} seconds ", broker,
                         rejectedRequests, rejectedRequestResetTimeSec);

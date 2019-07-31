@@ -30,10 +30,14 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
     let subscribeTsc = TaskCompletionSource<Consumer>()
     let partitionIndex = -1
-
-    let connectionHandler = ConnectionHandler(lookup, consumerConfig.Topic.CompleteTopicName, fun () -> this.Mb.Post(ConsumerMessage.ConnectionOpened))
-
     let prefix = sprintf "consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
+    // TODO take from configuration
+    let subscribeTimeout = DateTime.Now.Add(TimeSpan.FromSeconds(60.0))
+    let connectionHandler =
+        ConnectionHandler(lookup,
+                          consumerConfig.Topic.CompleteTopicName,
+                          (fun () -> this.Mb.Post(ConsumerMessage.ConnectionOpened)),
+                          (fun ex -> this.Mb.Post(ConsumerMessage.ConnectionFailed ex)))
 
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
@@ -53,30 +57,52 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                                 consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName
                                 consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
                                 consumerConfig.SubscriptionInitialPosition
-                        let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
-                        response |> PulsarResponseType.GetEmpty
-                        Log.Logger.LogInformation("{0} subscribed", prefix)
-                        let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
-
-                        let firstTimeConnect = subscribeTsc.TrySetResult(this)
-                        let isDurable = subscriptionMode = SubscriptionMode.Durable;
-                        // if the consumer is not partitioned or is re-connected and is partitioned, we send the flow
-                        // command to receive messages.
-                        // For readers too (isDurable==false), the partition idx will be set though we have to
-                        // send available permits immediately after establishing the reader session
-                        if (not (firstTimeConnect && partitionIndex > -1 && isDurable) && consumerConfig.ReceiverQueueSize <> 0) then
-                            let flowCommand = Commands.newFlow consumerId initialFlowCount
-                            do! clientCnx.Send flowCommand
-                            Log.Logger.LogInformation("{0} initial flow sent {1}", prefix, initialFlowCount)
+                        try
+                            let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                            response |> PulsarResponseType.GetEmpty
+                            Log.Logger.LogInformation("{0} subscribed", prefix)
+                            let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
+                            let firstTimeConnect = subscribeTsc.TrySetResult(this)
+                            let isDurable = subscriptionMode = SubscriptionMode.Durable;
+                            // if the consumer is not partitioned or is re-connected and is partitioned, we send the flow
+                            // command to receive messages.
+                            // For readers too (isDurable==false), the partition idx will be set though we have to
+                            // send available permits immediately after establishing the reader session
+                            if (not (firstTimeConnect && partitionIndex > -1 && isDurable) && consumerConfig.ReceiverQueueSize <> 0) then
+                                let flowCommand = Commands.newFlow consumerId initialFlowCount
+                                do! clientCnx.Send flowCommand
+                                Log.Logger.LogInformation("{0} initial flow sent {1}", prefix, initialFlowCount)
+                        with
+                        | ex ->
+                            clientCnx.RemoveConsumer consumerId
+                            Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
+                            if (connectionHandler.IsRetriableError ex) || not (subscribeTsc.TrySetException ex)  then
+                                // Either we had already created the consumer once (subscribeFuture.isDone()) or we are
+                                // still within the initial timeout budget and we are dealing with a retriable error
+                                connectionHandler.ReconnectLater ex
+                            else
+                                // unable to create new consumer, fail operation
+                                connectionHandler.Failed()
                     | _ ->
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
                     return! loop state
 
                 | ConsumerMessage.ConnectionClosed ->
-                    Log.Logger.LogInformation("{0} ConnectionClosed", prefix)
-                    do! connectionHandler.ConnectionClosed()
+
+                    Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
+                    connectionHandler.ConnectionClosed()
                     return! loop state
+
+                | ConsumerMessage.ConnectionFailed ex ->
+
+                    Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
+                    if (DateTime.Now > subscribeTimeout && subscribeTsc.TrySetException(ex)) then
+                        Log.Logger.LogInformation("{0} creation failed", prefix)
+                        connectionHandler.Failed()
+                    return! loop state
+
                 | ConsumerMessage.MessageReceived message ->
+
                     if state.WaitingChannel = nullChannel then
                         Log.Logger.LogInformation("{0} MessageReceived nullchannel", prefix)
                         queue.Enqueue(message)
@@ -90,14 +116,18 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                             queue.Enqueue(message)
                             state.WaitingChannel.Reply <| queue.Dequeue()
                         return! loop { state with WaitingChannel = nullChannel }
+
                 | ConsumerMessage.GetMessage ch ->
+
                     if queue.Count > 0 then
                         ch.Reply <| queue.Dequeue()
                         return! loop state
                     else
                         Log.Logger.LogInformation("{0} GetMessage waiting", prefix)
                         return! loop { state with WaitingChannel = ch }
+
                 | ConsumerMessage.Send (payload, channel) ->
+
                     match connectionHandler.ConnectionState with
                     | Ready conn ->
                         do! conn.Send payload
@@ -108,11 +138,15 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                         //TODO put message on schedule
                         channel.Reply()
                     return! loop state
+
                 | ConsumerMessage.ReachedEndOfTheTopic ->
+
                     Log.Logger.LogWarning("{0} ReachedEndOfTheTopic", prefix)
                     //TODO notify client app that topic end reached
                     connectionHandler.Terminate()
+
                 | ConsumerMessage.Close channel ->
+
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         connectionHandler.Closing()
@@ -136,9 +170,10 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                         Log.Logger.LogInformation("{0} can't close since connection already closed", prefix)
                         connectionHandler.Closed()
                         channel.Reply(Task.FromResult())
-
                     return! loop state
+
                 | ConsumerMessage.Unsubscribe channel ->
+
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         connectionHandler.Closing()
@@ -200,7 +235,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
 
     member private __.InitInternal() =
         task {
-            do connectionHandler.Connect()
+            do connectionHandler.GrabCnx()
             return! subscribeTsc.Task
         }
 

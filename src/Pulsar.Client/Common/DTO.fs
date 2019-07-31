@@ -131,6 +131,7 @@ type PulsarResponseType =
 
 type ProducerMessage =
     | ConnectionOpened
+    | ConnectionFailed of exn
     | ConnectionClosed
     | SendReceipt of CommandSendReceipt
     | BeginSendMessage of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
@@ -140,6 +141,7 @@ type ProducerMessage =
 
 type ConsumerMessage =
     | ConnectionOpened
+    | ConnectionFailed of exn
     | ConnectionClosed
     | ReachedEndOfTheTopic
     | MessageReceived of Message

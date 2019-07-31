@@ -18,8 +18,14 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
     let prefix = sprintf "producer(%u, %s)" %producerId producerConfig.ProducerName
     let producerCreatedTsc = TaskCompletionSource<Producer>()
+    // TODO take from configuration
+    let createProducerTimeout = DateTime.Now.Add(TimeSpan.FromSeconds(60.0))
+    let connectionHandler =
+        ConnectionHandler(lookup,
+                          producerConfig.Topic.CompleteTopicName,
+                          (fun () -> this.Mb.Post(ProducerMessage.ConnectionOpened)),
+                          (fun ex -> this.Mb.Post(ProducerMessage.ConnectionFailed ex)))
 
-    let connectionHandler = ConnectionHandler(lookup, producerConfig.Topic.CompleteTopicName, fun() -> this.Mb.Post(ProducerMessage.ConnectionOpened))
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
 
         let pendingMessages = Queue<PendingMessage>()
@@ -30,33 +36,51 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 match msg with
 
                 | ProducerMessage.ConnectionOpened ->
+
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
-
                         Log.Logger.LogInformation("{0} starting register to topic {1}", prefix, producerConfig.Topic)
                         clientCnx.AddProducer producerId this.Mb
                         let requestId = Generators.getNextRequestId()
-                        let payload = Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName producerId requestId
-                        let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
-                        let success = response |> PulsarResponseType.GetProducerSuccess
-                        Log.Logger.LogInformation("{0} registered with name {1}", prefix, success.GeneratedProducerName)
-
-
-                        // process pending messages
-                        if pendingMessages.Count > 0 then
-                            Log.Logger.LogInformation("{0} resending {1} pending messages", prefix, pendingMessages.Count)
-                            while pendingMessages.Count > 0 do
-                                let pendingMessage = pendingMessages.Dequeue()
-                                this.Mb.Post(SendMessage pendingMessage)
-                        else
-                            producerCreatedTsc.TrySetResult(this) |> ignore
+                        try
+                            let payload = Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName producerId requestId
+                            let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                            let success = response |> PulsarResponseType.GetProducerSuccess
+                            Log.Logger.LogInformation("{0} registered with name {1}", prefix, success.GeneratedProducerName)
+                            // process pending messages
+                            if pendingMessages.Count > 0 then
+                                Log.Logger.LogInformation("{0} resending {1} pending messages", prefix, pendingMessages.Count)
+                                while pendingMessages.Count > 0 do
+                                    let pendingMessage = pendingMessages.Dequeue()
+                                    this.Mb.Post(SendMessage pendingMessage)
+                            else
+                                producerCreatedTsc.TrySetResult(this) |> ignore
+                        with
+                        | ex ->
+                            clientCnx.RemoveProducer producerId
+                            Log.Logger.LogError(ex, "{0} Failed to create", prefix)
+                            // TODO handle special cases
+                            if (connectionHandler.IsRetriableError ex) || not (producerCreatedTsc.TrySetException ex)  then
+                                // Either we had already created the producer once (producerCreatedFuture.isDone()) or we are
+                                // still within the initial timeout budget and we are dealing with a retriable error
+                                connectionHandler.ReconnectLater ex
+                            else
+                                // unable to create new consumer, fail operation
+                                connectionHandler.Failed()
                     | _ ->
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
 
                 | ProducerMessage.ConnectionClosed ->
 
-                    Log.Logger.LogInformation("{0} ConnectionClosed", prefix)
-                    do! connectionHandler.ConnectionClosed()
+                    Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
+                    connectionHandler.ConnectionClosed()
+
+                | ProducerMessage.ConnectionFailed  ex ->
+
+                    Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
+                    if (DateTime.Now > createProducerTimeout && producerCreatedTsc.TrySetException(ex)) then
+                        Log.Logger.LogInformation("{0} creation failed", prefix)
+                        connectionHandler.Failed()
 
                 | ProducerMessage.BeginSendMessage (message, channel) ->
 
@@ -121,6 +145,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     | _ -> ()
 
                 | ProducerMessage.Close channel ->
+
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         connectionHandler.Closing()
@@ -168,7 +193,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
     member private __.InitInternal() =
        task {
-           do connectionHandler.Connect()
+           do connectionHandler.GrabCnx()
            return! producerCreatedTsc.Task
        }
 
