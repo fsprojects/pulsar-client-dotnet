@@ -21,7 +21,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
     // TODO take from configuration
     let createProducerTimeout = DateTime.Now.Add(TimeSpan.FromSeconds(60.0))
     let connectionHandler =
-        ConnectionHandler(lookup,
+        ConnectionHandler(prefix,
+                          lookup,
                           producerConfig.Topic.CompleteTopicName,
                           (fun () -> this.Mb.Post(ProducerMessage.ConnectionOpened)),
                           (fun ex -> this.Mb.Post(ProducerMessage.ConnectionFailed ex)))

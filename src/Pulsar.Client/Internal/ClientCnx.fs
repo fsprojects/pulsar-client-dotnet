@@ -88,6 +88,8 @@ type ClientCnx (broker: Broker,
                     Log.Logger.LogDebug("{0} ChannelInactive", prefix)
                     unregisterClientCnx(broker)
                     this.SendMb.Post(Stop)
+                    requests |> Seq.iter (fun kv ->
+                        kv.Value.SetException(Exception("ChannelInactive fired")))
                     consumers |> Seq.iter(fun kv ->
                         kv.Value.Post(ConsumerMessage.ConnectionClosed))
                     producers |> Seq.iter(fun kv ->
@@ -99,12 +101,17 @@ type ClientCnx (broker: Broker,
     let sendSerializedPayload (serializedPayload: Payload ) =
         task {
             let (conn, streamWriter) = connection
-            do! streamWriter |> serializedPayload
-            let connected = conn.Socket.Connected
-            if (not connected) then
-                Log.Logger.LogWarning("{0} socket was disconnected on writing", prefix)
+            try
+                do! streamWriter |> serializedPayload
+                let connected = conn.Socket.Connected
+                if (not connected) then
+                    Log.Logger.LogWarning("{0} socket was disconnected normally on writing", prefix)
+                    operationsMb.Post(ChannelInactive)
+                return connected
+            with ex ->
+                Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally on writing", prefix)
                 operationsMb.Post(ChannelInactive)
-            return connected
+                return false
         }
 
     let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
@@ -297,25 +304,33 @@ type ClientCnx (broker: Broker,
             let (conn, _) = connection
             let mutable continueLooping = true
             let reader = conn.Input
-            while continueLooping do
-                let! result = reader.ReadAsync()
-                let buffer = result.Buffer
-                if result.IsCompleted then
-                    if initialConnectionTsc.TrySetException(Exception("Unable to initiate connection")) then
-                        Log.Logger.LogWarning("{0} New connection was aborted", prefix)
-                    Log.Logger.LogWarning("{0} Socket was disconnected while reading", prefix)
-                    operationsMb.Post(ChannelInactive)
-                    continueLooping <- false
-                else
-                    match tryParse buffer with
-                    | Result.Ok (xcmd), consumed ->
-                        handleCommand xcmd
-                        reader.AdvanceTo consumed
-                    | Result.Error IncompleteCommand, _ ->
-                        Log.Logger.LogDebug("{0} IncompleteCommand received", prefix)
-                        reader.AdvanceTo(buffer.Start, buffer.End)
-                    | Result.Error (UnknownCommandType unknownType), _ ->
-                        failwithf "Unknown command type %A" unknownType
+
+            try
+                while continueLooping do
+                    let! result = reader.ReadAsync()
+                    let buffer = result.Buffer
+                    if result.IsCompleted then
+                        if initialConnectionTsc.TrySetException(Exception("Unable to initiate connection")) then
+                            Log.Logger.LogWarning("{0} New connection was aborted", prefix)
+                        Log.Logger.LogWarning("{0} Socket was disconnected normally while reading", prefix)
+                        operationsMb.Post(ChannelInactive)
+                        continueLooping <- false
+                    else
+                        match tryParse buffer with
+                        | Result.Ok (xcmd), consumed ->
+                            handleCommand xcmd
+                            reader.AdvanceTo consumed
+                        | Result.Error IncompleteCommand, _ ->
+                            Log.Logger.LogDebug("{0} IncompleteCommand received", prefix)
+                            reader.AdvanceTo(buffer.Start, buffer.End)
+                        | Result.Error (UnknownCommandType unknownType), _ ->
+                            failwithf "Unknown command type %A" unknownType
+            with ex ->
+                if initialConnectionTsc.TrySetException(Exception("Unable to initiate connection")) then
+                    Log.Logger.LogWarning("{0} New connection was aborted", prefix)
+                Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally while reading", prefix)
+                operationsMb.Post(ChannelInactive)
+
             Log.Logger.LogDebug("{0} Finished read socket", prefix)
         }
 

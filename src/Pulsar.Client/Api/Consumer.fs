@@ -34,7 +34,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
     // TODO take from configuration
     let subscribeTimeout = DateTime.Now.Add(TimeSpan.FromSeconds(60.0))
     let connectionHandler =
-        ConnectionHandler(lookup,
+        ConnectionHandler(prefix,
+                          lookup,
                           consumerConfig.Topic.CompleteTopicName,
                           (fun () -> this.Mb.Post(ConsumerMessage.ConnectionOpened)),
                           (fun ex -> this.Mb.Post(ConsumerMessage.ConnectionFailed ex)))
