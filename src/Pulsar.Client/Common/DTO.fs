@@ -96,7 +96,7 @@ type PendingMessage =
         Tcs : TaskCompletionSource<MessageId>
     }
 
-type PulsarTypes =
+type PulsarResponseType =
     | PartitionedTopicMetadata of PartitionedTopicMetadata
     | LookupTopicResult of LookupTopicResult
     | ProducerSuccess of ProducerSuccess
@@ -104,58 +104,30 @@ type PulsarTypes =
     | Error
     | Empty
 
-    // TODO backoff
-    static member private GetAttempt (reconnectCount, name) =
-        let maxAttempts = 2
-        let attempt =
-            match reconnectCount with
-            | Some i -> i + 1
-            | None -> 1
-        if attempt > maxAttempts then
-            failwith <| sprintf "%s failed after %i attempts" name maxAttempts
-        else
-            Log.Logger.LogDebug("Retry {0} attempt {1}", name, attempt)
-            attempt
+    static member GetPartitionedTopicMetadata req =
+        match req with
+        | PartitionedTopicMetadata x -> x
+        | _ -> failwith "Incorrect return type"
 
-    static member GetPartitionedTopicMetadata (req: unit -> Task<PulsarTypes>, ?reconnectCount: int) =
-        task {
-            match! req() with
-            | PartitionedTopicMetadata x -> return x
-            | Error -> return! PulsarTypes.GetPartitionedTopicMetadata(req, PulsarTypes.GetAttempt(reconnectCount, "GetPartitionedTopicMetadata"))
-            | _ -> return failwith "Impossible"
-        }
+    static member GetLookupTopicResult req =
+        match req with
+        | LookupTopicResult x -> x
+        | _ -> failwith "Incorrect return type"
 
-    static member GetLookupTopicResult (req: unit -> Task<PulsarTypes>, ?reconnectCount: int) =
-        task {
-            match! req() with
-            | LookupTopicResult x -> return x
-            | Error -> return! PulsarTypes.GetLookupTopicResult(req, PulsarTypes.GetAttempt(reconnectCount, "GetLookupTopicResult"))
-            | _ -> return failwith "Impossible"
-        }
+    static member GetProducerSuccess req =
+        match req with
+        | ProducerSuccess x -> x
+        | _ -> failwith "Incorrect return type"
 
-    static member GetProducerSuccess (req: unit -> Task<PulsarTypes>, ?reconnectCount: int) =
-        task {
-            match! req() with
-            | ProducerSuccess x -> return x
-            | Error -> return! PulsarTypes.GetProducerSuccess(req, PulsarTypes.GetAttempt(reconnectCount, "GetProducerSuccess"))
-            | _ -> return failwith "Impossible"
-        }
+    static member GetTopicsOfNamespace req =
+        match req with
+        | TopicsOfNamespace x -> x
+        | _ -> failwith "Incorrect return type"
 
-    static member GetTopicsOfNamespace (req: unit -> Task<PulsarTypes>, ?reconnectCount: int) =
-        task {
-            match! req() with
-            | TopicsOfNamespace x -> return x
-            | Error -> return! PulsarTypes.GetTopicsOfNamespace(req, PulsarTypes.GetAttempt(reconnectCount, "GetTopicsOfNamespace"))
-            | _ -> return failwith "Impossible"
-        }
-
-    static member GetEmpty (req: unit -> Task<PulsarTypes>, ?reconnectCount: int) =
-        task {
-            match! req() with
-            | Empty -> return ()
-            | Error -> return! PulsarTypes.GetEmpty(req, PulsarTypes.GetAttempt(reconnectCount, "GetEmpty"))
-            | _ -> return failwith "Impossible"
-        }
+    static member GetEmpty req =
+        match req with
+        | Empty -> ()
+        | _ -> failwith "Incorrect return type"
 
 type ProducerMessage =
     | ConnectionOpened
@@ -175,3 +147,33 @@ type ConsumerMessage =
     | Send of Payload * AsyncReplyChannel<unit>
     | Close of AsyncReplyChannel<Task>
     | Unsubscribe of AsyncReplyChannel<Task>
+
+exception InvalidServiceURL
+exception InvalidConfigurationException of string
+exception NotFoundException of string
+exception TimeoutException of string
+exception IncompatibleSchemaException of string
+exception LookupException of string
+exception TooManyRequestsException of string
+exception ConnectException of string
+exception AlreadyClosedException of string
+exception TopicTerminatedException of string
+exception AuthenticationException of string
+exception AuthorizationException of string
+exception GettingAuthenticationDataException of string
+exception UnsupportedAuthenticationException of string
+exception BrokerPersistenceException of string
+exception BrokerMetadataException of string
+exception ProducerBusyException of string
+exception ConsumerBusyException of string
+exception NotConnectedException of string
+exception InvalidMessageException of string
+exception InvalidTopicNameException of string
+exception NotSupportedException of string
+exception ProducerQueueIsFullError of string
+exception ProducerBlockedQuotaExceededError of string
+exception ProducerBlockedQuotaExceededException of string
+exception ChecksumException of string
+exception CryptoExceptionof of string
+
+

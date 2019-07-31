@@ -50,7 +50,7 @@ let tests =
     let produceMessages (producer: Producer) number producerName =
         task {
             for i in [1..number] do
-                let! _ = producer.SendAndWaitAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %A" i producerName (DateTime.Now.ToLongTimeString()) ))
+                let! _ = producer.SendAndWaitAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
                 ()
         }
 

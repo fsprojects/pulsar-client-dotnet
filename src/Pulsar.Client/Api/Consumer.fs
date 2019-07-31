@@ -15,20 +15,23 @@ open System.Threading
 type ConsumerException(message) =
     inherit Exception(message)
 
+type SubscriptionMode =
+    | Durable
+    | NonDurable
+
 type ConsumerState = {
     WaitingChannel: AsyncReplyChannel<Message>
 }
 
-type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) as this =
+type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: SubscriptionMode, lookup: BinaryLookupService) as this =
 
     let consumerId = Generators.getNextConsumerId()
     let queue = new Queue<Message>()
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
+    let subscribeTsc = TaskCompletionSource<Consumer>()
+    let partitionIndex = -1
 
-    let connectionOpened() =
-        this.Mb.Post(ConsumerMessage.ConnectionOpened)
-
-    let connectionHandler = ConnectionHandler(lookup, consumerConfig.Topic.CompleteTopicName, connectionOpened)
+    let connectionHandler = ConnectionHandler(lookup, consumerConfig.Topic.CompleteTopicName, fun () -> this.Mb.Post(ConsumerMessage.ConnectionOpened))
 
     let prefix = sprintf "consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
 
@@ -50,16 +53,21 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                                 consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName
                                 consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
                                 consumerConfig.SubscriptionInitialPosition
-                        do!
-                            fun () -> clientCnx.SendAndWaitForReply requestId payload
-                            |> PulsarTypes.GetEmpty
-                            |> Async.AwaitTask
+                        let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                        response |> PulsarResponseType.GetEmpty
                         Log.Logger.LogInformation("{0} subscribed", prefix)
                         let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
-                        let flowCommand =
-                            Commands.newFlow consumerId initialFlowCount
-                        do! clientCnx.Send flowCommand
-                        Log.Logger.LogInformation("{0} initial flow sent {1}", prefix, initialFlowCount)
+
+                        let firstTimeConnect = subscribeTsc.TrySetResult(this)
+                        let isDurable = subscriptionMode = SubscriptionMode.Durable;
+                        // if the consumer is not partitioned or is re-connected and is partitioned, we send the flow
+                        // command to receive messages.
+                        // For readers too (isDurable==false), the partition idx will be set though we have to
+                        // send available permits immediately after establishing the reader session
+                        if (not (firstTimeConnect && partitionIndex > -1 && isDurable) && consumerConfig.ReceiverQueueSize <> 0) then
+                            let flowCommand = Commands.newFlow consumerId initialFlowCount
+                            do! clientCnx.Send flowCommand
+                            Log.Logger.LogInformation("{0} initial flow sent {1}", prefix, initialFlowCount)
                     | _ ->
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
                     return! loop state
@@ -75,7 +83,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         return! loop state
                     else
                         let queueLength = queue.Count
-                        Log.Logger.LogInformation("{0} MessageReceived reply queueLength={1}", prefix, queueLength)
+                        Log.Logger.LogInformation("{0} MessageReceived queueLength={1}", prefix, queueLength)
                         if (queueLength = 0) then
                             state.WaitingChannel.Reply <| message
                         else
@@ -114,10 +122,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         let payload = Commands.newCloseConsumer consumerId requestId
                         task {
                             try
-                                do!
-                                    fun () -> clientCnx.SendAndWaitForReply requestId payload
-                                    |> PulsarTypes.GetEmpty
-                                    |> Async.AwaitTask
+                                let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                                response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
                                 connectionHandler.Closed()
                                 Log.Logger.LogInformation("{0} closed", prefix)
@@ -142,10 +148,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
                         let newTask =
                             task {
                                 try
-                                    do!
-                                        fun () -> clientCnx.SendAndWaitForReply requestId payload
-                                        |> PulsarTypes.GetEmpty
-                                        |> Async.AwaitTask
+                                    let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                                    response |> PulsarResponseType.GetEmpty
                                     clientCnx.RemoveConsumer(consumerId)
                                     connectionHandler.Closed()
                                     Log.Logger.LogInformation("{0} unsubscribed", prefix)
@@ -195,14 +199,18 @@ type Consumer private (consumerConfig: ConsumerConfiguration, lookup: BinaryLook
         }
 
     member private __.InitInternal() =
-        connectionHandler.Connect()
+        task {
+            do connectionHandler.Connect()
+            return! subscribeTsc.Task
+        }
 
     member private __.Mb with get(): MailboxProcessor<ConsumerMessage> = mb
 
-    static member Init(consumerConfig: ConsumerConfiguration, lookup: BinaryLookupService) =
-        let consumer = Consumer(consumerConfig, lookup)
-        consumer.InitInternal()
-        consumer
+    static member Init(consumerConfig: ConsumerConfiguration, subscriptionMode: SubscriptionMode, lookup: BinaryLookupService) =
+        task {
+            let consumer = Consumer(consumerConfig, subscriptionMode, lookup)
+            return! consumer.InitInternal()
+        }
 
 
 

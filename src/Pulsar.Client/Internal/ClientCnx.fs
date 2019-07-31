@@ -13,6 +13,7 @@ open System.Buffers
 open System.IO
 open ProtoBuf
 open CRC32
+open System.Threading
 open Pulsar.Client.Api
 
 type CnxOperation =
@@ -45,7 +46,7 @@ type CommandParseError =
 type SocketMessage =
     | SocketMessageWithReply of Payload * AsyncReplyChannel<unit>
     | SocketMessageWithoutReply of Payload
-    | SocketRequestMessageWithReply of RequestId * Payload * AsyncReplyChannel<Task<PulsarTypes>>
+    | SocketRequestMessageWithReply of RequestId * Payload * AsyncReplyChannel<Task<PulsarResponseType>>
     | Stop
 
 type ClientCnx (broker: Broker,
@@ -55,16 +56,19 @@ type ClientCnx (broker: Broker,
 
     let consumers = Dictionary<ConsumerId, MailboxProcessor<ConsumerMessage>>()
     let producers = Dictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
-    let requests = Dictionary<RequestId, TaskCompletionSource<PulsarTypes>>()
+    let requests = Dictionary<RequestId, TaskCompletionSource<PulsarResponseType>>()
     let clientCnxId = Generators.getNextClientCnxId()
     let prefix = sprintf "clientCnx(%i, %A)" clientCnxId broker.LogicalAddress
+    //TODO move to configuration
+    let maxNumberOfRejectedRequestPerConnection = 100
+    let rejectedRequestResetTimeSec = 60
+    let mutable numberOfRejectedRequests = 0
 
     let operationsMb = MailboxProcessor<CnxOperation>.Start(fun inbox ->
         let rec loop () =
             async {
                 match! inbox.Receive() with
                 | AddProducer (producerId, mb) ->
-                    let z = prefix
                     Log.Logger.LogDebug("{0} adding producer {1}", prefix, producerId)
                     producers.Add(producerId, mb)
                     return! loop()
@@ -96,7 +100,6 @@ type ClientCnx (broker: Broker,
         task {
             let (conn, streamWriter) = connection
             do! streamWriter |> serializedPayload
-
             let connected = conn.Socket.Connected
             if (not connected) then
                 Log.Logger.LogWarning("{0} socket was disconnected on writing", prefix)
@@ -170,10 +173,8 @@ type ClientCnx (broker: Broker,
         if (array.Length >= 8) then
             use stream =  new MemoryStream(array)
             use reader = new BinaryReader(stream)
-
             let totalength = reader.ReadInt32() |> int32FromBigEndian
             let frameLength = totalength + 4
-
             if (array.Length >= frameLength) then
                 let readMessage() =
                     reader.ReadInt16() |> int16FromBigEndian |> invalidArgIf ((<>) MagicNumber) "Invalid magicNumber" |> ignore
@@ -196,10 +197,49 @@ type ClientCnx (broker: Broker,
         else
             Result.Error IncompleteCommand, SequencePosition()
 
-    let handleRespone requestId result =
+    let handleSuccess requestId result =
         let tsc = requests.[requestId]
         tsc.SetResult result
         requests.Remove requestId |> ignore
+
+    let getPulsarClientException error errorMsg =
+        match error with
+        | ServerError.AuthenticationError -> AuthenticationException errorMsg
+        | ServerError.AuthorizationError -> AuthorizationException errorMsg
+        | ServerError.ProducerBusy -> ProducerBusyException errorMsg
+        | ServerError.ConsumerBusy -> ConsumerBusyException errorMsg
+        | ServerError.MetadataError -> BrokerMetadataException errorMsg
+        | ServerError.PersistenceError -> BrokerPersistenceException errorMsg
+        | ServerError.ServiceNotReady -> LookupException errorMsg
+        | ServerError.TooManyRequests -> TooManyRequestsException errorMsg
+        | ServerError.ProducerBlockedQuotaExceededError -> ProducerBlockedQuotaExceededError errorMsg
+        | ServerError.ProducerBlockedQuotaExceededException -> ProducerBlockedQuotaExceededException errorMsg
+        | ServerError.TopicTerminatedError -> TopicTerminatedException errorMsg
+        | ServerError.IncompatibleSchema -> IncompatibleSchemaException errorMsg
+        | _ -> Exception errorMsg
+
+    let handleError requestId error msg =
+        let tsc = requests.[requestId]
+        let exc = getPulsarClientException error msg
+        tsc.SetException exc
+        requests.Remove requestId |> ignore
+
+    let checkServerError serverError errMsg =
+        if (serverError = ServerError.ServiceNotReady) then
+            Log.Logger.LogError("{0} Close connection because received internal-server error {1}", broker, errMsg);
+            this.Close()
+        elif (serverError = ServerError.TooManyRequests) then
+            let rejectedRequests = Interlocked.Increment(&numberOfRejectedRequests)
+            if (rejectedRequests = 1) then
+                // schedule timer
+                async {
+                    do! Async.Sleep (rejectedRequestResetTimeSec*1000)
+                    Interlocked.Exchange(&numberOfRejectedRequests, 0) |> ignore
+                } |> Async.StartImmediate
+            elif (rejectedRequests >= maxNumberOfRejectedRequestPerConnection) then
+                Log.Logger.LogError("{0} Close connection because received {1} rejected request in {2} seconds ", broker,
+                        rejectedRequests, rejectedRequestResetTimeSec);
+                this.Close()
 
     let handleCommand xcmd =
         match xcmd with
@@ -207,13 +247,12 @@ type ClientCnx (broker: Broker,
             //TODO check server protocol version
             initialConnectionTsc.SetResult(this)
         | XCommandPartitionedTopicMetadataResponse cmd ->
-            let result =
-                if (cmd.ShouldSerializeError()) then
-                    Log.Logger.LogError("{0} CommandPartitionedTopicMetadataResponse Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
-                    Error
-                else
-                    PartitionedTopicMetadata { Partitions = cmd.Partitions }
-            handleRespone %cmd.RequestId result
+            if (cmd.ShouldSerializeError()) then
+                checkServerError cmd.Error cmd.Message
+                handleError %cmd.RequestId cmd.Error cmd.Message
+            else
+                let result = PartitionedTopicMetadata { Partitions = cmd.Partitions }
+                handleSuccess %cmd.RequestId result
         | XCommandSendReceipt cmd ->
             let producerMb = producers.[%cmd.ProducerId]
             producerMb.Post(SendReceipt cmd)
@@ -226,18 +265,17 @@ type ClientCnx (broker: Broker,
             let consumerMb = consumers.[%cmd.ConsumerId]
             consumerMb.Post(MessageReceived { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = payload })
         | XCommandLookupTopicResponse cmd ->
-            let result =
-                if (cmd.ShouldSerializeError()) then
-                    Log.Logger.LogError("{0} CommandLookupTopicResponse Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
-                    Error
-                else
-                    LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
-            handleRespone %cmd.RequestId result
+            if (cmd.ShouldSerializeError()) then
+                checkServerError cmd.Error cmd.Message
+                handleError %cmd.RequestId cmd.Error cmd.Message
+            else
+                let result = LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
+                handleSuccess %cmd.RequestId result
         | XCommandProducerSuccess cmd ->
             let result = ProducerSuccess { GeneratedProducerName = cmd.ProducerName }
-            handleRespone %cmd.RequestId result
+            handleSuccess %cmd.RequestId result
         | XCommandSuccess cmd ->
-            handleRespone %cmd.RequestId Empty
+            handleSuccess %cmd.RequestId Empty
         | XCommandCloseProducer cmd ->
             let producerMb = producers.[%cmd.ProducerId]
             producers.Remove(%cmd.ProducerId) |> ignore
@@ -251,11 +289,10 @@ type ClientCnx (broker: Broker,
             consumerMb.Post ReachedEndOfTheTopic
         | XCommandGetTopicsOfNamespaceResponse cmd ->
             let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
-            handleRespone %cmd.RequestId result
+            handleSuccess %cmd.RequestId result
         | XCommandError cmd ->
             Log.Logger.LogError("{0} CommandError Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
-            let result = Error
-            handleRespone %cmd.RequestId result
+            handleError %cmd.RequestId cmd.Error cmd.Message
 
     let readSocket () =
         task {

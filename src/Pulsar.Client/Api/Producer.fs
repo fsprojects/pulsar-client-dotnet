@@ -17,6 +17,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
     let producerId = Generators.getNextProducerId()
 
     let prefix = sprintf "producer(%u, %s)" %producerId producerConfig.ProducerName
+    let producerCreatedTsc = TaskCompletionSource<Producer>()
 
     let connectionHandler = ConnectionHandler(lookup, producerConfig.Topic.CompleteTopicName, fun() -> this.Mb.Post(ProducerMessage.ConnectionOpened))
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
@@ -35,13 +36,11 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         Log.Logger.LogInformation("{0} starting register to topic {1}", prefix, producerConfig.Topic)
                         clientCnx.AddProducer producerId this.Mb
                         let requestId = Generators.getNextRequestId()
-                        let payload =
-                            Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName producerId requestId
-                        let! success =
-                            fun () -> clientCnx.SendAndWaitForReply requestId payload
-                            |> PulsarTypes.GetProducerSuccess
-                            |> Async.AwaitTask
+                        let payload = Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName producerId requestId
+                        let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                        let success = response |> PulsarResponseType.GetProducerSuccess
                         Log.Logger.LogInformation("{0} registered with name {1}", prefix, success.GeneratedProducerName)
+
 
                         // process pending messages
                         if pendingMessages.Count > 0 then
@@ -49,6 +48,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                             while pendingMessages.Count > 0 do
                                 let pendingMessage = pendingMessages.Dequeue()
                                 this.Mb.Post(SendMessage pendingMessage)
+                        else
+                            producerCreatedTsc.TrySetResult(this) |> ignore
                     | _ ->
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
 
@@ -68,7 +69,6 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                             ProducerName = producerConfig.ProducerName,
                             UncompressedSize = (message.Length |> uint32)
                         )
-
                     let payload = Commands.newSend producerId sequenceId 1 metadata message
                     let tcs = TaskCompletionSource()
                     this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Tcs = tcs })
@@ -81,7 +81,6 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         pendingMessages.Enqueue(pendingMessage)
                     else
                         raise <| ProducerException("Producer send queue is full.")
-
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         do! clientCnx.Send pendingMessage.Payload
@@ -94,17 +93,14 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     let sequenceId = %receipt.SequenceId
                     let pendingMessage = pendingMessages.Peek()
                     let expectedSequenceId = pendingMessage.SequenceId
-
                     if sequenceId > expectedSequenceId then
                         Log.Logger.LogWarning(
                             "{0} Got ack for message. Expecting: {1} - got: {2} - queue-size: {3}",
                             prefix, expectedSequenceId, sequenceId, pendingMessages.Count)
-
                         // Force connection closing so that messages can be re-transmitted in a new connection
                         match connectionHandler.ConnectionState with
                         | Ready clientCnx -> clientCnx.Close()
                         | _ -> ()
-
                     elif sequenceId < expectedSequenceId then
                         Log.Logger.LogDebug(
                             "{0} Got ack for timed out message {1} last-seq: {2}",
@@ -134,11 +130,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         let payload = Commands.newCloseProducer producerId requestId
                         task {
                             try
-                                do!
-                                    fun () -> clientCnx.SendAndWaitForReply requestId payload
-                                    |> PulsarTypes.GetEmpty
-                                    |> Async.AwaitTask
-
+                                let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                                response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveProducer(producerId)
                                 connectionHandler.Closed()
                                 Log.Logger.LogInformation("{0} closed", prefix)
@@ -174,11 +167,15 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
         }
 
     member private __.InitInternal() =
-       connectionHandler.Connect()
+       task {
+           do connectionHandler.Connect()
+           return! producerCreatedTsc.Task
+       }
 
     member private __.Mb with get(): MailboxProcessor<ProducerMessage> = mb
 
     static member Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
-        let producer = new Producer(producerConfig, lookup)
-        producer.InitInternal()
-        producer
+        task {
+            let producer = new Producer(producerConfig, lookup)
+            return! producer.InitInternal()
+        }
