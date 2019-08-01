@@ -16,6 +16,12 @@ open CRC32
 open System.Threading
 open Pulsar.Client.Api
 
+type RequestsOperation =
+    | AddRequest of RequestId * TaskCompletionSource<PulsarResponseType>
+    | CompleteRequest of RequestId * PulsarResponseType
+    | FailRequest of RequestId * exn
+    | FailAllRequestsAndStop
+
 type CnxOperation =
     | AddProducer of ProducerId * MailboxProcessor<ProducerMessage>
     | AddConsumer of ConsumerId * MailboxProcessor<ConsumerMessage>
@@ -64,6 +70,30 @@ type ClientCnx (broker: Broker,
     let rejectedRequestResetTimeSec = 60
     let mutable numberOfRejectedRequests = 0
 
+    let requestsMb = MailboxProcessor<RequestsOperation>.Start(fun inbox ->
+        let rec loop () =
+            async {
+                match! inbox.Receive() with
+                | AddRequest (reqId, tsc) ->
+                    requests.Add(reqId, tsc)
+                    return! loop()
+                | CompleteRequest (reqId, result)  ->
+                    let tsc = requests.[reqId]
+                    tsc.SetResult result
+                    requests.Remove reqId |> ignore
+                    return! loop()
+                | FailRequest (reqId, ex)  ->
+                    let tsc = requests.[reqId]
+                    tsc.SetException ex
+                    requests.Remove reqId |> ignore
+                    return! loop()
+                | FailAllRequestsAndStop ->
+                    requests |> Seq.iter (fun kv ->
+                        kv.Value.SetException(Exception("ChannelInactive fired")))
+            }
+        loop ()
+    )
+
     let operationsMb = MailboxProcessor<CnxOperation>.Start(fun inbox ->
         let rec loop () =
             async {
@@ -88,8 +118,7 @@ type ClientCnx (broker: Broker,
                     Log.Logger.LogDebug("{0} ChannelInactive", prefix)
                     unregisterClientCnx(broker)
                     this.SendMb.Post(Stop)
-                    requests |> Seq.iter (fun kv ->
-                        kv.Value.SetException(Exception("ChannelInactive fired")))
+                    requestsMb.Post(FailAllRequestsAndStop)
                     consumers |> Seq.iter(fun kv ->
                         kv.Value.Post(ConsumerMessage.ConnectionClosed))
                     producers |> Seq.iter(fun kv ->
@@ -130,7 +159,7 @@ type ClientCnx (broker: Broker,
                 | SocketRequestMessageWithReply (reqId, payload, replyChannel) ->
                     let! connected = sendSerializedPayload payload |> Async.AwaitTask
                     let tsc = TaskCompletionSource()
-                    requests.Add(reqId, tsc)
+                    requestsMb.Post(AddRequest(reqId, tsc))
                     replyChannel.Reply(tsc.Task)
                     if connected then
                         return! loop ()
@@ -205,9 +234,7 @@ type ClientCnx (broker: Broker,
             Result.Error IncompleteCommand, SequencePosition()
 
     let handleSuccess requestId result =
-        let tsc = requests.[requestId]
-        tsc.SetResult result
-        requests.Remove requestId |> ignore
+        requestsMb.Post(CompleteRequest(requestId, result))
 
     let getPulsarClientException error errorMsg =
         match error with
@@ -226,10 +253,8 @@ type ClientCnx (broker: Broker,
         | _ -> Exception errorMsg
 
     let handleError requestId error msg =
-        let tsc = requests.[requestId]
         let exc = getPulsarClientException error msg
-        tsc.SetException exc
-        requests.Remove requestId |> ignore
+        requestsMb.Post(FailRequest(requestId, exc))
 
     let checkServerError serverError errMsg =
         if (serverError = ServerError.ServiceNotReady) then

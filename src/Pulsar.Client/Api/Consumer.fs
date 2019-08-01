@@ -105,12 +105,12 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                 | ConsumerMessage.MessageReceived message ->
 
                     if state.WaitingChannel = nullChannel then
-                        Log.Logger.LogInformation("{0} MessageReceived nullchannel", prefix)
+                        Log.Logger.LogDebug("{0} MessageReceived nullchannel", prefix)
                         queue.Enqueue(message)
                         return! loop state
                     else
                         let queueLength = queue.Count
-                        Log.Logger.LogInformation("{0} MessageReceived queueLength={1}", prefix, queueLength)
+                        Log.Logger.LogDebug("{0} MessageReceived queueLength={1}", prefix, queueLength)
                         if (queueLength = 0) then
                             state.WaitingChannel.Reply <| message
                         else
@@ -124,7 +124,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                         ch.Reply <| queue.Dequeue()
                         return! loop state
                     else
-                        Log.Logger.LogInformation("{0} GetMessage waiting", prefix)
+                        Log.Logger.LogDebug("{0} GetMessage waiting", prefix)
                         return! loop { state with WaitingChannel = ch }
 
                 | ConsumerMessage.Send (payload, channel) ->
@@ -132,7 +132,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                     match connectionHandler.ConnectionState with
                     | Ready conn ->
                         do! conn.Send payload
-                        Log.Logger.LogInformation("{0} Send complete", prefix)
+                        Log.Logger.LogDebug("{0} Send complete", prefix)
                         channel.Reply()
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)

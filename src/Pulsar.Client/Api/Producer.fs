@@ -85,7 +85,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
                 | ProducerMessage.BeginSendMessage (message, channel) ->
 
-                    Log.Logger.LogInformation("{0} BeginSendMessage", prefix)
+                    Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
                     let sequenceId = Generators.getNextSequenceId()
                     let metadata =
                         MessageMetadata (
@@ -101,7 +101,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
                 | ProducerMessage.SendMessage pendingMessage ->
 
-                    Log.Logger.LogInformation("{0} SendMessage id={1}", prefix, %pendingMessage.SequenceId)
+                    Log.Logger.LogDebug("{0} SendMessage id={1}", prefix, %pendingMessage.SequenceId)
                     if pendingMessages.Count <= producerConfig.MaxPendingMessages then
                         pendingMessages.Enqueue(pendingMessage)
                     else
@@ -134,7 +134,6 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         Log.Logger.LogDebug(
                             "{0} Received ack for message {1}",
                             prefix, sequenceId)
-
                         pendingMessage.Tcs.SetResult(MessageId.FromMessageIdData(receipt.MessageId))
                         pendingMessages.Dequeue() |> ignore
 
