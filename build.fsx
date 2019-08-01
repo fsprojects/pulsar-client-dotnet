@@ -27,7 +27,7 @@ Target.create "Restore" (fun _ ->
  )
 
 Target.create "RunTests" (fun _ ->
-    !!("**/*.Tests.*proj")
+    !!("tests/UnitTests/UnitTests.fsproj")
     |> Seq.iter (DotNet.test id)
 )
 
