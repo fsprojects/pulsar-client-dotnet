@@ -7,7 +7,7 @@ open Pulsar.Client.Common
 type ConnectionHandlerMessage =
     | GrabCnx
     | ReconnectLater of exn
-    | ConnectionClosed
+    | ConnectionClosed of ClientCnx
 
 type ConnectionState =
     | Ready of ClientCnx
@@ -66,16 +66,20 @@ type ConnectionHandler( parentPrefix: string,
                         asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
                     else
                         Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", parentPrefix, topic, this.ConnectionState)
-                | ConnectionClosed ->
-                    if isValidStateForReconnection() then
-                        // TODO backoff
-                        let delay = 1000
-                        Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {2}s ",
-                            parentPrefix, topic, this.ConnectionState, delay / 1000)
-                        this.ConnectionState <- Connecting
-                        asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
-                    else
-                        Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", parentPrefix, topic, this.ConnectionState)
+                | ConnectionClosed clientCnx ->
+                    match this.ConnectionState with
+                    | Ready cnx when cnx <> clientCnx ->
+                        Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
+                    | _ ->
+                        if isValidStateForReconnection() then
+                            // TODO backoff
+                            let delay = 1000
+                            Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {2}s ",
+                                parentPrefix, topic, this.ConnectionState, delay / 1000)
+                            this.ConnectionState <- Connecting
+                            asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
+                        else
+                            Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", parentPrefix, topic, this.ConnectionState)
                 return! loop ()
             }
         loop  ()
@@ -101,8 +105,8 @@ type ConnectionHandler( parentPrefix: string,
     member __.SetReady connection =
         __.ConnectionState <- Ready connection
 
-    member __.ConnectionClosed() =
-        mb.Post(ConnectionClosed)
+    member __.ConnectionClosed (clientCnx: ClientCnx) =
+        mb.Post(ConnectionClosed clientCnx)
 
     member __.ReconnectLater ex =
         mb.Post(ReconnectLater ex)

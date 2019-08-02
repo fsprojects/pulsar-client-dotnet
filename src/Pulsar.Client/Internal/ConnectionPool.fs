@@ -46,7 +46,9 @@ let private connect (broker: Broker) =
         let proxyToBroker = if physicalAddress = logicalAddress then None else Some logicalAddress
         let connectPayload =
             Commands.newConnect clientVersion protocolVersion proxyToBroker
-        do! clientCnx.Send connectPayload
+        let! success = clientCnx.Send connectPayload
+        if not success then
+            raise (ConnectionFailedOnSend "ConnectionPool connect")
         return! initialConnectionTsc.Task
     }
 

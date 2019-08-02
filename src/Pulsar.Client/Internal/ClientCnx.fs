@@ -28,6 +28,7 @@ type CnxOperation =
     | RemoveConsumer of ConsumerId
     | RemoveProducer of ProducerId
     | ChannelInactive
+    | Stop
 
 type PulsarCommand =
     | XCommandConnected of CommandConnected
@@ -50,7 +51,7 @@ type CommandParseError =
     | UnknownCommandType of BaseCommand.Type
 
 type SocketMessage =
-    | SocketMessageWithReply of Payload * AsyncReplyChannel<unit>
+    | SocketMessageWithReply of Payload * AsyncReplyChannel<bool>
     | SocketMessageWithoutReply of Payload
     | SocketRequestMessageWithReply of RequestId * Payload * AsyncReplyChannel<Task<PulsarResponseType>>
     | Stop
@@ -64,11 +65,12 @@ type ClientCnx (broker: Broker,
     let producers = Dictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
     let requests = Dictionary<RequestId, TaskCompletionSource<PulsarResponseType>>()
     let clientCnxId = Generators.getNextClientCnxId()
-    let prefix = sprintf "clientCnx(%i, %A)" clientCnxId broker.LogicalAddress
+    let prefix = sprintf "clientCnx(%i, %A)" %clientCnxId broker.LogicalAddress
     //TODO move to configuration
     let maxNumberOfRejectedRequestPerConnection = 100
     let rejectedRequestResetTimeSec = 60
     let mutable numberOfRejectedRequests = 0
+    let mutable isActive = true
 
     let requestsMb = MailboxProcessor<RequestsOperation>.Start(fun inbox ->
         let rec loop () =
@@ -90,9 +92,15 @@ type ClientCnx (broker: Broker,
                 | FailAllRequestsAndStop ->
                     requests |> Seq.iter (fun kv ->
                         kv.Value.SetException(Exception("ChannelInactive fired")))
+                    requests.Clear()
             }
         loop ()
     )
+
+    let tryStopMailboxes() =
+        if consumers.Count = 0 && producers.Count = 0 then
+            this.SendMb.Post(SocketMessage.Stop)
+            this.OperationsMb.Post(CnxOperation.Stop)
 
     let operationsMb = MailboxProcessor<CnxOperation>.Start(fun inbox ->
         let rec loop () =
@@ -109,20 +117,28 @@ type ClientCnx (broker: Broker,
                 | RemoveConsumer consumerId ->
                     Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
                     consumers.Remove(consumerId) |> ignore
+                    if isActive |> not then
+                        tryStopMailboxes()
                     return! loop()
                 | RemoveProducer producerId ->
                     Log.Logger.LogDebug("{0} removing producer {1}", prefix, producerId)
                     producers.Remove(producerId) |> ignore
+                    if isActive |> not then
+                        tryStopMailboxes()
                     return! loop()
                 | ChannelInactive ->
-                    Log.Logger.LogDebug("{0} ChannelInactive", prefix)
-                    unregisterClientCnx(broker)
-                    this.SendMb.Post(Stop)
-                    requestsMb.Post(FailAllRequestsAndStop)
-                    consumers |> Seq.iter(fun kv ->
-                        kv.Value.Post(ConsumerMessage.ConnectionClosed))
-                    producers |> Seq.iter(fun kv ->
-                        kv.Value.Post(ProducerMessage.ConnectionClosed))
+                    if isActive then
+                        Log.Logger.LogDebug("{0} ChannelInactive", prefix)
+                        isActive <- false
+                        unregisterClientCnx(broker)
+                        requestsMb.Post(FailAllRequestsAndStop)
+                        consumers |> Seq.iter(fun kv ->
+                            kv.Value.Post(ConsumerMessage.ConnectionClosed this))
+                        producers |> Seq.iter(fun kv ->
+                            kv.Value.Post(ProducerMessage.ConnectionClosed this))
+                    return! loop()
+                | CnxOperation.Stop ->
+                    Log.Logger.LogDebug("{0} operationsMb stopped", prefix)
             }
         loop ()
     )
@@ -149,23 +165,21 @@ type ClientCnx (broker: Broker,
                 match! inbox.Receive() with
                 | SocketMessageWithReply (payload, replyChannel) ->
                     let! connected = sendSerializedPayload payload |> Async.AwaitTask
-                    replyChannel.Reply()
-                    if connected then
-                        return! loop ()
+                    replyChannel.Reply(connected)
+                    return! loop ()
                 | SocketMessageWithoutReply payload ->
                     let! connected = sendSerializedPayload payload |> Async.AwaitTask
-                    if connected then
-                        return! loop ()
+                    return! loop ()
                 | SocketRequestMessageWithReply (reqId, payload, replyChannel) ->
                     let! connected = sendSerializedPayload payload |> Async.AwaitTask
                     let tsc = TaskCompletionSource()
                     requestsMb.Post(AddRequest(reqId, tsc))
                     replyChannel.Reply(tsc.Task)
-                    if connected then
-                        return! loop ()
-                    else
+                    if not connected then
                         tsc.SetException(Exception("Disconnected"))
-                | Stop -> ()
+                    return! loop ()
+                | SocketMessage.Stop ->
+                    Log.Logger.LogDebug("{0} sendMb stopped", prefix)
             }
         loop ()
     )
@@ -307,12 +321,10 @@ type ClientCnx (broker: Broker,
             handleSuccess %cmd.RequestId Empty
         | XCommandCloseProducer cmd ->
             let producerMb = producers.[%cmd.ProducerId]
-            producers.Remove(%cmd.ProducerId) |> ignore
-            producerMb.Post ProducerMessage.ConnectionClosed
+            producerMb.Post (ProducerMessage.ConnectionClosed this)
         | XCommandCloseConsumer cmd ->
             let consumerMb = consumers.[%cmd.ConsumerId]
-            consumers.Remove(%cmd.ConsumerId) |> ignore
-            consumerMb.Post ConnectionClosed
+            consumerMb.Post (ConsumerMessage.ConnectionClosed this)
         | XCommandReachedEndOfTopic cmd ->
             let consumerMb = consumers.[%cmd.ConsumerId]
             consumerMb.Post ReachedEndOfTheTopic
@@ -356,12 +368,16 @@ type ClientCnx (broker: Broker,
                 Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally while reading", prefix)
                 operationsMb.Post(ChannelInactive)
 
-            Log.Logger.LogDebug("{0} Finished read socket", prefix)
+            Log.Logger.LogDebug("{0} readSocket stopped", prefix)
         }
 
     do Task.Run(fun () -> readSocket().Wait()) |> ignore
 
     member private __.SendMb with get(): MailboxProcessor<SocketMessage> = sendMb
+
+    member private __.OperationsMb with get(): MailboxProcessor<CnxOperation> = operationsMb
+
+    member __.ClientCnxId with get() = clientCnxId
 
     member __.Send payload =
         sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))

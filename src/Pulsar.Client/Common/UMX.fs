@@ -9,6 +9,7 @@ open FSharp.UMX
 [<Measure>] type private producerId
 [<Measure>] type private consumerId
 [<Measure>] type private sequenceId
+[<Measure>] type private clientCnxId
 [<Measure>] type private completeTopicName
 
 type LedgerId = uint64<ledgerId>
@@ -17,4 +18,5 @@ type RequestId = uint64<requestId>
 type ProducerId = uint64<producerId>
 type ConsumerId = uint64<consumerId>
 type SequenceId = uint64<sequenceId>
+type ClientCnxId = uint64<clientCnxId>
 type CompleteTopicName = string<completeTopicName>

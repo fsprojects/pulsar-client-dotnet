@@ -132,7 +132,7 @@ type PulsarResponseType =
 type ProducerMessage =
     | ConnectionOpened
     | ConnectionFailed of exn
-    | ConnectionClosed
+    | ConnectionClosed of obj // ClientCnx
     | SendReceipt of CommandSendReceipt
     | BeginSendMessage of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
     | SendMessage of PendingMessage
@@ -142,11 +142,11 @@ type ProducerMessage =
 type ConsumerMessage =
     | ConnectionOpened
     | ConnectionFailed of exn
-    | ConnectionClosed
+    | ConnectionClosed of obj // ClientCnx
     | ReachedEndOfTheTopic
     | MessageReceived of Message
     | GetMessage of AsyncReplyChannel<Message>
-    | Send of Payload * AsyncReplyChannel<unit>
+    | Send of Payload * AsyncReplyChannel<bool>
     | Close of AsyncReplyChannel<Task>
     | Unsubscribe of AsyncReplyChannel<Task>
 
@@ -177,5 +177,8 @@ exception ProducerBlockedQuotaExceededError of string
 exception ProducerBlockedQuotaExceededException of string
 exception ChecksumException of string
 exception CryptoExceptionof of string
+
+// custom exception
+exception ConnectionFailedOnSend of string
 
 

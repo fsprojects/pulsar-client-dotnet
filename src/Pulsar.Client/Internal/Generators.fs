@@ -8,9 +8,7 @@ let mutable private requestId = 0L
 let mutable private producerId = 0L
 let mutable private consumerId = 0L
 let mutable private sequenceId = 0L
-
-
-let mutable private clientCnxId = 0
+let mutable private clientCnxId = 0L
 
 let getNextRequestId(): RequestId =
     % (uint64 <| Interlocked.Increment(&requestId))
@@ -24,5 +22,5 @@ let getNextConsumerId(): ConsumerId =
 let getNextSequenceId(): SequenceId =
     % (uint64 <| Interlocked.Increment(&sequenceId))
 
-let getNextClientCnxId(): int =
-    Interlocked.Increment(&clientCnxId)
+let getNextClientCnxId(): ClientCnxId =
+    % (uint64 <| Interlocked.Increment(&clientCnxId))

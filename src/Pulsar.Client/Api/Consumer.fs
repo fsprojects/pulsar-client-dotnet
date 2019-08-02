@@ -71,8 +71,11 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                             // send available permits immediately after establishing the reader session
                             if (not (firstTimeConnect && partitionIndex > -1 && isDurable) && consumerConfig.ReceiverQueueSize <> 0) then
                                 let flowCommand = Commands.newFlow consumerId initialFlowCount
-                                do! clientCnx.Send flowCommand
-                                Log.Logger.LogInformation("{0} initial flow sent {1}", prefix, initialFlowCount)
+                                let! success = clientCnx.Send flowCommand
+                                if success then
+                                    Log.Logger.LogInformation("{0} initial flow sent {1}", prefix, initialFlowCount)
+                                else
+                                    raise (ConnectionFailedOnSend "FlowCommand")
                         with
                         | ex ->
                             clientCnx.RemoveConsumer consumerId
@@ -88,10 +91,11 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
                     return! loop state
 
-                | ConsumerMessage.ConnectionClosed ->
-
+                | ConsumerMessage.ConnectionClosed clientCnx ->
                     Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
-                    connectionHandler.ConnectionClosed()
+                    let clientCnx = clientCnx :?> ClientCnx
+                    connectionHandler.ConnectionClosed clientCnx
+                    clientCnx.RemoveConsumer(consumerId)
                     return! loop state
 
                 | ConsumerMessage.ConnectionFailed ex ->
@@ -131,13 +135,13 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
 
                     match connectionHandler.ConnectionState with
                     | Ready conn ->
-                        do! conn.Send payload
-                        Log.Logger.LogDebug("{0} Send complete", prefix)
-                        channel.Reply()
+                        let! success = conn.Send payload
+                        if success then
+                            Log.Logger.LogDebug("{0} Send complete", prefix)
+                        channel.Reply(success)
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
-                        //TODO put message on schedule
-                        channel.Reply()
+                        channel.Reply(false)
                     return! loop state
 
                 | ConsumerMessage.ReachedEndOfTheTopic ->
@@ -213,13 +217,17 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
     member __.AcknowledgeAsync (msg: Message) =
         task {
             let command = Commands.newAck consumerId msg.MessageId CommandAck.AckType.Individual
-            return! mb.PostAndAsyncReply(fun channel -> Send (command, channel))
+            let! success = mb.PostAndAsyncReply(fun channel -> Send (command, channel))
+            if not success then
+                raise (ConnectionFailedOnSend "AcknowledgeAsync")
         }
 
     member __.RedeliverUnacknowledgedMessagesAsync () =
         task {
             let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
-            return! mb.PostAndAsyncReply(fun channel -> Send (command, channel))
+            let! success = mb.PostAndAsyncReply(fun channel -> Send (command, channel))
+            if not success then
+                raise (ConnectionFailedOnSend "RedeliverUnacknowledgedMessagesAsync")
         }
 
     member __.CloseAsync() =

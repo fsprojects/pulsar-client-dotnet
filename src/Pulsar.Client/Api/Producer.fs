@@ -71,10 +71,12 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     | _ ->
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
 
-                | ProducerMessage.ConnectionClosed ->
+                | ProducerMessage.ConnectionClosed clientCnx ->
 
                     Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
-                    connectionHandler.ConnectionClosed()
+                    let clientCnx = clientCnx :?> ClientCnx
+                    connectionHandler.ConnectionClosed clientCnx
+                    clientCnx.RemoveProducer(producerId)
 
                 | ProducerMessage.ConnectionFailed  ex ->
 
@@ -104,14 +106,17 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     Log.Logger.LogDebug("{0} SendMessage id={1}", prefix, %pendingMessage.SequenceId)
                     if pendingMessages.Count <= producerConfig.MaxPendingMessages then
                         pendingMessages.Enqueue(pendingMessage)
+                        match connectionHandler.ConnectionState with
+                        | Ready clientCnx ->
+                            let! success = clientCnx.Send pendingMessage.Payload
+                            if success then
+                                Log.Logger.LogDebug("{0} send complete", prefix)
+                            else
+                                pendingMessage.Tcs.SetException(ConnectionFailedOnSend "SendMessage")
+                        | _ ->
+                            Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                     else
-                        raise <| ProducerException("Producer send queue is full.")
-                    match connectionHandler.ConnectionState with
-                    | Ready clientCnx ->
-                        do! clientCnx.Send pendingMessage.Payload
-                        Log.Logger.LogDebug("{0} send complete", prefix)
-                    | _ ->
-                        Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
+                        pendingMessage.Tcs.SetException(ProducerException "Producer send queue is full.")
 
                 | ProducerMessage.SendReceipt receipt ->
 
