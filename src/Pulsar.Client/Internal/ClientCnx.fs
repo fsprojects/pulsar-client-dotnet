@@ -312,7 +312,11 @@ type ClientCnx (broker: Broker,
                 checkServerError cmd.Error cmd.Message
                 handleError %cmd.RequestId cmd.Error cmd.Message
             else
-                let result = LookupTopicResult { BrokerServiceUrl = cmd.brokerServiceUrl; Proxy = cmd.ProxyThroughServiceUrl }
+                let result = LookupTopicResult {
+                    BrokerServiceUrl = cmd.brokerServiceUrl
+                    Redirect = (cmd.Response = CommandLookupTopicResponse.LookupType.Redirect)
+                    Proxy = cmd.ProxyThroughServiceUrl
+                    Authoritative = cmd.Authoritative }
                 handleSuccess %cmd.RequestId result
         | XCommandProducerSuccess cmd ->
             let result = ProducerSuccess { GeneratedProducerName = cmd.ProducerName }

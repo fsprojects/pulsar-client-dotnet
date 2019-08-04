@@ -12,7 +12,7 @@ open Pulsar.Client.Internal
 let tests =
 
     let withTestData test =
-        let config = { ServiceUrl = "pulsar://localhost:6650" }
+        let config = { ServiceUrl = "pulsar://localhost:6650"; OperationTimeout = TimeSpan.Zero }
         let resolver = ServiceNameResolver config
         test(config, resolver)
 

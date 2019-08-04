@@ -40,6 +40,12 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                     maxPendingMessages
                     |> invalidArgIfNotGreaterThanZero "MaxPendingMessages needs to be greater than 0." })
 
+    member __.SendTimeout sendTimeout =
+        ProducerBuilder(
+            client,
+            { config with
+                SendTimeout = sendTimeout })
+
     member __.CreateAsync() =
         config
         |> verify

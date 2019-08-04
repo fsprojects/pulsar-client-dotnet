@@ -7,26 +7,20 @@ open System
 open ConnectionPool
 open System.Net
 open System.Threading.Tasks
+open Microsoft.Extensions.Logging
 
 
 type BinaryLookupService (config: PulsarClientConfiguration) =
 
     let serviceNameResolver = ServiceNameResolver(config)
 
-    let makeRequest getPayload =
+    member __.GetPartitionedTopicMetadata topicName =
         task {
             let endpoint = serviceNameResolver.ResolveHost()
             let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint
             let requestId = Generators.getNextRequestId()
-            let payload = getPayload requestId
+            let payload = Commands.newPartitionMetadataRequest topicName requestId
             let! response = clientCnx.SendAndWaitForReply requestId payload
-            return (endpoint, response)
-        }
-
-    member __.GetPartitionedTopicMetadata topicName =
-        task {
-            let getPayload = fun requestId -> Commands.newPartitionMetadataRequest topicName requestId
-            let! (_, response) = makeRequest getPayload
             return PulsarResponseType.GetPartitionedTopicMetadata response
         }
 
@@ -35,19 +29,52 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
     member __.UpdateServiceUrl(serviceUrl) = serviceNameResolver.UpdateServiceUrl(serviceUrl)
 
     member __.GetBroker(topicName: CompleteTopicName) =
+        __.FindBroker(serviceNameResolver.ResolveHost(), false, topicName)
+
+    member private __.FindBroker(endpoint: DnsEndPoint, autoritative: bool, topicName: CompleteTopicName) =
         task {
-            let getPayload = fun requestId -> Commands.newLookup topicName requestId false
-            let! (endpoint, response) = makeRequest getPayload
+            let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint
+            let requestId = Generators.getNextRequestId()
+            let payload = Commands.newLookup topicName requestId autoritative
+            let! response = clientCnx.SendAndWaitForReply requestId payload
             let lookupTopicResult = PulsarResponseType.GetLookupTopicResult response
+            // (1) build response broker-address
+            //TODO
             let uri = Uri(lookupTopicResult.BrokerServiceUrl)
-            let address = DnsEndPoint(uri.Host, uri.Port)
-            return if lookupTopicResult.Proxy
-                   then { LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress endpoint }
-                   else { LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address }
+
+            let resultEndpoint = DnsEndPoint(uri.Host, uri.Port)
+            // (2) redirect to given address if response is: redirect
+            if lookupTopicResult.Redirect then
+                Log.Logger.LogDebug("Redirecting to {0} topicName {1}", resultEndpoint, topicName)
+                return!  __.FindBroker(resultEndpoint, lookupTopicResult.Authoritative, topicName)
+            else
+                // (3) received correct broker to connect
+                return if lookupTopicResult.Proxy
+                       then { LogicalAddress = LogicalAddress resultEndpoint; PhysicalAddress = PhysicalAddress endpoint }
+                       else { LogicalAddress = LogicalAddress resultEndpoint; PhysicalAddress = PhysicalAddress resultEndpoint }
         }
 
-    member __.GetTopicsUnderNamespace (ns : NamespaceName, mode : TopicDomain) = task {
-        let getPayload = fun requestId -> Commands.newGetTopicsOfNamespaceRequest ns requestId mode
-        let! (_, response) = makeRequest getPayload
-        return PulsarResponseType.GetTopicsOfNamespace response
-    }
+    member __.GetTopicsUnderNamespace (ns : NamespaceName, mode : TopicDomain) =
+        task {
+            let backoff = Backoff { BackoffConfig.Default with
+                                        Initial = TimeSpan.FromMilliseconds(100.0)
+                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout) }
+            let! result = __.GetTopicsUnderNamespace(serviceNameResolver.ResolveHost(), ns, backoff, int config.OperationTimeout.TotalMilliseconds, mode)
+            return result
+        }
+
+    member private __.GetTopicsUnderNamespace (endpoint: DnsEndPoint, ns: NamespaceName, backoff: Backoff, remainingTimeMs: int, mode: TopicDomain) =
+        async {
+            try
+                let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint |> Async.AwaitTask
+                let requestId = Generators.getNextRequestId()
+                let payload = Commands.newGetTopicsOfNamespaceRequest ns requestId mode
+                let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                return (endpoint, response)
+            with ex ->
+                let delay = Math.Min(backoff.Next(), remainingTimeMs)
+                if delay <= 0 then
+                    raise (TimeoutException "Could not getTopicsUnderNamespace within configured timeout.")
+                do! Async.Sleep delay
+                return! __.GetTopicsUnderNamespace(endpoint, ns, backoff, remainingTimeMs - delay, mode)
+        }

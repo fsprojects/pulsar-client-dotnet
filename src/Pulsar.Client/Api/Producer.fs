@@ -20,12 +20,18 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
     let producerCreatedTsc = TaskCompletionSource<Producer>()
     // TODO take from configuration
     let createProducerTimeout = DateTime.Now.Add(TimeSpan.FromSeconds(60.0))
+    let sendTimeoutMs = producerConfig.SendTimeout.TotalMilliseconds
     let connectionHandler =
         ConnectionHandler(prefix,
                           lookup,
                           producerConfig.Topic.CompleteTopicName,
                           (fun () -> this.Mb.Post(ProducerMessage.ConnectionOpened)),
-                          (fun ex -> this.Mb.Post(ProducerMessage.ConnectionFailed ex)))
+                          (fun ex -> this.Mb.Post(ProducerMessage.ConnectionFailed ex)),
+                          Backoff { BackoffConfig.Default with
+                                        Initial = TimeSpan.FromMilliseconds(100.0)
+                                        Max = TimeSpan.FromSeconds(60.0)
+                                        MandatoryStop = TimeSpan.FromMilliseconds(Math.Max(100.0, sendTimeoutMs - 100.0))})
+
 
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
 
@@ -48,6 +54,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             let success = response |> PulsarResponseType.GetProducerSuccess
                             Log.Logger.LogInformation("{0} registered with name {1}", prefix, success.GeneratedProducerName)
+                            connectionHandler.ResetBackoff()
                             // process pending messages
                             if pendingMessages.Count > 0 then
                                 Log.Logger.LogInformation("{0} resending {1} pending messages", prefix, pendingMessages.Count)

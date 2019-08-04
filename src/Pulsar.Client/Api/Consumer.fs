@@ -38,7 +38,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                           lookup,
                           consumerConfig.Topic.CompleteTopicName,
                           (fun () -> this.Mb.Post(ConsumerMessage.ConnectionOpened)),
-                          (fun ex -> this.Mb.Post(ConsumerMessage.ConnectionFailed ex)))
+                          (fun ex -> this.Mb.Post(ConsumerMessage.ConnectionFailed ex)),
+                          Backoff({ BackoffConfig.Default with Initial = TimeSpan.FromMilliseconds(100.0); Max = TimeSpan.FromSeconds(60.0) }))
 
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
@@ -62,6 +63,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             response |> PulsarResponseType.GetEmpty
                             Log.Logger.LogInformation("{0} subscribed", prefix)
+                            connectionHandler.ResetBackoff()
                             let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
                             let firstTimeConnect = subscribeTsc.TrySetResult(this)
                             let isDurable = subscriptionMode = SubscriptionMode.Durable;

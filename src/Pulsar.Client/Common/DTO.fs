@@ -30,6 +30,8 @@ type LookupTopicResult =
     {
         Proxy: bool
         BrokerServiceUrl : string
+        Redirect: bool
+        Authoritative: bool
     }
 
 type TopicsOfNamespace =

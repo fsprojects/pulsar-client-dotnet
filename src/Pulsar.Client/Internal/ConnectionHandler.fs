@@ -22,7 +22,8 @@ type ConnectionHandler( parentPrefix: string,
                         lookup: BinaryLookupService,
                         topic: CompleteTopicName,
                         connectionOpened: unit -> unit,
-                        connectionFailed: exn -> unit) as this =
+                        connectionFailed: exn -> unit,
+                        backoff: Backoff) as this =
 
     let mutable connectionState = Uninitialized
 
@@ -58,10 +59,9 @@ type ConnectionHandler( parentPrefix: string,
                             Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", parentPrefix, topic, this.ConnectionState)
                 | ReconnectLater ex ->
                     if isValidStateForReconnection() then
-                        // TODO backoff
-                        let delay = 1000
-                        Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}s ",
-                            parentPrefix, topic, this.ConnectionState, delay / 1000)
+                        let delay = backoff.Next()
+                        Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
+                            parentPrefix, topic, this.ConnectionState, delay)
                         this.ConnectionState <- Connecting
                         asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
                     else
@@ -72,10 +72,9 @@ type ConnectionHandler( parentPrefix: string,
                         Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
                     | _ ->
                         if isValidStateForReconnection() then
-                            // TODO backoff
-                            let delay = 1000
-                            Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {2}s ",
-                                parentPrefix, topic, this.ConnectionState, delay / 1000)
+                            let delay = backoff.Next()
+                            Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {2}ms ",
+                                parentPrefix, topic, this.ConnectionState, delay)
                             this.ConnectionState <- Connecting
                             asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
                         else
@@ -110,6 +109,9 @@ type ConnectionHandler( parentPrefix: string,
 
     member __.ReconnectLater ex =
         mb.Post(ReconnectLater ex)
+
+    member __.ResetBackoff() =
+        backoff.Reset()
 
     member __.ConnectionState
         with get() = Volatile.Read(&connectionState)

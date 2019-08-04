@@ -15,6 +15,7 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <None Include="paket.references" />
+    <Compile Include="Internal\Backoff.fs" />
     <Compile Include="Internal\Log.fs" />
     <Compile Include="Common\Tools.fs" />
     <Compile Include="Common\UMX.fs" />
