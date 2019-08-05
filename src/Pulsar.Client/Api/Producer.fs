@@ -9,6 +9,8 @@ open Pulsar.Client.Internal
 open System
 open Microsoft.Extensions.Logging
 open System.Collections.Generic
+open ProtoBuf
+open System.IO
 
 type ProducerException(message) =
     inherit Exception(message)
@@ -111,6 +113,22 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
                 | ProducerMessage.BeginSendMessage (message, channel) ->
 
+                    // serialize meta-data size, meta-data and payload for single message in batch
+                    
+                    let smm = SingleMessageMetadata(PayloadSize = message.Length)
+                    use smmStream = MemoryStreamManager.GetStream()
+                    Serializer.SerializeWithLengthPrefix(smmStream, smm, PrefixStyle.Fixed32BigEndian)
+                    let smmSize = int32 smmStream.Length
+                    let smmBuff = smmStream.ToArray()
+                    
+                    use messageStream = MemoryStreamManager.GetStream()
+                    use messageWriter = new BinaryWriter(messageStream)
+                    
+                    messageWriter.Write(smmSize)
+                    messageWriter.Write(smmBuff)
+                    messageWriter.Write(message)
+                    let messageBuff = messageStream.ToArray()
+
                     Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
                     let sequenceId = Generators.getNextSequenceId()
                     let metadata =
@@ -118,9 +136,9 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                             SequenceId = %sequenceId,
                             PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
                             ProducerName = producerConfig.ProducerName,
-                            UncompressedSize = (message.Length |> uint32)
+                            UncompressedSize = (messageBuff.Length |> uint32)
                         )
-                    let payload = Commands.newSend producerId sequenceId 1 metadata message
+                    let payload = Commands.newSend producerId sequenceId 1 metadata messageBuff
                     let tcs = TaskCompletionSource()
                     this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Tcs = tcs })
                     channel.Reply(tcs)
