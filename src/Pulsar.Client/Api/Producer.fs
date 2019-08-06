@@ -114,20 +114,18 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                 | ProducerMessage.BeginSendMessage (message, channel) ->
 
                     // serialize meta-data size, meta-data and payload for single message in batch
-                    
-                    let smm = SingleMessageMetadata(PayloadSize = message.Length)
-                    use smmStream = MemoryStreamManager.GetStream()
-                    Serializer.SerializeWithLengthPrefix(smmStream, smm, PrefixStyle.Fixed32BigEndian)
-                    let smmSize = int32 smmStream.Length
-                    let smmBuff = smmStream.ToArray()
-                    
-                    use messageStream = MemoryStreamManager.GetStream()
-                    use messageWriter = new BinaryWriter(messageStream)
-                    
-                    messageWriter.Write(smmSize)
-                    messageWriter.Write(smmBuff)
-                    messageWriter.Write(message)
-                    let messageBuff = messageStream.ToArray()
+
+                    let sendX (message: byte[]) =
+                        let smm = SingleMessageMetadata(PayloadSize = message.Length)
+                        use messageStream = MemoryStreamManager.GetStream()
+                        use messageWriter = new BinaryWriter(messageStream)
+                        Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
+                        messageWriter.Write(message)
+                        messageStream.ToArray()
+
+                    let one = sendX message
+                    let two = sendX message
+                    let result = Array.concat [one; two]
 
                     Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
                     let sequenceId = Generators.getNextSequenceId()
@@ -136,9 +134,9 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                             SequenceId = %sequenceId,
                             PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
                             ProducerName = producerConfig.ProducerName,
-                            UncompressedSize = (messageBuff.Length |> uint32)
+                            NumMessagesInBatch = 2
                         )
-                    let payload = Commands.newSend producerId sequenceId 1 metadata messageBuff
+                    let payload = Commands.newSend producerId sequenceId 2 metadata result
                     let tcs = TaskCompletionSource()
                     this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Tcs = tcs })
                     channel.Reply(tcs)
