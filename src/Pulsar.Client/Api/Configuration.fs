@@ -22,6 +22,8 @@ type ConsumerConfiguration =
         SubscriptionType: SubscriptionType
         ReceiverQueueSize: int
         SubscriptionInitialPosition: SubscriptionInitialPosition
+        AckTimeout: TimeSpan
+        TickDuration: TimeSpan
     }
     static member Default =
         {
@@ -31,6 +33,8 @@ type ConsumerConfiguration =
             SubscriptionType = SubscriptionType.Exclusive
             ReceiverQueueSize = 1000
             SubscriptionInitialPosition = SubscriptionInitialPosition.Latest
+            AckTimeout = TimeSpan.Zero
+            TickDuration = TimeSpan.FromMilliseconds(1000.0)
         }
 
 type ProducerConfiguration =

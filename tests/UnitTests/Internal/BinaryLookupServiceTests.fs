@@ -1,4 +1,4 @@
-﻿module HttpLookupServiceTests
+﻿module Pulsar.Client.UnitTests.Internal.HttpLookupServiceTests
 
 open Expecto
 open Pulsar.Client.Api

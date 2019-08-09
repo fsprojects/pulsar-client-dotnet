@@ -9,13 +9,9 @@ open System.Text
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open Serilog
-open Serilog.Sinks.SystemConsole
-open Serilog.Configuration
-open Microsoft.Extensions.Logging.Console
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.DependencyInjection
 open Serilog.Sinks.SystemConsole.Themes
-open Serilog.Core
 
 
 [<Literal>]
@@ -54,12 +50,19 @@ let tests =
                 ()
         }
 
+    let fastProduceMessages (producer: Producer) number producerName =
+        task {
+            for i in [1..number] do
+                let! _ = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
+                ()
+        }
+
     let consumeMessages (consumer: Consumer) number consumerName =
         task {
             for i in [1..number] do
                 let! message = consumer.ReceiveAsync()
                 let received = Encoding.UTF8.GetString(message.Payload)
-                do! consumer.AcknowledgeAsync(message)
+                do! consumer.AcknowledgeAsync(message.MessageId)
                 Log.Debug("{0} received {1}", consumerName, received)
                 let expected = "Message #" + string i
                 if received.StartsWith(expected) |> not then
@@ -130,4 +133,73 @@ let tests =
 
             (consumeMessages consumer 100 "sequential").Wait()
             Log.Debug("Finished send 100 messages and then receiving them works fine when retention is set on namespace")
+
+
+        testCase "2 producers and 2 consumers" <| fun () ->
+
+            Log.Debug("Started 2 producers and 2 consumers")
+            let client = getClient()
+            let ticks = DateTimeOffset.UtcNow.UtcTicks
+            let topicName1 = "public/default/topic-" + ticks.ToString()
+            let topicName2 = "public/default/topic-" + (ticks+1L).ToString()
+            let messagesNumber = 1000
+
+            let consumer1 =
+                ConsumerBuilder(client)
+                    .Topic(topicName2)
+                    .ConsumerName("consumer1")
+                    .SubscriptionName("my-subscriptionx")
+                    .SubscribeAsync()
+                    .Result
+
+            let consumer2 =
+                ConsumerBuilder(client)
+                    .Topic(topicName1)
+                    .ConsumerName("consumer2")
+                    .SubscriptionName("my-subscriptiony")
+                    .SubscribeAsync()
+                    .Result
+
+            let producer1 =
+                ProducerBuilder(client)
+                    .Topic(topicName1)
+                    .ProducerName("producer1")
+                    .CreateAsync()
+                    .Result
+
+            let producer2 =
+                ProducerBuilder(client)
+                    .Topic(topicName2)
+                    .ProducerName("producer2")
+                    .CreateAsync()
+                    .Result
+
+            let t1 = Task.Run(fun () ->
+                fastProduceMessages producer1 messagesNumber "producer1" |> Task.WaitAll
+                Log.Debug("t1 ended")
+            )
+
+            let t2 = Task.Run(fun () ->
+                consumeMessages consumer1 messagesNumber "consumer1" |> Task.WaitAll
+                Log.Debug("t2 ended")
+            )
+
+            let t3 = Task.Run(fun () ->
+                task {
+                    for i in 1..messagesNumber do
+                        let! message = consumer2.ReceiveAsync()
+                        let received = Encoding.UTF8.GetString(message.Payload)
+                        do! consumer2.AcknowledgeAsync(message.MessageId)
+                        Log.Debug("{0} received {1}", "consumer2", received)
+                        let expected = "Message #" + string i
+                        if received.StartsWith(expected) |> not then
+                            failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received "consumer2"
+                        let! _ = producer2.SendAsync(message.Payload)
+                        ()
+                } |> Task.WaitAll
+                Log.Debug("t3 ended")
+            )
+            [|t1; t2; t3|] |> Task.WaitAll
+
+            Log.Debug("Finished 2 producers and 2 consumers")
     ]

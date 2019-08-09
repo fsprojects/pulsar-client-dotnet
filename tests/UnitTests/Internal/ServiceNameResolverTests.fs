@@ -1,4 +1,4 @@
-﻿module ServiceNameResolverTests
+﻿module Pulsar.Client.UnitTests.Internal.ServiceNameResolverTests
 
 open System
 open System.Net

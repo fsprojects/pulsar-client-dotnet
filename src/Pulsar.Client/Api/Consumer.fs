@@ -11,6 +11,7 @@ open Pulsar.Client.Common
 open pulsar.proto
 open Microsoft.Extensions.Logging
 open System.Threading
+open System.Runtime.InteropServices
 
 type ConsumerException(message) =
     inherit Exception(message)
@@ -40,6 +41,20 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                           (fun () -> this.Mb.Post(ConsumerMessage.ConnectionOpened)),
                           (fun ex -> this.Mb.Post(ConsumerMessage.ConnectionFailed ex)),
                           Backoff({ BackoffConfig.Default with Initial = TimeSpan.FromMilliseconds(100.0); Max = TimeSpan.FromSeconds(60.0) }))
+    let redeliverMessages messages =
+        async {
+            do! this.RedeliverUnacknowledgedMessagesAsync messages |> Async.AwaitTask
+        } |> Async.StartImmediate
+
+    let unAckedMessageTracker =
+        if consumerConfig.AckTimeout > TimeSpan.Zero then
+            if consumerConfig.TickDuration > TimeSpan.Zero then
+                let tickDuration = if consumerConfig.AckTimeout > consumerConfig.TickDuration then consumerConfig.TickDuration else consumerConfig.TickDuration
+                UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, tickDuration, redeliverMessages) :> IUnAckedMessageTracker
+            else
+                UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, consumerConfig.AckTimeout, redeliverMessages) :> IUnAckedMessageTracker
+        else
+            UnAckedMessageTracker.UNACKED_MESSAGE_TRACKER_DISABLED
 
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
@@ -127,7 +142,9 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                 | ConsumerMessage.GetMessage ch ->
 
                     if queue.Count > 0 then
-                        ch.Reply <| queue.Dequeue()
+                        let msg = queue.Dequeue()
+                        unAckedMessageTracker.Add(msg.MessageId) |> ignore
+                        ch.Reply msg
                         return! loop state
                     else
                         Log.Logger.LogDebug("{0} GetMessage waiting", prefix)
@@ -166,6 +183,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                                 let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
+                                unAckedMessageTracker.Close();
                                 connectionHandler.Closed()
                                 Log.Logger.LogInformation("{0} closed", prefix)
                             with
@@ -174,7 +192,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                                 reraize ex
                         } |> channel.Reply
                     | _ ->
-                        Log.Logger.LogInformation("{0} can't close since connection already closed", prefix)
+                        Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
+                        unAckedMessageTracker.Close();
                         connectionHandler.Closed()
                         channel.Reply(Task.FromResult())
                     return! loop state
@@ -184,28 +203,26 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         connectionHandler.Closing()
+                        unAckedMessageTracker.Close()
                         Log.Logger.LogInformation("{0} starting unsubscribe ", prefix)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newUnsubscribeConsumer consumerId requestId
-                        let newTask =
-                            task {
-                                try
-                                    let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
-                                    response |> PulsarResponseType.GetEmpty
-                                    clientCnx.RemoveConsumer(consumerId)
-                                    connectionHandler.Closed()
-                                    Log.Logger.LogInformation("{0} unsubscribed", prefix)
-                                with
-                                | ex ->
-                                    connectionHandler.SetReady clientCnx
-                                    Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
-                                    reraize ex
-                            }
-                        channel.Reply(newTask)
+                        task {
+                            try
+                                let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                                response |> PulsarResponseType.GetEmpty
+                                clientCnx.RemoveConsumer(consumerId)
+                                connectionHandler.Closed()
+                                Log.Logger.LogInformation("{0} unsubscribed", prefix)
+                            with
+                            | ex ->
+                                connectionHandler.SetReady clientCnx
+                                Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
+                                reraize ex
+                        } |> channel.Reply
                     | _ ->
-                        Log.Logger.LogInformation("{0} can't unsubscribe since connection already closed", prefix)
-                        connectionHandler.Closed()
-                        channel.Reply(Task.FromResult<unit>())
+                        Log.Logger.LogError("{0} can't unsubscribe since connection already closed", prefix)
+                        channel.Reply(Task.FromException(Exception("Not connected to broker")))
                     return! loop state
             }
         loop { WaitingChannel = nullChannel }
@@ -216,17 +233,27 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
             return! mb.PostAndAsyncReply(GetMessage)
         }
 
-    member __.AcknowledgeAsync (msg: Message) =
+    member __.AcknowledgeAsync (msgId: MessageId) =
         task {
-            let command = Commands.newAck consumerId msg.MessageId CommandAck.AckType.Individual
+            let command = Commands.newAck consumerId msgId CommandAck.AckType.Individual
             let! success = mb.PostAndAsyncReply(fun channel -> Send (command, channel))
-            if not success then
+            if success then
+                unAckedMessageTracker.Remove(msgId) |> ignore
+            else
                 raise (ConnectionFailedOnSend "AcknowledgeAsync")
         }
 
     member __.RedeliverUnacknowledgedMessagesAsync () =
         task {
             let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
+            let! success = mb.PostAndAsyncReply(fun channel -> Send (command, channel))
+            if not success then
+                raise (ConnectionFailedOnSend "RedeliverUnacknowledgedMessagesAsync")
+        }
+
+    member __.RedeliverUnacknowledgedMessagesAsync messages =
+        task {
+            let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some messages)
             let! success = mb.PostAndAsyncReply(fun channel -> Send (command, channel))
             if not success then
                 raise (ConnectionFailedOnSend "RedeliverUnacknowledgedMessagesAsync")

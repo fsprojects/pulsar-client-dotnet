@@ -34,7 +34,7 @@ namespace CsharpExamples
                         .SubscribeAsync();
             var message = await consumer.ReceiveAsync();
             Console.WriteLine("Received: " + Encoding.UTF8.GetString(message.Payload));
-            await consumer.AcknowledgeAsync(message);
+            await consumer.AcknowledgeAsync(message.MessageId);
 
             Console.WriteLine("Example ended");
 

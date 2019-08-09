@@ -185,10 +185,10 @@ let newCloseProducer (producerId: ProducerId) (requestId : RequestId) =
     let command = BaseCommand(``type`` = CommandType.CloseProducer, CloseProducer = request)
     command |> serializeSimpleCommand
 
-let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<MessageId list>) =
+let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<MessageId seq>) =
     let request = CommandRedeliverUnacknowledgedMessages(ConsumerId = %consumerId)
     match messageIds with
-    | Some ids -> ids |> List.iter (fun msgId -> request.MessageIds.Add(msgId.ToMessageIdData()))
+    | Some ids -> ids |> Seq.iter (fun msgId -> request.MessageIds.Add(msgId.ToMessageIdData()))
     | None -> ()
     let command = BaseCommand(``type`` = CommandType.RedeliverUnacknowledgedMessages, redeliverUnacknowledgedMessages = request)
     command |> serializeSimpleCommand

@@ -34,7 +34,7 @@ let main argv =
 
         let! message = consumer.ReceiveAsync()
         printfn "Received: %A" (message.Payload |> Encoding.UTF8.GetString)
-        do! consumer.AcknowledgeAsync(message)
+        do! consumer.AcknowledgeAsync(message.MessageId)
     }
     t.Wait()
 
