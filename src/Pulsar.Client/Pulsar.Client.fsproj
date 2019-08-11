@@ -25,6 +25,7 @@
     <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\Configuration.fs" />
+    <Compile Include="Api\Batching.fs" />
     <Compile Include="Internal\UnAckedMessageTracker.fs" />
     <Compile Include="Internal\Generators.fs" />
     <Compile Include="Internal\ServiceNameResolver.fs" />
