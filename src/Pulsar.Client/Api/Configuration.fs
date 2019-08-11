@@ -48,6 +48,7 @@ type ProducerConfiguration =
         MaxMessagesPerBatch: int
         MaxBatchingPublishDelay: TimeSpan
         SendTimeout: TimeSpan
+        BatcherBuilder : IBatcherBuilder
     }
     static member Default =
         {
@@ -58,4 +59,5 @@ type ProducerConfiguration =
             MaxMessagesPerBatch = 1000
             MaxBatchingPublishDelay = TimeSpan.FromMilliseconds(1.)
             SendTimeout = TimeSpan.FromMilliseconds(30000.0)
+            BatcherBuilder = BatcherBuilder()
         }

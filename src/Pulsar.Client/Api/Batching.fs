@@ -36,9 +36,7 @@ type IBatcherBuilder =
     abstract member Build : unit -> IBatchMessageContainer
 
 
-type internal DefaultBatchMessageContainer =
-
-    new() = DefaultBatchMessageContainer()
+type internal DefaultBatchMessageContainer() =
 
     interface IBatchMessageContainer with
 
@@ -55,9 +53,7 @@ type internal DefaultBatchMessageContainer =
         member __.IsMultiBatches with get() = raise(NotImplementedException())
 
 
-type internal KeyBasedBatchMessageContainer =
-
-    new() = KeyBasedBatchMessageContainer()
+type internal KeyBasedBatchMessageContainer() =
 
     interface IBatchMessageContainer with
 
@@ -74,7 +70,8 @@ type internal KeyBasedBatchMessageContainer =
         member __.IsMultiBatches with get() = raise(NotImplementedException())
 
 
-type internal BatcherBuilder(defaultContainer : IBatchMessageContainer, keyBasedContainer : IBatchMessageContainer) =
+type internal BatcherBuilder private
+    (defaultContainer : IBatchMessageContainer, keyBasedContainer : IBatchMessageContainer) =
 
     new() = BatcherBuilder(DefaultBatchMessageContainer(), KeyBasedBatchMessageContainer())
 
