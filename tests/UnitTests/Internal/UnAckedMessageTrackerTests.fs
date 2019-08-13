@@ -18,7 +18,7 @@ let tests =
 
         test "UnAckedMessageTracker add and remove works" {
             let tracker = UnAckedMessageTracker("", TimeSpan.FromMilliseconds(100.0), TimeSpan.FromMilliseconds(10.0), emptyRedeliver) :> IUnAckedMessageTracker
-            let msgId = { LedgerId = %1UL; EntryId = %1UL;  Partition = 1 }
+            let msgId = { LedgerId = %1UL; EntryId = %1UL;  Partition = 1; Type = Individual }
             tracker.Add(msgId) |> Expect.isTrue ""
             tracker.Remove(msgId) |> Expect.isTrue ""
             tracker.Close()
@@ -26,7 +26,7 @@ let tests =
 
         test "UnAckedMessageTracker add 3 and remove until 1 works" {
             let tracker = UnAckedMessageTracker("", TimeSpan.FromMilliseconds(100.0), TimeSpan.FromMilliseconds(10.0), emptyRedeliver) :> IUnAckedMessageTracker
-            let msgId1 = { LedgerId = %1UL; EntryId = %1UL;  Partition = 1 }
+            let msgId1 = { LedgerId = %1UL; EntryId = %1UL;  Partition = 1; Type = Individual }
             let msgId2 = { msgId1 with EntryId = %2UL }
             let msgId3 = { msgId1 with EntryId = %3UL }
             tracker.Add msgId1 |> Expect.isTrue ""
@@ -40,7 +40,7 @@ let tests =
 
         test "UnAckedMessageTracker add 3 and remove until 3 works" {
             let tracker = UnAckedMessageTracker("", TimeSpan.FromMilliseconds(100.0), TimeSpan.FromMilliseconds(10.0), emptyRedeliver) :> IUnAckedMessageTracker
-            let msgId1 = { LedgerId = %1UL; EntryId = %1UL;  Partition = 1 }
+            let msgId1 = { LedgerId = %1UL; EntryId = %1UL;  Partition = 1; Type = Individual }
             let msgId2 = { msgId1 with EntryId = %2UL }
             let msgId3 = { msgId1 with EntryId = %3UL }
             tracker.Add msgId1 |> Expect.isTrue ""
@@ -58,7 +58,7 @@ let tests =
                 let length = msgIds |> Seq.length
                 tsc.SetResult(length)
             let tracker = UnAckedMessageTracker("", TimeSpan.FromMilliseconds(40.0), TimeSpan.FromMilliseconds(20.0), redeliver) :> IUnAckedMessageTracker
-            let msgId1 = { LedgerId = %1UL; EntryId = %1UL;  Partition = 1 }
+            let msgId1 = { LedgerId = %1UL; EntryId = %1UL;  Partition = 1; Type = Individual }
             let msgId2 = { msgId1 with EntryId = %2UL }
             let msgId3 = { msgId1 with EntryId = %3UL }
             tracker.Add msgId1 |> Expect.isTrue ""
@@ -75,7 +75,7 @@ let tests =
                 let length = msgIds |> Seq.length
                 tsc.SetResult(length)
             let tracker = UnAckedMessageTracker("", TimeSpan.FromMilliseconds(40.0), TimeSpan.FromMilliseconds(20.0), redeliver) :> IUnAckedMessageTracker
-            let msgId1 = { LedgerId = %1UL; EntryId = %1UL;  Partition = 1 }
+            let msgId1 = { LedgerId = %1UL; EntryId = %1UL;  Partition = 1; Type = Individual }
             let msgId2 = { msgId1 with EntryId = %2UL }
             let msgId3 = { msgId1 with EntryId = %3UL }
             tracker.Add msgId1 |> Expect.isTrue ""

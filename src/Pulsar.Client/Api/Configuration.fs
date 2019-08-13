@@ -24,6 +24,7 @@ type ConsumerConfiguration =
         SubscriptionInitialPosition: SubscriptionInitialPosition
         AckTimeout: TimeSpan
         TickDuration: TimeSpan
+        AcknowledgementsGroupTime: TimeSpan
     }
     static member Default =
         {
@@ -35,6 +36,7 @@ type ConsumerConfiguration =
             SubscriptionInitialPosition = SubscriptionInitialPosition.Latest
             AckTimeout = TimeSpan.Zero
             TickDuration = TimeSpan.FromMilliseconds(1000.0)
+            AcknowledgementsGroupTime = TimeSpan.FromMilliseconds(100.0)
         }
 
 type ProducerConfiguration =

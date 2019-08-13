@@ -12,7 +12,6 @@ open System.IO
 open ProtoBuf
 open System.Net
 open System.Threading.Tasks
-open CRC32
 
 module CommandsTests =
 
@@ -171,11 +170,11 @@ module CommandsTests =
             }
 
             test "newAck should return correct frame" {
-                let messageId = { LedgerId = %1UL; EntryId = %2UL; Partition = -1 }
+                let messageId = { LedgerId = %1UL; EntryId = %2UL; Partition = -1; Type = Individual }
                 let consumerId = %1UL
 
                 let totalSize, commandSize, command =
-                    serializeDeserializeSimpleCommand (newAck consumerId messageId CommandAck.AckType.Individual)
+                    serializeDeserializeSimpleCommand (newAck consumerId messageId AckType.Individual)
 
                 totalSize |> Expect.equal "" 29
                 commandSize |> Expect.equal "" 25

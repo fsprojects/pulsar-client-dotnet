@@ -8,7 +8,7 @@ using System;
 using System.Security.Cryptography;
 
 
-namespace CRC32
+namespace Pulsar.Client.Common
 {
     public static class CRC32C
     {

@@ -7,14 +7,11 @@ open Microsoft.Extensions.Logging
 open System.Threading.Tasks
 open pulsar.proto
 open System
-open System.IO.Pipelines
 open FSharp.UMX
 open System.Buffers
 open System.IO
 open ProtoBuf
-open CRC32
 open System.Threading
-open Pulsar.Client.Api
 
 type RequestsOperation =
     | AddRequest of RequestId * TaskCompletionSource<PulsarResponseType>
@@ -304,9 +301,13 @@ type ClientCnx (broker: Broker,
             producerMb.Post(SendError cmd)
         | XCommandPing _ ->
             Commands.newPong() |> SocketMessageWithoutReply |> sendMb.Post
-        | XCommandMessage (cmd, _, payload) ->
+        | XCommandMessage (cmd, metadata, payload) ->
             let consumerMb = consumers.[%cmd.ConsumerId]
-            consumerMb.Post(MessageReceived { MessageId = MessageId.FromMessageIdData(cmd.MessageId); Payload = payload })
+            consumerMb.Post(MessageReceived {
+                MessageId = MessageId.FromMessageIdData(cmd.MessageId)
+                RedeliveryCount = cmd.RedeliveryCount
+                Metadata = Metadata.FromMessageMetadata(metadata)
+                Payload = payload })
         | XCommandLookupTopicResponse cmd ->
             if (cmd.ShouldSerializeError()) then
                 checkServerError cmd.Error cmd.Message

@@ -142,7 +142,7 @@ let tests =
             let ticks = DateTimeOffset.UtcNow.UtcTicks
             let topicName1 = "public/default/topic-" + ticks.ToString()
             let topicName2 = "public/default/topic-" + (ticks+1L).ToString()
-            let messagesNumber = 1000
+            let messagesNumber = 100
 
             let consumer1 =
                 ConsumerBuilder(client)

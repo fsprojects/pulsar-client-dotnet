@@ -15,10 +15,11 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <None Include="paket.references" />
+    <Compile Include="Common\UMX.fs" />
+    <Compile Include="Internal\BatchMessageAcker.fs" />
     <Compile Include="Internal\Backoff.fs" />
     <Compile Include="Internal\Log.fs" />
     <Compile Include="Common\Tools.fs" />
-    <Compile Include="Common\UMX.fs" />
     <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\TopicName.fs" />
     <Compile Include="Common\NamespaceName.fs" />
@@ -31,6 +32,7 @@
     <Compile Include="Internal\ConnectionPool.fs" />
     <Compile Include="Internal\BinaryLookupService.fs" />
     <Compile Include="Internal\ConnectionHandler.fs" />
+    <Compile Include="Internal\AcknowledgmentsGroupingTracker.fs" />
 
     <Compile Include="Api\Consumer.fs" />
     <Compile Include="Api\Producer.fs" />

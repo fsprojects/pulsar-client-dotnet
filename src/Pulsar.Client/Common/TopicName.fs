@@ -40,4 +40,7 @@ type TopicName(topic: string) =
     member __.CompleteTopicName
         with get() : CompleteTopicName = %completeTopicName
 
+    member __.IsPersistent
+        with get() = true
+
     override this.ToString() = %this.CompleteTopicName

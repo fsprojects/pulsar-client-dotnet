@@ -3,11 +3,8 @@
 open pulsar.proto
 open FSharp.UMX
 open ProtoBuf
-open System
 open System.IO
 open System.Net
-open Microsoft.IO
-open CRC32
 open Microsoft.Extensions.Logging
 open Pulsar.Client.Internal
 
@@ -37,7 +34,6 @@ let internal serializeSimpleCommand(command : BaseCommand) =
         use binaryWriter = new BinaryWriter(stream)
         binaryWriter.Write(int32ToBigEndian totalSize)
         stream.Seek(0L, SeekOrigin.Begin) |> ignore
-
 
         Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
         stream.CopyToAsync(output)
@@ -106,10 +102,17 @@ let newSend (producerId : ProducerId) (sequenceId : SequenceId) (numMessages : i
     let command = BaseCommand(``type`` = CommandType.Send, Send = request)
     serializePayloadCommand command msgMetadata payload
 
-let newAck (consumerId : ConsumerId) (messageId: MessageId)
-    (ackType : CommandAck.AckType) : Payload =
-    let request = CommandAck(ConsumerId = %consumerId, ack_type = ackType)
+let newAck (consumerId : ConsumerId) (messageId: MessageId) (ackType : AckType) : Payload =
+    let request = CommandAck(ConsumerId = %consumerId, ack_type = ackType.ToCommandAckType())
     request.MessageIds.Add(messageId.ToMessageIdData())
+    let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
+    serializeSimpleCommand command
+
+let newMultiMessageAck (consumerId : ConsumerId) (messages: MessageId seq) : Payload =
+    let request = CommandAck(ConsumerId = %consumerId, ack_type = CommandAck.AckType.Individual)
+    messages
+    |> Seq.map (fun messageId -> messageId.ToMessageIdData())
+    |> request.MessageIds.AddRange
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 

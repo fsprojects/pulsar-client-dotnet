@@ -4,21 +4,12 @@ open Pulsar.Client.Common
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Collections.Concurrent
 open System.Net
-open System.Buffers
-open System.Buffers.Binary
 open System.Threading.Tasks
 open Pipelines.Sockets.Unofficial
 open System
 open Microsoft.Extensions.Logging
 open pulsar.proto
-open ProtoBuf
-open System.IO
-open FSharp.UMX
 open System.Reflection
-open Pulsar.Client.Api
-open System.IO.Pipelines
-open CRC32
-open System.Collections.Generic
 open Pulsar.Client.Internal
 
 let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()

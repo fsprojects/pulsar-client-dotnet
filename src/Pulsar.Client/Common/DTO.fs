@@ -52,10 +52,25 @@ type TopicDomain =
     | Persistent
     | NonPersistent
 
+type AckType =
+    | Individual
+    | Cumulative
+    member this.ToCommandAckType() =
+        match this with
+        | AckType.Individual -> CommandAck.AckType.Individual
+        | AckType.Cumulative -> CommandAck.AckType.Cumulative
+
+type BatchDetails = BatchIndex * BatchMessageAcker
+
+type MessageIdType =
+    | Individual
+    | Cumulative of BatchDetails
+
 type MessageId =
     {
         LedgerId: LedgerId
         EntryId: EntryId
+        Type: MessageIdType
         Partition: int
     }
     with
@@ -64,6 +79,14 @@ type MessageId =
                 LedgerId = %messageIdData.ledgerId
                 EntryId = %messageIdData.entryId
                 Partition = messageIdData.Partition
+                Type = MessageIdType.Individual
+            }
+        static member Earliest =
+            {
+                LedgerId = %0UL
+                EntryId = %0UL
+                Partition = %0
+                Type = MessageIdType.Individual
             }
         member this.ToMessageIdData() =
             MessageIdData(
@@ -81,9 +104,24 @@ type Broker =
         PhysicalAddress: PhysicalAddress
     }
 
+
+type Metadata =
+    {
+        NumMessages: int
+        HasNumMessagesInBatch: bool
+    }
+    with
+        static member FromMessageMetadata(messageMetadata: MessageMetadata) =
+            {
+                NumMessages = messageMetadata.NumMessagesInBatch
+                HasNumMessagesInBatch = messageMetadata.ShouldSerializeNumMessagesInBatch()
+            }
+
 type Message =
     {
         MessageId: MessageId
+        Metadata: Metadata
+        RedeliveryCount: uint32
         Payload: byte[]
     }
 
@@ -148,7 +186,8 @@ type ConsumerMessage =
     | ReachedEndOfTheTopic
     | MessageReceived of Message
     | GetMessage of AsyncReplyChannel<Message>
-    | Send of Payload * AsyncReplyChannel<bool>
+    | Acknowledge of MessageId * AckType * AsyncReplyChannel<bool>
+    | RedeliverAcknowledged of Option<MessageId seq> * AsyncReplyChannel<unit>
     | Close of AsyncReplyChannel<Task>
     | Unsubscribe of AsyncReplyChannel<Task>
 
