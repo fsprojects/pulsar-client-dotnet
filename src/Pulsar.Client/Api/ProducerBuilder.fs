@@ -18,7 +18,7 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
 
     new(client: PulsarClient) = ProducerBuilder(client, ProducerConfiguration.Default)
 
-    member __.Topic topic =
+    member this.Topic topic =
         ProducerBuilder(
             client,
             { config with
@@ -26,13 +26,13 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                     |> invalidArgIfBlankString "Topic must not be blank."
                     |> TopicName })
 
-    member __.ProducerName producerName =
+    member this.ProducerName producerName =
         ProducerBuilder(
             client,
             { config with
                 ProducerName = producerName |> invalidArgIfBlankString "ProducerName must not be blank." })
 
-    member __.MaxPendingMessages maxPendingMessages =
+    member this.MaxPendingMessages maxPendingMessages =
         ProducerBuilder(
             client,
             { config with
@@ -40,13 +40,13 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                     maxPendingMessages
                     |> invalidArgIfNotGreaterThanZero "MaxPendingMessages needs to be greater than 0." })
 
-    member __.SendTimeout sendTimeout =
+    member this.SendTimeout sendTimeout =
         ProducerBuilder(
             client,
             { config with
                 SendTimeout = sendTimeout })
 
-    member __.CreateAsync() =
+    member this.CreateAsync() =
         config
         |> verify
         |> client.CreateProducerAsync

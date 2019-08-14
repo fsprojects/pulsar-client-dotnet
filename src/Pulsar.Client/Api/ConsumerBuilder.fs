@@ -22,7 +22,7 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
 
     new(client: PulsarClient) = ConsumerBuilder(client, ConsumerConfiguration.Default)
 
-    member __.Topic topic =
+    member this.Topic topic =
         ConsumerBuilder(
             client,
             { config with
@@ -30,37 +30,37 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
                     |> invalidArgIfBlankString "Topic must not be blank."
                     |> TopicName })
 
-    member __.ConsumerName name =
+    member this.ConsumerName name =
         ConsumerBuilder(
             client,
             { config with
                 ConsumerName = name |> invalidArgIfBlankString "Consumer name must not be blank." })
 
-    member __.SubscriptionName subscriptionName =
+    member this.SubscriptionName subscriptionName =
         ConsumerBuilder(
             client,
             { config with
                 SubscriptionName = subscriptionName |> invalidArgIfBlankString "Subscription name must not be blank." })
 
-    member __.SubscriptionType subscriptionType =
+    member this.SubscriptionType subscriptionType =
         ConsumerBuilder(
             client,
             { config with
                 SubscriptionType = subscriptionType  })
 
-    member __.ReceiverQueueSize receiverQueueSize =
+    member this.ReceiverQueueSize receiverQueueSize =
         ConsumerBuilder(
             client,
             { config with
                 ReceiverQueueSize = receiverQueueSize |> invalidArgIfNotGreaterThanZero "ReceiverQueueSize should be greater than 0."  })
 
-    member __.SubscriptionInitialPosition subscriptionInitialPosition =
+    member this.SubscriptionInitialPosition subscriptionInitialPosition =
         ConsumerBuilder(
             client,
             { config with
                 SubscriptionInitialPosition = subscriptionInitialPosition  })
 
-    member __.SubscribeAsync() =
+    member this.SubscribeAsync() =
         config
         |> verify
         |> client.SubscribeAsync

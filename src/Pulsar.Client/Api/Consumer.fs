@@ -78,7 +78,6 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
             // the messages will be re-delivered
         }
 
-
     let markAckForBatchMessage msgId ackType (batchDetails: BatchDetails) =
         let (batchIndex, batchAcker) = batchDetails
         let isAllMsgsAcked =
@@ -98,7 +97,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
             | AckType.Cumulative when not batchAcker.PrevBatchCumulativelyAcked ->
                 sendAcknowledge msgId ackType |> Async.StartImmediate
                 batchAcker.PrevBatchCumulativelyAcked <- true
-            | _ -> ()
+            | _ ->
+                ()
             Log.Logger.LogDebug("{0} cannot ack message acktype {1}, cardinality {2}, length {3}",
                 prefix, ackType, outstandingAcks, batchSize)
             false
@@ -112,7 +112,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
             Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
             let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
             let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
-            //TODO handle non-durable cases
+            //TODO handle non-durable with StartMessageId
             let messageId = { LedgerId = msg.MessageId.LedgerId; EntryId = msg.MessageId.EntryId; Partition = partitionIndex; Type = Cumulative(%i,acker) }
             let message = { msg with MessageId = messageId; Payload = singleMessagePayload }
             queue.Enqueue(message)
@@ -185,13 +185,15 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                     return! loop state
 
                 | ConsumerMessage.MessageReceived message ->
-                    Log.Logger.LogDebug("{0} MessageReceived queueLength={1} {2}", prefix, queue.Count, message.MessageId)
+
+                    let hasWaitingChannel = state.WaitingChannel <> nullChannel
+                    Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWatingChannel={3}",
+                        prefix, message.MessageId, queue.Count, hasWaitingChannel)
                     if (acksGroupingTracker.IsDuplicate(message.MessageId)) then
-                        Log.Logger.LogDebug("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, message.MessageId)
+                        Log.Logger.LogInformation("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, message.MessageId)
                     else
                         if (message.Metadata.NumMessages = 1 && not message.Metadata.HasNumMessagesInBatch) then
-                            if state.WaitingChannel = nullChannel then
-                                Log.Logger.LogDebug("{0} MessageReceived {1}", prefix, message.MessageId)
+                            if not hasWaitingChannel then
                                 queue.Enqueue(message)
                                 return! loop state
                             else
@@ -204,7 +206,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                         else
                              // handle batch message enqueuing; uncompressed payload has all messages in batch
                             receiveIndividualMessagesFromBatch message
-                            if state.WaitingChannel <> nullChannel then
+                            if hasWaitingChannel then
                                 state.WaitingChannel.Reply <| queue.Dequeue()
                                 return! loop { state with WaitingChannel = nullChannel }
                             else
@@ -245,7 +247,6 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                             // other messages in batch are still pending ack.
                             ()
                         | _ ->
-                            Log.Logger.LogDebug("{0} acknowledging message - {1}, acktype {2}", prefix, messageId, ackType)
                             do! sendAcknowledge messageId ackType
                             Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
                         channel.Reply(true)
@@ -319,12 +320,12 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
         loop { WaitingChannel = nullChannel }
     )
 
-    member __.ReceiveAsync() =
+    member this.ReceiveAsync() =
         task {
             return! mb.PostAndAsyncReply(GetMessage)
         }
 
-    member __.AcknowledgeAsync (msgId: MessageId) =
+    member this.AcknowledgeAsync (msgId: MessageId) =
         task {
             let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Individual, channel))
             //TODO check
@@ -334,7 +335,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                 raise (ConnectionFailedOnSend "AcknowledgeAsync")
         }
 
-    member __.AcknowledgeCumulativeAsync (msgId: MessageId) =
+    member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
         task {
             let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Cumulative, channel))
             //TODO check
@@ -344,35 +345,35 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                 raise (ConnectionFailedOnSend "AcknowledgeCumulativeAsync")
         }
 
-    member __.RedeliverUnacknowledgedMessagesAsync () =
+    member this.RedeliverUnacknowledgedMessagesAsync () =
         task {
             do! mb.PostAndAsyncReply(fun channel -> RedeliverAcknowledged (None, channel))
         }
 
-    member __.RedeliverUnacknowledgedMessagesAsync messages =
+    member this.RedeliverUnacknowledgedMessagesAsync messages =
         task {
             do! mb.PostAndAsyncReply(fun channel -> RedeliverAcknowledged (Some messages, channel))
         }
 
-    member __.CloseAsync() =
+    member this.CloseAsync() =
         task {
             let! result = mb.PostAndAsyncReply(ConsumerMessage.Close)
             return! result
         }
 
-    member __.UnsubscribeAsync() =
+    member this.UnsubscribeAsync() =
         task {
             let! result = mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
             return! result
         }
 
-    member private __.InitInternal() =
+    member private this.InitInternal() =
         task {
             do connectionHandler.GrabCnx()
             return! subscribeTsc.Task
         }
 
-    member private __.Mb with get(): MailboxProcessor<ConsumerMessage> = mb
+    member private this.Mb with get(): MailboxProcessor<ConsumerMessage> = mb
 
     static member Init(consumerConfig: ConsumerConfiguration, subscriptionMode: SubscriptionMode, lookup: BinaryLookupService) =
         task {

@@ -145,15 +145,15 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
     interface IAcknowledgmentsGroupingTracker with
         /// Since the ack are delayed, we need to do some best-effort duplicate check to discard messages that are being
         /// resent after a disconnection and for which the user has already sent an acknowledgement.
-        member __.IsDuplicate(msgId) =
+        member this.IsDuplicate(msgId) =
             mb.PostAndReply (fun channel -> GroupingTrackerMessage.IsDuplicate (msgId, channel))
-        member __.AddAcknowledgment(msgId, ackType) =
+        member this.AddAcknowledgment(msgId, ackType) =
             mb.PostAndAsyncReply (fun channel -> GroupingTrackerMessage.AddAcknowledgment (msgId, ackType, channel))
-        member __.Flush() =
+        member this.Flush() =
             mb.Post GroupingTrackerMessage.Flush
-        member __.FlushAndClean() =
+        member this.FlushAndClean() =
             mb.Post GroupingTrackerMessage.FlushAndClean
-        member __.Close() =
+        member this.Close() =
             timer.Stop()
             mb.Post GroupingTrackerMessage.Stop
 
@@ -161,10 +161,10 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
     static member NonPersistentAcknowledgmentGroupingTracker =
         {
             new IAcknowledgmentsGroupingTracker with
-                member __.IsDuplicate(msgId) = false
-                member __.AddAcknowledgment(msgId, ackType) = async { return () }
-                member __.Flush() = ()
-                member __.FlushAndClean() = ()
-                member __.Close() = ()
+                member this.IsDuplicate(msgId) = false
+                member this.AddAcknowledgment(msgId, ackType) = async { return () }
+                member this.Flush() = ()
+                member this.FlushAndClean() = ()
+                member this.Close() = ()
         }
 

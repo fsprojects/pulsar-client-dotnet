@@ -11,10 +11,9 @@ type NamespaceName(name : string) =
             "Invalid namespace name format. Namespace name must be specified as '<tenant>/<namespace>'."
         |> fun ar -> (ar.[0], ar.[1])
 
-    member __.Tenant
-        with get() = tenant
+    member this.Tenant = tenant
 
-    member __.LocalName
-        with get() = localName
+    member this.LocalName = localName
 
-    override __.ToString() = name
+    override this.ToString() =
+        name

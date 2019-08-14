@@ -37,10 +37,11 @@ type TopicName(topic: string) =
                     else
                         failwith "Invalid short topic name '" + topic + "', it should be in the format of <tenant>/<namespace>/<topic> or <topic>"
 
-    member __.CompleteTopicName
-        with get() : CompleteTopicName = %completeTopicName
+    let isPersistent = completeTopicName.StartsWith("persistent")
 
-    member __.IsPersistent
-        with get() = true
+    member this.CompleteTopicName: CompleteTopicName = %completeTopicName
 
-    override this.ToString() = %this.CompleteTopicName
+    member this.IsPersistent = isPersistent
+
+    override this.ToString() =
+        %completeTopicName

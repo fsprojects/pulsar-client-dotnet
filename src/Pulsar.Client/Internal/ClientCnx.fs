@@ -295,10 +295,19 @@ type ClientCnx (broker: Broker,
                 handleSuccess %cmd.RequestId result
         | XCommandSendReceipt cmd ->
             let producerMb = producers.[%cmd.ProducerId]
-            producerMb.Post(SendReceipt cmd)
+            producerMb.Post(SendReceipt { MessageId = MessageId.FromMessageIdData(cmd.MessageId); SequenceId = %cmd.SequenceId })
         | XCommandSendError cmd ->
+            Log.Logger.LogWarning("{0} Received send error from server: {1} : {2}", broker, cmd.Error, cmd.Message)
             let producerMb = producers.[%cmd.ProducerId]
-            producerMb.Post(SendError cmd)
+            match cmd.Error with
+            | ServerError.ChecksumError ->
+                producerMb.Post(RecoverChecksumError %cmd.SequenceId)
+            | ServerError.TopicTerminatedError ->
+                producerMb.Post(Terminated)
+            | _ ->
+                // By default, for transient error, let the reconnection logic
+                // to take place and re-establish the produce again
+                this.Close()
         | XCommandPing _ ->
             Commands.newPong() |> SocketMessageWithoutReply |> sendMb.Post
         | XCommandMessage (cmd, metadata, payload) ->
@@ -378,34 +387,34 @@ type ClientCnx (broker: Broker,
 
     do Task.Run(fun () -> readSocket().Wait()) |> ignore
 
-    member private __.SendMb with get(): MailboxProcessor<SocketMessage> = sendMb
+    member private this.SendMb with get(): MailboxProcessor<SocketMessage> = sendMb
 
-    member private __.OperationsMb with get(): MailboxProcessor<CnxOperation> = operationsMb
+    member private this.OperationsMb with get(): MailboxProcessor<CnxOperation> = operationsMb
 
-    member __.ClientCnxId with get() = clientCnxId
+    member this.ClientCnxId with get() = clientCnxId
 
-    member __.Send payload =
+    member this.Send payload =
         sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
 
-    member __.SendAndWaitForReply reqId payload =
+    member this.SendAndWaitForReply reqId payload =
         task {
             let! task = sendMb.PostAndAsyncReply(fun replyChannel -> SocketRequestMessageWithReply(reqId, payload, replyChannel))
             return! task
         }
 
-    member __.RemoveConsumer (consumerId: ConsumerId) =
+    member this.RemoveConsumer (consumerId: ConsumerId) =
         operationsMb.Post(RemoveConsumer(consumerId))
 
-    member __.RemoveProducer (consumerId: ProducerId) =
+    member this.RemoveProducer (consumerId: ProducerId) =
         operationsMb.Post(RemoveProducer(consumerId))
 
-    member __.AddProducer (producerId: ProducerId) (producerMb: MailboxProcessor<ProducerMessage>) =
+    member this.AddProducer (producerId: ProducerId) (producerMb: MailboxProcessor<ProducerMessage>) =
         operationsMb.Post(AddProducer (producerId, producerMb))
 
-    member __.AddConsumer (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
+    member this.AddConsumer (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
         operationsMb.Post(AddConsumer (consumerId, consumerMb))
 
-    member __.Close() =
+    member this.Close() =
         let (conn, writeStream) = connection
         conn.Dispose()
         writeStream.Dispose()

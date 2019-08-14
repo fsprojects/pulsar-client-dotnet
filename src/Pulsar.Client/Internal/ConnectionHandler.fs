@@ -86,38 +86,38 @@ type ConnectionHandler( parentPrefix: string,
 
     member private __.Mb with get() : MailboxProcessor<ConnectionHandlerMessage> = mb
 
-    member __.GrabCnx() =
+    member this.GrabCnx() =
         mb.Post(GrabCnx)
 
-    member __.Terminate() =
-        __.ConnectionState <- Terminated
+    member this.Terminate() =
+        this.ConnectionState <- Terminated
 
-    member __.Closed() =
-        __.ConnectionState <- Closed
+    member this.Closed() =
+        this.ConnectionState <- Closed
 
-    member __.Failed() =
-        __.ConnectionState <- Failed
+    member this.Failed() =
+        this.ConnectionState <- Failed
 
-    member __.Closing() =
-        __.ConnectionState <- Closing
+    member this.Closing() =
+        this.ConnectionState <- Closing
 
-    member __.SetReady connection =
-        __.ConnectionState <- Ready connection
+    member this.SetReady connection =
+        this.ConnectionState <- Ready connection
 
-    member __.ConnectionClosed (clientCnx: ClientCnx) =
+    member this.ConnectionClosed (clientCnx: ClientCnx) =
         mb.Post(ConnectionClosed clientCnx)
 
-    member __.ReconnectLater ex =
+    member this.ReconnectLater ex =
         mb.Post(ReconnectLater ex)
 
-    member __.ResetBackoff() =
+    member this.ResetBackoff() =
         backoff.Reset()
 
-    member __.ConnectionState
+    member this.ConnectionState
         with get() = Volatile.Read(&connectionState)
         and private set(value) = Volatile.Write(&connectionState, value)
 
-    member __.IsRetriableError ex =
+    member this.IsRetriableError ex =
         match ex with
         | LookupException _ -> true
         | _ -> false

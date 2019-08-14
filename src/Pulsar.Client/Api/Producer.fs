@@ -33,6 +33,10 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                                         MandatoryStop = TimeSpan.FromMilliseconds(Math.Max(100.0, sendTimeoutMs - 100.0))})
 
 
+    let failPendingMessages ex =
+        //TODO
+        ()
+
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
 
         let pendingMessages = Queue<PendingMessage>()
@@ -67,14 +71,27 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         | ex ->
                             clientCnx.RemoveProducer producerId
                             Log.Logger.LogError(ex, "{0} Failed to create", prefix)
-                            // TODO handle special cases
-                            if (connectionHandler.IsRetriableError ex) || not (producerCreatedTsc.TrySetException ex)  then
+                            match ex with
+                            | ProducerBlockedQuotaExceededException reason ->
+                                Log.Logger.LogWarning("{0} Topic backlog quota exceeded. {1}", prefix, reason)
+                                failPendingMessages(ex)
+                            | ProducerBlockedQuotaExceededError reason ->
+                                Log.Logger.LogWarning("{0} is blocked on creation because backlog exceeded. {1}", prefix, reason)
+                            | _ ->
+                                ()
+
+                            match ex with
+                            | TopicTerminatedException reason ->
+                                connectionHandler.Terminate()
+                                failPendingMessages(ex)
+                                producerCreatedTsc.TrySetException(ex) |> ignore
+                            | _ when producerCreatedTsc.Task.IsCompleted || (connectionHandler.IsRetriableError ex && DateTime.Now < createProducerTimeout) ->
                                 // Either we had already created the producer once (producerCreatedFuture.isDone()) or we are
                                 // still within the initial timeout budget and we are dealing with a retriable error
                                 connectionHandler.ReconnectLater ex
-                            else
-                                // unable to create new consumer, fail operation
+                            | _ ->
                                 connectionHandler.Failed()
+                                producerCreatedTsc.SetException(ex)
                     | _ ->
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
 
@@ -127,34 +144,49 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
                 | ProducerMessage.SendReceipt receipt ->
 
-                    let sequenceId = %receipt.SequenceId
+                    let sequenceId = receipt.SequenceId
                     let pendingMessage = pendingMessages.Peek()
                     let expectedSequenceId = pendingMessage.SequenceId
                     if sequenceId > expectedSequenceId then
                         Log.Logger.LogWarning(
-                            "{0} Got ack for message. Expecting: {1} - got: {2} - queue-size: {3}",
-                            prefix, expectedSequenceId, sequenceId, pendingMessages.Count)
+                            "{0} Got ack for msg {1}. expecting {2} - got: {3} - queue-size: {4}",
+                            prefix, receipt.MessageId, expectedSequenceId, sequenceId, pendingMessages.Count)
                         // Force connection closing so that messages can be re-transmitted in a new connection
                         match connectionHandler.ConnectionState with
                         | Ready clientCnx -> clientCnx.Close()
                         | _ -> ()
                     elif sequenceId < expectedSequenceId then
-                        Log.Logger.LogDebug(
-                            "{0} Got ack for timed out message {1} last-seq: {2}",
-                            prefix, sequenceId, expectedSequenceId)
+                        Log.Logger.LogInformation(
+                            "{0} Got ack for timed out msg {1} seq {2} last-seq: {3}",
+                            prefix, receipt.MessageId, sequenceId, expectedSequenceId)
                     else
                         Log.Logger.LogDebug(
-                            "{0} Received ack for message {1}",
-                            prefix, sequenceId)
-                        pendingMessage.Tcs.SetResult(MessageId.FromMessageIdData(receipt.MessageId))
+                            "{0} Received ack for message {1} sequenceId={2}",
+                            prefix, receipt.MessageId, sequenceId)
+                        pendingMessage.Tcs.SetResult(receipt.MessageId)
                         pendingMessages.Dequeue() |> ignore
 
-                | ProducerMessage.SendError error ->
+                | ProducerMessage.RecoverChecksumError error ->
 
-                    Log.Logger.LogError("{0} SendError {1}", prefix, error.Message)
+                    //* Checks message checksum to retry if message was corrupted while sending to broker. Recomputes checksum of the
+                    //* message header-payload again.
+                    //* <ul>
+                    //* <li><b>if matches with existing checksum</b>: it means message was corrupt while sending to broker. So, resend
+                    //* message</li>
+                    //* <li><b>if doesn't match with existing checksum</b>: it means message is already corrupt and can't retry again.
+                    //* So, fail send-message by failing callback</li>
+                    //* </ul>
+
+                    // TODO
+                    ()
+
+                | ProducerMessage.Terminated ->
+
                     match connectionHandler.ConnectionState with
-                    | Ready clientCnx -> clientCnx.Close()
-                    | _ -> ()
+                    | Closed | Terminated -> ()
+                    | _ ->
+                        connectionHandler.Terminate()
+                        failPendingMessages(TopicTerminatedException("The topic has been terminated"))
 
                 | ProducerMessage.Close channel ->
 
@@ -186,30 +218,32 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
         loop ()
     )
 
-    member __.SendAndWaitAsync (msg: byte[]) =
+    // TODO: Process sendTimeout events
+
+    member this.SendAndWaitAsync (msg: byte[]) =
         task {
             let! tcs = mb.PostAndAsyncReply(fun channel -> BeginSendMessage (msg, channel))
             return! tcs.Task
         }
 
-    member __.SendAsync (msg: byte[]) =
+    member this.SendAsync (msg: byte[]) =
         task {
             mb.PostAndAsyncReply(fun channel -> BeginSendMessage (msg, channel)) |> ignore
         }
 
-    member __.CloseAsync() =
+    member this.CloseAsync() =
         task {
             let! result = mb.PostAndAsyncReply(ProducerMessage.Close)
             return! result
         }
 
-    member private __.InitInternal() =
+    member private this.InitInternal() =
        task {
            do connectionHandler.GrabCnx()
            return! producerCreatedTsc.Task
        }
 
-    member private __.Mb with get(): MailboxProcessor<ProducerMessage> = mb
+    member private this.Mb with get(): MailboxProcessor<ProducerMessage> = mb
 
     static member Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
         task {

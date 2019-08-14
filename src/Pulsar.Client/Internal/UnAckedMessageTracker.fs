@@ -95,15 +95,15 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
     do timer.Start()
 
     interface IUnAckedMessageTracker with
-        member __.Clear() =
+        member this.Clear() =
             mb.Post TrackerMessage.Clear
-        member __.Add(msgId) =
+        member this.Add(msgId) =
             mb.PostAndReply (fun channel -> TrackerMessage.Add (msgId, channel))
-        member __.Remove(msgId) =
+        member this.Remove(msgId) =
             mb.PostAndReply (fun channel -> TrackerMessage.Remove (msgId, channel))
-        member __.RemoveMessagesTill(msgId) =
+        member this.RemoveMessagesTill(msgId) =
             mb.PostAndReply (fun channel -> TrackerMessage.RemoveMessagesTill (msgId, channel))
-        member __.Close() =
+        member this.Close() =
             timer.Stop()
             mb.Post Stop
 
@@ -111,10 +111,10 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
     static member UNACKED_MESSAGE_TRACKER_DISABLED =
         {
             new IUnAckedMessageTracker with
-                member __.Clear() = ()
-                member __.Add(msgId) = true
-                member __.Remove(msgId) = true
-                member __.RemoveMessagesTill(msgId) = 0
-                member __.Close() = ()
+                member this.Clear() = ()
+                member this.Add(msgId) = true
+                member this.Remove(msgId) = true
+                member this.RemoveMessagesTill(msgId) = 0
+                member this.Close() = ()
         }
 

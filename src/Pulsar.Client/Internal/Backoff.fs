@@ -25,7 +25,7 @@ type Backoff (config: BackoffConfig) =
     let mutable firstBackoffTime = DateTime.MinValue
     let random = Random()
 
-    member __.Next() =
+    member this.Next() =
         let mutable current = next;
         if (current < max) then
             next <- Math.Min(next * 2.0, max)
@@ -50,10 +50,10 @@ type Backoff (config: BackoffConfig) =
 
         Math.Max(initial, current) |> int
 
-    member __.ReduceToHalf() =
+    member this.ReduceToHalf() =
         if (next > initial) then
             next <- Math.Max(next / 2.0, initial)
 
-    member __.Reset() =
+    member this.Reset() =
         next <- initial
         mandatoryStopMade <- false

@@ -78,15 +78,15 @@ type MessageId =
             {
                 LedgerId = %messageIdData.ledgerId
                 EntryId = %messageIdData.entryId
-                Partition = messageIdData.Partition
                 Type = MessageIdType.Individual
+                Partition = messageIdData.Partition
             }
         static member Earliest =
             {
                 LedgerId = %0UL
                 EntryId = %0UL
-                Partition = %0
                 Type = MessageIdType.Individual
+                Partition = %0
             }
         member this.ToMessageIdData() =
             MessageIdData(
@@ -94,6 +94,12 @@ type MessageId =
                 entryId = %this.EntryId,
                 Partition = this.Partition
             )
+
+type SendReceipt =
+    {
+        SequenceId: SequenceId
+        MessageId: MessageId
+    }
 
 type LogicalAddress = LogicalAddress of DnsEndPoint
 type PhysicalAddress = PhysicalAddress of DnsEndPoint
@@ -173,10 +179,11 @@ type ProducerMessage =
     | ConnectionOpened
     | ConnectionFailed of exn
     | ConnectionClosed of obj // ClientCnx
-    | SendReceipt of CommandSendReceipt
+    | SendReceipt of SendReceipt
     | BeginSendMessage of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
     | SendMessage of PendingMessage
-    | SendError of CommandSendError
+    | RecoverChecksumError of SequenceId
+    | Terminated
     | Close of AsyncReplyChannel<Task>
 
 type ConsumerMessage =

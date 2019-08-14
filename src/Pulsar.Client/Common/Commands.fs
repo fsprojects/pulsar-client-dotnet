@@ -10,10 +10,7 @@ open Pulsar.Client.Internal
 
 type internal CommandType = BaseCommand.Type
 
-
 Serializer.PrepareSerializer<BaseCommand>()
-
-
 
 let internal serializeSimpleCommand(command : BaseCommand) =
     fun (output: Stream) ->

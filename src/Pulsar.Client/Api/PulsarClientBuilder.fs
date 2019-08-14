@@ -21,12 +21,12 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 
     new() = PulsarClientBuilder(PulsarClientConfiguration.Default)
  
-    member __.WithServiceUrl url =
+    member this.WithServiceUrl url =
         PulsarClientBuilder
             { config with
                 ServiceUrl = url |> invalidArgIfBlankString "ServiceUrl must not be blank." }
 
-    member __.Build() =
+    member this.Build() =
         config
         |> verify
         |> PulsarClient

@@ -14,7 +14,7 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
 
     let serviceNameResolver = ServiceNameResolver(config)
 
-    member __.GetPartitionedTopicMetadata topicName =
+    member this.GetPartitionedTopicMetadata topicName =
         task {
             let endpoint = serviceNameResolver.ResolveHost()
             let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint
@@ -24,14 +24,14 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
             return PulsarResponseType.GetPartitionedTopicMetadata response
         }
 
-    member __.GetServiceUrl() = serviceNameResolver.GetServiceUrl()
+    member this.GetServiceUrl() = serviceNameResolver.GetServiceUrl()
 
-    member __.UpdateServiceUrl(serviceUrl) = serviceNameResolver.UpdateServiceUrl(serviceUrl)
+    member this.UpdateServiceUrl(serviceUrl) = serviceNameResolver.UpdateServiceUrl(serviceUrl)
 
-    member __.GetBroker(topicName: CompleteTopicName) =
-        __.FindBroker(serviceNameResolver.ResolveHost(), false, topicName)
+    member this.GetBroker(topicName: CompleteTopicName) =
+        this.FindBroker(serviceNameResolver.ResolveHost(), false, topicName)
 
-    member private __.FindBroker(endpoint: DnsEndPoint, autoritative: bool, topicName: CompleteTopicName) =
+    member private this.FindBroker(endpoint: DnsEndPoint, autoritative: bool, topicName: CompleteTopicName) =
         task {
             let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint
             let requestId = Generators.getNextRequestId()
@@ -46,7 +46,7 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
             // (2) redirect to given address if response is: redirect
             if lookupTopicResult.Redirect then
                 Log.Logger.LogDebug("Redirecting to {0} topicName {1}", resultEndpoint, topicName)
-                return!  __.FindBroker(resultEndpoint, lookupTopicResult.Authoritative, topicName)
+                return!  this.FindBroker(resultEndpoint, lookupTopicResult.Authoritative, topicName)
             else
                 // (3) received correct broker to connect
                 return if lookupTopicResult.Proxy
@@ -54,16 +54,16 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
                        else { LogicalAddress = LogicalAddress resultEndpoint; PhysicalAddress = PhysicalAddress resultEndpoint }
         }
 
-    member __.GetTopicsUnderNamespace (ns : NamespaceName, mode : TopicDomain) =
+    member this.GetTopicsUnderNamespace (ns : NamespaceName, mode : TopicDomain) =
         task {
             let backoff = Backoff { BackoffConfig.Default with
                                         Initial = TimeSpan.FromMilliseconds(100.0)
                                         MandatoryStop = (config.OperationTimeout + config.OperationTimeout) }
-            let! result = __.GetTopicsUnderNamespace(serviceNameResolver.ResolveHost(), ns, backoff, int config.OperationTimeout.TotalMilliseconds, mode)
+            let! result = this.GetTopicsUnderNamespace(serviceNameResolver.ResolveHost(), ns, backoff, int config.OperationTimeout.TotalMilliseconds, mode)
             return result
         }
 
-    member private __.GetTopicsUnderNamespace (endpoint: DnsEndPoint, ns: NamespaceName, backoff: Backoff, remainingTimeMs: int, mode: TopicDomain) =
+    member private this.GetTopicsUnderNamespace (endpoint: DnsEndPoint, ns: NamespaceName, backoff: Backoff, remainingTimeMs: int, mode: TopicDomain) =
         async {
             try
                 let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint |> Async.AwaitTask
@@ -76,5 +76,5 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
                 if delay <= 0 then
                     raise (TimeoutException "Could not getTopicsUnderNamespace within configured timeout.")
                 do! Async.Sleep delay
-                return! __.GetTopicsUnderNamespace(endpoint, ns, backoff, remainingTimeMs - delay, mode)
+                return! this.GetTopicsUnderNamespace(endpoint, ns, backoff, remainingTimeMs - delay, mode)
         }
