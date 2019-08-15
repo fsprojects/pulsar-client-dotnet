@@ -23,9 +23,17 @@ module ConfigurationTests =
                 config.Topic |> Expect.equal (incorrectDefault "Topic") Unchecked.defaultof<TopicName>
                 config.ProducerName |> Expect.equal (incorrectDefault "ProducerName") String.Empty
                 config.MaxPendingMessages |> Expect.equal (incorrectDefault "MaxPendingMessages") 1000
-                config.BatchingEnabled |> Expect.equal (incorrectDefault "BatchingEnabled") true
+                config.BatchingEnabled |> Expect.equal (incorrectDefault "BatchingEnabled") false
                 config.MaxMessagesPerBatch |> Expect.equal (incorrectDefault "BatchingMaxMessages") 1000
-                config.MaxBatchingPublishDelay |> Expect.equal (incorrectDefault "MaxBatchingPublishDelay") (TimeSpan.FromMilliseconds(1.))
+
+                config.MaxBatchingPublishDelay
+                |> Expect.equal (incorrectDefault "MaxBatchingPublishDelay") (TimeSpan.FromMilliseconds(1.))
+
+                config.BatchMessageContainerBuilder(BatchMessageContainerConfiguration.Default).GetType()
+                |> Expect.equal
+                    ("BatchMessageContainerBuilder creates incorrect default container")
+                    (typeof<DefaultBatchMessageContainer>)
+
             }
 
         ]

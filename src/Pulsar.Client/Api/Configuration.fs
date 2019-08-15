@@ -48,16 +48,17 @@ type ProducerConfiguration =
         MaxMessagesPerBatch: int
         MaxBatchingPublishDelay: TimeSpan
         SendTimeout: TimeSpan
-        BatcherBuilder : IBatcherBuilder
+        BatchMessageContainerBuilder : BatchMessageContainerConfiguration -> IBatchMessageContainer
     }
     static member Default =
         {
             Topic = Unchecked.defaultof<TopicName>
             ProducerName = ""
             MaxPendingMessages = 1000
-            BatchingEnabled = true
+            BatchingEnabled = false
             MaxMessagesPerBatch = 1000
             MaxBatchingPublishDelay = TimeSpan.FromMilliseconds(1.)
             SendTimeout = TimeSpan.FromMilliseconds(30000.0)
-            BatcherBuilder = BatcherBuilder()
+            BatchMessageContainerBuilder =
+                (fun configuration -> DefaultBatchMessageContainer(configuration) :> IBatchMessageContainer)
         }
