@@ -328,7 +328,6 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
     member this.AcknowledgeAsync (msgId: MessageId) =
         task {
             let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Individual, channel))
-            //TODO check
             if success then
                 unAckedMessageTracker.Remove(msgId) |> ignore
             else
@@ -338,7 +337,6 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
     member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
         task {
             let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Cumulative, channel))
-            //TODO check
             if success then
                 unAckedMessageTracker.Remove(msgId) |> ignore
             else

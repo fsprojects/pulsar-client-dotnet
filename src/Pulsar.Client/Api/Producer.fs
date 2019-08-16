@@ -9,17 +9,19 @@ open Pulsar.Client.Internal
 open System
 open Microsoft.Extensions.Logging
 open System.Collections.Generic
+open System.Timers
+open System.IO
 
 type ProducerException(message) =
     inherit Exception(message)
 
-type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLookupService) as this =
+type Producer private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, lookup: BinaryLookupService) as this =
     let producerId = Generators.getNextProducerId()
 
     let prefix = sprintf "producer(%u, %s)" %producerId producerConfig.ProducerName
     let producerCreatedTsc = TaskCompletionSource<Producer>()
-    // TODO take from configuration
-    let createProducerTimeout = DateTime.Now.Add(TimeSpan.FromSeconds(60.0))
+    let pendingMessages = Queue<PendingMessage>()
+    let createProducerTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let sendTimeoutMs = producerConfig.SendTimeout.TotalMilliseconds
     let connectionHandler =
         ConnectionHandler(prefix,
@@ -33,13 +35,45 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                                         MandatoryStop = TimeSpan.FromMilliseconds(Math.Max(100.0, sendTimeoutMs - 100.0))})
 
 
-    let failPendingMessages ex =
-        //TODO
-        ()
+    let failPendingMessages (ex: exn) =
+        while pendingMessages.Count > 0 do
+            let msg = pendingMessages.Dequeue()
+            msg.Tcs.SetException(ex)
+        // TODO fail batch messages
+
+    let timer = new Timer(sendTimeoutMs)
+
+    let startSendTimeoutTimer () =
+        if sendTimeoutMs > 0.0 then
+            timer.AutoReset <- true
+            timer.Elapsed.Add(fun _ -> this.Mb.Post TimeoutCheck)
+            timer.Start()
+
+    let resendMessages () =
+        if pendingMessages.Count > 0 then
+            Log.Logger.LogInformation("{0} resending {1} pending messages", prefix, pendingMessages.Count)
+            while pendingMessages.Count > 0 do
+                let pendingMessage = pendingMessages.Dequeue()
+                this.Mb.Post(SendMessage pendingMessage)
+        else
+            producerCreatedTsc.TrySetResult(this) |> ignore
+
+    let verifyIfLocalBufferIsCorrupted (msg: PendingMessage) =
+        task {
+            use stream = MemoryStreamManager.GetStream()
+            use reader = new BinaryReader(stream)
+            do! msg.Payload (stream :> Stream) // materialize stream
+            let streamSize = stream.Length
+            stream.Seek(4L, SeekOrigin.Begin) |> ignore
+            let cmdSize = reader.ReadInt32() |> int32FromBigEndian
+            stream.Seek((10+cmdSize) |> int64, SeekOrigin.Begin) |> ignore
+            let checkSum = reader.ReadInt32() |> int32FromBigEndian
+            let checkSumPayload = (int streamSize) - 14 - cmdSize
+            let computedCheckSum = CRC32C.Get(0u, stream, checkSumPayload) |> int32
+            return checkSum <> computedCheckSum
+        }
 
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
-
-        let pendingMessages = Queue<PendingMessage>()
 
         let rec loop () =
             async {
@@ -59,14 +93,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                             let success = response |> PulsarResponseType.GetProducerSuccess
                             Log.Logger.LogInformation("{0} registered with name {1}", prefix, success.GeneratedProducerName)
                             connectionHandler.ResetBackoff()
-                            // process pending messages
-                            if pendingMessages.Count > 0 then
-                                Log.Logger.LogInformation("{0} resending {1} pending messages", prefix, pendingMessages.Count)
-                                while pendingMessages.Count > 0 do
-                                    let pendingMessage = pendingMessages.Dequeue()
-                                    this.Mb.Post(SendMessage pendingMessage)
-                            else
-                                producerCreatedTsc.TrySetResult(this) |> ignore
+                            resendMessages()
                         with
                         | ex ->
                             clientCnx.RemoveProducer producerId
@@ -122,7 +149,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         )
                     let payload = Commands.newSend producerId sequenceId 1 metadata message
                     let tcs = TaskCompletionSource()
-                    this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Tcs = tcs })
+                    this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Tcs = tcs; CreatedAt = DateTime.Now })
                     channel.Reply(tcs)
 
                 | ProducerMessage.SendMessage pendingMessage ->
@@ -136,7 +163,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                             if success then
                                 Log.Logger.LogDebug("{0} send complete", prefix)
                             else
-                                pendingMessage.Tcs.SetException(ConnectionFailedOnSend "SendMessage")
+                                Log.Logger.LogInformation("{0} send failed", prefix)
                         | _ ->
                             Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                     else
@@ -166,7 +193,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                         pendingMessage.Tcs.SetResult(receipt.MessageId)
                         pendingMessages.Dequeue() |> ignore
 
-                | ProducerMessage.RecoverChecksumError error ->
+                | ProducerMessage.RecoverChecksumError sequenceId ->
 
                     //* Checks message checksum to retry if message was corrupted while sending to broker. Recomputes checksum of the
                     //* message header-payload again.
@@ -176,9 +203,23 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     //* <li><b>if doesn't match with existing checksum</b>: it means message is already corrupt and can't retry again.
                     //* So, fail send-message by failing callback</li>
                     //* </ul>
-
-                    // TODO
-                    ()
+                    Log.Logger.LogWarning("{0} RecoverChecksumError id={1}", prefix, sequenceId)
+                    if pendingMessages.Count > 0 then
+                        let pendingMessage = pendingMessages.Peek()
+                        let expectedSequenceId = pendingMessage.SequenceId
+                        if sequenceId = expectedSequenceId then
+                            let! corrupted = verifyIfLocalBufferIsCorrupted pendingMessage |> Async.AwaitTask
+                            if corrupted then
+                                // remove message from pendingMessages queue and fail callback
+                                pendingMessages.Dequeue() |> ignore
+                                pendingMessage.Tcs.SetException(ChecksumException "Checksum failed on corrupt message")
+                            else
+                                Log.Logger.LogDebug("{0} Message is not corrupted, retry send-message with sequenceId {1}", prefix, sequenceId)
+                                resendMessages()
+                        else
+                            Log.Logger.LogDebug("{0} Corrupt message is already timed out {1}", prefix, sequenceId)
+                    else
+                        Log.Logger.LogDebug("{0} Got send failure for timed out seqId {1}", prefix, sequenceId)
 
                 | ProducerMessage.Terminated ->
 
@@ -187,6 +228,20 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     | _ ->
                         connectionHandler.Terminate()
                         failPendingMessages(TopicTerminatedException("The topic has been terminated"))
+
+                | ProducerMessage.TimeoutCheck ->
+
+                    match connectionHandler.ConnectionState with
+                    | Closed | Terminated -> ()
+                    | _ ->
+                        if pendingMessages.Count > 0 then
+                            let firstMessage = pendingMessages.Peek()
+                            if firstMessage.CreatedAt.AddMilliseconds(sendTimeoutMs) >= DateTime.Now then
+                                // The diff is less than or equal to zero, meaning that the message has been timed out.
+                                // Set the callback to timeout on every message, then clear the pending queue.
+                                Log.Logger.LogInformation("{0} Message send timed out. Failing {1} messages", prefix, pendingMessages.Count)
+                                let ex = TimeoutException "Could not send message to broker within given timeout"
+                                failPendingMessages ex
 
                 | ProducerMessage.Close channel ->
 
@@ -203,6 +258,7 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveProducer(producerId)
                                 connectionHandler.Closed()
+                                timer.Stop()
                                 Log.Logger.LogInformation("{0} closed", prefix)
                             with
                             | ex ->
@@ -212,13 +268,15 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
                     | _ ->
                         Log.Logger.LogInformation("{0} can't close since connection already closed", prefix)
                         connectionHandler.Closed()
+                        timer.Stop()
                         channel.Reply(Task.FromResult())
+
                 return! loop ()
             }
         loop ()
     )
 
-    // TODO: Process sendTimeout events
+    do startSendTimeoutTimer()
 
     member this.SendAndWaitAsync (msg: byte[]) =
         task {
@@ -245,8 +303,8 @@ type Producer private (producerConfig: ProducerConfiguration, lookup: BinaryLook
 
     member private this.Mb with get(): MailboxProcessor<ProducerMessage> = mb
 
-    static member Init(producerConfig: ProducerConfiguration, lookup: BinaryLookupService) =
+    static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, lookup: BinaryLookupService) =
         task {
-            let producer = new Producer(producerConfig, lookup)
+            let producer = new Producer(producerConfig, clientConfig, lookup)
             return! producer.InitInternal()
         }

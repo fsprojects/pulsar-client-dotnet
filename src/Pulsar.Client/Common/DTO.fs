@@ -137,6 +137,7 @@ type Connection = SocketConnection * WriterStream
 
 type PendingMessage =
     {
+        CreatedAt: DateTime
         SequenceId: SequenceId
         Payload: Payload
         Tcs : TaskCompletionSource<MessageId>
@@ -184,6 +185,7 @@ type ProducerMessage =
     | SendMessage of PendingMessage
     | RecoverChecksumError of SequenceId
     | Terminated
+    | TimeoutCheck
     | Close of AsyncReplyChannel<Task>
 
 type ConsumerMessage =

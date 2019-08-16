@@ -40,7 +40,7 @@ type PulsarClient(config: PulsarClientConfiguration) =
             let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
             if (metadata.Partitions > 1u)
             then
-                return! Producer.Init(producerConfig, lookupSerivce)
+                return! Producer.Init(producerConfig, config, lookupSerivce)
             else
-                return! Producer.Init(producerConfig, lookupSerivce)
+                return! Producer.Init(producerConfig, config, lookupSerivce)
         }
