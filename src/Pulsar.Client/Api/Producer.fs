@@ -11,6 +11,7 @@ open Microsoft.Extensions.Logging
 open System.Collections.Generic
 open System.Timers
 open System.IO
+open ProtoBuf
 
 type ProducerException(message) =
     inherit Exception(message)
@@ -72,6 +73,14 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
             let computedCheckSum = CRC32C.Get(0u, stream, checkSumPayload) |> int32
             return checkSum <> computedCheckSum
         }
+
+    let makeBatchMessage (message : byte[]) =
+        let smm = SingleMessageMetadata(PayloadSize = message.Length)
+        use messageStream = MemoryStreamManager.GetStream()
+        use messageWriter = new BinaryWriter(messageStream)
+        Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
+        messageWriter.Write(message)
+        messageStream.ToArray()
 
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
 
@@ -136,9 +145,12 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                         Log.Logger.LogInformation("{0} creation failed", prefix)
                         connectionHandler.Failed()
 
-                | ProducerMessage.BeginSendMessage (message, channel) ->
+                | ProducerMessage.BeginSendMessage (message, channel, numMessagesInBatch) ->
 
                     Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
+
+                    let numMessages = match numMessagesInBatch with | Some(x) -> x | None -> 1
+
                     let sequenceId = Generators.getNextSequenceId()
                     let metadata =
                         MessageMetadata (
@@ -147,7 +159,11 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                             ProducerName = producerConfig.ProducerName,
                             UncompressedSize = (message.Length |> uint32)
                         )
-                    let payload = Commands.newSend producerId sequenceId 1 metadata message
+
+                    if numMessagesInBatch.IsSome then
+                        metadata.NumMessagesInBatch <- numMessages
+
+                    let payload = Commands.newSend producerId sequenceId numMessages metadata message
                     let tcs = TaskCompletionSource()
                     this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Tcs = tcs; CreatedAt = DateTime.Now })
                     channel.Reply(tcs)
@@ -168,6 +184,17 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                             Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                     else
                         pendingMessage.Tcs.SetException(ProducerException "Producer send queue is full.")
+
+                | ProducerMessage.SendBatch (messages : byte[][], channel) ->
+
+                    Log.Logger.LogDebug("{0} SendBatch", prefix)
+
+                    let batch =
+                        messages
+                        |> Array.map makeBatchMessage
+                        |> Array.concat
+
+                    this.Mb.Post(BeginSendMessage(batch, channel, Some(messages.Length)))
 
                 | ProducerMessage.SendReceipt receipt ->
 
@@ -280,13 +307,24 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
 
     member this.SendAndWaitAsync (msg: byte[]) =
         task {
-            let! tcs = mb.PostAndAsyncReply(fun channel -> BeginSendMessage (msg, channel))
+            let! tcs = mb.PostAndAsyncReply(fun channel -> BeginSendMessage (msg, channel, None))
             return! tcs.Task
         }
 
     member this.SendAsync (msg: byte[]) =
         task {
-            mb.PostAndAsyncReply(fun channel -> BeginSendMessage (msg, channel)) |> ignore
+            mb.PostAndAsyncReply(fun channel -> BeginSendMessage (msg, channel, None)) |> ignore
+        }
+
+    member this.SendBatchAndWaitAsync (messages: byte[][]) =
+        task {
+            let! tcs = mb.PostAndAsyncReply(fun channel -> SendBatch (messages, channel))
+            return! tcs.Task
+        }
+
+    member this.SendBatchAsync (messages: byte[][]) =
+        task {
+            mb.PostAndAsyncReply(fun channel -> SendBatch (messages, channel)) |> ignore
         }
 
     member this.CloseAsync() =

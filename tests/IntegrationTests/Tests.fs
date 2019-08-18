@@ -57,6 +57,16 @@ let tests =
                 ()
         }
 
+    let produceMessagesBatch (producer: Producer) number producerName =
+        task {
+            let messages =
+                Array.init number (fun i -> i + 1)
+                |> Array.map (fun i -> sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()))
+                |> Array.map Encoding.UTF8.GetBytes
+            let! _ = producer.SendBatchAsync messages
+            ()
+        }
+
     let consumeMessages (consumer: Consumer) number consumerName =
         task {
             for i in [1..number] do
@@ -202,4 +212,42 @@ let tests =
             [|t1; t2; t3|] |> Task.WaitAll
 
             Log.Debug("Finished 2 producers and 2 consumers")
+
+        testCase "send messages batch" <| fun () ->
+
+            Log.Debug("Started send messages batch")
+
+            let client = getClient()
+            let ticks = DateTimeOffset.UtcNow.UtcTicks
+            let topicName = "public/default/topic-" + ticks.ToString()
+            let messagesNumber = 100
+
+            let consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName("batch consumer")
+                    .SubscriptionName("batch-subscription")
+                    .SubscribeAsync()
+                    .Result
+
+            let producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName("batch producer")
+                    .CreateAsync()
+                    .Result
+
+            let t1 = Task.Run(fun () ->
+                produceMessagesBatch producer messagesNumber "batch producer" |> Task.WaitAll
+                Log.Debug("t1 ended")
+            )
+
+            let t2 = Task.Run(fun () ->
+                consumeMessages consumer messagesNumber "batch consumer" |> Task.WaitAll
+                Log.Debug("t2 ended")
+            )
+
+            [| t1; t2 |] |> Task.WaitAll
+
+            Log.Debug("Finished send messages batch")
     ]

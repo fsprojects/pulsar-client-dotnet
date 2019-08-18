@@ -181,8 +181,9 @@ type ProducerMessage =
     | ConnectionFailed of exn
     | ConnectionClosed of obj // ClientCnx
     | SendReceipt of SendReceipt
-    | BeginSendMessage of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
+    | BeginSendMessage of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>> * numMessagesInBatch : int option
     | SendMessage of PendingMessage
+    | SendBatch of messages : byte[][] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
     | RecoverChecksumError of SequenceId
     | Terminated
     | TimeoutCheck
