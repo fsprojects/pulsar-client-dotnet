@@ -165,8 +165,8 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
     let command = BaseCommand(``type`` = CommandType.Subscribe, Subscribe = request)
     command |> serializeSimpleCommand
 
-let newFlow (consumerId: ConsumerId) (messagePermits: uint32) =
-    let request = CommandFlow(ConsumerId = %consumerId, messagePermits = messagePermits)
+let newFlow (consumerId: ConsumerId) (messagePermits: int) =
+    let request = CommandFlow(ConsumerId = %consumerId, messagePermits = (uint32 messagePermits))
     let command = BaseCommand(``type`` = CommandType.Flow, Flow = request)
     command |> serializeSimpleCommand
 
@@ -185,7 +185,7 @@ let newCloseProducer (producerId: ProducerId) (requestId : RequestId) =
     let command = BaseCommand(``type`` = CommandType.CloseProducer, CloseProducer = request)
     command |> serializeSimpleCommand
 
-let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<MessageId seq>) =
+let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<#seq<MessageId>>) =
     let request = CommandRedeliverUnacknowledgedMessages(ConsumerId = %consumerId)
     match messageIds with
     | Some ids -> ids |> Seq.iter (fun msgId -> request.MessageIds.Add(msgId.ToMessageIdData()))

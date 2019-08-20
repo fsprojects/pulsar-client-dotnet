@@ -134,7 +134,6 @@ let tests =
             (consumeMessages consumer 100 "sequential").Wait()
             Log.Debug("Finished send 100 messages and then receiving them works fine when retention is set on namespace")
 
-
         testCase "2 producers and 2 consumers" <| fun () ->
 
             Log.Debug("Started 2 producers and 2 consumers")
@@ -202,4 +201,40 @@ let tests =
             [|t1; t2; t3|] |> Task.WaitAll
 
             Log.Debug("Finished 2 producers and 2 consumers")
+
+        testCase "Send and receive 100 messages concurrently works fine with small receiver queue size" <| fun () ->
+
+            Log.Debug("Started Send and receive 100 messages concurrently works fine with small receiver queue size")
+            let client = getClient()
+            let topicName = "public/default/topic-" + DateTimeOffset.UtcNow.UtcTicks.ToString()
+
+            let producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .CreateAsync()
+                    .Result
+
+            let consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .ReceiverQueueSize(10)
+                    .SubscribeAsync()
+                    .Result
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! produceMessages producer 100 ""
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! consumeMessages consumer 100 ""
+                    }:> Task)
+
+            Task.WaitAll(producerTask, consumerTask)
+
+            Log.Debug("Finished Send and receive 100 messages concurrently works fine with small receiver queue size")
     ]

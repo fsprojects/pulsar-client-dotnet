@@ -28,14 +28,18 @@ type ConsumerState = {
 
 type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: SubscriptionMode, lookup: BinaryLookupService) as this =
 
+    [<Literal>]
+    let MAX_REDELIVER_UNACKNOWLEDGED = 1000
     let consumerId = Generators.getNextConsumerId()
-    let queue = new Queue<Message>()
+    let incomingMessages = new Queue<Message>()
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
     let subscribeTsc = TaskCompletionSource<Consumer>()
     let partitionIndex = -1
     let prefix = sprintf "consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
     // TODO take from configuration
     let subscribeTimeout = DateTime.Now.Add(TimeSpan.FromSeconds(60.0))
+    let mutable avalablePermits = 0
+    let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
     let connectionHandler =
         ConnectionHandler(prefix,
                           lookup,
@@ -43,6 +47,13 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                           (fun () -> this.Mb.Post(ConsumerMessage.ConnectionOpened)),
                           (fun ex -> this.Mb.Post(ConsumerMessage.ConnectionFailed ex)),
                           Backoff({ BackoffConfig.Default with Initial = TimeSpan.FromMilliseconds(100.0); Max = TimeSpan.FromSeconds(60.0) }))
+
+    let increaseAvailablePermits delta =
+        avalablePermits <- avalablePermits + delta
+        if avalablePermits >= receiverQueueRefillThreshold then
+            this.Mb.Post(ConsumerMessage.SendFlowPermits avalablePermits)
+            avalablePermits <- 0
+
     let redeliverMessages messages =
         async {
             do! this.RedeliverUnacknowledgedMessagesAsync messages |> Async.AwaitTask
@@ -115,7 +126,19 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
             //TODO handle non-durable with StartMessageId
             let messageId = { LedgerId = msg.MessageId.LedgerId; EntryId = msg.MessageId.EntryId; Partition = partitionIndex; Type = Cumulative(%i,acker) }
             let message = { msg with MessageId = messageId; Payload = singleMessagePayload }
-            queue.Enqueue(message)
+            incomingMessages.Enqueue(message)
+
+
+    /// Record the event that one message has been processed by the application.
+    /// Periodically, it sends a Flow command to notify the broker that it can push more messages
+    let messageProcessed (msg: Message) =
+        increaseAvailablePermits 1
+        if consumerConfig.AckTimeout <> TimeSpan.Zero then
+            if (partitionIndex <> -1) then
+                // we should no longer track this message, TopicsConsumer will take care from now onwards
+                unAckedMessageTracker.Remove msg.MessageId |> ignore
+            else
+                unAckedMessageTracker.Add msg.MessageId |> ignore
 
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
@@ -140,7 +163,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                             response |> PulsarResponseType.GetEmpty
                             Log.Logger.LogInformation("{0} subscribed", prefix)
                             connectionHandler.ResetBackoff()
-                            let initialFlowCount = consumerConfig.ReceiverQueueSize |> uint32
+                            let initialFlowCount = consumerConfig.ReceiverQueueSize
                             let firstTimeConnect = subscribeTsc.TrySetResult(this)
                             let isDurable = subscriptionMode = SubscriptionMode.Durable;
                             // if the consumer is not partitioned or is re-connected and is partitioned, we send the flow
@@ -170,6 +193,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                     return! loop state
 
                 | ConsumerMessage.ConnectionClosed clientCnx ->
+
                     Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
                     let clientCnx = clientCnx :?> ClientCnx
                     connectionHandler.ConnectionClosed clientCnx
@@ -188,60 +212,51 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
 
                     let hasWaitingChannel = state.WaitingChannel <> nullChannel
                     Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWatingChannel={3}",
-                        prefix, message.MessageId, queue.Count, hasWaitingChannel)
+                        prefix, message.MessageId, incomingMessages.Count, hasWaitingChannel)
                     if (acksGroupingTracker.IsDuplicate(message.MessageId)) then
                         Log.Logger.LogInformation("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, message.MessageId)
+                        increaseAvailablePermits message.Metadata.NumMessages
                     else
                         if (message.Metadata.NumMessages = 1 && not message.Metadata.HasNumMessagesInBatch) then
                             if not hasWaitingChannel then
-                                queue.Enqueue(message)
+                                incomingMessages.Enqueue(message)
                                 return! loop state
                             else
-                                if (queue.Count = 0) then
+                                if (incomingMessages.Count = 0) then
+                                    messageProcessed message
                                     state.WaitingChannel.Reply <| message
                                 else
-                                    queue.Enqueue(message)
-                                    state.WaitingChannel.Reply <| queue.Dequeue()
+                                    incomingMessages.Enqueue(message)
+                                    let nextMessage = incomingMessages.Dequeue()
+                                    messageProcessed nextMessage
+                                    state.WaitingChannel.Reply nextMessage
                                 return! loop { state with WaitingChannel = nullChannel }
                         else
                              // handle batch message enqueuing; uncompressed payload has all messages in batch
                             receiveIndividualMessagesFromBatch message
                             if hasWaitingChannel then
-                                state.WaitingChannel.Reply <| queue.Dequeue()
+                                state.WaitingChannel.Reply <| incomingMessages.Dequeue()
                                 return! loop { state with WaitingChannel = nullChannel }
                             else
                                 return! loop state
 
-                | ConsumerMessage.GetMessage ch ->
+                | ConsumerMessage.Receive ch ->
 
-                    if queue.Count > 0 then
-                        let msg = queue.Dequeue()
-                        unAckedMessageTracker.Add(msg.MessageId) |> ignore
+                    Log.Logger.LogDebug("{0} Receive", prefix)
+                    if incomingMessages.Count > 0 then
+                        let msg = incomingMessages.Dequeue()
+                        messageProcessed msg
                         ch.Reply msg
                         return! loop state
                     else
                         Log.Logger.LogDebug("{0} GetMessage waiting", prefix)
                         return! loop { state with WaitingChannel = ch }
 
-                | ConsumerMessage.RedeliverAcknowledged (messageIds, channel) ->
-
-                    match connectionHandler.ConnectionState with
-                    | Ready conn ->
-                        let command = Commands.newRedeliverUnacknowledgedMessages consumerId messageIds
-                        let! success = conn.Send command
-                        if success then
-                            Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
-                        else
-                            Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
-                    | _ ->
-                        Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
-                    channel.Reply()
-                    return! loop state
-
                 | ConsumerMessage.Acknowledge (messageId, ackType, channel) ->
 
+                    Log.Logger.LogDebug("{0} Acknowledge", prefix)
                     match connectionHandler.ConnectionState with
-                    | Ready conn ->
+                    | Ready _ ->
                         match messageId.Type with
                         | Cumulative batchDetails when not (markAckForBatchMessage messageId ackType batchDetails) ->
                             // other messages in batch are still pending ack.
@@ -253,6 +268,63 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                         channel.Reply(false)
+                    return! loop state
+
+                | ConsumerMessage.RedeliverUnacknowledged (messageIds, channel) ->
+
+                    Log.Logger.LogDebug("{0} RedeliverUnacknowledged", prefix)
+                    if Seq.isEmpty messageIds |> not then
+                        match consumerConfig.SubscriptionType with
+                        | SubscriptionType.Shared | SubscriptionType.KeyShared ->
+                            this.Mb.Post(RedeliverAllUnacknowledged channel)
+                            Log.Logger.LogInformation("{0} We cannot redeliver single messages if subscription type is not Shared", prefix)
+                        | _ ->
+                            match connectionHandler.ConnectionState with
+                            | Ready clientCnx ->
+                                let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
+                                for batch in batches do
+                                    let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some(batch))
+                                    let! success = clientCnx.Send command
+                                    if success then
+                                        Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
+                                    else
+                                        Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
+                            | _ ->
+                                Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
+                            channel.Reply()
+                    return! loop state
+
+                | ConsumerMessage.RedeliverAllUnacknowledged channel ->
+
+                    Log.Logger.LogDebug("{0} RedeliverAllUnacknowledged", prefix)
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
+                        let! success = clientCnx.Send command
+                        if success then
+                            let currentSize = incomingMessages.Count
+                            if currentSize > 0 then
+                                incomingMessages.Clear()
+                                increaseAvailablePermits currentSize
+                            Log.Logger.LogDebug("{0} RedeliverAllUnacknowledged complete", prefix)
+                        else
+                            Log.Logger.LogWarning("{0} RedeliverAllUnacknowledged was not complete", prefix)
+                    | _ ->
+                        Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
+                    channel.Reply()
+                    return! loop state
+
+                | ConsumerMessage.SendFlowPermits numMessages ->
+
+                    Log.Logger.LogDebug("{0} SendFlowPermits {1}", prefix, numMessages)
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        let flowCommand = Commands.newFlow consumerId numMessages
+                        let! success = clientCnx.Send flowCommand
+                        if not success then
+                            Log.Logger.LogWarning("{0} failed SendFlowPermits {1}", prefix, numMessages)
+                    | _ ->
+                        Log.Logger.LogWarning("{0} not connected, skipping SendFlowPermits {1}", prefix, numMessages)
                     return! loop state
 
                 | ConsumerMessage.ReachedEndOfTheTopic ->
@@ -322,7 +394,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
 
     member this.ReceiveAsync() =
         task {
-            return! mb.PostAndAsyncReply(GetMessage)
+            return! mb.PostAndAsyncReply(Receive)
         }
 
     member this.AcknowledgeAsync (msgId: MessageId) =
@@ -345,12 +417,12 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
 
     member this.RedeliverUnacknowledgedMessagesAsync () =
         task {
-            do! mb.PostAndAsyncReply(fun channel -> RedeliverAcknowledged (None, channel))
+            do! mb.PostAndAsyncReply(RedeliverAllUnacknowledged)
         }
 
     member this.RedeliverUnacknowledgedMessagesAsync messages =
         task {
-            do! mb.PostAndAsyncReply(fun channel -> RedeliverAcknowledged (Some messages, channel))
+            do! mb.PostAndAsyncReply(fun channel -> RedeliverUnacknowledged (messages, channel))
         }
 
     member this.CloseAsync() =

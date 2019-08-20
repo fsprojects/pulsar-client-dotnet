@@ -161,7 +161,7 @@ module CommandsTests =
                 let consumerId = %1UL
 
                 let totalSize, commandSize, command =
-                    serializeDeserializeSimpleCommand (newFlow consumerId messagePermits)
+                    serializeDeserializeSimpleCommand (newFlow consumerId (int messagePermits))
 
                 totalSize |> Expect.equal "" 12
                 commandSize |> Expect.equal "" 8

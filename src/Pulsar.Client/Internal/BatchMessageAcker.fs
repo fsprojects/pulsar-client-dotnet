@@ -35,5 +35,7 @@ type BatchMessageAcker(batchSize: int) =
 
     override this.GetHashCode () = 0
 
+    override this.ToString() = "UnackedCount: " + unackedCount.ToString()
+
     interface System.IComparable with
          member x.CompareTo yobj = 0

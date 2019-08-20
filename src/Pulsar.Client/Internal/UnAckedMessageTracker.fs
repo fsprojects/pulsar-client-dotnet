@@ -55,7 +55,7 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
                         messageIdPartitionMap.Remove(msgId) |> ignore
                         channel.Reply(true)
                     else
-                        Log.Logger.LogWarning("{0} Duplicate message remove {1}", prefix, msgId)
+                        Log.Logger.LogWarning("{0} Unexisting message remove {1}", prefix, msgId)
                         channel.Reply(false)
                     return! loop state
                 | TrackerMessage.RemoveMessagesTill (msgId, channel) ->

@@ -43,6 +43,7 @@ type SubscriptionType =
     | Exclusive = 0
     | Shared = 1
     | Failover = 2
+    | KeyShared = 3
 
 type SubscriptionInitialPosition =
     | Latest = 0
@@ -194,9 +195,11 @@ type ConsumerMessage =
     | ConnectionClosed of obj // ClientCnx
     | ReachedEndOfTheTopic
     | MessageReceived of Message
-    | GetMessage of AsyncReplyChannel<Message>
+    | Receive of AsyncReplyChannel<Message>
     | Acknowledge of MessageId * AckType * AsyncReplyChannel<bool>
-    | RedeliverAcknowledged of Option<MessageId seq> * AsyncReplyChannel<unit>
+    | RedeliverUnacknowledged of MessageId seq * AsyncReplyChannel<unit>
+    | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
+    | SendFlowPermits of int
     | Close of AsyncReplyChannel<Task>
     | Unsubscribe of AsyncReplyChannel<Task>
 
