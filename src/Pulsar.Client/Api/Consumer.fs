@@ -15,9 +15,6 @@ open System.IO
 open ProtoBuf
 open pulsar.proto
 
-type ConsumerException(message) =
-    inherit Exception(message)
-
 type SubscriptionMode =
     | Durable
     | NonDurable
@@ -56,7 +53,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
 
     let redeliverMessages messages =
         async {
-            do! this.RedeliverUnacknowledgedMessagesAsync messages |> Async.AwaitTask
+            do! this.Mb.PostAndAsyncReply(fun channel -> RedeliverUnacknowledged (messages, channel))
         } |> Async.StartImmediate
 
     let unAckedMessageTracker =
@@ -139,6 +136,26 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                 unAckedMessageTracker.Remove msg.MessageId |> ignore
             else
                 unAckedMessageTracker.Add msg.MessageId |> ignore
+
+    let removeExpiredMessagesFromQueue (msgIds: TrackerState) =
+        if incomingMessages.Count > 0 then
+            let peek = incomingMessages.Peek()
+            if msgIds.Contains peek.MessageId then
+                // try not to remove elements that are added while we remove
+                let mutable finish = false
+                let mutable messagesFromQueue = 0
+                while not finish && incomingMessages.Count > 0 do
+                    let message = incomingMessages.Dequeue()
+                    messagesFromQueue <- messagesFromQueue + 1
+                    if msgIds.Contains(message.MessageId) |> not then
+                        msgIds.Add(message.MessageId) |> ignore
+                        finish <- true
+                messagesFromQueue
+            else
+                // first message is not expired, then no message is expired in queue.
+                0
+        else
+            0
 
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
@@ -281,6 +298,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                         | _ ->
                             match connectionHandler.ConnectionState with
                             | Ready clientCnx ->
+                                let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds);
                                 let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
                                 for batch in batches do
                                     let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some(batch))
@@ -289,6 +307,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                                         Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
                                     else
                                         Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
+                                if messagesFromQueue > 0 then
+                                    increaseAvailablePermits messagesFromQueue
                             | _ ->
                                 Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                             channel.Reply()
@@ -306,6 +326,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                             if currentSize > 0 then
                                 incomingMessages.Clear()
                                 increaseAvailablePermits currentSize
+                                unAckedMessageTracker.Clear()
                             Log.Logger.LogDebug("{0} RedeliverAllUnacknowledged complete", prefix)
                         else
                             Log.Logger.LogWarning("{0} RedeliverAllUnacknowledged was not complete", prefix)
@@ -418,11 +439,6 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
     member this.RedeliverUnacknowledgedMessagesAsync () =
         task {
             do! mb.PostAndAsyncReply(RedeliverAllUnacknowledged)
-        }
-
-    member this.RedeliverUnacknowledgedMessagesAsync messages =
-        task {
-            do! mb.PostAndAsyncReply(fun channel -> RedeliverUnacknowledged (messages, channel))
         }
 
     member this.CloseAsync() =

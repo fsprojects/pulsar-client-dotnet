@@ -2,6 +2,7 @@
 
 open Pulsar.Client.Common
 open FSharp.UMX
+open System
 
 type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguration) =
 
@@ -14,7 +15,7 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
         |> checkValue
             (fun c ->
                 c.Topic
-                |> throwIfDefault (fun() ->  ProducerException("Topic name must be set on the producer builder.")))
+                |> throwIfDefault (fun() ->  ArgumentException("Topic name must be set on the producer builder.")))
 
     new(client: PulsarClient) = ProducerBuilder(client, ProducerConfiguration.Default)
 

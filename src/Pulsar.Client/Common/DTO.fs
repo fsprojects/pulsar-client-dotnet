@@ -11,6 +11,7 @@ open FSharp.UMX
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
+open System.Collections.Generic
 
 type ChecksumType =
     | Crc32c
@@ -135,6 +136,7 @@ type Message =
 type WriterStream = Stream
 type Payload = WriterStream -> Task
 type Connection = SocketConnection * WriterStream
+type TrackerState = HashSet<MessageId>
 
 type PendingMessage =
     {
@@ -197,7 +199,7 @@ type ConsumerMessage =
     | MessageReceived of Message
     | Receive of AsyncReplyChannel<Message>
     | Acknowledge of MessageId * AckType * AsyncReplyChannel<bool>
-    | RedeliverUnacknowledged of MessageId seq * AsyncReplyChannel<unit>
+    | RedeliverUnacknowledged of TrackerState * AsyncReplyChannel<unit>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
     | SendFlowPermits of int
     | Close of AsyncReplyChannel<Task>

@@ -188,7 +188,10 @@ let newCloseProducer (producerId: ProducerId) (requestId : RequestId) =
 let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<#seq<MessageId>>) =
     let request = CommandRedeliverUnacknowledgedMessages(ConsumerId = %consumerId)
     match messageIds with
-    | Some ids -> ids |> Seq.iter (fun msgId -> request.MessageIds.Add(msgId.ToMessageIdData()))
+    | Some ids -> ids |> Seq.iter (fun msgId ->
+        Log.Logger.LogDebug("{0} gets redelivered", msgId)
+        request.MessageIds.Add(msgId.ToMessageIdData()))
     | None -> ()
+
     let command = BaseCommand(``type`` = CommandType.RedeliverUnacknowledgedMessages, redeliverUnacknowledgedMessages = request)
     command |> serializeSimpleCommand

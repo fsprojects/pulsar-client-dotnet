@@ -12,9 +12,6 @@ open System.Collections.Generic
 open System.Timers
 open System.IO
 
-type ProducerException(message) =
-    inherit Exception(message)
-
 type Producer private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, lookup: BinaryLookupService) as this =
     let producerId = Generators.getNextProducerId()
 
@@ -167,7 +164,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                         | _ ->
                             Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                     else
-                        pendingMessage.Tcs.SetException(ProducerException "Producer send queue is full.")
+                        pendingMessage.Tcs.SetException(ProducerQueueIsFullError "Producer send queue is full.")
 
                 | ProducerMessage.SendReceipt receipt ->
 

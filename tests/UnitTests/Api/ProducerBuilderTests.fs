@@ -48,7 +48,7 @@ module ProducerBuilderTests =
 
             test "CreateAsync throws an exception if Topic is blank" {
                 fun() -> builder().CreateAsync() |> ignore
-                |> Expect.throwsWithMessage<ProducerException> "Topic name must be set on the producer builder."
+                |> Expect.throwsWithMessage<ArgumentException> "Topic name must be set on the producer builder."
             }
 
         ]

@@ -2,8 +2,12 @@
 
 open Pulsar.Client.Common
 open FSharp.UMX
+open System
 
 type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguration) =
+
+    [<Literal>]
+    let MIN_ACK_TIMEOUT_MILLIS = 1000
 
     let verify(config : ConsumerConfiguration) =
         let checkValue check config =
@@ -14,11 +18,11 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
         |> checkValue
             (fun c ->
                 c.Topic
-                |> throwIfDefault (fun() ->  ConsumerException("Topic name must be set on the producer builder.")))
+                |> throwIfDefault (fun() ->  ArgumentException("Topic name must be set on the producer builder.")))
         |> checkValue
             (fun c ->
                 c.SubscriptionName
-                |> throwIfBlankString (fun() -> ConsumerException("Subscription name name must be set on the producer builder.")))
+                |> throwIfBlankString (fun() -> ArgumentException("Subscription name name must be set on the producer builder.")))
 
     new(client: PulsarClient) = ConsumerBuilder(client, ConsumerConfiguration.Default)
 
@@ -59,6 +63,25 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
             client,
             { config with
                 SubscriptionInitialPosition = subscriptionInitialPosition  })
+
+    member this.AckTimeout ackTimeout =
+        ConsumerBuilder(
+            client,
+            { config with
+                AckTimeout = ackTimeout |> invalidArgIf (fun arg ->
+                   arg <> TimeSpan.Zero && arg < TimeSpan.FromMilliseconds(float MIN_ACK_TIMEOUT_MILLIS)) (sprintf "Ack timeout should be greater than %i ms" MIN_ACK_TIMEOUT_MILLIS)  })
+
+    member this.TickDuration tickDuration =
+        ConsumerBuilder(
+            client,
+            { config with
+                TickDuration = tickDuration  })
+
+    member this.AcknowledgementsGroupTime ackGroupTime =
+        ConsumerBuilder(
+            client,
+            { config with
+                AcknowledgementsGroupTime = ackGroupTime  })
 
     member this.SubscribeAsync() =
         config

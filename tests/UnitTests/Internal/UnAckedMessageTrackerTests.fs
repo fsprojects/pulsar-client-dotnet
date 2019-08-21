@@ -74,7 +74,7 @@ let tests =
             let redeliver msgIds =
                 let length = msgIds |> Seq.length
                 tsc.SetResult(length)
-            let tracker = UnAckedMessageTracker("", TimeSpan.FromMilliseconds(40.0), TimeSpan.FromMilliseconds(20.0), redeliver) :> IUnAckedMessageTracker
+            let tracker = UnAckedMessageTracker("", TimeSpan.FromMilliseconds(50.0), TimeSpan.FromMilliseconds(20.0), redeliver) :> IUnAckedMessageTracker
             let msgId1 = { LedgerId = %1UL; EntryId = %1UL;  Partition = 1; Type = Individual }
             let msgId2 = { msgId1 with EntryId = %2UL }
             let msgId3 = { msgId1 with EntryId = %3UL }

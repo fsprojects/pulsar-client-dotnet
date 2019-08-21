@@ -14,8 +14,6 @@ type TrackerMessage =
     | Clear
     | Stop
 
-type TrackerState = HashSet<MessageId>
-
 type IUnAckedMessageTracker =
     abstract member Clear: unit -> unit
     abstract member Add: MessageId -> bool
@@ -23,7 +21,7 @@ type IUnAckedMessageTracker =
     abstract member RemoveMessagesTill: MessageId -> int
     abstract member Close: unit -> unit
 
-type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: TimeSpan, redeliverUnacknowledgedMessages: seq<MessageId> -> unit) =
+type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: TimeSpan, redeliverUnacknowledgedMessages: TrackerState -> unit) =
 
     let messageIdPartitionMap = SortedDictionary<MessageId, TrackerState>()
     let timePartitions = Queue<TrackerState>()
@@ -74,6 +72,8 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
                     let timedOutMessages = timePartitions.Dequeue()
                     if timedOutMessages.Count > 0 then
                         Log.Logger.LogWarning("{0} {1} messages have timed-out", prefix, timedOutMessages.Count)
+                        for msgId in timedOutMessages do
+                            messageIdPartitionMap.Remove(msgId) |> ignore
                         redeliverUnacknowledgedMessages timedOutMessages
                     return! loop (TrackerState())
                 | Clear ->
