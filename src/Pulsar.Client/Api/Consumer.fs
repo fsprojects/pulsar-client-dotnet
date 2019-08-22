@@ -290,28 +290,27 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                 | ConsumerMessage.RedeliverUnacknowledged (messageIds, channel) ->
 
                     Log.Logger.LogDebug("{0} RedeliverUnacknowledged", prefix)
-                    if Seq.isEmpty messageIds |> not then
-                        match consumerConfig.SubscriptionType with
-                        | SubscriptionType.Shared | SubscriptionType.KeyShared ->
-                            this.Mb.Post(RedeliverAllUnacknowledged channel)
-                            Log.Logger.LogInformation("{0} We cannot redeliver single messages if subscription type is not Shared", prefix)
+                    match consumerConfig.SubscriptionType with
+                    | SubscriptionType.Shared | SubscriptionType.KeyShared ->
+                        match connectionHandler.ConnectionState with
+                        | Ready clientCnx ->
+                            let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds);
+                            let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
+                            for batch in batches do
+                                let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some(batch))
+                                let! success = clientCnx.Send command
+                                if success then
+                                    Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
+                                else
+                                    Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
+                            if messagesFromQueue > 0 then
+                                increaseAvailablePermits messagesFromQueue
                         | _ ->
-                            match connectionHandler.ConnectionState with
-                            | Ready clientCnx ->
-                                let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds);
-                                let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
-                                for batch in batches do
-                                    let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some(batch))
-                                    let! success = clientCnx.Send command
-                                    if success then
-                                        Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
-                                    else
-                                        Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
-                                if messagesFromQueue > 0 then
-                                    increaseAvailablePermits messagesFromQueue
-                            | _ ->
-                                Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
-                            channel.Reply()
+                            Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
+                        channel.Reply()
+                    | _ ->
+                        this.Mb.Post(RedeliverAllUnacknowledged channel)
+                        Log.Logger.LogInformation("{0} We cannot redeliver single messages if subscription type is not Shared", prefix)
                     return! loop state
 
                 | ConsumerMessage.RedeliverAllUnacknowledged channel ->

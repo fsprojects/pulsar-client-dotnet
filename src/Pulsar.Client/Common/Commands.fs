@@ -189,7 +189,7 @@ let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Op
     let request = CommandRedeliverUnacknowledgedMessages(ConsumerId = %consumerId)
     match messageIds with
     | Some ids -> ids |> Seq.iter (fun msgId ->
-        Log.Logger.LogDebug("{0} gets redelivered", msgId)
+        Log.Logger.LogDebug("{0} should be redelivered", msgId)
         request.MessageIds.Add(msgId.ToMessageIdData()))
     | None -> ()
 

@@ -12,6 +12,7 @@ open Serilog
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.DependencyInjection
 open Serilog.Sinks.SystemConsole.Themes
+open System.Collections.Generic
 
 
 [<Literal>]
@@ -56,6 +57,12 @@ let tests =
                 let! _ = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
                 ()
         }
+
+    let getMessageNumber (msg: string) =
+        let ind1 = msg.IndexOf("#")
+        let ind2 = msg.IndexOf("Sent")
+        let subString = msg.Substring(ind1+1, ind2 - ind1 - 2)
+        int subString
 
     let consumeMessages (consumer: Consumer) number consumerName =
         task {
@@ -291,4 +298,61 @@ let tests =
             Task.WaitAll(producerTask, consumerTask)
 
             Log.Debug("Finished messages get redelivered if ackTimeout is set")
+
+        testCase "Messages get redelivered if ackTimeout is set for shared subscription" <| fun () ->
+
+            Log.Debug("Started messages get redelivered if ackTimeout is set for shared subscription")
+            let client = getClient()
+            let topicName = "public/default/topic-" + DateTimeOffset.UtcNow.UtcTicks.ToString()
+
+            let producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .CreateAsync()
+                    .Result
+
+            let consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .ConsumerName("AckTimeoutConsumerShared")
+                    .AckTimeout(TimeSpan.FromSeconds(1.0))
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscribeAsync()
+                    .Result
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! produceMessages producer 100 ""
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        let hashSet1 = HashSet [1..100]
+                        let hashSet2 = HashSet [91..100]
+                        for i in [1..100] do
+                            let! message = consumer.ReceiveAsync()
+                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let receivedNumber = getMessageNumber received
+                            hashSet1.Remove receivedNumber |> ignore
+                            Log.Debug("{0} received {1}", "AckTimeoutConsumer", received)
+                            if (i <= 90) then
+                                do! consumer.AcknowledgeAsync(message.MessageId)
+                        Expect.isEmpty "" hashSet1
+                        do! Task.Delay(1100)
+                        for i in [91..100] do
+                            let! message = consumer.ReceiveAsync()
+                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let receivedNumber = getMessageNumber received
+                            hashSet2.Remove receivedNumber |> ignore
+                            Log.Debug("{0} received {1}", "AckTimeoutConsumer", received)
+                            do! consumer.AcknowledgeAsync(message.MessageId)
+                        Expect.isEmpty "" hashSet2
+                    }:> Task)
+
+            Task.WaitAll(producerTask, consumerTask)
+
+            Log.Debug("Finished messages get redelivered if ackTimeout is set for shared subscription")
     ]
