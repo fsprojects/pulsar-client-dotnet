@@ -11,6 +11,7 @@ open Microsoft.Extensions.Logging
 open pulsar.proto
 open System.Reflection
 open Pulsar.Client.Internal
+open System.IO.Pipelines
 
 let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
 let protocolVersion =
@@ -25,7 +26,7 @@ let private connect (broker: Broker) =
     task {
         let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
         let (LogicalAddress logicalAddress) = broker.LogicalAddress
-        let! socketConnection = SocketConnection.ConnectAsync(physicalAddress)
+        let! socketConnection = SocketConnection.ConnectAsync(physicalAddress, PipeOptions(pauseWriterThreshold = 5_242_880L ))
         let writerStream = StreamConnection.GetWriter(socketConnection.Output)
         let connection = (socketConnection, writerStream)
         let initialConnectionTsc = TaskCompletionSource<ClientCnx>()
