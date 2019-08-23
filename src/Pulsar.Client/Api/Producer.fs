@@ -273,6 +273,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
         loop ()
     )
 
+    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startSendTimeoutTimer()
 
     member this.SendAndWaitAsync (msg: byte[]) =

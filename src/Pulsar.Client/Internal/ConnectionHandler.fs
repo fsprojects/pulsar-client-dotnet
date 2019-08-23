@@ -26,6 +26,7 @@ type ConnectionHandler( parentPrefix: string,
                         backoff: Backoff) as this =
 
     let mutable connectionState = Uninitialized
+    let prefix = parentPrefix + " ConnectionHandler"
 
     let isValidStateForReconnection() =
         match this.ConnectionState with
@@ -40,32 +41,32 @@ type ConnectionHandler( parentPrefix: string,
                 | GrabCnx ->
                     match this.ConnectionState with
                     | Ready _ ->
-                        Log.Logger.LogWarning("{0} Client cnx already set for topic {1}, ignoring reconnection request", parentPrefix, topic);
+                        Log.Logger.LogWarning("{0} Client cnx already set for topic {1}, ignoring reconnection request", prefix, topic);
                     | _ ->
                         if isValidStateForReconnection() then
                             try
-                                Log.Logger.LogDebug("{0} Starting reconnect to {1}", parentPrefix, topic);
+                                Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic);
                                 let! broker = lookup.GetBroker(topic) |> Async.AwaitTask
                                 let! clientCnx = ConnectionPool.getConnection broker |> Async.AwaitTask
                                 this.ConnectionState <- Ready clientCnx
                                 connectionOpened()
                             with
                             | ex ->
-                                Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", parentPrefix, topic, this.ConnectionState)
+                                Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
                                 connectionFailed ex
                                 if isValidStateForReconnection() then
                                     this.Mb.Post(ReconnectLater ex)
                         else
-                            Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", parentPrefix, topic, this.ConnectionState)
+                            Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", prefix, topic, this.ConnectionState)
                 | ReconnectLater ex ->
                     if isValidStateForReconnection() then
                         let delay = backoff.Next()
                         Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
-                            parentPrefix, topic, this.ConnectionState, delay)
+                            prefix, topic, this.ConnectionState, delay)
                         this.ConnectionState <- Connecting
                         asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
                     else
-                        Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", parentPrefix, topic, this.ConnectionState)
+                        Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
                 | ConnectionClosed clientCnx ->
                     match this.ConnectionState with
                     | Ready cnx when cnx <> clientCnx ->
@@ -74,15 +75,17 @@ type ConnectionHandler( parentPrefix: string,
                         if isValidStateForReconnection() then
                             let delay = backoff.Next()
                             Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {2}ms ",
-                                parentPrefix, topic, this.ConnectionState, delay)
+                                prefix, topic, this.ConnectionState, delay)
                             this.ConnectionState <- Connecting
                             asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
                         else
-                            Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", parentPrefix, topic, this.ConnectionState)
+                            Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
                 return! loop ()
             }
         loop  ()
     )
+
+    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} ConnectionHandler mailbox failure", prefix))
 
     member private __.Mb with get() : MailboxProcessor<ConnectionHandlerMessage> = mb
 

@@ -137,6 +137,7 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
         loop MessageId.Earliest
     )
 
+    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     let timer = new Timer(ackGroupTime.TotalMilliseconds)
     do timer.AutoReset <- true
     do timer.Elapsed.Add(fun _ -> mb.Post Flush)

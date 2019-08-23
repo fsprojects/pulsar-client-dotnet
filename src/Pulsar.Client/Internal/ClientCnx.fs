@@ -385,6 +385,9 @@ type ClientCnx (broker: Broker,
             Log.Logger.LogDebug("{0} readSocket stopped", prefix)
         }
 
+    do requestsMb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} requestsMb mailbox failure", prefix))
+    do operationsMb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} operationsMb mailbox failure", prefix))
+    do sendMb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} sendMb mailbox failure", prefix))
     do Task.Run(fun () -> readSocket().Wait()) |> ignore
 
     member private this.SendMb with get(): MailboxProcessor<SocketMessage> = sendMb

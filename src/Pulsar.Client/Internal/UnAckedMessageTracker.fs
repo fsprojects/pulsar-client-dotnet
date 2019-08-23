@@ -88,6 +88,7 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
         loop (TrackerState())
     )
 
+    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     let timer = new Timer(tickDuration.TotalMilliseconds)
     do fillTimePartions()
     do timer.AutoReset <- true

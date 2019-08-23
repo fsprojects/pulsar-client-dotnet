@@ -411,6 +411,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
             }
         loop { WaitingChannel = nullChannel }
     )
+    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
+
 
     member this.ReceiveAsync() =
         task {
