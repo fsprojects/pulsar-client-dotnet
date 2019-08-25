@@ -58,6 +58,15 @@ let tests =
                 ()
         }
 
+    let createSendAndWaitTasks (producer: Producer) number producerName =
+        let createTask taskNumber =
+            let message = sprintf "Message #%i Sent from %s on %s" taskNumber producerName (DateTime.Now.ToLongTimeString())
+            let messageBytes = Encoding.UTF8.GetBytes(message)
+            let task = Task.Run(fun() -> producer.SendAndWaitAsync(messageBytes) |> ignore)
+            (task, message)
+
+        [|1..number|] |> Array.map createTask
+
     let getMessageNumber (msg: string) =
         let ind1 = msg.IndexOf("#")
         let ind2 = msg.IndexOf("Sent")
@@ -74,6 +83,17 @@ let tests =
                 let expected = "Message #" + string i
                 if received.StartsWith(expected) |> not then
                     failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
+        }
+
+    let consumeAndVerifyMessages (consumer: Consumer) consumerName (expectedMessages : string[]) =
+        task {
+            for i in [1..expectedMessages.Length] do
+                let! message = consumer.ReceiveAsync()
+                let received = Encoding.UTF8.GetString(message.Payload)
+                do! consumer.AcknowledgeAsync(message.MessageId)
+                Log.Debug("{0} received {1}", consumerName, received)
+                if expectedMessages |> Array.contains received |> not then
+                    failwith <| sprintf "Received unexpected message '%s' consumer %s" received consumerName
         }
 
     testList "basic" [
@@ -355,4 +375,106 @@ let tests =
             Task.WaitAll(producerTask, consumerTask)
 
             Log.Debug("Finished messages get redelivered if ackTimeout is set for shared subscription")
+
+        testCase "Batch get sended if batch size exceeds" <| fun () ->
+
+            Log.Debug("Started 'Batch get sended if batch size exceeds'")
+
+            let client = getClient()
+            let ticks = DateTimeOffset.UtcNow.UtcTicks
+            let topicName = "public/default/topic-" + ticks.ToString()
+            let messagesNumber = 100
+
+            let consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName("batch consumer")
+                    .SubscriptionName("batch-subscription")
+                    .SubscribeAsync()
+                    .Result
+
+            let producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName("batch producer")
+                    .EnableBatching()
+                    .BatchingMaxMessages(messagesNumber)
+                    .CreateAsync()
+                    .Result
+
+            fastProduceMessages producer messagesNumber "batch producer" |> Task.WaitAll
+            consumeMessages consumer messagesNumber "batch consumer" |> Task.WaitAll
+
+            Log.Debug("Finished 'Batch get sended if batch size exceeds'")
+
+        testCase "Batch get sended if timeout exceeds" <| fun () ->
+
+            Log.Debug("Started 'Batch get sended if timeout exceeds'")
+
+            let client = getClient()
+            let ticks = DateTimeOffset.UtcNow.UtcTicks
+            let topicName = "public/default/topic-" + ticks.ToString()
+            let batchSize = 10
+            let messagesNumber = 5
+
+            let consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName("batch consumer")
+                    .SubscriptionName("batch-subscription")
+                    .SubscribeAsync()
+                    .Result
+
+            let producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName("batch producer")
+                    .EnableBatching()
+                    .BatchingMaxMessages(batchSize)
+                    .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(100.0))
+                    .CreateAsync()
+                    .Result
+
+            fastProduceMessages producer messagesNumber "batch producer" |> Task.WaitAll
+
+            Task.Delay(TimeSpan.FromMilliseconds(200.0)).Wait()
+
+            consumeMessages consumer messagesNumber "batch consumer" |> Task.WaitAll
+
+            Log.Debug("Finished 'Batch get sended if timeout exceeds'")
+
+        testCase "Batch get created from several tasks" <| fun () ->
+
+            Log.Debug("Started 'Batch get created from several tasks'")
+
+            let client = getClient()
+            let ticks = DateTimeOffset.UtcNow.UtcTicks
+            let topicName = "public/default/topic-" + ticks.ToString()
+            let messagesNumber = 100
+
+            let consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName("batch consumer")
+                    .SubscriptionName("batch-subscription")
+                    .SubscribeAsync()
+                    .Result
+
+            let producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName("batch producer")
+                    .EnableBatching()
+                    .BatchingMaxMessages(messagesNumber)
+                    .CreateAsync()
+                    .Result
+
+            let taskData = createSendAndWaitTasks producer messagesNumber "batch producer"
+            let tasks = taskData |> Array.map fst
+            let sentMessages = taskData |> Array.map snd
+
+            tasks |> Task.WaitAll
+            consumeAndVerifyMessages consumer "batch consumer" sentMessages |> Task.WaitAll
+
+            Log.Debug("Finished 'Batch get created from several tasks'")
     ]

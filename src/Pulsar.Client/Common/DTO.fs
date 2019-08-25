@@ -146,6 +146,18 @@ type PendingMessage =
         Tcs : TaskCompletionSource<MessageId>
     }
 
+type BatchItem =
+    {
+        Data: byte[]
+        Tcs : TaskCompletionSource<MessageId>
+    }
+
+type PendingBatch =
+    {
+        SequenceId: SequenceId
+        CompletionSources : TaskCompletionSource<MessageId> list
+    }
+
 type PulsarResponseType =
     | PartitionedTopicMetadata of PartitionedTopicMetadata
     | LookupTopicResult of LookupTopicResult
@@ -190,6 +202,8 @@ type ProducerMessage =
     | Terminated
     | TimeoutCheck
     | Close of AsyncReplyChannel<Task>
+    | StoreBatchItem of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
+    | SendBatchMessage of BatchItem list
 
 type ConsumerMessage =
     | ConnectionOpened
