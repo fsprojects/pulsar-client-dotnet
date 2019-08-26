@@ -1,12 +1,13 @@
 ﻿namespace Pulsar.Client.Api
 
 open Pulsar.Client.Common
+open System
 
 type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 
     let clientExceptionIfBlankString message arg =
         arg
-        |> throwIfBlankString (fun() -> PulsarClientException(message))
+        |> throwIfBlankString (fun() -> ArgumentException(message))
 
     let verify(config : PulsarClientConfiguration) =
         let checkValue check config =
@@ -20,7 +21,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
                 |> clientExceptionIfBlankString "Service Url needs to be specified on the PulsarClientBuilder object.")
 
     new() = PulsarClientBuilder(PulsarClientConfiguration.Default)
- 
+
     member this.WithServiceUrl url =
         PulsarClientBuilder
             { config with

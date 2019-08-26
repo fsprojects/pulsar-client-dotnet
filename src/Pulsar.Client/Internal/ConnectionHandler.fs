@@ -124,3 +124,10 @@ type ConnectionHandler( parentPrefix: string,
         match ex with
         | LookupException _ -> true
         | _ -> false
+
+    member this.CheckIfActive prefix =
+        match this.ConnectionState with
+        | Ready _ | Connecting -> ()
+        | Closing | Closed ->  raise <| AlreadyClosedException(prefix + "already closed")
+        | Terminated ->  raise <| AlreadyClosedException(prefix + " topic was terminated")
+        | Failed | Uninitialized ->  raise <| NotConnectedException(prefix + " not connected")

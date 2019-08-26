@@ -13,6 +13,8 @@ open Microsoft.Extensions.Logging
 open Microsoft.Extensions.DependencyInjection
 open Serilog.Sinks.SystemConsole.Themes
 open System.Collections.Generic
+open Pulsar.Client.IntegrationTests
+open FSharp.UMX
 
 
 [<Literal>]
@@ -21,7 +23,7 @@ let pulsarAddress = "pulsar://my-pulsar-cluster:31002"
 let configureLogging() =
     Log.Logger <-
         LoggerConfiguration()
-            .MinimumLevel.Debug()
+            .MinimumLevel.Warning()
             .WriteTo.Console(theme = AnsiConsoleTheme.Code, outputTemplate="[{Timestamp:HH:mm:ss} {Level:u3} {ThreadId}] {Message:lj}{NewLine}{Exception}")
             .Enrich.FromLogContext()
             .Enrich.WithThreadId()
@@ -101,7 +103,7 @@ let tests =
 
             Log.Debug("Started Send and receive 100 messages concurrently works fine in default configuration")
             let client = getClient()
-            let topicName = "public/default/test"
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
             let producer =
                 ProducerBuilder(client)
@@ -138,7 +140,7 @@ let tests =
 
             Log.Debug("Started send 100 messages and then receiving them works fine when retention is set on namespace")
             let client = getClient()
-            let topicName = "public/retention/topic-" + DateTimeOffset.UtcNow.UtcTicks.ToString()
+            let topicName = "public/retention/topic-" + Guid.NewGuid().ToString("N")
 
             let producer =
                 ProducerBuilder(client)
@@ -161,13 +163,12 @@ let tests =
             (consumeMessages consumer 100 "sequential").Wait()
             Log.Debug("Finished send 100 messages and then receiving them works fine when retention is set on namespace")
 
-        testCase "2 producers and 2 consumers" <| fun () ->
+        testCase "Full roundtrip (emulate Request-Response behaviour)" <| fun () ->
 
-            Log.Debug("Started 2 producers and 2 consumers")
+            Log.Debug("Started Full roundtrip (emulate Request-Response behaviour)")
             let client = getClient()
-            let ticks = DateTimeOffset.UtcNow.UtcTicks
-            let topicName1 = "public/default/topic-" + ticks.ToString()
-            let topicName2 = "public/default/topic-" + (ticks+1L).ToString()
+            let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let messagesNumber = 100
 
             let consumer1 =
@@ -227,13 +228,13 @@ let tests =
             )
             [|t1; t2; t3|] |> Task.WaitAll
 
-            Log.Debug("Finished 2 producers and 2 consumers")
+            Log.Debug("Finished Full roundtrip (emulate Request-Response behaviour)")
 
         testCase "Send and receive 100 messages concurrently works fine with small receiver queue size" <| fun () ->
 
             Log.Debug("Started Send and receive 100 messages concurrently works fine with small receiver queue size")
             let client = getClient()
-            let topicName = "public/default/topic-" + DateTimeOffset.UtcNow.UtcTicks.ToString()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
             let producer =
                 ProducerBuilder(client)
@@ -269,7 +270,7 @@ let tests =
 
             Log.Debug("Started messages get redelivered if ackTimeout is set")
             let client = getClient()
-            let topicName = "public/default/topic-" + DateTimeOffset.UtcNow.UtcTicks.ToString()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
             let producer =
                 ProducerBuilder(client)
@@ -323,7 +324,7 @@ let tests =
 
             Log.Debug("Started messages get redelivered if ackTimeout is set for shared subscription")
             let client = getClient()
-            let topicName = "public/default/topic-" + DateTimeOffset.UtcNow.UtcTicks.ToString()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
             let producer =
                 ProducerBuilder(client)
@@ -381,8 +382,7 @@ let tests =
             Log.Debug("Started 'Batch get sended if batch size exceeds'")
 
             let client = getClient()
-            let ticks = DateTimeOffset.UtcNow.UtcTicks
-            let topicName = "public/default/topic-" + ticks.ToString()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let messagesNumber = 100
 
             let consumer =
@@ -412,8 +412,7 @@ let tests =
             Log.Debug("Started 'Batch get sended if timeout exceeds'")
 
             let client = getClient()
-            let ticks = DateTimeOffset.UtcNow.UtcTicks
-            let topicName = "public/default/topic-" + ticks.ToString()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let batchSize = 10
             let messagesNumber = 5
 
@@ -448,8 +447,7 @@ let tests =
             Log.Debug("Started 'Batch get created from several tasks'")
 
             let client = getClient()
-            let ticks = DateTimeOffset.UtcNow.UtcTicks
-            let topicName = "public/default/topic-" + ticks.ToString()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let messagesNumber = 100
 
             let consumer =
@@ -477,4 +475,53 @@ let tests =
             consumeAndVerifyMessages consumer "batch consumer" sentMessages |> Task.WaitAll
 
             Log.Debug("Finished 'Batch get created from several tasks'")
+
+        testCase "Client, producer and consumer can't be accessed after close" <| fun () ->
+
+            Log.Debug("Started 'Client, producer and consumer can't be accessed after close'")
+
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let messagesNumber = 100
+
+            let consumer1 =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName("ClosingConsumer")
+                    .SubscriptionName("closing1-subscription")
+                    .SubscribeAsync()
+                    .Result
+
+            let consumer2 =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName("ClosingConsumer")
+                    .SubscriptionName("closing2-subscription")
+                    .SubscribeAsync()
+                    .Result
+
+            let producer1 =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName("ClosingProducer1")
+                    .CreateAsync()
+                    .Result
+
+            let producer2 =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName("ClosingProducer2")
+                    .CreateAsync()
+                    .Result
+
+            consumer1.CloseAsync().Wait()
+            Expect.throwsT2<AlreadyClosedException> (fun () -> consumer1.ReceiveAsync().Result |> ignore) |> ignore
+            producer1.CloseAsync().Wait()
+            Expect.throwsT2<AlreadyClosedException> (fun () -> producer1.SendAsync([||]).Result |> ignore) |> ignore
+            client.CloseAsync().Wait()
+            Expect.throwsT2<AlreadyClosedException> (fun () -> consumer2.UnsubscribeAsync().Result |> ignore) |> ignore
+            Expect.throwsT2<AlreadyClosedException> (fun () -> producer2.SendAsync([||]).Result |> ignore) |> ignore
+            Expect.throwsT2<AlreadyClosedException> (fun () -> client.GetPartitionedTopicMetadata(%"abc").Result |> ignore) |> ignore
+
+            Log.Debug("Finished 'Client, producer and consumer can't be accessed after close'")
     ]

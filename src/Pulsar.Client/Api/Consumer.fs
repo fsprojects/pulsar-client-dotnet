@@ -23,7 +23,8 @@ type ConsumerState = {
     WaitingChannel: AsyncReplyChannel<Message>
 }
 
-type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: SubscriptionMode, lookup: BinaryLookupService) as this =
+type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, subscriptionMode: SubscriptionMode,
+                        lookup: BinaryLookupService, cleanup: Consumer -> unit) as this =
 
     [<Literal>]
     let MAX_REDELIVER_UNACKNOWLEDGED = 1000
@@ -33,8 +34,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
     let subscribeTsc = TaskCompletionSource<Consumer>()
     let partitionIndex = -1
     let prefix = sprintf "consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
-    // TODO take from configuration
-    let subscribeTimeout = DateTime.Now.Add(TimeSpan.FromSeconds(60.0))
+    let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable avalablePermits = 0
     let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
     let connectionHandler =
@@ -157,6 +157,11 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
         else
             0
 
+    let stopConsumer() =
+        unAckedMessageTracker.Close()
+        cleanup(this)
+        Log.Logger.LogInformation("{0} stopped", prefix)
+
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
         let rec loop (state: ConsumerState) =
@@ -198,13 +203,16 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                         | ex ->
                             clientCnx.RemoveConsumer consumerId
                             Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
-                            if (connectionHandler.IsRetriableError ex) || not (subscribeTsc.TrySetException ex)  then
-                                // Either we had already created the consumer once (subscribeFuture.isDone()) or we are
-                                // still within the initial timeout budget and we are dealing with a retriable error
+                            if (connectionHandler.IsRetriableError ex && DateTime.Now < subscribeTimeout) then
                                 connectionHandler.ReconnectLater ex
                             else
-                                // unable to create new consumer, fail operation
-                                connectionHandler.Failed()
+                                if not subscribeTsc.Task.IsCompleted then
+                                    // unable to create new consumer, fail operation
+                                    connectionHandler.Failed()
+                                    subscribeTsc.SetException(ex)
+                                    stopConsumer()
+                                else
+                                    connectionHandler.ReconnectLater ex
                     | _ ->
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
                     return! loop state
@@ -223,7 +231,9 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                     if (DateTime.Now > subscribeTimeout && subscribeTsc.TrySetException(ex)) then
                         Log.Logger.LogInformation("{0} creation failed", prefix)
                         connectionHandler.Failed()
-                    return! loop state
+                        stopConsumer()
+                    else
+                        return! loop state
 
                 | ConsumerMessage.MessageReceived message ->
 
@@ -358,7 +368,6 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         connectionHandler.Closing()
-                        // TODO failPendingReceive
                         Log.Logger.LogInformation("{0} starting close", prefix)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newCloseConsumer consumerId requestId
@@ -367,9 +376,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                                 let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
-                                unAckedMessageTracker.Close();
                                 connectionHandler.Closed()
-                                Log.Logger.LogInformation("{0} closed", prefix)
+                                stopConsumer()
                             with
                             | ex ->
                                 Log.Logger.LogError(ex, "{0} failed to close", prefix)
@@ -377,10 +385,9 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                         } |> channel.Reply
                     | _ ->
                         Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
-                        unAckedMessageTracker.Close();
                         connectionHandler.Closed()
+                        stopConsumer()
                         channel.Reply(Task.FromResult())
-                    return! loop state
 
                 | ConsumerMessage.Unsubscribe channel ->
 
@@ -397,17 +404,17 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
                                 connectionHandler.Closed()
-                                Log.Logger.LogInformation("{0} unsubscribed", prefix)
+                                stopConsumer()
                             with
                             | ex ->
-                                connectionHandler.SetReady clientCnx
                                 Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
                                 reraize ex
                         } |> channel.Reply
                     | _ ->
-                        Log.Logger.LogError("{0} can't unsubscribe since connection already closed", prefix)
+                        Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
                         channel.Reply(Task.FromException(Exception("Not connected to broker")))
-                    return! loop state
+                        return! loop state
+
             }
         loop { WaitingChannel = nullChannel }
     )
@@ -416,11 +423,13 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
 
     member this.ReceiveAsync() =
         task {
+            connectionHandler.CheckIfActive(prefix)
             return! mb.PostAndAsyncReply(Receive)
         }
 
     member this.AcknowledgeAsync (msgId: MessageId) =
         task {
+            connectionHandler.CheckIfActive(prefix)
             let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Individual, channel))
             if success then
                 unAckedMessageTracker.Remove(msgId) |> ignore
@@ -430,6 +439,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
 
     member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
         task {
+            connectionHandler.CheckIfActive(prefix)
             let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Cumulative, channel))
             if success then
                 unAckedMessageTracker.Remove(msgId) |> ignore
@@ -439,20 +449,32 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
 
     member this.RedeliverUnacknowledgedMessagesAsync () =
         task {
+            connectionHandler.CheckIfActive(prefix)
             do! mb.PostAndAsyncReply(RedeliverAllUnacknowledged)
         }
 
     member this.CloseAsync() =
         task {
+            connectionHandler.CheckIfActive(prefix)
             let! result = mb.PostAndAsyncReply(ConsumerMessage.Close)
             return! result
         }
 
     member this.UnsubscribeAsync() =
         task {
+            connectionHandler.CheckIfActive(prefix)
             let! result = mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
             return! result
         }
+
+    member private this.Mb with get(): MailboxProcessor<ConsumerMessage> = mb
+
+    member this.ConsumerId with get() = consumerId
+
+    override this.Equals consumer =
+        consumerId = (consumer :?> Consumer).ConsumerId
+
+    override this.GetHashCode () = int consumerId
 
     member private this.InitInternal() =
         task {
@@ -460,11 +482,10 @@ type Consumer private (consumerConfig: ConsumerConfiguration, subscriptionMode: 
             return! subscribeTsc.Task
         }
 
-    member private this.Mb with get(): MailboxProcessor<ConsumerMessage> = mb
-
-    static member Init(consumerConfig: ConsumerConfiguration, subscriptionMode: SubscriptionMode, lookup: BinaryLookupService) =
+    static member Init(consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, subscriptionMode: SubscriptionMode,
+                        lookup: BinaryLookupService, cleanup: Consumer -> unit) =
         task {
-            let consumer = Consumer(consumerConfig, subscriptionMode, lookup)
+            let consumer = Consumer(consumerConfig, clientConfig, subscriptionMode, lookup, cleanup)
             return! consumer.InitInternal()
         }
 

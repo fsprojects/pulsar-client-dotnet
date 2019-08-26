@@ -13,7 +13,8 @@ open System.Timers
 open System.IO
 open ProtoBuf
 
-type Producer private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, lookup: BinaryLookupService) as this =
+type Producer private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, lookup: BinaryLookupService,
+                        cleanup: Producer -> unit) as this =
     let producerId = Generators.getNextProducerId()
 
     let prefix = sprintf "producer(%u, %s)" %producerId producerConfig.ProducerName
@@ -117,6 +118,12 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
 
         metadata
 
+    let stopProducer() =
+        timer.Stop()
+        batchTimer.Stop()
+        cleanup(this)
+        Log.Logger.LogInformation("{0} stopped", prefix)
+
     let mb = MailboxProcessor<ProducerMessage>.Start(fun inbox ->
 
         let rec loop () =
@@ -156,6 +163,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                                 connectionHandler.Terminate()
                                 failPendingMessages(ex)
                                 producerCreatedTsc.TrySetException(ex) |> ignore
+                                stopProducer()
                             | _ when producerCreatedTsc.Task.IsCompleted || (connectionHandler.IsRetriableError ex && DateTime.Now < createProducerTimeout) ->
                                 // Either we had already created the producer once (producerCreatedFuture.isDone()) or we are
                                 // still within the initial timeout budget and we are dealing with a retriable error
@@ -163,8 +171,10 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                             | _ ->
                                 connectionHandler.Failed()
                                 producerCreatedTsc.SetException(ex)
+                                stopProducer()
                     | _ ->
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
+                    return! loop ()
 
                 | ProducerMessage.ConnectionClosed clientCnx ->
 
@@ -172,6 +182,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                     let clientCnx = clientCnx :?> ClientCnx
                     connectionHandler.ConnectionClosed clientCnx
                     clientCnx.RemoveProducer(producerId)
+                    return! loop ()
 
                 | ProducerMessage.ConnectionFailed  ex ->
 
@@ -179,6 +190,9 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                     if (DateTime.Now > createProducerTimeout && producerCreatedTsc.TrySetException(ex)) then
                         Log.Logger.LogInformation("{0} creation failed", prefix)
                         connectionHandler.Failed()
+                        stopProducer()
+                    else
+                        return! loop ()
 
                 | ProducerMessage.StoreBatchItem (message, channel) ->
 
@@ -194,6 +208,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                         postSendBatchMessage()
 
                     channel.Reply(tcs)
+                    return! loop ()
 
                 | ProducerMessage.SendBatchMessage batchItems ->
 
@@ -236,6 +251,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                     pendingBatches.Add(sequenceId, tcss)
 
                     Log.Logger.LogDebug("{0} Pending batch created", prefix)
+                    return! loop ()
 
                 | ProducerMessage.BeginSendMessage (message, channel) ->
 
@@ -247,6 +263,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                     let tcs = TaskCompletionSource()
                     this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Tcs = tcs; CreatedAt = DateTime.Now })
                     channel.Reply(tcs)
+                    return! loop ()
 
                 | ProducerMessage.SendMessage pendingMessage ->
 
@@ -264,6 +281,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                             Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                     else
                         pendingMessage.Tcs.SetException(ProducerQueueIsFullError "Producer send queue is full.")
+                    return! loop ()
 
                 | ProducerMessage.SendReceipt receipt ->
 
@@ -302,6 +320,8 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
 
                             Log.Logger.LogDebug("{0} batch messages completed for seqienceId: {1}", prefix, sequenceId)
 
+                    return! loop ()
+
                 | ProducerMessage.RecoverChecksumError sequenceId ->
 
                     //* Checks message checksum to retry if message was corrupted while sending to broker. Recomputes checksum of the
@@ -329,6 +349,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                             Log.Logger.LogDebug("{0} Corrupt message is already timed out {1}", prefix, sequenceId)
                     else
                         Log.Logger.LogDebug("{0} Got send failure for timed out seqId {1}", prefix, sequenceId)
+                    return! loop ()
 
                 | ProducerMessage.Terminated ->
 
@@ -337,6 +358,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                     | _ ->
                         connectionHandler.Terminate()
                         failPendingMessages(TopicTerminatedException("The topic has been terminated"))
+                    return! loop ()
 
                 | ProducerMessage.TimeoutCheck ->
 
@@ -351,13 +373,13 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                                 Log.Logger.LogInformation("{0} Message send timed out. Failing {1} messages", prefix, pendingMessages.Count)
                                 let ex = TimeoutException "Could not send message to broker within given timeout"
                                 failPendingMessages ex
+                    return! loop ()
 
                 | ProducerMessage.Close channel ->
 
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         connectionHandler.Closing()
-                        // TODO failPendingReceive
                         Log.Logger.LogInformation("{0} starting close", prefix)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newCloseProducer producerId requestId
@@ -367,9 +389,8 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveProducer(producerId)
                                 connectionHandler.Closed()
-                                timer.Stop()
-                                batchTimer.Stop()
-                                Log.Logger.LogInformation("{0} closed", prefix)
+                                stopProducer()
+                                failPendingMessages(AlreadyClosedException("Producer was already closed"))
                             with
                             | ex ->
                                 Log.Logger.LogError(ex, "{0} failed to close", prefix)
@@ -378,11 +399,10 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                     | _ ->
                         Log.Logger.LogInformation("{0} can't close since connection already closed", prefix)
                         connectionHandler.Closed()
-                        timer.Stop()
-                        batchTimer.Stop()
+                        stopProducer()
+                        failPendingMessages(AlreadyClosedException("Producer was already closed"))
                         channel.Reply(Task.FromResult())
 
-                return! loop ()
             }
         loop ()
     )
@@ -391,28 +411,41 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
     do startSendTimeoutTimer()
     do startSendBatchTimer()
 
-    let sendMessage message =
+    member private this.SendMessage message =
         if producerConfig.BatchingEnabled then
             mb.PostAndAsyncReply(fun channel -> StoreBatchItem (message, channel))
         else
             mb.PostAndAsyncReply(fun channel -> BeginSendMessage (message, channel))
 
-    member this.SendAndWaitAsync (msg: byte[]) =
+    member this.SendAndWaitAsync (message: byte[]) =
         task {
-            let! tcs = sendMessage msg
+            connectionHandler.CheckIfActive(prefix)
+            let! tcs = this.SendMessage message
             return! tcs.Task
         }
 
-    member this.SendAsync (msg: byte[]) =
+    member this.SendAsync (message: byte[]) =
         task {
-            sendMessage msg |> ignore
+            connectionHandler.CheckIfActive(prefix)
+            let! _ = this.SendMessage message
+            return ()
         }
 
     member this.CloseAsync() =
         task {
+            connectionHandler.CheckIfActive(prefix)
             let! result = mb.PostAndAsyncReply(ProducerMessage.Close)
             return! result
         }
+
+    member private this.Mb with get(): MailboxProcessor<ProducerMessage> = mb
+
+    member this.ProducerId with get() = producerId
+
+    override this.Equals producer =
+        producerId = (producer :?> Producer).ProducerId
+
+    override this.GetHashCode () = int producerId
 
     member private this.InitInternal() =
        task {
@@ -420,10 +453,9 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
            return! producerCreatedTsc.Task
        }
 
-    member private this.Mb with get(): MailboxProcessor<ProducerMessage> = mb
-
-    static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, lookup: BinaryLookupService) =
+    static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, lookup: BinaryLookupService,
+                        cleanup: Producer -> unit) =
         task {
-            let producer = new Producer(producerConfig, clientConfig, lookup)
+            let producer = new Producer(producerConfig, clientConfig, lookup, cleanup)
             return! producer.InitInternal()
         }

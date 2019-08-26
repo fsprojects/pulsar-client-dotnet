@@ -75,6 +75,7 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
                 let delay = Math.Min(backoff.Next(), remainingTimeMs)
                 if delay <= 0 then
                     raise (TimeoutException "Could not getTopicsUnderNamespace within configured timeout.")
+                Log.Logger.LogWarning(ex, "GetTopicsUnderNamespace failed will retry in {0} ms", delay)
                 do! Async.Sleep delay
                 return! this.GetTopicsUnderNamespace(endpoint, ns, backoff, remainingTimeMs - delay, mode)
         }

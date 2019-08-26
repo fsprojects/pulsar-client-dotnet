@@ -30,7 +30,7 @@ module PulsarClientBuilderTests =
 
             test "Build throws an exception if ServiceUrl is blank" {
                 fun() -> builder().Build() |> ignore
-                |> Expect.throwsWithMessage<PulsarClientException>
+                |> Expect.throwsWithMessage<ArgumentException>
                     "Service Url needs to be specified on the PulsarClientBuilder object."
             }
 
