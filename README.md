@@ -10,7 +10,7 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 
 - [X] Basic Producer/Consumer API
 - [ ] Partitioned topics
-- [ ] Batching
+- [X] Batching
 - [ ] Compression
 - [ ] TLS
 - [ ] Authentication
