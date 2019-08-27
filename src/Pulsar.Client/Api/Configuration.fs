@@ -50,6 +50,7 @@ type ProducerConfiguration =
         MaxMessagesPerBatch: int
         MaxBatchingPublishDelay: TimeSpan
         SendTimeout: TimeSpan
+        CompressionType: CompressionType
     }
     static member Default =
         {
@@ -60,4 +61,5 @@ type ProducerConfiguration =
             MaxMessagesPerBatch = 1000
             MaxBatchingPublishDelay = TimeSpan.FromMilliseconds(1.0)
             SendTimeout = TimeSpan.FromMilliseconds(30000.0)
+            CompressionType = CompressionType.None
         }

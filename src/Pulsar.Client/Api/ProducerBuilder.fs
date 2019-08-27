@@ -64,6 +64,12 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
             { config with
                 SendTimeout = sendTimeout })
 
+    member __.CompressionType compressionType =
+        ProducerBuilder(
+            client,
+            { config with
+                CompressionType = compressionType })
+
     member this.CreateAsync() =
         config
         |> verify

@@ -24,6 +24,8 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
     let batchItems = ResizeArray<BatchItem>()
     let pendingBatches = Dictionary<SequenceId, TaskCompletionSource<MessageId>[]>()
 
+    let compressionCodec = CompressionCodec.create producerConfig.CompressionType
+
     let createProducerTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let sendTimeoutMs = producerConfig.SendTimeout.TotalMilliseconds
     let connectionHandler =
@@ -93,12 +95,21 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
 
     let createMessageMetadata (message : byte[]) numMessagesInBatch =
 
+        let mapCompressionType = function
+            | CompressionType.None -> pulsar.proto.CompressionType.None
+            | CompressionType.ZLib -> pulsar.proto.CompressionType.Zlib
+            | CompressionType.LZ4 -> pulsar.proto.CompressionType.Lz4
+            | CompressionType.ZStd -> pulsar.proto.CompressionType.Zstd
+            | CompressionType.Snappy -> pulsar.proto.CompressionType.Snappy
+            | _ -> pulsar.proto.CompressionType.None
+
         let metadata =
             MessageMetadata (
                 SequenceId = %Generators.getNextSequenceId(),
                 PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
                 ProducerName = producerConfig.ProducerName,
-                UncompressedSize = (message.Length |> uint32))
+                UncompressedSize = (message.Length |> uint32),
+                Compression = (mapCompressionType producerConfig.CompressionType))
 
         let numMessages = match numMessagesInBatch with | Some(x) -> x | None -> 1
 
@@ -214,9 +225,10 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                             messageWriter.Write(message.Data)
 
                         let batchData = messageStream.ToArray()
+                        let encodedBatchData = compressionCodec.Encode batchData
                         let metadata = createMessageMetadata batchData (Some batchSize)
                         let sequenceId = %metadata.SequenceId
-                        let payload = Commands.newSend producerId sequenceId batchSize metadata batchData
+                        let payload = Commands.newSend producerId sequenceId batchSize metadata encodedBatchData
                         let agentMessage = SendMessage {
                                 SequenceId = sequenceId
                                 Payload = payload
@@ -238,8 +250,9 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
 
                     Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
                     let metadata = createMessageMetadata message None
+                    let encodedMessages = compressionCodec.Encode message
                     let sequenceId = %metadata.SequenceId
-                    let payload = Commands.newSend producerId sequenceId 1 metadata message
+                    let payload = Commands.newSend producerId sequenceId 1 metadata encodedMessages
                     let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
                     this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Tcs = tcs; CreatedAt = DateTime.Now })
                     channel.Reply(tcs)
