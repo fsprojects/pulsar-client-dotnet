@@ -13,8 +13,8 @@ open System.Timers
 open System.IO
 open ProtoBuf
 
-type Producer private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, lookup: BinaryLookupService,
-                        cleanup: Producer -> unit) as this =
+type Producer private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                        lookup: BinaryLookupService, cleanup: Producer -> unit) as this =
     let producerId = Generators.getNextProducerId()
 
     let prefix = sprintf "producer(%u, %s)" %producerId producerConfig.ProducerName
@@ -28,6 +28,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
     let sendTimeoutMs = producerConfig.SendTimeout.TotalMilliseconds
     let connectionHandler =
         ConnectionHandler(prefix,
+                          connectionPool,
                           lookup,
                           producerConfig.Topic.CompleteTopicName,
                           (fun () -> this.Mb.Post(ProducerMessage.ConnectionOpened)),
@@ -453,9 +454,9 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
            return! producerCreatedTsc.Task
        }
 
-    static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, lookup: BinaryLookupService,
-                        cleanup: Producer -> unit) =
+    static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                        lookup: BinaryLookupService, cleanup: Producer -> unit) =
         task {
-            let producer = new Producer(producerConfig, clientConfig, lookup, cleanup)
+            let producer = new Producer(producerConfig, clientConfig, connectionPool, lookup, cleanup)
             return! producer.InitInternal()
         }

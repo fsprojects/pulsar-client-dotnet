@@ -19,7 +19,7 @@ namespace CsharpExamples
             PulsarClient.Logger = new ConsoleLogger("PulsarLogger", (x, y) => true, true);
 
             var client = new PulsarClientBuilder()
-                .WithServiceUrl(serviceUrl)
+                .ServiceUrl(serviceUrl)
                 .Build();
 
             var producer = await new ProducerBuilder(client)

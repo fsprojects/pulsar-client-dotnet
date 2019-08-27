@@ -4,7 +4,6 @@ open System
 open System.Net
 open Pulsar.Client.Api
 
-//TODO: implement and move into separate file
 type internal ServiceUri = Uri
 
 type internal ServiceNameResolver(config: PulsarClientConfiguration) =

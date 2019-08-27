@@ -21,7 +21,7 @@ let main argv =
 
     let client =
         PulsarClientBuilder()
-            .WithServiceUrl(serviceUrl)
+            .ServiceUrl(serviceUrl)
             .Build()
 
     let t = task {

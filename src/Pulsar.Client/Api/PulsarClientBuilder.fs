@@ -22,10 +22,15 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 
     new() = PulsarClientBuilder(PulsarClientConfiguration.Default)
 
-    member this.WithServiceUrl url =
+    member this.ServiceUrl url =
         PulsarClientBuilder
             { config with
                 ServiceUrl = url |> invalidArgIfBlankString "ServiceUrl must not be blank." }
+
+    member this.MaxNumberOfRejectedRequestPerConnection num =
+        PulsarClientBuilder
+            { config with
+                MaxNumberOfRejectedRequestPerConnection = num |> invalidArgIfLessThanZero "MaxNumberOfRejectedRequestPerConnection can't be negative" }
 
     member this.Build() =
         config

@@ -22,10 +22,15 @@ module PulsarClientBuilderTests =
             test "WithServiceUrl throws an exception for blank url" {
                 let checkUrl url =
                     builder()
-                    |> configure(fun b -> b.WithServiceUrl url)
+                    |> configure(fun b -> b.ServiceUrl url)
                     |> Expect.throwsWithMessage<ArgumentException> "ServiceUrl must not be blank."
-
                 [null; ""; " "] |> List.iter checkUrl
+            }
+
+            test "MaxNumberOfRejectedRequestPerConnection throws an exception for negative value" {
+                builder()
+                |> configure(fun b -> b.MaxNumberOfRejectedRequestPerConnection -1)
+                |> Expect.throwsWithMessage<ArgumentException> "MaxNumberOfRejectedRequestPerConnection can't be negative"
             }
 
             test "Build throws an exception if ServiceUrl is blank" {

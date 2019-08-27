@@ -9,8 +9,8 @@ open System
 let tests =
 
     let withService test =
-        let config = { ServiceUrl = "pulsar://localhost:6650"; OperationTimeout = TimeSpan.Zero }
-        test (BinaryLookupService config)
+        let config = { PulsarClientConfiguration.Default with ServiceUrl = "pulsar://localhost:6650" }
+        test (BinaryLookupService(config, ConnectionPool(config)))
 
     testList "BinaryLookupService" [
 

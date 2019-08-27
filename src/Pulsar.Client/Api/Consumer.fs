@@ -23,8 +23,8 @@ type ConsumerState = {
     WaitingChannel: AsyncReplyChannel<Message>
 }
 
-type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, subscriptionMode: SubscriptionMode,
-                        lookup: BinaryLookupService, cleanup: Consumer -> unit) as this =
+type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                        subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: Consumer -> unit) as this =
 
     [<Literal>]
     let MAX_REDELIVER_UNACKNOWLEDGED = 1000
@@ -35,10 +35,12 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
     let partitionIndex = -1
     let prefix = sprintf "consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
+    let mutable hasReachedEndOfTopic = false
     let mutable avalablePermits = 0
     let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
     let connectionHandler =
         ConnectionHandler(prefix,
+                          connectionPool,
                           lookup,
                           consumerConfig.Topic.CompleteTopicName,
                           (fun () -> this.Mb.Post(ConsumerMessage.ConnectionOpened)),
@@ -360,8 +362,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
                 | ConsumerMessage.ReachedEndOfTheTopic ->
 
                     Log.Logger.LogWarning("{0} ReachedEndOfTheTopic", prefix)
-                    //TODO notify client app that topic end reached
-                    connectionHandler.Terminate()
+                    hasReachedEndOfTopic <- true
 
                 | ConsumerMessage.Close channel ->
 
@@ -467,6 +468,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
             return! result
         }
 
+    member this.HasReachedEndOfTopic with get() = hasReachedEndOfTopic
+
     member private this.Mb with get(): MailboxProcessor<ConsumerMessage> = mb
 
     member this.ConsumerId with get() = consumerId
@@ -482,10 +485,10 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
             return! subscribeTsc.Task
         }
 
-    static member Init(consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, subscriptionMode: SubscriptionMode,
-                        lookup: BinaryLookupService, cleanup: Consumer -> unit) =
+    static member Init(consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                        subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: Consumer -> unit) =
         task {
-            let consumer = Consumer(consumerConfig, clientConfig, subscriptionMode, lookup, cleanup)
+            let consumer = Consumer(consumerConfig, clientConfig, connectionPool, subscriptionMode, lookup, cleanup)
             return! consumer.InitInternal()
         }
 

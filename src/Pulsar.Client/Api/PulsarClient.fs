@@ -23,7 +23,8 @@ type PulsarClientMessage =
 
 type PulsarClient(config: PulsarClientConfiguration) as this =
 
-    let lookupSerivce = BinaryLookupService(config)
+    let connectionPool = ConnectionPool(config)
+    let lookupSerivce = BinaryLookupService(config, connectionPool)
     let producers = HashSet<Producer>()
     let consumers = HashSet<Consumer>()
     let mutable clientState = Active
@@ -82,6 +83,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                         return! loop ()
                 | Stop ->
                     this.ClientState <- Closed
+                    connectionPool.Close()
                     Log.Logger.LogInformation("Pulsar client stopped")
             }
         loop ()
@@ -120,11 +122,11 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             let removeConsumer = fun consumer -> mb.Post(RemoveConsumer consumer)
             if (metadata.Partitions > 1u)
             then
-                let! consumer = Consumer.Init(consumerConfig, config, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
+                let! consumer = Consumer.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
                 consumers.Add(consumer) |> ignore
                 return consumer
             else
-                let! consumer = Consumer.Init(consumerConfig, config, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
+                let! consumer = Consumer.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
                 consumers.Add(consumer) |> ignore
                 return consumer
         }
@@ -136,11 +138,11 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
             let removeProducer = fun producer -> mb.Post(RemoveProducer producer)
             if (metadata.Partitions > 1u) then
-                let! producer = Producer.Init(producerConfig, config, lookupSerivce, removeProducer)
+                let! producer = Producer.Init(producerConfig, config, connectionPool, lookupSerivce, removeProducer)
                 producers.Add(producer) |> ignore
                 return producer
             else
-                let! producer = Producer.Init(producerConfig, config, lookupSerivce, removeProducer)
+                let! producer = Producer.Init(producerConfig, config, connectionPool, lookupSerivce, removeProducer)
                 producers.Add(producer) |> ignore
                 return producer
         }

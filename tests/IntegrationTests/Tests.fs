@@ -23,7 +23,7 @@ let pulsarAddress = "pulsar://my-pulsar-cluster:31002"
 let configureLogging() =
     Log.Logger <-
         LoggerConfiguration()
-            .MinimumLevel.Warning()
+            .MinimumLevel.Information()
             .WriteTo.Console(theme = AnsiConsoleTheme.Code, outputTemplate="[{Timestamp:HH:mm:ss} {Level:u3} {ThreadId}] {Message:lj}{NewLine}{Exception}")
             .Enrich.FromLogContext()
             .Enrich.WithThreadId()
@@ -41,9 +41,15 @@ let tests =
 
     configureLogging()
 
-    let getClient() =
+    let commonClient =
         PulsarClientBuilder()
-            .WithServiceUrl(pulsarAddress)
+            .ServiceUrl(pulsarAddress)
+            .Build()
+
+    let getClient() = commonClient
+    let getNewClient() =
+        PulsarClientBuilder()
+            .ServiceUrl(pulsarAddress)
             .Build()
 
     let produceMessages (producer: Producer) number producerName =
@@ -480,7 +486,7 @@ let tests =
 
             Log.Debug("Started 'Client, producer and consumer can't be accessed after close'")
 
-            let client = getClient()
+            let client = getNewClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let messagesNumber = 100
 

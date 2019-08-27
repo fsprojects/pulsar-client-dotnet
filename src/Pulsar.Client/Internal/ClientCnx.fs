@@ -12,6 +12,7 @@ open System.Buffers
 open System.IO
 open ProtoBuf
 open System.Threading
+open Pulsar.Client.Api
 
 type RequestsOperation =
     | AddRequest of RequestId * TaskCompletionSource<PulsarResponseType>
@@ -53,7 +54,8 @@ type SocketMessage =
     | SocketRequestMessageWithReply of RequestId * Payload * AsyncReplyChannel<Task<PulsarResponseType>>
     | Stop
 
-type ClientCnx (broker: Broker,
+type ClientCnx (config: PulsarClientConfiguration,
+                broker: Broker,
                 connection: Connection,
                 initialConnectionTsc: TaskCompletionSource<ClientCnx>,
                 unregisterClientCnx: Broker -> unit) as this =
@@ -63,8 +65,7 @@ type ClientCnx (broker: Broker,
     let requests = Dictionary<RequestId, TaskCompletionSource<PulsarResponseType>>()
     let clientCnxId = Generators.getNextClientCnxId()
     let prefix = sprintf "clientCnx(%i, %A)" %clientCnxId broker.LogicalAddress
-    //TODO move to configuration
-    let maxNumberOfRejectedRequestPerConnection = 100
+    let maxNumberOfRejectedRequestPerConnection = config.MaxNumberOfRejectedRequestPerConnection
     let rejectedRequestResetTimeSec = 60
     let mutable numberOfRejectedRequests = 0
     let mutable isActive = true
@@ -421,3 +422,9 @@ type ClientCnx (broker: Broker,
         let (conn, writeStream) = connection
         conn.Dispose()
         writeStream.Dispose()
+
+    member this.Dispose() =
+        sendMb.Post(SocketMessage.Stop)
+        operationsMb.Post(CnxOperation.Stop)
+        requestsMb.Post(FailAllRequestsAndStop)
+        this.Close()

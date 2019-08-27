@@ -4,20 +4,19 @@ open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Common
 open System
-open ConnectionPool
 open System.Net
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 
 
-type BinaryLookupService (config: PulsarClientConfiguration) =
+type BinaryLookupService (config: PulsarClientConfiguration, connectionPool: ConnectionPool) =
 
     let serviceNameResolver = ServiceNameResolver(config)
 
     member this.GetPartitionedTopicMetadata topicName =
         task {
             let endpoint = serviceNameResolver.ResolveHost()
-            let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint
+            let! clientCnx = connectionPool.GetBrokerlessConnection endpoint
             let requestId = Generators.getNextRequestId()
             let payload = Commands.newPartitionMetadataRequest topicName requestId
             let! response = clientCnx.SendAndWaitForReply requestId payload
@@ -33,13 +32,13 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
 
     member private this.FindBroker(endpoint: DnsEndPoint, autoritative: bool, topicName: CompleteTopicName) =
         task {
-            let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint
+            let! clientCnx = connectionPool.GetBrokerlessConnection endpoint
             let requestId = Generators.getNextRequestId()
             let payload = Commands.newLookup topicName requestId autoritative
             let! response = clientCnx.SendAndWaitForReply requestId payload
             let lookupTopicResult = PulsarResponseType.GetLookupTopicResult response
             // (1) build response broker-address
-            //TODO
+            //TODO add tls support
             let uri = Uri(lookupTopicResult.BrokerServiceUrl)
 
             let resultEndpoint = DnsEndPoint(uri.Host, uri.Port)
@@ -66,7 +65,7 @@ type BinaryLookupService (config: PulsarClientConfiguration) =
     member private this.GetTopicsUnderNamespace (endpoint: DnsEndPoint, ns: NamespaceName, backoff: Backoff, remainingTimeMs: int, mode: TopicDomain) =
         async {
             try
-                let! clientCnx = ConnectionPool.getBrokerlessConnection endpoint |> Async.AwaitTask
+                let! clientCnx = connectionPool.GetBrokerlessConnection endpoint |> Async.AwaitTask
                 let requestId = Generators.getNextRequestId()
                 let payload = Commands.newGetTopicsOfNamespaceRequest ns requestId mode
                 let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask

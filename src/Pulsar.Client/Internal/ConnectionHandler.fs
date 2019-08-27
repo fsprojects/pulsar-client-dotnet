@@ -3,6 +3,7 @@
 open Microsoft.Extensions.Logging
 open System.Threading
 open Pulsar.Client.Common
+open Pulsar.Client.Api
 
 type ConnectionHandlerMessage =
     | GrabCnx
@@ -19,6 +20,7 @@ type ConnectionState =
     | Uninitialized
 
 type ConnectionHandler( parentPrefix: string,
+                        connectionPool: ConnectionPool,
                         lookup: BinaryLookupService,
                         topic: CompleteTopicName,
                         connectionOpened: unit -> unit,
@@ -47,7 +49,7 @@ type ConnectionHandler( parentPrefix: string,
                             try
                                 Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic);
                                 let! broker = lookup.GetBroker(topic) |> Async.AwaitTask
-                                let! clientCnx = ConnectionPool.getConnection broker |> Async.AwaitTask
+                                let! clientCnx = connectionPool.GetConnection broker |> Async.AwaitTask
                                 this.ConnectionState <- Ready clientCnx
                                 connectionOpened()
                             with
