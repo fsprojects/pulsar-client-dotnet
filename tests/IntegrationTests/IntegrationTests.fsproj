@@ -7,8 +7,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Expect.fs" />
+    <Compile Include="Common.fs" />
+    <Compile Include="Batching.fs" />
+    <Compile Include="Acks.fs" />
+    <Compile Include="Basic.fs" />
     <None Include="paket.references" />
-    <Compile Include="Tests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
   <ItemGroup>

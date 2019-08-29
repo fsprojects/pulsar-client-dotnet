@@ -15,7 +15,7 @@ type GroupingTrackerMessage =
     | Flush
     | Stop
 
-type LastAcknowledgeMessage = MessageId
+type LastCumulativeAck = MessageId
 
 type IAcknowledgmentsGroupingTracker =
     abstract member IsDuplicate: MessageId -> bool
@@ -34,7 +34,7 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
 
     let prefix = prefix + " GroupingTracker"
 
-    let flush (lastAcknowledgedMessage: LastAcknowledgeMessage) =
+    let flush (lastCumulativeAck: LastCumulativeAck) =
         async {
             if not cumulativeAckFlushRequired && pendingIndividualAcks.Count = 0 then
                 return ()
@@ -45,7 +45,7 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
                         | Ready cnx ->
                             let mutable success = true
                             if cumulativeAckFlushRequired then
-                                let payload = Commands.newAck consumerId lastAcknowledgedMessage AckType.Cumulative
+                                let payload = Commands.newAck consumerId lastCumulativeAck AckType.Cumulative
                                 let! ackSuccess = cnx.Send payload
                                 if ackSuccess then
                                     cumulativeAckFlushRequired <- false
@@ -90,17 +90,17 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
         }
 
     let mb = MailboxProcessor<GroupingTrackerMessage>.Start(fun inbox ->
-        let rec loop (lastAcknowledgeMessage: LastAcknowledgeMessage)  =
+        let rec loop (lastCumulativeAck: LastCumulativeAck)  =
             async {
                 let! message = inbox.Receive()
                 match message with
                 | GroupingTrackerMessage.IsDuplicate (msgId, channel) ->
-                    if msgId <= lastAcknowledgeMessage then
+                    if msgId <= lastCumulativeAck then
                         Log.Logger.LogDebug("{0} Message {1} already included in a cumulative ack", prefix, msgId)
                         channel.Reply(true)
                     else
                         channel.Reply(pendingIndividualAcks.Contains msgId)
-                    return! loop lastAcknowledgeMessage
+                    return! loop lastCumulativeAck
                 | GroupingTrackerMessage.AddAcknowledgment (msgId, ackType, channel) ->
                     if ackGroupTime = TimeSpan.Zero then
                         // We cannot group acks if the delay is 0 or when there are properties attached to it. Fortunately that's an
@@ -108,29 +108,30 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
                         do! doImmediateAck msgId ackType
                         Log.Logger.LogDebug("{0} messageId {1} has been immediately acked", prefix, msgId)
                         channel.Reply()
-                        return! loop lastAcknowledgeMessage
+                        return! loop lastCumulativeAck
                     elif ackType = AckType.Cumulative then
                         // cumulative ack
+                        cumulativeAckFlushRequired <- true
                         channel.Reply()
                         return! loop msgId
                     else
                         // Individual ack
                         if pendingIndividualAcks.Add(msgId) then
                             if pendingIndividualAcks.Count >= MAX_ACK_GROUP_SIZE then
-                                do! flush lastAcknowledgeMessage
+                                do! flush lastCumulativeAck
                                 Log.Logger.LogWarning("{0} messageId {1} MAX_ACK_GROUP_SIZE reached and flushed", prefix, msgId)
                         else
                             Log.Logger.LogWarning("{0} messageId {1} has already been added", prefix, msgId)
                         channel.Reply()
-                        return! loop lastAcknowledgeMessage
+                        return! loop lastCumulativeAck
 
                 | GroupingTrackerMessage.FlushAndClean ->
-                    do! flush lastAcknowledgeMessage
+                    do! flush lastCumulativeAck
                     pendingIndividualAcks.Clear()
                     return! loop MessageId.Earliest
                 | Flush ->
-                    do! flush lastAcknowledgeMessage
-                    return! loop lastAcknowledgeMessage
+                    do! flush lastCumulativeAck
+                    return! loop lastCumulativeAck
                 | Stop ->
                     pendingIndividualAcks.Clear()
             }

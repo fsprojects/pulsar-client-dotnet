@@ -199,7 +199,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
                                 let flowCommand = Commands.newFlow consumerId initialFlowCount
                                 let! success = clientCnx.Send flowCommand
                                 if success then
-                                    Log.Logger.LogInformation("{0} initial flow sent {1}", prefix, initialFlowCount)
+                                    Log.Logger.LogDebug("{0} initial flow sent {1}", prefix, initialFlowCount)
                                 else
                                     raise (ConnectionFailedOnSend "FlowCommand")
                         with
