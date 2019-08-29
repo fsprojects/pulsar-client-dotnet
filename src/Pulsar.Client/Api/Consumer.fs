@@ -78,10 +78,12 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
         async {
             match ackType with
             | AckType.Individual ->
-                //TODO
-                ()
+                match messageId.Type with
+                | Individual ->
+                    unAckedMessageTracker.Remove(messageId) |> ignore
+                | Cumulative batch ->
+                    unAckedMessageTracker.Remove(messageId) |> ignore
             | AckType.Cumulative ->
-                //TODO
                 ()
             do! acksGroupingTracker.AddAcknowledgment(messageId, ackType)
             // Consumer acknowledgment operation immediately succeeds. In any case, if we're not able to send ack to broker,
@@ -122,7 +124,6 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
             Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
             let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
             let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
-            //TODO handle non-durable with StartMessageId
             let messageId = { LedgerId = msg.MessageId.LedgerId; EntryId = msg.MessageId.EntryId; Partition = partitionIndex; Type = Cumulative(%i,acker) }
             let message = { msg with MessageId = messageId; Payload = singleMessagePayload }
             incomingMessages.Enqueue(message)

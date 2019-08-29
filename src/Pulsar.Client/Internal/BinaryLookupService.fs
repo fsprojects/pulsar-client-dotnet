@@ -38,7 +38,6 @@ type BinaryLookupService (config: PulsarClientConfiguration, connectionPool: Con
             let! response = clientCnx.SendAndWaitForReply requestId payload
             let lookupTopicResult = PulsarResponseType.GetLookupTopicResult response
             // (1) build response broker-address
-            //TODO add tls support
             let uri = Uri(lookupTopicResult.BrokerServiceUrl)
 
             let resultEndpoint = DnsEndPoint(uri.Host, uri.Port)

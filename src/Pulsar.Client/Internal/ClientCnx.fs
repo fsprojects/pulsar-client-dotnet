@@ -270,7 +270,7 @@ type ClientCnx (config: PulsarClientConfiguration,
 
     let checkServerError serverError errMsg =
         if (serverError = ServerError.ServiceNotReady) then
-            Log.Logger.LogError("{0} Close connection because received internal-server error {1}", broker, errMsg);
+            Log.Logger.LogError("{0} Close connection because received internal-server error {1}", prefix, errMsg);
             this.Close()
         elif (serverError = ServerError.TooManyRequests) then
             let rejectedRequests = Interlocked.Increment(&numberOfRejectedRequests)
@@ -278,14 +278,14 @@ type ClientCnx (config: PulsarClientConfiguration,
                 // schedule timer
                 asyncDelay (rejectedRequestResetTimeSec*1000) (fun() -> Interlocked.Exchange(&numberOfRejectedRequests, 0) |> ignore)
             elif (rejectedRequests >= maxNumberOfRejectedRequestPerConnection) then
-                Log.Logger.LogError("{0} Close connection because received {1} rejected request in {2} seconds ", broker,
+                Log.Logger.LogError("{0} Close connection because received {1} rejected request in {2} seconds ", prefix,
                         rejectedRequests, rejectedRequestResetTimeSec);
                 this.Close()
 
     let handleCommand xcmd =
         match xcmd with
-        | XCommandConnected _ ->
-            //TODO check server protocol version
+        | XCommandConnected cmd ->
+            Log.Logger.LogInformation("{0} Connected ProtocolVersion: {1} ServerVersion: {2}", prefix, cmd.ProtocolVersion, cmd.ServerVersion)
             initialConnectionTsc.SetResult(this)
         | XCommandPartitionedTopicMetadataResponse cmd ->
             if (cmd.ShouldSerializeError()) then
@@ -298,7 +298,7 @@ type ClientCnx (config: PulsarClientConfiguration,
             let producerMb = producers.[%cmd.ProducerId]
             producerMb.Post(SendReceipt { MessageId = MessageId.FromMessageIdData(cmd.MessageId); SequenceId = %cmd.SequenceId })
         | XCommandSendError cmd ->
-            Log.Logger.LogWarning("{0} Received send error from server: {1} : {2}", broker, cmd.Error, cmd.Message)
+            Log.Logger.LogWarning("{0} Received send error from server: {1} : {2}", prefix, cmd.Error, cmd.Message)
             let producerMb = producers.[%cmd.ProducerId]
             match cmd.Error with
             | ServerError.ChecksumError ->
