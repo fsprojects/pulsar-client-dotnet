@@ -63,25 +63,23 @@ let tests =
             let client = getClient()
             let topicName = "public/retention/topic-" + Guid.NewGuid().ToString("N")
 
-            let producer =
+            let! producer =
                 ProducerBuilder(client)
                     .ProducerName("sequential")
                     .Topic(topicName)
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
-            (produceMessages producer 100 "sequential").Wait()
+            do! produceMessages producer 100 "sequential" |> Async.AwaitTask
 
-            let consumer =
+            let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .ConsumerName("sequential")
                     .SubscriptionName("test-subscription")
                     .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
-            (consumeMessages consumer 100 "sequential").Wait()
+            do! consumeMessages consumer 100 "sequential" |> Async.AwaitTask
             Log.Debug("Finished send 100 messages and then receiving them works fine when retention is set on namespace")
         }
 
@@ -190,7 +188,6 @@ let tests =
 
             let client = getNewClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let messagesNumber = 100
 
             let! consumer1 =
                 ConsumerBuilder(client)
@@ -218,11 +215,11 @@ let tests =
                     .ProducerName("ClosingProducer2")
                     .CreateAsync() |> Async.AwaitTask
 
-            consumer1.CloseAsync().Wait()
+            do! consumer1.CloseAsync() |> Async.AwaitTask
             Expect.throwsT2<AlreadyClosedException> (fun () -> consumer1.ReceiveAsync().Result |> ignore) |> ignore
-            producer1.CloseAsync().Wait()
+            do! producer1.CloseAsync() |> Async.AwaitTask
             Expect.throwsT2<AlreadyClosedException> (fun () -> producer1.SendAsync([||]).Result |> ignore) |> ignore
-            client.CloseAsync().Wait()
+            do! client.CloseAsync() |> Async.AwaitTask
             Expect.throwsT2<AlreadyClosedException> (fun () -> consumer2.UnsubscribeAsync().Result |> ignore) |> ignore
             Expect.throwsT2<AlreadyClosedException> (fun () -> producer2.SendAsync([||]).Result |> ignore) |> ignore
             Expect.throwsT2<AlreadyClosedException> (fun () -> client.GetPartitionedTopicMetadata(%"abc").Result |> ignore) |> ignore

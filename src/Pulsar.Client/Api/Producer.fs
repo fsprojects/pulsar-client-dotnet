@@ -46,9 +46,8 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
             msg.Tcs.SetException(ex)
 
         pendingBatches
-        |> Seq.toArray
-        |> Array.collect (fun i -> i.Value)
-        |> Array.iter (fun tcs -> tcs.SetException(ex))
+        |> Seq.collect (fun i -> i.Value)
+        |> Seq.iter (fun tcs -> tcs.SetException(ex))
 
         pendingBatches.Clear()
 
@@ -215,43 +214,33 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
 
                     Log.Logger.LogDebug("{0} SendBatchMessage", prefix)
 
-                    let prepareBatchPart (data : byte[]) =
-                        let smm = SingleMessageMetadata(PayloadSize = data.Length)
-                        use messageStream = MemoryStreamManager.GetStream()
-                        use messageWriter = new BinaryWriter(messageStream)
+                    use messageStream = MemoryStreamManager.GetStream()
+                    use messageWriter = new BinaryWriter(messageStream)
+
+                    for message in batchItems do
+                        let smm = SingleMessageMetadata(PayloadSize = message.Data.Length)
                         Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
-                        messageWriter.Write(data)
-                        messageStream.ToArray()
+                        messageWriter.Write(message.Data)
 
-                    let batchData =
-                        batchItems
-                        |> Seq.map (fun m -> m.Data)
-                        |> Seq.map prepareBatchPart
-                        |> Seq.toArray
-                        |> Array.concat
-
+                    let batchData = messageStream.ToArray()
                     let batchSize = batchItems.Length
                     let metadata = createMessageMetadata batchData (Some batchSize)
                     let sequenceId = %metadata.SequenceId
-
                     let payload = Commands.newSend producerId sequenceId batchSize metadata batchData
-
-                    Log.Logger.LogDebug("{0} Send batch command created. Batch size: {1}", prefix, batchSize)
-
                     let agentMessage = SendMessage {
                             SequenceId = sequenceId
                             Payload = payload
                             Tcs = TaskCompletionSource()
                             CreatedAt = DateTime.Now }
-
                     this.Mb.Post(agentMessage)
 
-                    Log.Logger.LogDebug("{0} Batch command was sent", prefix)
-
-                    let tcss = batchItems |> Seq.map(fun i -> i.Tcs) |> Seq.toArray
+                    let tcss =
+                        batchItems
+                        |> Seq.map(fun i -> i.Tcs)
+                        |> Seq.toArray
                     pendingBatches.Add(sequenceId, tcss)
 
-                    Log.Logger.LogDebug("{0} Pending batch created", prefix)
+                    Log.Logger.LogDebug("{0} Pending batch created. Batch size: {1}", prefix, batchSize)
                     return! loop ()
 
                 | ProducerMessage.BeginSendMessage (message, channel) ->
