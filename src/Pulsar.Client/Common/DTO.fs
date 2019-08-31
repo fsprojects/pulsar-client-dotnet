@@ -78,24 +78,29 @@ type MessageId =
     with
         static member FromMessageIdData(messageIdData: MessageIdData) =
             {
-                LedgerId = %messageIdData.ledgerId
-                EntryId = %messageIdData.entryId
+                LedgerId = %(int64 messageIdData.ledgerId)
+                EntryId = %(int64 messageIdData.entryId)
                 Type = MessageIdType.Individual
                 Partition = messageIdData.Partition
             }
         static member Earliest =
             {
-                LedgerId = %0UL
-                EntryId = %0UL
+                LedgerId = %(-1L)
+                EntryId = %(-1L)
                 Type = MessageIdType.Individual
-                Partition = %0
+                Partition = %(-1)
             }
         member this.ToMessageIdData() =
             MessageIdData(
-                ledgerId = %this.LedgerId,
-                entryId = %this.EntryId,
+                ledgerId = uint64 %this.LedgerId,
+                entryId = uint64 %this.EntryId,
                 Partition = this.Partition
             )
+        member this.PrevBatchMessageId
+            with get() =
+                {
+                    this with EntryId = this.EntryId - %1L
+                }
 
 type SendReceipt =
     {

@@ -24,7 +24,8 @@ type IAcknowledgmentsGroupingTracker =
     abstract member Flush: unit -> unit
     abstract member Close: unit -> unit
 
-type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackGroupTime: TimeSpan, handler: ConnectionHandler) =
+type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackGroupTime: TimeSpan, getState: unit -> ConnectionState,
+                                    sendAckPayload: ClientCnx -> Payload -> Async<bool>) =
 
     [<Literal>]
     let MAX_ACK_GROUP_SIZE = 1000
@@ -41,12 +42,12 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
             else
                 let! result =
                     async {
-                        match handler.ConnectionState with
+                        match getState() with
                         | Ready cnx ->
                             let mutable success = true
                             if cumulativeAckFlushRequired then
                                 let payload = Commands.newAck consumerId lastCumulativeAck AckType.Cumulative
-                                let! ackSuccess = cnx.Send payload
+                                let! ackSuccess = sendAckPayload cnx payload
                                 if ackSuccess then
                                     cumulativeAckFlushRequired <- false
                                     Log.Logger.LogDebug("{0} cumulativeAckFlush was required newAck completed", prefix)
@@ -60,7 +61,7 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
                                             yield message
                                     }
                                 let payload = Commands.newMultiMessageAck consumerId messages
-                                let! ackSuccess = cnx.Send payload
+                                let! ackSuccess = sendAckPayload cnx payload
                                 if ackSuccess then
                                     Log.Logger.LogDebug("{0} newMultiMessageAck completed", prefix)
                                 success <- ackSuccess
@@ -77,10 +78,10 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
         async {
             let! result =
                 async {
-                    match handler.ConnectionState with
+                    match getState() with
                     | Ready cnx ->
                         let payload = Commands.newAck consumerId msgId ackType
-                        return! cnx.Send payload
+                        return! sendAckPayload cnx payload
                     | _ ->
                         return false
                 }
@@ -139,10 +140,15 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
     )
 
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
-    let timer = new Timer(ackGroupTime.TotalMilliseconds)
-    do timer.AutoReset <- true
-    do timer.Elapsed.Add(fun _ -> mb.Post Flush)
-    do timer.Start()
+
+    let timer = new Timer()
+    let tryLaunchTimer() =
+        if ackGroupTime <> TimeSpan.Zero then
+            timer.Interval <- ackGroupTime.TotalMilliseconds
+            timer.AutoReset <- true
+            timer.Elapsed.Add(fun _ -> mb.Post Flush)
+            timer.Start()
+    do tryLaunchTimer()
 
     interface IAcknowledgmentsGroupingTracker with
         /// Since the ack are delayed, we need to do some best-effort duplicate check to discard messages that are being

@@ -21,26 +21,24 @@ open FSharp.UMX
 let tests =
 
     testList "basic" [
-        testCase "Send and receive 100 messages concurrently works fine in default configuration" <| fun () ->
+        testAsync "Send and receive 100 messages concurrently works fine in default configuration" {
 
             Log.Debug("Started Send and receive 100 messages concurrently works fine in default configuration")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
-            let producer =
+            let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
                     .ProducerName("concurrent")
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
-            let consumer =
+            let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .ConsumerName("concurrent")
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
@@ -57,8 +55,9 @@ let tests =
             Task.WaitAll(producerTask, consumerTask)
 
             Log.Debug("Finished Send and receive 100 messages concurrently works fine in default configuration")
+        }
 
-        testCase "Send 100 messages and then receiving them works fine when retention is set on namespace" <| fun () ->
+        testAsync "Send 100 messages and then receiving them works fine when retention is set on namespace" {
 
             Log.Debug("Started send 100 messages and then receiving them works fine when retention is set on namespace")
             let client = getClient()
@@ -84,8 +83,9 @@ let tests =
 
             (consumeMessages consumer 100 "sequential").Wait()
             Log.Debug("Finished send 100 messages and then receiving them works fine when retention is set on namespace")
+        }
 
-        testCase "Full roundtrip (emulate Request-Response behaviour)" <| fun () ->
+        testAsync "Full roundtrip (emulate Request-Response behaviour)" {
 
             Log.Debug("Started Full roundtrip (emulate Request-Response behaviour)")
             let client = getClient()
@@ -93,35 +93,31 @@ let tests =
             let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let messagesNumber = 100
 
-            let consumer1 =
+            let! consumer1 =
                 ConsumerBuilder(client)
                     .Topic(topicName2)
                     .ConsumerName("consumer1")
                     .SubscriptionName("my-subscriptionx")
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
-            let consumer2 =
+            let! consumer2 =
                 ConsumerBuilder(client)
                     .Topic(topicName1)
                     .ConsumerName("consumer2")
                     .SubscriptionName("my-subscriptiony")
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
-            let producer1 =
+            let! producer1 =
                 ProducerBuilder(client)
                     .Topic(topicName1)
                     .ProducerName("producer1")
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
-            let producer2 =
+            let! producer2 =
                 ProducerBuilder(client)
                     .Topic(topicName2)
                     .ProducerName("producer2")
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
             let t1 = Task.Run(fun () ->
                 fastProduceMessages producer1 messagesNumber "producer1" |> Task.WaitAll
@@ -151,26 +147,25 @@ let tests =
             [|t1; t2; t3|] |> Task.WaitAll
 
             Log.Debug("Finished Full roundtrip (emulate Request-Response behaviour)")
+        }
 
-        testCase "Send and receive 100 messages concurrently works fine with small receiver queue size" <| fun () ->
+        testAsync "Send and receive 100 messages concurrently works fine with small receiver queue size" {
 
             Log.Debug("Started Send and receive 100 messages concurrently works fine with small receiver queue size")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
-            let producer =
+            let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
-            let consumer =
+            let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .ReceiverQueueSize(10)
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
@@ -187,8 +182,9 @@ let tests =
             Task.WaitAll(producerTask, consumerTask)
 
             Log.Debug("Finished Send and receive 100 messages concurrently works fine with small receiver queue size")
+        }
 
-        testCase "Client, producer and consumer can't be accessed after close" <| fun () ->
+        testAsync "Client, producer and consumer can't be accessed after close" {
 
             Log.Debug("Started 'Client, producer and consumer can't be accessed after close'")
 
@@ -196,35 +192,31 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let messagesNumber = 100
 
-            let consumer1 =
+            let! consumer1 =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .ConsumerName("ClosingConsumer")
                     .SubscriptionName("closing1-subscription")
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
-            let consumer2 =
+            let! consumer2 =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .ConsumerName("ClosingConsumer")
                     .SubscriptionName("closing2-subscription")
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
-            let producer1 =
+            let! producer1 =
                 ProducerBuilder(client)
                     .Topic(topicName)
                     .ProducerName("ClosingProducer1")
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
-            let producer2 =
+            let! producer2 =
                 ProducerBuilder(client)
                     .Topic(topicName)
                     .ProducerName("ClosingProducer2")
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
             consumer1.CloseAsync().Wait()
             Expect.throwsT2<AlreadyClosedException> (fun () -> consumer1.ReceiveAsync().Result |> ignore) |> ignore
@@ -236,4 +228,5 @@ let tests =
             Expect.throwsT2<AlreadyClosedException> (fun () -> client.GetPartitionedTopicMetadata(%"abc").Result |> ignore) |> ignore
 
             Log.Debug("Finished 'Client, producer and consumer can't be accessed after close'")
+        }
     ]

@@ -23,26 +23,24 @@ let tests =
 
     testList "acks" [
 
-        testCase "Messages get redelivered if ackTimeout is set" <| fun () ->
+        testAsync "Messages get redelivered if ackTimeout is set" {
 
             Log.Debug("Started messages get redelivered if ackTimeout is set")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
-            let producer =
+            let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
-            let consumer =
+            let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .ConsumerName("AckTimeoutConsumer")
                     .AckTimeout(TimeSpan.FromSeconds(1.0))
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
@@ -77,27 +75,27 @@ let tests =
 
             Log.Debug("Finished messages get redelivered if ackTimeout is set")
 
-        testCase "Messages get redelivered if ackTimeout is set for shared subscription" <| fun () ->
+        }
+
+        testAsync "Messages get redelivered if ackTimeout is set for shared subscription" {
 
             Log.Debug("Started messages get redelivered if ackTimeout is set for shared subscription")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
-            let producer =
+            let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
-            let consumer =
+            let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .ConsumerName("AckTimeoutConsumerShared")
                     .AckTimeout(TimeSpan.FromSeconds(1.0))
                     .SubscriptionType(SubscriptionType.Shared)
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
@@ -134,28 +132,28 @@ let tests =
 
             Log.Debug("Finished messages get redelivered if ackTimeout is set for shared subscription")
 
-        ftestCase "Cumulative ack works well" <| fun () ->
+        }
+
+        testAsync "Cumulative ack works well" {
 
             Log.Debug("Started Cumulative ack works well")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let consumerName = "CumulativeAcker"
 
-            let producer =
+            let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
-            let consumer =
+            let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .ConsumerName(consumerName)
                     .SubscriptionType(SubscriptionType.Exclusive)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
@@ -193,4 +191,125 @@ let tests =
             ) |> ignore
 
             Log.Debug("Finished Cumulative ack works well")
+
+        }
+
+        testAsync "Individual ack works for batch messages" {
+
+            Log.Debug("Started Individual ack works for batch messages")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let consumerName = "CumulativeAcker"
+            let producerName = "BatchingProducer"
+            let messagesCount = 10
+
+            let! producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .EnableBatching()
+                    .ProducerName(producerName)
+                    .BatchingMaxMessages(10)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .ConsumerName(consumerName)
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! fastProduceMessages producer messagesCount ""
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! consumeMessages consumer messagesCount ""
+                        do! Task.Delay(100)
+                    }:> Task)
+
+            Task.WaitAll(producerTask, consumerTask)
+
+            use cts = new CancellationTokenSource()
+            cts.CancelAfter(200)
+            let t = Task.Run((fun () -> (task {
+                                                do! consumer.RedeliverUnacknowledgedMessagesAsync()
+                                                let! _ = consumer.ReceiveAsync()
+                                                ()
+                                            }).Wait(cts.Token)), cts.Token)
+            Expect.throwsT2<TaskCanceledException> (fun () ->
+                t.Wait()
+            ) |> ignore
+
+            Log.Debug("Finished Individual ack works for batch messages")
+        }
+
+        testAsync "Cumulative ack work for batch messages" {
+
+            Log.Debug("Started Cumulative ack works for batch messages")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let consumerName = "CumulativeAcker"
+            let producerName = "BatchingProducer"
+            let messagesCount = 10
+
+            let! producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .EnableBatching()
+                    .ProducerName(producerName)
+                    .BatchingMaxMessages(10)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .ConsumerName(consumerName)
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(25.0))
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! fastProduceMessages producer messagesCount ""
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        for i in [1..messagesCount] do
+                            let! message = consumer.ReceiveAsync()
+                            let received = Encoding.UTF8.GetString(message.Payload)
+                            Log.Debug("{0} received {1}", consumerName, received)
+                            let expected = "Message #" + string i
+                            if received.StartsWith(expected) |> not then
+                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
+                            if i%2 = 0 then
+                                do! consumer.AcknowledgeCumulativeAsync(message.MessageId)
+                                do! Task.Delay(50)
+                        do! consumer.RedeliverUnacknowledgedMessagesAsync()
+                    }:> Task)
+
+            Task.WaitAll(producerTask, consumerTask)
+
+            use cts = new CancellationTokenSource()
+            cts.CancelAfter(200)
+            let t = Task.Run((fun () -> (task {
+                                                do! consumer.RedeliverUnacknowledgedMessagesAsync()
+                                                let! _ = consumer.ReceiveAsync()
+                                                ()
+                                            }).Wait(cts.Token)), cts.Token)
+            Expect.throwsT2<TaskCanceledException> (fun () ->
+                t.Wait()
+            ) |> ignore
+
+            Log.Debug("Finished Cumulative ack works for batch messages")
+        }
     ]

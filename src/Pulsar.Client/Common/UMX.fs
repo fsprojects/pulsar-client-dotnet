@@ -13,8 +13,8 @@ open FSharp.UMX
 [<Measure>] type private completeTopicName
 [<Measure>] type private batchIndex
 
-type LedgerId = uint64<ledgerId>
-type EntryId = uint64<entryId>
+type LedgerId = int64<ledgerId>
+type EntryId = int64<entryId>
 type RequestId = uint64<requestId>
 type ProducerId = uint64<producerId>
 type ConsumerId = uint64<consumerId>

@@ -24,7 +24,7 @@ let tests =
 
     testList "basic" [
 
-        testCase "Batch get sended if batch size exceeds" <| fun () ->
+        testAsync "Batch get sended if batch size exceeds" {
 
             Log.Debug("Started 'Batch get sended if batch size exceeds'")
 
@@ -32,29 +32,29 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let messagesNumber = 100
 
-            let consumer =
+            let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .ConsumerName("batch consumer")
                     .SubscriptionName("batch-subscription")
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
-            let producer =
+            let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
                     .ProducerName("batch producer")
                     .EnableBatching()
                     .BatchingMaxMessages(messagesNumber)
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
-            fastProduceMessages producer messagesNumber "batch producer" |> Task.WaitAll
-            consumeMessages consumer messagesNumber "batch consumer" |> Task.WaitAll
+            do! fastProduceMessages producer messagesNumber "batch producer" |> Async.AwaitTask
+            do! consumeMessages consumer messagesNumber "batch consumer" |> Async.AwaitTask
 
             Log.Debug("Finished 'Batch get sended if batch size exceeds'")
 
-        testCase "Batch get sended if timeout exceeds" <| fun () ->
+        }
+
+        testAsync "Batch get sended if timeout exceeds" {
 
             Log.Debug("Started 'Batch get sended if timeout exceeds'")
 
@@ -63,33 +63,33 @@ let tests =
             let batchSize = 10
             let messagesNumber = 5
 
-            let consumer =
+            let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .ConsumerName("batch consumer")
                     .SubscriptionName("batch-subscription")
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
-            let producer =
+            let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
                     .ProducerName("batch producer")
                     .EnableBatching()
                     .BatchingMaxMessages(batchSize)
                     .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(100.0))
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
-            fastProduceMessages producer messagesNumber "batch producer" |> Task.WaitAll
+            do! fastProduceMessages producer messagesNumber "batch producer" |> Async.AwaitTask
 
-            Task.Delay(TimeSpan.FromMilliseconds(200.0)).Wait()
+            do! Async.Sleep 200
 
-            consumeMessages consumer messagesNumber "batch consumer" |> Task.WaitAll
+            do! consumeMessages consumer messagesNumber "batch consumer" |> Async.AwaitTask
 
             Log.Debug("Finished 'Batch get sended if timeout exceeds'")
 
-        testCase "Batch get created from several tasks" <| fun () ->
+        }
+
+        testAsync "Batch get created from several tasks" {
 
             Log.Debug("Started 'Batch get created from several tasks'")
 
@@ -97,29 +97,29 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let messagesNumber = 100
 
-            let consumer =
+            let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .ConsumerName("batch consumer")
                     .SubscriptionName("batch-subscription")
-                    .SubscribeAsync()
-                    .Result
+                    .SubscribeAsync() |> Async.AwaitTask
 
-            let producer =
+            let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
                     .ProducerName("batch producer")
                     .EnableBatching()
                     .BatchingMaxMessages(messagesNumber)
-                    .CreateAsync()
-                    .Result
+                    .CreateAsync() |> Async.AwaitTask
 
             let taskData = createSendAndWaitTasks producer messagesNumber "batch producer"
             let tasks = taskData |> Array.map fst
             let sentMessages = taskData |> Array.map snd
 
             tasks |> Task.WaitAll
-            consumeAndVerifyMessages consumer "batch consumer" sentMessages |> Task.WaitAll
+            do! consumeAndVerifyMessages consumer "batch consumer" sentMessages |> Async.AwaitTask
 
             Log.Debug("Finished 'Batch get created from several tasks'")
+
+        }
     ]

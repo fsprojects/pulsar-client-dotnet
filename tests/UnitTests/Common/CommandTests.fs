@@ -170,7 +170,7 @@ module CommandsTests =
             }
 
             test "newAck should return correct frame" {
-                let messageId = { LedgerId = %1UL; EntryId = %2UL; Partition = -1; Type = Individual }
+                let messageId = { LedgerId = %1L; EntryId = %2L; Partition = -1; Type = Individual }
                 let consumerId = %1UL
 
                 let totalSize, commandSize, command =
@@ -179,8 +179,8 @@ module CommandsTests =
                 totalSize |> Expect.equal "" 29
                 commandSize |> Expect.equal "" 25
                 command.Ack.ConsumerId |> Expect.equal "" %consumerId
-                command.Ack.MessageIds.[0].entryId |> Expect.equal "" %messageId.EntryId
-                command.Ack.MessageIds.[0].ledgerId |> Expect.equal "" %messageId.LedgerId
+                command.Ack.MessageIds.[0].entryId |> Expect.equal "" (uint64 %messageId.EntryId)
+                command.Ack.MessageIds.[0].ledgerId |> Expect.equal "" (uint64 %messageId.LedgerId)
                 command.Ack.MessageIds.[0].Partition |> Expect.equal "" %messageId.Partition
             }
 

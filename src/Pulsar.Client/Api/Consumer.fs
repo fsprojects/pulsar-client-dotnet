@@ -68,9 +68,12 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
         else
             UnAckedMessageTracker.UNACKED_MESSAGE_TRACKER_DISABLED
 
+    let getConnectionState() = connectionHandler.ConnectionState
+    let sendAckPayload (cnx: ClientCnx) payload = cnx.Send payload
+
     let acksGroupingTracker =
         if consumerConfig.Topic.IsPersistent then
-            AcknowledgmentsGroupingTracker(prefix, consumerId, consumerConfig.AcknowledgementsGroupTime, connectionHandler) :> IAcknowledgmentsGroupingTracker
+            AcknowledgmentsGroupingTracker(prefix, consumerId, consumerConfig.AcknowledgementsGroupTime, getConnectionState, sendAckPayload) :> IAcknowledgmentsGroupingTracker
         else
             AcknowledgmentsGroupingTracker.NonPersistentAcknowledgmentGroupingTracker
 
@@ -90,7 +93,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
             // the messages will be re-delivered
         }
 
-    let markAckForBatchMessage msgId ackType (batchDetails: BatchDetails) =
+    let markAckForBatchMessage (msgId: MessageId) ackType (batchDetails: BatchDetails) =
         let (batchIndex, batchAcker) = batchDetails
         let isAllMsgsAcked =
             match ackType with
@@ -107,7 +110,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
         else
             match ackType with
             | AckType.Cumulative when not batchAcker.PrevBatchCumulativelyAcked ->
-                sendAcknowledge msgId ackType |> Async.StartImmediate
+                sendAcknowledge msgId.PrevBatchMessageId ackType |> Async.StartImmediate
+                Log.Logger.LogDebug("{0} update PrevBatchCumulativelyAcked", prefix)
                 batchAcker.PrevBatchCumulativelyAcked <- true
             | _ ->
                 ()
