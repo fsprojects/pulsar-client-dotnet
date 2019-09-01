@@ -32,6 +32,7 @@ let tests =
             let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
+                    .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
@@ -86,6 +87,7 @@ let tests =
             let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
+                    .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
@@ -206,7 +208,7 @@ let tests =
             let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
-                    .EnableBatching()
+                    .EnableBatching(true)
                     .ProducerName(producerName)
                     .BatchingMaxMessages(10)
                     .CreateAsync() |> Async.AwaitTask
@@ -261,7 +263,7 @@ let tests =
             let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
-                    .EnableBatching()
+                    .EnableBatching(true)
                     .ProducerName(producerName)
                     .BatchingMaxMessages(10)
                     .CreateAsync() |> Async.AwaitTask

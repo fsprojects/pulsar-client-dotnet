@@ -40,10 +40,10 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                     maxPendingMessages
                     |> invalidArgIfNotGreaterThanZero "MaxPendingMessages needs to be greater than 0." })
 
-    member __.EnableBatching() =
+    member __.EnableBatching enableBatching =
         ProducerBuilder(
             client,
-            { config with BatchingEnabled = true })
+            { config with BatchingEnabled = enableBatching })
 
     member __.BatchingMaxMessages maxMessagesPerBatch =
         ProducerBuilder(

@@ -156,6 +156,7 @@ let tests =
             let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
+                    .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =

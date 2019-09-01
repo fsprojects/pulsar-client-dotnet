@@ -265,14 +265,17 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
                                     messageProcessed nextMessage
                                     state.WaitingChannel.Reply nextMessage
                                 return! loop { state with WaitingChannel = nullChannel }
-                        else
-                             // handle batch message enqueuing; uncompressed payload has all messages in batch
+                        elif message.Metadata.NumMessages > 0 then
+                            // handle batch message enqueuing; uncompressed payload has all messages in batch
                             receiveIndividualMessagesFromBatch message
                             if hasWaitingChannel then
                                 state.WaitingChannel.Reply <| incomingMessages.Dequeue()
                                 return! loop { state with WaitingChannel = nullChannel }
                             else
                                 return! loop state
+                        else
+                            Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, message.Metadata.NumMessages)
+                            return! loop state
 
                 | ConsumerMessage.Receive ch ->
 

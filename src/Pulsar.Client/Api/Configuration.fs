@@ -56,8 +56,8 @@ type ProducerConfiguration =
             Topic = Unchecked.defaultof<TopicName>
             ProducerName = ""
             MaxPendingMessages = 1000
-            BatchingEnabled = false
+            BatchingEnabled = true
             MaxMessagesPerBatch = 1000
-            MaxBatchingPublishDelay = TimeSpan.Zero
+            MaxBatchingPublishDelay = TimeSpan.FromMilliseconds(1.0)
             SendTimeout = TimeSpan.FromMilliseconds(30000.0)
         }

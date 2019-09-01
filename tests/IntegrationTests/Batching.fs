@@ -43,7 +43,7 @@ let tests =
                 ProducerBuilder(client)
                     .Topic(topicName)
                     .ProducerName("batch producer")
-                    .EnableBatching()
+                    .EnableBatching(true)
                     .BatchingMaxMessages(messagesNumber)
                     .CreateAsync() |> Async.AwaitTask
 
@@ -74,7 +74,7 @@ let tests =
                 ProducerBuilder(client)
                     .Topic(topicName)
                     .ProducerName("batch producer")
-                    .EnableBatching()
+                    .EnableBatching(true)
                     .BatchingMaxMessages(batchSize)
                     .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(100.0))
                     .CreateAsync() |> Async.AwaitTask
@@ -108,7 +108,7 @@ let tests =
                 ProducerBuilder(client)
                     .Topic(topicName)
                     .ProducerName("batch producer")
-                    .EnableBatching()
+                    .EnableBatching(true)
                     .BatchingMaxMessages(messagesNumber)
                     .CreateAsync() |> Async.AwaitTask
 

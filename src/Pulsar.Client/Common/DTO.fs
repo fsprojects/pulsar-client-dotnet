@@ -208,7 +208,7 @@ type ProducerMessage =
     | TimeoutCheck
     | Close of AsyncReplyChannel<Task>
     | StoreBatchItem of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
-    | SendBatchMessage of BatchItem list
+    | SendBatchMessage
 
 type ConsumerMessage =
     | ConnectionOpened

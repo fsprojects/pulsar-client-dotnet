@@ -51,31 +51,20 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
 
         pendingBatches.Clear()
 
-    let postSendBatchMessage() =
-        let message = batchItems |> Seq.toList |> SendBatchMessage
-        batchItems.Clear()
-        this.Mb.Post message
-
-    let timer = new Timer(sendTimeoutMs)
-
+    let sendTimeoutTimer = new Timer()
     let startSendTimeoutTimer () =
         if sendTimeoutMs > 0.0 then
-            timer.AutoReset <- true
-
-            timer.Elapsed.Add(fun _ ->
-                Log.Logger.LogDebug("{0} Batch timer elapsed", prefix)
-                postSendBatchMessage())
-
-            timer.Start()
+            sendTimeoutTimer.Interval <- sendTimeoutMs
+            sendTimeoutTimer.AutoReset <- true
+            sendTimeoutTimer.Elapsed.Add(fun _ -> this.Mb.Post TimeoutCheck)
+            sendTimeoutTimer.Start()
 
     let batchTimer = new Timer()
-
     let startSendBatchTimer () =
-
         if producerConfig.BatchingEnabled && producerConfig.MaxBatchingPublishDelay <> TimeSpan.Zero then
             batchTimer.Interval <- producerConfig.MaxBatchingPublishDelay.TotalMilliseconds
             batchTimer.AutoReset <- true
-            batchTimer.Elapsed.Add(fun _ -> postSendBatchMessage())
+            batchTimer.Elapsed.Add(fun _ -> this.Mb.Post SendBatchMessage)
             batchTimer.Start()
 
     let resendMessages () =
@@ -119,7 +108,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
         metadata
 
     let stopProducer() =
-        timer.Stop()
+        sendTimeoutTimer.Stop()
         batchTimer.Stop()
         cleanup(this)
         Log.Logger.LogInformation("{0} stopped", prefix)
@@ -205,42 +194,46 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
 
                     if batchItems.Count = producerConfig.MaxMessagesPerBatch then
                         Log.Logger.LogDebug("{0} Max batch container size exceeded", prefix)
-                        postSendBatchMessage()
+                        this.Mb.Post SendBatchMessage
 
                     channel.Reply(tcs)
                     return! loop ()
 
-                | ProducerMessage.SendBatchMessage batchItems ->
+                | ProducerMessage.SendBatchMessage ->
 
-                    Log.Logger.LogDebug("{0} SendBatchMessage", prefix)
+                    let batchSize = batchItems.Count
+                    if batchSize > 0 then
+                        Log.Logger.LogDebug("{0} SendBatchMessage started", prefix)
 
-                    use messageStream = MemoryStreamManager.GetStream()
-                    use messageWriter = new BinaryWriter(messageStream)
+                        use messageStream = MemoryStreamManager.GetStream()
+                        use messageWriter = new BinaryWriter(messageStream)
 
-                    for message in batchItems do
-                        let smm = SingleMessageMetadata(PayloadSize = message.Data.Length)
-                        Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
-                        messageWriter.Write(message.Data)
+                        for message in batchItems do
+                            let smm = SingleMessageMetadata(PayloadSize = message.Data.Length)
+                            Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
+                            messageWriter.Write(message.Data)
 
-                    let batchData = messageStream.ToArray()
-                    let batchSize = batchItems.Length
-                    let metadata = createMessageMetadata batchData (Some batchSize)
-                    let sequenceId = %metadata.SequenceId
-                    let payload = Commands.newSend producerId sequenceId batchSize metadata batchData
-                    let agentMessage = SendMessage {
-                            SequenceId = sequenceId
-                            Payload = payload
-                            Tcs = TaskCompletionSource()
-                            CreatedAt = DateTime.Now }
-                    this.Mb.Post(agentMessage)
+                        let batchData = messageStream.ToArray()
+                        let metadata = createMessageMetadata batchData (Some batchSize)
+                        let sequenceId = %metadata.SequenceId
+                        let payload = Commands.newSend producerId sequenceId batchSize metadata batchData
+                        let agentMessage = SendMessage {
+                                SequenceId = sequenceId
+                                Payload = payload
+                                Tcs = TaskCompletionSource()
+                                CreatedAt = DateTime.Now }
+                        this.Mb.Post(agentMessage)
 
-                    let tcss =
-                        batchItems
-                        |> Seq.map(fun i -> i.Tcs)
-                        |> Seq.toArray
-                    pendingBatches.Add(sequenceId, tcss)
+                        let tcss =
+                            batchItems
+                            |> Seq.map(fun i -> i.Tcs)
+                            |> Seq.toArray
+                        pendingBatches.Add(sequenceId, tcss)
+                        batchItems.Clear()
+                        Log.Logger.LogDebug("{0} Pending batch created. Batch size: {1}", prefix, batchSize)
+                    else
+                        Log.Logger.LogDebug("{0} SendBatchMessage skipped", prefix)
 
-                    Log.Logger.LogDebug("{0} Pending batch created. Batch size: {1}", prefix, batchSize)
                     return! loop ()
 
                 | ProducerMessage.BeginSendMessage (message, channel) ->
