@@ -170,7 +170,7 @@ type ClientCnx (config: PulsarClientConfiguration,
                     return! loop ()
                 | SocketRequestMessageWithReply (reqId, payload, replyChannel) ->
                     let! connected = sendSerializedPayload payload |> Async.AwaitTask
-                    let tsc = TaskCompletionSource()
+                    let tsc = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
                     requestsMb.Post(AddRequest(reqId, tsc))
                     replyChannel.Reply(tsc.Task)
                     if not connected then

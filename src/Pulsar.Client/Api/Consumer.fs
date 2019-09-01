@@ -31,7 +31,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
     let consumerId = Generators.getNextConsumerId()
     let incomingMessages = new Queue<Message>()
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
-    let subscribeTsc = TaskCompletionSource<Consumer>()
+    let subscribeTsc = TaskCompletionSource<Consumer>(TaskCreationOptions.RunContinuationsAsynchronously)
     let partitionIndex = -1
     let prefix = sprintf "consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)

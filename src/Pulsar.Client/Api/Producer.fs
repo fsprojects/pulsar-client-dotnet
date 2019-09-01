@@ -18,7 +18,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
     let producerId = Generators.getNextProducerId()
 
     let prefix = sprintf "producer(%u, %s)" %producerId producerConfig.ProducerName
-    let producerCreatedTsc = TaskCompletionSource<Producer>()
+    let producerCreatedTsc = TaskCompletionSource<Producer>(TaskCreationOptions.RunContinuationsAsynchronously)
 
     let pendingMessages = Queue<PendingMessage>()
     let batchItems = ResizeArray<BatchItem>()
@@ -187,7 +187,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
 
                     Log.Logger.LogDebug("{0} Begin store batch item. Batch container size: {1}", prefix, batchItems.Count)
 
-                    let tcs = TaskCompletionSource()
+                    let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
                     batchItems.Add({ Data = message; Tcs = tcs })
 
                     Log.Logger.LogDebug("{0} End store batch item. Batch container size: {1}", prefix, batchItems.Count)
@@ -220,7 +220,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                         let agentMessage = SendMessage {
                                 SequenceId = sequenceId
                                 Payload = payload
-                                Tcs = TaskCompletionSource()
+                                Tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
                                 CreatedAt = DateTime.Now }
                         this.Mb.Post(agentMessage)
 
@@ -231,8 +231,6 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                         pendingBatches.Add(sequenceId, tcss)
                         batchItems.Clear()
                         Log.Logger.LogDebug("{0} Pending batch created. Batch size: {1}", prefix, batchSize)
-                    else
-                        Log.Logger.LogDebug("{0} SendBatchMessage skipped", prefix)
 
                     return! loop ()
 
@@ -243,7 +241,7 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                     let metadata = createMessageMetadata message None
                     let sequenceId = %metadata.SequenceId
                     let payload = Commands.newSend producerId sequenceId 1 metadata message
-                    let tcs = TaskCompletionSource()
+                    let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
                     this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Tcs = tcs; CreatedAt = DateTime.Now })
                     channel.Reply(tcs)
                     return! loop ()

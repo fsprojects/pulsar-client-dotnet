@@ -32,7 +32,7 @@ type ConnectionPool (config: PulsarClientConfiguration) =
             let! socketConnection = SocketConnection.ConnectAsync(physicalAddress, PipeOptions(pauseWriterThreshold = 5_242_880L ))
             let writerStream = StreamConnection.GetWriter(socketConnection.Output)
             let connection = (socketConnection, writerStream)
-            let initialConnectionTsc = TaskCompletionSource<ClientCnx>()
+            let initialConnectionTsc = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
 
             let unregisterClientCnx (broker: Broker) =
                 connections.TryRemove(broker.LogicalAddress) |> ignore

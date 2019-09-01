@@ -40,7 +40,8 @@ namespace CsharpExamples
 
             await consumer.AcknowledgeAsync(message.MessageId);
 
-            Console.WriteLine("Example ended");
+            Console.WriteLine("Example ended. Press any key to exit");
+            Console.ReadKey();
         }
     }
 }
