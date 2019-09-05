@@ -147,42 +147,6 @@ let tests =
             Log.Debug("Finished Full roundtrip (emulate Request-Response behaviour)")
         }
 
-        testAsync "Send and receive 100 messages concurrently works fine with small receiver queue size" {
-
-            Log.Debug("Started Send and receive 100 messages concurrently works fine with small receiver queue size")
-            let client = getClient()
-            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-
-            let! producer =
-                ProducerBuilder(client)
-                    .Topic(topicName)
-                    .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
-
-            let! consumer =
-                ConsumerBuilder(client)
-                    .Topic(topicName)
-                    .SubscriptionName("test-subscription")
-                    .ReceiverQueueSize(10)
-                    .SubscribeAsync() |> Async.AwaitTask
-
-            let producerTask =
-                Task.Run(fun () ->
-                    task {
-                        do! produceMessages producer 100 ""
-                    }:> Task)
-
-            let consumerTask =
-                Task.Run(fun () ->
-                    task {
-                        do! consumeMessages consumer 100 ""
-                    }:> Task)
-
-            Task.WaitAll(producerTask, consumerTask)
-
-            Log.Debug("Finished Send and receive 100 messages concurrently works fine with small receiver queue size")
-        }
-
         testAsync "Client, producer and consumer can't be accessed after close" {
 
             Log.Debug("Started 'Client, producer and consumer can't be accessed after close'")

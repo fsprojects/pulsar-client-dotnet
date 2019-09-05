@@ -237,7 +237,6 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
                 | ProducerMessage.BeginSendMessage (message, channel) ->
 
                     Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
-
                     let metadata = createMessageMetadata message None
                     let sequenceId = %metadata.SequenceId
                     let payload = Commands.newSend producerId sequenceId 1 metadata message

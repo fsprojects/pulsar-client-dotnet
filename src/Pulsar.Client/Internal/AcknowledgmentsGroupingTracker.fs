@@ -24,7 +24,8 @@ type IAcknowledgmentsGroupingTracker =
     abstract member Flush: unit -> unit
     abstract member Close: unit -> unit
 
-type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackGroupTime: TimeSpan, getState: unit -> ConnectionState,
+type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackGroupTime: TimeSpan,
+                                    getState: unit -> ConnectionState,
                                     sendAckPayload: ClientCnx -> Payload -> Async<bool>) =
 
     [<Literal>]

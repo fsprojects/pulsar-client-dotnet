@@ -28,18 +28,18 @@ let tests =
             Log.Debug("Started messages get redelivered if ackTimeout is set")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let consumerName = "AckTimeoutConsumerWithBatching"
 
             let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
-                    .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
-                    .ConsumerName("AckTimeoutConsumer")
+                    .ConsumerName(consumerName)
                     .AckTimeout(TimeSpan.FromSeconds(1.0))
                     .SubscribeAsync() |> Async.AwaitTask
 
@@ -55,26 +55,81 @@ let tests =
                         for i in [1..100] do
                             let! message = consumer.ReceiveAsync()
                             let received = Encoding.UTF8.GetString(message.Payload)
-                            Log.Debug("{0} received {1}", "AckTimeoutConsumer", received)
+                            Log.Debug("{0} received {1}", consumerName, received)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then
-                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received "AckTimeoutConsumer"
+                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
                             if (i <= 90) then
                                 do! consumer.AcknowledgeAsync(message.MessageId)
                         do! Task.Delay(1100)
                         for i in [91..100] do
                             let! message = consumer.ReceiveAsync()
                             let received = Encoding.UTF8.GetString(message.Payload)
-                            Log.Debug("{0} received {1}", "AckTimeoutConsumer", received)
+                            Log.Debug("{0} received {1}", consumerName, received)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then
-                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received "AckTimeoutConsumer"
+                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
                             do! consumer.AcknowledgeAsync(message.MessageId)
                     }:> Task)
 
             Task.WaitAll(producerTask, consumerTask)
 
             Log.Debug("Finished messages get redelivered if ackTimeout is set")
+
+        }
+
+        testAsync "Messages get redelivered if ackTimeout is set without batching" {
+
+            Log.Debug("Started messages get redelivered if ackTimeout is set without batching")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let consumerName = "AckTimeoutConsumer"
+
+            let! producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .ConsumerName(consumerName)
+                    .AckTimeout(TimeSpan.FromSeconds(1.0))
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! produceMessages producer 100 ""
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        for i in [1..100] do
+                            let! message = consumer.ReceiveAsync()
+                            let received = Encoding.UTF8.GetString(message.Payload)
+                            Log.Debug("{0} received {1}", consumerName, received)
+                            let expected = "Message #" + string i
+                            if received.StartsWith(expected) |> not then
+                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
+                            if (i <= 90) then
+                                do! consumer.AcknowledgeAsync(message.MessageId)
+                        do! Task.Delay(1100)
+                        for i in [91..100] do
+                            let! message = consumer.ReceiveAsync()
+                            let received = Encoding.UTF8.GetString(message.Payload)
+                            Log.Debug("{0} received {1}", consumerName, received)
+                            let expected = "Message #" + string i
+                            if received.StartsWith(expected) |> not then
+                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
+                            do! consumer.AcknowledgeAsync(message.MessageId)
+                    }:> Task)
+
+            Task.WaitAll(producerTask, consumerTask)
+
+            Log.Debug("Finished messages get redelivered if ackTimeout is set without batching")
 
         }
 

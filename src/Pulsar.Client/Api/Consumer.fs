@@ -164,6 +164,10 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
         else
             0
 
+    let replyWithMessage (channel: AsyncReplyChannel<Message>) message =
+        messageProcessed message
+        channel.Reply message
+
     let stopConsumer() =
         unAckedMessageTracker.Close()
         cleanup(this)
@@ -257,19 +261,16 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
                                 return! loop state
                             else
                                 if (incomingMessages.Count = 0) then
-                                    messageProcessed message
-                                    state.WaitingChannel.Reply <| message
+                                    replyWithMessage state.WaitingChannel message
                                 else
                                     incomingMessages.Enqueue(message)
-                                    let nextMessage = incomingMessages.Dequeue()
-                                    messageProcessed nextMessage
-                                    state.WaitingChannel.Reply nextMessage
+                                    replyWithMessage state.WaitingChannel <| incomingMessages.Dequeue()
                                 return! loop { state with WaitingChannel = nullChannel }
                         elif message.Metadata.NumMessages > 0 then
                             // handle batch message enqueuing; uncompressed payload has all messages in batch
                             receiveIndividualMessagesFromBatch message
                             if hasWaitingChannel then
-                                state.WaitingChannel.Reply <| incomingMessages.Dequeue()
+                                replyWithMessage state.WaitingChannel <| incomingMessages.Dequeue()
                                 return! loop { state with WaitingChannel = nullChannel }
                             else
                                 return! loop state
@@ -281,9 +282,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
 
                     Log.Logger.LogDebug("{0} Receive", prefix)
                     if incomingMessages.Count > 0 then
-                        let msg = incomingMessages.Dequeue()
-                        messageProcessed msg
-                        ch.Reply msg
+                        replyWithMessage ch <| incomingMessages.Dequeue()
                         return! loop state
                     else
                         Log.Logger.LogDebug("{0} GetMessage waiting", prefix)
@@ -440,9 +439,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
         task {
             connectionHandler.CheckIfActive(prefix)
             let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Individual, channel))
-            if success then
-                unAckedMessageTracker.Remove(msgId) |> ignore
-            else
+            if not success then
                 raise (ConnectionFailedOnSend "AcknowledgeAsync")
         }
 
@@ -450,9 +447,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
         task {
             connectionHandler.CheckIfActive(prefix)
             let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Cumulative, channel))
-            if success then
-                unAckedMessageTracker.Remove(msgId) |> ignore
-            else
+            if not success then
                 raise (ConnectionFailedOnSend "AcknowledgeCumulativeAsync")
         }
 

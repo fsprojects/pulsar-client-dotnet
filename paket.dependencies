@@ -15,7 +15,6 @@ nuget Serilog.Enrichers.Thread
 nuget Serilog.Extensions.Logging
 nuget Serilog.Sinks.Console
 nuget TaskBuilder.fs
-nuget UTF8Json
 nuget Expecto
 nuget Microsoft.NET.Test.Sdk
 nuget YoloDev.Expecto.TestSdk

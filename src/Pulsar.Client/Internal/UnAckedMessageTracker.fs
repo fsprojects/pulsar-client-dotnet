@@ -38,6 +38,8 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
                 let! message = inbox.Receive()
                 match message with
                 | TrackerMessage.Add (msgId, channel) ->
+
+                    Log.Logger.LogDebug("{0} Adding message {1}", prefix, msgId)
                     if messageIdPartitionMap.ContainsKey msgId then
                         channel.Reply(false)
                         Log.Logger.LogWarning("{0} Duplicate message add {1}", prefix, msgId)
@@ -46,7 +48,10 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
                         state.Add(msgId) |> ignore
                         channel.Reply(true)
                     return! loop state
+
                 | TrackerMessage.Remove (msgId, channel) ->
+
+                    Log.Logger.LogDebug("{0} Removing message {1}", prefix, msgId)
                     let mutable targetState: TrackerState = null
                     if messageIdPartitionMap.TryGetValue(msgId, &targetState) then
                         targetState.Remove(msgId) |> ignore
@@ -56,7 +61,10 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
                         Log.Logger.LogWarning("{0} Unexisting message remove {1}", prefix, msgId)
                         channel.Reply(false)
                     return! loop state
+
                 | TrackerMessage.RemoveMessagesTill (msgId, channel) ->
+
+                    Log.Logger.LogDebug("{0} RemoveMessagesTill {1}", prefix, msgId)
                     messageIdPartitionMap.Keys
                         |> Seq.takeWhile (fun key -> key <= msgId)
                         |> Seq.toArray
@@ -67,7 +75,9 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
                         |> Seq.length
                         |> channel.Reply
                     return! loop state
+
                 | TickTime ->
+
                     timePartitions.Enqueue(state)
                     let timedOutMessages = timePartitions.Dequeue()
                     if timedOutMessages.Count > 0 then
@@ -76,12 +86,18 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
                             messageIdPartitionMap.Remove(msgId) |> ignore
                         redeliverUnacknowledgedMessages timedOutMessages
                     return! loop (TrackerState())
+
                 | Clear ->
+
+                    Log.Logger.LogDebug("{0} Clear", prefix)
                     messageIdPartitionMap.Clear()
                     timePartitions.Clear()
                     fillTimePartions()
                     return! loop (TrackerState())
+
                 | Stop ->
+
+                    Log.Logger.LogDebug("{0} Stop", prefix)
                     messageIdPartitionMap.Clear()
                     timePartitions.Clear()
             }
