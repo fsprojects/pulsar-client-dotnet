@@ -1,8 +1,8 @@
 # pulsar-client-dotnet
 
-## IN EARLY DEVELOPMENT, but you can already try basic pub/sub functionality
 ### Contributions are most welcome!
 
+[Pulsar.Client nuget](https://www.nuget.org/packages/Pulsar.Client)
 
 Supported pulsar version: **2.4.0**
 
@@ -35,7 +35,7 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
  - Make youre modifications
  - Run Unit tests
  - If changes are made in Client logic, run Integration tests. Before runnint do the following.
-    1. Change `pulsarAddress` to point your pulsar cluster
+    1. Change `pulsarAddress` in Common.fs to point your pulsar cluster
     2. Ensure `public/default` namespace with default settings
     3. Ensure `public/retention` namespace with time or storage size retention configured
  - Send a Pull Request.

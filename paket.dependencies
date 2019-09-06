@@ -10,6 +10,7 @@ nuget Microsoft.Extensions.Logging.Abstractions
 nuget Microsoft.Extensions.Logging.Console
 nuget Microsoft.IO.RecyclableMemoryStream
 nuget Pipelines.Sockets.Unofficial
+nuget Pulsar.Client
 nuget Serilog
 nuget Serilog.Enrichers.Thread
 nuget Serilog.Extensions.Logging
