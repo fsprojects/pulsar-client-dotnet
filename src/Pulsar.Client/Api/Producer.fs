@@ -397,14 +397,14 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
         else
             mb.PostAndAsyncReply(fun channel -> BeginSendMessage (message, channel))
 
-    member this.SendAndWaitAsync (message: byte[]) =
+    member this.SendAsync (message: byte[]) =
         task {
             connectionHandler.CheckIfActive(prefix)
             let! tcs = this.SendMessage message
             return! tcs.Task
         }
 
-    member this.SendAsync (message: byte[]) =
+    member this.SendAndForgetAsync (message: byte[]) =
         task {
             connectionHandler.CheckIfActive(prefix)
             let! _ = this.SendMessage message

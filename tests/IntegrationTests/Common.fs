@@ -54,14 +54,14 @@ let getNewClient() =
 let produceMessages (producer: Producer) number producerName =
     task {
         for i in [1..number] do
-            let! _ = producer.SendAndWaitAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
+            let! _ = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
             ()
     }
 
 let fastProduceMessages (producer: Producer) number producerName =
     task {
         for i in [1..number] do
-            let! _ = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
+            let! _ = producer.SendAndForgetAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
             ()
     }
 
@@ -69,7 +69,7 @@ let createSendAndWaitTasks (producer: Producer) number producerName =
     let createTask taskNumber =
         let message = sprintf "Message #%i Sent from %s on %s" taskNumber producerName (DateTime.Now.ToLongTimeString())
         let messageBytes = Encoding.UTF8.GetBytes(message)
-        let task = Task.Run(fun() -> producer.SendAndWaitAsync(messageBytes) |> ignore)
+        let task = Task.Run(fun() -> producer.SendAsync(messageBytes) |> ignore)
         (task, message)
 
     [|1..number|] |> Array.map createTask

@@ -137,7 +137,7 @@ let tests =
                         let expected = "Message #" + string i
                         if received.StartsWith(expected) |> not then
                             failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received "consumer2"
-                        let! _ = producer2.SendAsync(message.Payload)
+                        let! _ = producer2.SendAndForgetAsync(message.Payload)
                         ()
                 } |> Task.WaitAll
                 Log.Debug("t3 ended")
@@ -183,10 +183,10 @@ let tests =
             do! consumer1.CloseAsync() |> Async.AwaitTask
             Expect.throwsT2<AlreadyClosedException> (fun () -> consumer1.ReceiveAsync().Result |> ignore) |> ignore
             do! producer1.CloseAsync() |> Async.AwaitTask
-            Expect.throwsT2<AlreadyClosedException> (fun () -> producer1.SendAsync([||]).Result |> ignore) |> ignore
+            Expect.throwsT2<AlreadyClosedException> (fun () -> producer1.SendAndForgetAsync([||]).Result |> ignore) |> ignore
             do! client.CloseAsync() |> Async.AwaitTask
             Expect.throwsT2<AlreadyClosedException> (fun () -> consumer2.UnsubscribeAsync().Result |> ignore) |> ignore
-            Expect.throwsT2<AlreadyClosedException> (fun () -> producer2.SendAsync([||]).Result |> ignore) |> ignore
+            Expect.throwsT2<AlreadyClosedException> (fun () -> producer2.SendAndForgetAsync([||]).Result |> ignore) |> ignore
             Expect.throwsT2<AlreadyClosedException> (fun () -> client.GetPartitionedTopicMetadata(%"abc").Result |> ignore) |> ignore
 
             Log.Debug("Finished 'Client, producer and consumer can't be accessed after close'")
