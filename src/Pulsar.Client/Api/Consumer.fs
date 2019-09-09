@@ -33,6 +33,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
     let subscribeTsc = TaskCompletionSource<Consumer>(TaskCreationOptions.RunContinuationsAsynchronously)
     let partitionIndex = -1
+    let hasParentConsumer = false
     let prefix = sprintf "consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable hasReachedEndOfTopic = false
@@ -60,8 +61,8 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
 
     let unAckedMessageTracker =
         if consumerConfig.AckTimeout > TimeSpan.Zero then
-            if consumerConfig.TickDuration > TimeSpan.Zero then
-                let tickDuration = if consumerConfig.AckTimeout > consumerConfig.TickDuration then consumerConfig.TickDuration else consumerConfig.TickDuration
+            if consumerConfig.AckTimeoutTickTime > TimeSpan.Zero then
+                let tickDuration = if consumerConfig.AckTimeout > consumerConfig.AckTimeoutTickTime then consumerConfig.AckTimeoutTickTime else consumerConfig.AckTimeoutTickTime
                 UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, tickDuration, redeliverMessages) :> IUnAckedMessageTracker
             else
                 UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, consumerConfig.AckTimeout, redeliverMessages) :> IUnAckedMessageTracker
@@ -138,7 +139,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
     let messageProcessed (msg: Message) =
         increaseAvailablePermits 1
         if consumerConfig.AckTimeout <> TimeSpan.Zero then
-            if (partitionIndex <> -1) then
+            if hasParentConsumer then
                 // we should no longer track this message, TopicsConsumer will take care from now onwards
                 unAckedMessageTracker.Remove msg.MessageId |> ignore
             else
@@ -203,7 +204,7 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
                             // command to receive messages.
                             // For readers too (isDurable==false), the partition idx will be set though we have to
                             // send available permits immediately after establishing the reader session
-                            if (not (firstTimeConnect && partitionIndex > -1 && isDurable) && consumerConfig.ReceiverQueueSize <> 0) then
+                            if (not (firstTimeConnect && hasParentConsumer && isDurable) && consumerConfig.ReceiverQueueSize <> 0) then
                                 let flowCommand = Commands.newFlow consumerId initialFlowCount
                                 let! success = clientCnx.Send flowCommand
                                 if success then

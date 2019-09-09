@@ -25,7 +25,7 @@ type ConsumerConfiguration =
         ReceiverQueueSize: int
         SubscriptionInitialPosition: SubscriptionInitialPosition
         AckTimeout: TimeSpan
-        TickDuration: TimeSpan
+        AckTimeoutTickTime: TimeSpan
         AcknowledgementsGroupTime: TimeSpan
     }
     static member Default =
@@ -37,7 +37,7 @@ type ConsumerConfiguration =
             ReceiverQueueSize = 1000
             SubscriptionInitialPosition = SubscriptionInitialPosition.Latest
             AckTimeout = TimeSpan.Zero
-            TickDuration = TimeSpan.FromMilliseconds(1000.0)
+            AckTimeoutTickTime = TimeSpan.FromMilliseconds(1000.0)
             AcknowledgementsGroupTime = TimeSpan.FromMilliseconds(100.0)
         }
 

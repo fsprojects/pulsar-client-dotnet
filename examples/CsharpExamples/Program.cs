@@ -31,7 +31,7 @@ namespace CsharpExamples
                 .SubscriptionName(subscriptionName)
                 .SubscribeAsync();
 
-            var messageId = await producer.SendAndWaitAsync(Encoding.UTF8.GetBytes($"Sent from C# at '{DateTime.Now}'"));
+            var messageId = await producer.SendAsync(Encoding.UTF8.GetBytes($"Sent from C# at '{DateTime.Now}'"));
             Console.WriteLine($"MessageId is: '{messageId}'");
 
 

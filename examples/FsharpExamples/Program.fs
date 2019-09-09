@@ -37,7 +37,7 @@ let main argv =
                 .SubscriptionName(subscriptionName)
                 .SubscribeAsync()
 
-        let! messageId = producer.SendAndWaitAsync(Encoding.UTF8.GetBytes(sprintf "Sent from F# at '%A'" DateTime.Now))
+        let! messageId = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Sent from F# at '%A'" DateTime.Now))
         printfn "MessageId is: '%A'" messageId
 
         let! message = consumer.ReceiveAsync()

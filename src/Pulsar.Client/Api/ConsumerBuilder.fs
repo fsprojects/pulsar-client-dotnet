@@ -71,11 +71,11 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
                 AckTimeout = ackTimeout |> invalidArgIf (fun arg ->
                    arg <> TimeSpan.Zero && arg < TimeSpan.FromMilliseconds(float MIN_ACK_TIMEOUT_MILLIS)) (sprintf "Ack timeout should be greater than %i ms" MIN_ACK_TIMEOUT_MILLIS)  })
 
-    member this.TickDuration tickDuration =
+    member this.AckTimeoutTickTime ackTimeoutTickTime =
         ConsumerBuilder(
             client,
             { config with
-                TickDuration = tickDuration  })
+                AckTimeoutTickTime = ackTimeoutTickTime  })
 
     member this.AcknowledgementsGroupTime ackGroupTime =
         ConsumerBuilder(

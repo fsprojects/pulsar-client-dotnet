@@ -2,13 +2,14 @@
 <Project Sdk="Microsoft.NET.Sdk" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);CopyProjectReferencesToPackage</TargetsForTfmSpecificBuildOutput>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>0.1.1</Version>
+    <Version>0.1.4</Version>
     <Company>F# community</Company>
-    <Description>.net client for Apache Pulsar</Description>
+    <Description>.NET client for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>First stable version for real world testing</PackageReleaseNotes>
+    <PackageReleaseNotes>One more nuget reference fix</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryType>GitHub</RepositoryType>
     <PackageTags>pulsar</PackageTags>
@@ -19,7 +20,7 @@
     <WarningsAsErrors>0025</WarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" />
+    <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
@@ -42,7 +43,6 @@
     <Compile Include="Internal\BinaryLookupService.fs" />
     <Compile Include="Internal\ConnectionHandler.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTracker.fs" />
-
     <Compile Include="Api\Consumer.fs" />
     <Compile Include="Api\Producer.fs" />
     <Compile Include="Api\PulsarClient.fs" />
@@ -50,5 +50,10 @@
     <Compile Include="Api\ProducerBuilder.fs" />
     <Compile Include="Api\PulsarClientBuilder.fs" />
   </ItemGroup>
+  <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths-&gt;WithMetadataValue('ReferenceSourceTarget', 'ProjectReference'))" />
+    </ItemGroup>
+  </Target>
   <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>

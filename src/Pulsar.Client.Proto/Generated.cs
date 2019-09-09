@@ -7,26 +7,26 @@ namespace pulsar.proto
 {
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class Schema : global::ProtoBuf.IExtensible
+    internal partial class Schema : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"name", IsRequired = true)]
-        public string Name { get; set; }
+        internal string Name { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"schema_data", IsRequired = true)]
-        public byte[] SchemaData { get; set; }
+        internal byte[] SchemaData { get; set; }
 
         [global::ProtoBuf.ProtoMember(4, IsRequired = true)]
-        public Type type { get; set; }
+        internal Type type { get; set; }
 
         [global::ProtoBuf.ProtoMember(5, Name = @"properties")]
-        public global::System.Collections.Generic.List<KeyValue> Properties { get; } = new global::System.Collections.Generic.List<KeyValue>();
+        internal global::System.Collections.Generic.List<KeyValue> Properties { get; } = new global::System.Collections.Generic.List<KeyValue>();
 
         [global::ProtoBuf.ProtoContract()]
-        public enum Type
+        internal enum Type
         {
             None = 0,
             String = 1,
@@ -49,468 +49,468 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class MessageIdData : global::ProtoBuf.IExtensible
+    internal partial class MessageIdData : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, IsRequired = true)]
-        public ulong ledgerId { get; set; }
+        internal ulong ledgerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, IsRequired = true)]
-        public ulong entryId { get; set; }
+        internal ulong entryId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"partition")]
         [global::System.ComponentModel.DefaultValue(-1)]
-        public int Partition
+        internal int Partition
         {
             get { return __pbn__Partition ?? -1; }
             set { __pbn__Partition = value; }
         }
-        public bool ShouldSerializePartition() => __pbn__Partition != null;
-        public void ResetPartition() => __pbn__Partition = null;
+        internal bool ShouldSerializePartition() => __pbn__Partition != null;
+        internal void ResetPartition() => __pbn__Partition = null;
         private int? __pbn__Partition;
 
         [global::ProtoBuf.ProtoMember(4, Name = @"batch_index")]
         [global::System.ComponentModel.DefaultValue(-1)]
-        public int BatchIndex
+        internal int BatchIndex
         {
             get { return __pbn__BatchIndex ?? -1; }
             set { __pbn__BatchIndex = value; }
         }
-        public bool ShouldSerializeBatchIndex() => __pbn__BatchIndex != null;
-        public void ResetBatchIndex() => __pbn__BatchIndex = null;
+        internal bool ShouldSerializeBatchIndex() => __pbn__BatchIndex != null;
+        internal void ResetBatchIndex() => __pbn__BatchIndex = null;
         private int? __pbn__BatchIndex;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class KeyValue : global::ProtoBuf.IExtensible
+    internal partial class KeyValue : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"key", IsRequired = true)]
-        public string Key { get; set; }
+        internal string Key { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"value", IsRequired = true)]
-        public string Value { get; set; }
+        internal string Value { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class KeyLongValue : global::ProtoBuf.IExtensible
+    internal partial class KeyLongValue : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"key", IsRequired = true)]
-        public string Key { get; set; }
+        internal string Key { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"value", IsRequired = true)]
-        public ulong Value { get; set; }
+        internal ulong Value { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class EncryptionKeys : global::ProtoBuf.IExtensible
+    internal partial class EncryptionKeys : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"key", IsRequired = true)]
-        public string Key { get; set; }
+        internal string Key { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"value", IsRequired = true)]
-        public byte[] Value { get; set; }
+        internal byte[] Value { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"metadata")]
-        public global::System.Collections.Generic.List<KeyValue> Metadatas { get; } = new global::System.Collections.Generic.List<KeyValue>();
+        internal global::System.Collections.Generic.List<KeyValue> Metadatas { get; } = new global::System.Collections.Generic.List<KeyValue>();
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class MessageMetadata : global::ProtoBuf.IExtensible
+    internal partial class MessageMetadata : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"producer_name", IsRequired = true)]
-        public string ProducerName { get; set; }
+        internal string ProducerName { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"sequence_id", IsRequired = true)]
-        public ulong SequenceId { get; set; }
+        internal ulong SequenceId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"publish_time", IsRequired = true)]
-        public ulong PublishTime { get; set; }
+        internal ulong PublishTime { get; set; }
 
         [global::ProtoBuf.ProtoMember(4, Name = @"properties")]
-        public global::System.Collections.Generic.List<KeyValue> Properties { get; } = new global::System.Collections.Generic.List<KeyValue>();
+        internal global::System.Collections.Generic.List<KeyValue> Properties { get; } = new global::System.Collections.Generic.List<KeyValue>();
 
         [global::ProtoBuf.ProtoMember(5, Name = @"replicated_from")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string ReplicatedFrom
+        internal string ReplicatedFrom
         {
             get { return __pbn__ReplicatedFrom ?? ""; }
             set { __pbn__ReplicatedFrom = value; }
         }
-        public bool ShouldSerializeReplicatedFrom() => __pbn__ReplicatedFrom != null;
-        public void ResetReplicatedFrom() => __pbn__ReplicatedFrom = null;
+        internal bool ShouldSerializeReplicatedFrom() => __pbn__ReplicatedFrom != null;
+        internal void ResetReplicatedFrom() => __pbn__ReplicatedFrom = null;
         private string __pbn__ReplicatedFrom;
 
         [global::ProtoBuf.ProtoMember(6, Name = @"partition_key")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string PartitionKey
+        internal string PartitionKey
         {
             get { return __pbn__PartitionKey ?? ""; }
             set { __pbn__PartitionKey = value; }
         }
-        public bool ShouldSerializePartitionKey() => __pbn__PartitionKey != null;
-        public void ResetPartitionKey() => __pbn__PartitionKey = null;
+        internal bool ShouldSerializePartitionKey() => __pbn__PartitionKey != null;
+        internal void ResetPartitionKey() => __pbn__PartitionKey = null;
         private string __pbn__PartitionKey;
 
         [global::ProtoBuf.ProtoMember(7, Name = @"replicate_to")]
-        public global::System.Collections.Generic.List<string> ReplicateToes { get; } = new global::System.Collections.Generic.List<string>();
+        internal global::System.Collections.Generic.List<string> ReplicateToes { get; } = new global::System.Collections.Generic.List<string>();
 
         [global::ProtoBuf.ProtoMember(8, Name = @"compression")]
         [global::System.ComponentModel.DefaultValue(CompressionType.None)]
-        public CompressionType Compression
+        internal CompressionType Compression
         {
             get { return __pbn__Compression ?? CompressionType.None; }
             set { __pbn__Compression = value; }
         }
-        public bool ShouldSerializeCompression() => __pbn__Compression != null;
-        public void ResetCompression() => __pbn__Compression = null;
+        internal bool ShouldSerializeCompression() => __pbn__Compression != null;
+        internal void ResetCompression() => __pbn__Compression = null;
         private CompressionType? __pbn__Compression;
 
         [global::ProtoBuf.ProtoMember(9, Name = @"uncompressed_size")]
         [global::System.ComponentModel.DefaultValue(0)]
-        public uint UncompressedSize
+        internal uint UncompressedSize
         {
             get { return __pbn__UncompressedSize ?? 0; }
             set { __pbn__UncompressedSize = value; }
         }
-        public bool ShouldSerializeUncompressedSize() => __pbn__UncompressedSize != null;
-        public void ResetUncompressedSize() => __pbn__UncompressedSize = null;
+        internal bool ShouldSerializeUncompressedSize() => __pbn__UncompressedSize != null;
+        internal void ResetUncompressedSize() => __pbn__UncompressedSize = null;
         private uint? __pbn__UncompressedSize;
 
         [global::ProtoBuf.ProtoMember(11, Name = @"num_messages_in_batch")]
         [global::System.ComponentModel.DefaultValue(1)]
-        public int NumMessagesInBatch
+        internal int NumMessagesInBatch
         {
             get { return __pbn__NumMessagesInBatch ?? 1; }
             set { __pbn__NumMessagesInBatch = value; }
         }
-        public bool ShouldSerializeNumMessagesInBatch() => __pbn__NumMessagesInBatch != null;
-        public void ResetNumMessagesInBatch() => __pbn__NumMessagesInBatch = null;
+        internal bool ShouldSerializeNumMessagesInBatch() => __pbn__NumMessagesInBatch != null;
+        internal void ResetNumMessagesInBatch() => __pbn__NumMessagesInBatch = null;
         private int? __pbn__NumMessagesInBatch;
 
         [global::ProtoBuf.ProtoMember(12, Name = @"event_time")]
         [global::System.ComponentModel.DefaultValue(0)]
-        public ulong EventTime
+        internal ulong EventTime
         {
             get { return __pbn__EventTime ?? 0; }
             set { __pbn__EventTime = value; }
         }
-        public bool ShouldSerializeEventTime() => __pbn__EventTime != null;
-        public void ResetEventTime() => __pbn__EventTime = null;
+        internal bool ShouldSerializeEventTime() => __pbn__EventTime != null;
+        internal void ResetEventTime() => __pbn__EventTime = null;
         private ulong? __pbn__EventTime;
 
         [global::ProtoBuf.ProtoMember(13, Name = @"encryption_keys")]
-        public global::System.Collections.Generic.List<EncryptionKeys> EncryptionKeys { get; } = new global::System.Collections.Generic.List<EncryptionKeys>();
+        internal global::System.Collections.Generic.List<EncryptionKeys> EncryptionKeys { get; } = new global::System.Collections.Generic.List<EncryptionKeys>();
 
         [global::ProtoBuf.ProtoMember(14, Name = @"encryption_algo")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string EncryptionAlgo
+        internal string EncryptionAlgo
         {
             get { return __pbn__EncryptionAlgo ?? ""; }
             set { __pbn__EncryptionAlgo = value; }
         }
-        public bool ShouldSerializeEncryptionAlgo() => __pbn__EncryptionAlgo != null;
-        public void ResetEncryptionAlgo() => __pbn__EncryptionAlgo = null;
+        internal bool ShouldSerializeEncryptionAlgo() => __pbn__EncryptionAlgo != null;
+        internal void ResetEncryptionAlgo() => __pbn__EncryptionAlgo = null;
         private string __pbn__EncryptionAlgo;
 
         [global::ProtoBuf.ProtoMember(15, Name = @"encryption_param")]
-        public byte[] EncryptionParam
+        internal byte[] EncryptionParam
         {
             get { return __pbn__EncryptionParam; }
             set { __pbn__EncryptionParam = value; }
         }
-        public bool ShouldSerializeEncryptionParam() => __pbn__EncryptionParam != null;
-        public void ResetEncryptionParam() => __pbn__EncryptionParam = null;
+        internal bool ShouldSerializeEncryptionParam() => __pbn__EncryptionParam != null;
+        internal void ResetEncryptionParam() => __pbn__EncryptionParam = null;
         private byte[] __pbn__EncryptionParam;
 
         [global::ProtoBuf.ProtoMember(16, Name = @"schema_version")]
-        public byte[] SchemaVersion
+        internal byte[] SchemaVersion
         {
             get { return __pbn__SchemaVersion; }
             set { __pbn__SchemaVersion = value; }
         }
-        public bool ShouldSerializeSchemaVersion() => __pbn__SchemaVersion != null;
-        public void ResetSchemaVersion() => __pbn__SchemaVersion = null;
+        internal bool ShouldSerializeSchemaVersion() => __pbn__SchemaVersion != null;
+        internal void ResetSchemaVersion() => __pbn__SchemaVersion = null;
         private byte[] __pbn__SchemaVersion;
 
         [global::ProtoBuf.ProtoMember(17, Name = @"partition_key_b64_encoded")]
         [global::System.ComponentModel.DefaultValue(false)]
-        public bool PartitionKeyB64Encoded
+        internal bool PartitionKeyB64Encoded
         {
             get { return __pbn__PartitionKeyB64Encoded ?? false; }
             set { __pbn__PartitionKeyB64Encoded = value; }
         }
-        public bool ShouldSerializePartitionKeyB64Encoded() => __pbn__PartitionKeyB64Encoded != null;
-        public void ResetPartitionKeyB64Encoded() => __pbn__PartitionKeyB64Encoded = null;
+        internal bool ShouldSerializePartitionKeyB64Encoded() => __pbn__PartitionKeyB64Encoded != null;
+        internal void ResetPartitionKeyB64Encoded() => __pbn__PartitionKeyB64Encoded = null;
         private bool? __pbn__PartitionKeyB64Encoded;
 
         [global::ProtoBuf.ProtoMember(18, Name = @"ordering_key")]
-        public byte[] OrderingKey
+        internal byte[] OrderingKey
         {
             get { return __pbn__OrderingKey; }
             set { __pbn__OrderingKey = value; }
         }
-        public bool ShouldSerializeOrderingKey() => __pbn__OrderingKey != null;
-        public void ResetOrderingKey() => __pbn__OrderingKey = null;
+        internal bool ShouldSerializeOrderingKey() => __pbn__OrderingKey != null;
+        internal void ResetOrderingKey() => __pbn__OrderingKey = null;
         private byte[] __pbn__OrderingKey;
 
         [global::ProtoBuf.ProtoMember(19, Name = @"deliver_at_time")]
-        public long DeliverAtTime
+        internal long DeliverAtTime
         {
             get { return __pbn__DeliverAtTime.GetValueOrDefault(); }
             set { __pbn__DeliverAtTime = value; }
         }
-        public bool ShouldSerializeDeliverAtTime() => __pbn__DeliverAtTime != null;
-        public void ResetDeliverAtTime() => __pbn__DeliverAtTime = null;
+        internal bool ShouldSerializeDeliverAtTime() => __pbn__DeliverAtTime != null;
+        internal void ResetDeliverAtTime() => __pbn__DeliverAtTime = null;
         private long? __pbn__DeliverAtTime;
 
         [global::ProtoBuf.ProtoMember(20, Name = @"marker_type")]
-        public int MarkerType
+        internal int MarkerType
         {
             get { return __pbn__MarkerType.GetValueOrDefault(); }
             set { __pbn__MarkerType = value; }
         }
-        public bool ShouldSerializeMarkerType() => __pbn__MarkerType != null;
-        public void ResetMarkerType() => __pbn__MarkerType = null;
+        internal bool ShouldSerializeMarkerType() => __pbn__MarkerType != null;
+        internal void ResetMarkerType() => __pbn__MarkerType = null;
         private int? __pbn__MarkerType;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class SingleMessageMetadata : global::ProtoBuf.IExtensible
+    internal partial class SingleMessageMetadata : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"properties")]
-        public global::System.Collections.Generic.List<KeyValue> Properties { get; } = new global::System.Collections.Generic.List<KeyValue>();
+        internal global::System.Collections.Generic.List<KeyValue> Properties { get; } = new global::System.Collections.Generic.List<KeyValue>();
 
         [global::ProtoBuf.ProtoMember(2, Name = @"partition_key")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string PartitionKey
+        internal string PartitionKey
         {
             get { return __pbn__PartitionKey ?? ""; }
             set { __pbn__PartitionKey = value; }
         }
-        public bool ShouldSerializePartitionKey() => __pbn__PartitionKey != null;
-        public void ResetPartitionKey() => __pbn__PartitionKey = null;
+        internal bool ShouldSerializePartitionKey() => __pbn__PartitionKey != null;
+        internal void ResetPartitionKey() => __pbn__PartitionKey = null;
         private string __pbn__PartitionKey;
 
         [global::ProtoBuf.ProtoMember(3, Name = @"payload_size", IsRequired = true)]
-        public int PayloadSize { get; set; }
+        internal int PayloadSize { get; set; }
 
         [global::ProtoBuf.ProtoMember(4, Name = @"compacted_out")]
         [global::System.ComponentModel.DefaultValue(false)]
-        public bool CompactedOut
+        internal bool CompactedOut
         {
             get { return __pbn__CompactedOut ?? false; }
             set { __pbn__CompactedOut = value; }
         }
-        public bool ShouldSerializeCompactedOut() => __pbn__CompactedOut != null;
-        public void ResetCompactedOut() => __pbn__CompactedOut = null;
+        internal bool ShouldSerializeCompactedOut() => __pbn__CompactedOut != null;
+        internal void ResetCompactedOut() => __pbn__CompactedOut = null;
         private bool? __pbn__CompactedOut;
 
         [global::ProtoBuf.ProtoMember(5, Name = @"event_time")]
         [global::System.ComponentModel.DefaultValue(0)]
-        public ulong EventTime
+        internal ulong EventTime
         {
             get { return __pbn__EventTime ?? 0; }
             set { __pbn__EventTime = value; }
         }
-        public bool ShouldSerializeEventTime() => __pbn__EventTime != null;
-        public void ResetEventTime() => __pbn__EventTime = null;
+        internal bool ShouldSerializeEventTime() => __pbn__EventTime != null;
+        internal void ResetEventTime() => __pbn__EventTime = null;
         private ulong? __pbn__EventTime;
 
         [global::ProtoBuf.ProtoMember(6, Name = @"partition_key_b64_encoded")]
         [global::System.ComponentModel.DefaultValue(false)]
-        public bool PartitionKeyB64Encoded
+        internal bool PartitionKeyB64Encoded
         {
             get { return __pbn__PartitionKeyB64Encoded ?? false; }
             set { __pbn__PartitionKeyB64Encoded = value; }
         }
-        public bool ShouldSerializePartitionKeyB64Encoded() => __pbn__PartitionKeyB64Encoded != null;
-        public void ResetPartitionKeyB64Encoded() => __pbn__PartitionKeyB64Encoded = null;
+        internal bool ShouldSerializePartitionKeyB64Encoded() => __pbn__PartitionKeyB64Encoded != null;
+        internal void ResetPartitionKeyB64Encoded() => __pbn__PartitionKeyB64Encoded = null;
         private bool? __pbn__PartitionKeyB64Encoded;
 
         [global::ProtoBuf.ProtoMember(7, Name = @"ordering_key")]
-        public byte[] OrderingKey
+        internal byte[] OrderingKey
         {
             get { return __pbn__OrderingKey; }
             set { __pbn__OrderingKey = value; }
         }
-        public bool ShouldSerializeOrderingKey() => __pbn__OrderingKey != null;
-        public void ResetOrderingKey() => __pbn__OrderingKey = null;
+        internal bool ShouldSerializeOrderingKey() => __pbn__OrderingKey != null;
+        internal void ResetOrderingKey() => __pbn__OrderingKey = null;
         private byte[] __pbn__OrderingKey;
 
         [global::ProtoBuf.ProtoMember(8, Name = @"sequence_id")]
-        public ulong SequenceId
+        internal ulong SequenceId
         {
             get { return __pbn__SequenceId.GetValueOrDefault(); }
             set { __pbn__SequenceId = value; }
         }
-        public bool ShouldSerializeSequenceId() => __pbn__SequenceId != null;
-        public void ResetSequenceId() => __pbn__SequenceId = null;
+        internal bool ShouldSerializeSequenceId() => __pbn__SequenceId != null;
+        internal void ResetSequenceId() => __pbn__SequenceId = null;
         private ulong? __pbn__SequenceId;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandConnect : global::ProtoBuf.IExtensible
+    internal partial class CommandConnect : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"client_version", IsRequired = true)]
-        public string ClientVersion { get; set; }
+        internal string ClientVersion { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"auth_method")]
         [global::System.ComponentModel.DefaultValue(AuthMethod.AuthMethodNone)]
-        public AuthMethod AuthMethod
+        internal AuthMethod AuthMethod
         {
             get { return __pbn__AuthMethod ?? AuthMethod.AuthMethodNone; }
             set { __pbn__AuthMethod = value; }
         }
-        public bool ShouldSerializeAuthMethod() => __pbn__AuthMethod != null;
-        public void ResetAuthMethod() => __pbn__AuthMethod = null;
+        internal bool ShouldSerializeAuthMethod() => __pbn__AuthMethod != null;
+        internal void ResetAuthMethod() => __pbn__AuthMethod = null;
         private AuthMethod? __pbn__AuthMethod;
 
         [global::ProtoBuf.ProtoMember(5, Name = @"auth_method_name")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string AuthMethodName
+        internal string AuthMethodName
         {
             get { return __pbn__AuthMethodName ?? ""; }
             set { __pbn__AuthMethodName = value; }
         }
-        public bool ShouldSerializeAuthMethodName() => __pbn__AuthMethodName != null;
-        public void ResetAuthMethodName() => __pbn__AuthMethodName = null;
+        internal bool ShouldSerializeAuthMethodName() => __pbn__AuthMethodName != null;
+        internal void ResetAuthMethodName() => __pbn__AuthMethodName = null;
         private string __pbn__AuthMethodName;
 
         [global::ProtoBuf.ProtoMember(3, Name = @"auth_data")]
-        public byte[] AuthData
+        internal byte[] AuthData
         {
             get { return __pbn__AuthData; }
             set { __pbn__AuthData = value; }
         }
-        public bool ShouldSerializeAuthData() => __pbn__AuthData != null;
-        public void ResetAuthData() => __pbn__AuthData = null;
+        internal bool ShouldSerializeAuthData() => __pbn__AuthData != null;
+        internal void ResetAuthData() => __pbn__AuthData = null;
         private byte[] __pbn__AuthData;
 
         [global::ProtoBuf.ProtoMember(4, Name = @"protocol_version")]
         [global::System.ComponentModel.DefaultValue(0)]
-        public int ProtocolVersion
+        internal int ProtocolVersion
         {
             get { return __pbn__ProtocolVersion ?? 0; }
             set { __pbn__ProtocolVersion = value; }
         }
-        public bool ShouldSerializeProtocolVersion() => __pbn__ProtocolVersion != null;
-        public void ResetProtocolVersion() => __pbn__ProtocolVersion = null;
+        internal bool ShouldSerializeProtocolVersion() => __pbn__ProtocolVersion != null;
+        internal void ResetProtocolVersion() => __pbn__ProtocolVersion = null;
         private int? __pbn__ProtocolVersion;
 
         [global::ProtoBuf.ProtoMember(6, Name = @"proxy_to_broker_url")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string ProxyToBrokerUrl
+        internal string ProxyToBrokerUrl
         {
             get { return __pbn__ProxyToBrokerUrl ?? ""; }
             set { __pbn__ProxyToBrokerUrl = value; }
         }
-        public bool ShouldSerializeProxyToBrokerUrl() => __pbn__ProxyToBrokerUrl != null;
-        public void ResetProxyToBrokerUrl() => __pbn__ProxyToBrokerUrl = null;
+        internal bool ShouldSerializeProxyToBrokerUrl() => __pbn__ProxyToBrokerUrl != null;
+        internal void ResetProxyToBrokerUrl() => __pbn__ProxyToBrokerUrl = null;
         private string __pbn__ProxyToBrokerUrl;
 
         [global::ProtoBuf.ProtoMember(7, Name = @"original_principal")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string OriginalPrincipal
+        internal string OriginalPrincipal
         {
             get { return __pbn__OriginalPrincipal ?? ""; }
             set { __pbn__OriginalPrincipal = value; }
         }
-        public bool ShouldSerializeOriginalPrincipal() => __pbn__OriginalPrincipal != null;
-        public void ResetOriginalPrincipal() => __pbn__OriginalPrincipal = null;
+        internal bool ShouldSerializeOriginalPrincipal() => __pbn__OriginalPrincipal != null;
+        internal void ResetOriginalPrincipal() => __pbn__OriginalPrincipal = null;
         private string __pbn__OriginalPrincipal;
 
         [global::ProtoBuf.ProtoMember(8, Name = @"original_auth_data")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string OriginalAuthData
+        internal string OriginalAuthData
         {
             get { return __pbn__OriginalAuthData ?? ""; }
             set { __pbn__OriginalAuthData = value; }
         }
-        public bool ShouldSerializeOriginalAuthData() => __pbn__OriginalAuthData != null;
-        public void ResetOriginalAuthData() => __pbn__OriginalAuthData = null;
+        internal bool ShouldSerializeOriginalAuthData() => __pbn__OriginalAuthData != null;
+        internal void ResetOriginalAuthData() => __pbn__OriginalAuthData = null;
         private string __pbn__OriginalAuthData;
 
         [global::ProtoBuf.ProtoMember(9, Name = @"original_auth_method")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string OriginalAuthMethod
+        internal string OriginalAuthMethod
         {
             get { return __pbn__OriginalAuthMethod ?? ""; }
             set { __pbn__OriginalAuthMethod = value; }
         }
-        public bool ShouldSerializeOriginalAuthMethod() => __pbn__OriginalAuthMethod != null;
-        public void ResetOriginalAuthMethod() => __pbn__OriginalAuthMethod = null;
+        internal bool ShouldSerializeOriginalAuthMethod() => __pbn__OriginalAuthMethod != null;
+        internal void ResetOriginalAuthMethod() => __pbn__OriginalAuthMethod = null;
         private string __pbn__OriginalAuthMethod;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandConnected : global::ProtoBuf.IExtensible
+    internal partial class CommandConnected : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"server_version", IsRequired = true)]
-        public string ServerVersion { get; set; }
+        internal string ServerVersion { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"protocol_version")]
         [global::System.ComponentModel.DefaultValue(0)]
-        public int ProtocolVersion
+        internal int ProtocolVersion
         {
             get { return __pbn__ProtocolVersion ?? 0; }
             set { __pbn__ProtocolVersion = value; }
         }
-        public bool ShouldSerializeProtocolVersion() => __pbn__ProtocolVersion != null;
-        public void ResetProtocolVersion() => __pbn__ProtocolVersion = null;
+        internal bool ShouldSerializeProtocolVersion() => __pbn__ProtocolVersion != null;
+        internal void ResetProtocolVersion() => __pbn__ProtocolVersion = null;
         private int? __pbn__ProtocolVersion;
 
         [global::ProtoBuf.ProtoMember(3, Name = @"max_message_size")]
-        public int MaxMessageSize
+        internal int MaxMessageSize
         {
             get { return __pbn__MaxMessageSize.GetValueOrDefault(); }
             set { __pbn__MaxMessageSize = value; }
         }
-        public bool ShouldSerializeMaxMessageSize() => __pbn__MaxMessageSize != null;
-        public void ResetMaxMessageSize() => __pbn__MaxMessageSize = null;
+        internal bool ShouldSerializeMaxMessageSize() => __pbn__MaxMessageSize != null;
+        internal void ResetMaxMessageSize() => __pbn__MaxMessageSize = null;
         private int? __pbn__MaxMessageSize;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandAuthResponse : global::ProtoBuf.IExtensible
+    internal partial class CommandAuthResponse : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
@@ -518,33 +518,33 @@ namespace pulsar.proto
 
         [global::ProtoBuf.ProtoMember(1, Name = @"client_version")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string ClientVersion
+        internal string ClientVersion
         {
             get { return __pbn__ClientVersion ?? ""; }
             set { __pbn__ClientVersion = value; }
         }
-        public bool ShouldSerializeClientVersion() => __pbn__ClientVersion != null;
-        public void ResetClientVersion() => __pbn__ClientVersion = null;
+        internal bool ShouldSerializeClientVersion() => __pbn__ClientVersion != null;
+        internal void ResetClientVersion() => __pbn__ClientVersion = null;
         private string __pbn__ClientVersion;
 
         [global::ProtoBuf.ProtoMember(2, Name = @"response")]
-        public AuthData Response { get; set; }
+        internal AuthData Response { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"protocol_version")]
         [global::System.ComponentModel.DefaultValue(0)]
-        public int ProtocolVersion
+        internal int ProtocolVersion
         {
             get { return __pbn__ProtocolVersion ?? 0; }
             set { __pbn__ProtocolVersion = value; }
         }
-        public bool ShouldSerializeProtocolVersion() => __pbn__ProtocolVersion != null;
-        public void ResetProtocolVersion() => __pbn__ProtocolVersion = null;
+        internal bool ShouldSerializeProtocolVersion() => __pbn__ProtocolVersion != null;
+        internal void ResetProtocolVersion() => __pbn__ProtocolVersion = null;
         private int? __pbn__ProtocolVersion;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandAuthChallenge : global::ProtoBuf.IExtensible
+    internal partial class CommandAuthChallenge : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
@@ -552,33 +552,33 @@ namespace pulsar.proto
 
         [global::ProtoBuf.ProtoMember(1, Name = @"server_version")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string ServerVersion
+        internal string ServerVersion
         {
             get { return __pbn__ServerVersion ?? ""; }
             set { __pbn__ServerVersion = value; }
         }
-        public bool ShouldSerializeServerVersion() => __pbn__ServerVersion != null;
-        public void ResetServerVersion() => __pbn__ServerVersion = null;
+        internal bool ShouldSerializeServerVersion() => __pbn__ServerVersion != null;
+        internal void ResetServerVersion() => __pbn__ServerVersion = null;
         private string __pbn__ServerVersion;
 
         [global::ProtoBuf.ProtoMember(2, Name = @"challenge")]
-        public AuthData Challenge { get; set; }
+        internal AuthData Challenge { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"protocol_version")]
         [global::System.ComponentModel.DefaultValue(0)]
-        public int ProtocolVersion
+        internal int ProtocolVersion
         {
             get { return __pbn__ProtocolVersion ?? 0; }
             set { __pbn__ProtocolVersion = value; }
         }
-        public bool ShouldSerializeProtocolVersion() => __pbn__ProtocolVersion != null;
-        public void ResetProtocolVersion() => __pbn__ProtocolVersion = null;
+        internal bool ShouldSerializeProtocolVersion() => __pbn__ProtocolVersion != null;
+        internal void ResetProtocolVersion() => __pbn__ProtocolVersion = null;
         private int? __pbn__ProtocolVersion;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class AuthData : global::ProtoBuf.IExtensible
+    internal partial class AuthData : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
@@ -586,123 +586,123 @@ namespace pulsar.proto
 
         [global::ProtoBuf.ProtoMember(1, Name = @"auth_method_name")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string AuthMethodName
+        internal string AuthMethodName
         {
             get { return __pbn__AuthMethodName ?? ""; }
             set { __pbn__AuthMethodName = value; }
         }
-        public bool ShouldSerializeAuthMethodName() => __pbn__AuthMethodName != null;
-        public void ResetAuthMethodName() => __pbn__AuthMethodName = null;
+        internal bool ShouldSerializeAuthMethodName() => __pbn__AuthMethodName != null;
+        internal void ResetAuthMethodName() => __pbn__AuthMethodName = null;
         private string __pbn__AuthMethodName;
 
         [global::ProtoBuf.ProtoMember(2)]
-        public byte[] auth_data
+        internal byte[] auth_data
         {
             get { return __pbn__auth_data; }
             set { __pbn__auth_data = value; }
         }
-        public bool ShouldSerializeauth_data() => __pbn__auth_data != null;
-        public void Resetauth_data() => __pbn__auth_data = null;
+        internal bool ShouldSerializeauth_data() => __pbn__auth_data != null;
+        internal void Resetauth_data() => __pbn__auth_data = null;
         private byte[] __pbn__auth_data;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandSubscribe : global::ProtoBuf.IExtensible
+    internal partial class CommandSubscribe : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"topic", IsRequired = true)]
-        public string Topic { get; set; }
+        internal string Topic { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"subscription", IsRequired = true)]
-        public string Subscription { get; set; }
+        internal string Subscription { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, IsRequired = true)]
-        public SubType subType { get; set; }
+        internal SubType subType { get; set; }
 
         [global::ProtoBuf.ProtoMember(4, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(5, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(6, Name = @"consumer_name")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string ConsumerName
+        internal string ConsumerName
         {
             get { return __pbn__ConsumerName ?? ""; }
             set { __pbn__ConsumerName = value; }
         }
-        public bool ShouldSerializeConsumerName() => __pbn__ConsumerName != null;
-        public void ResetConsumerName() => __pbn__ConsumerName = null;
+        internal bool ShouldSerializeConsumerName() => __pbn__ConsumerName != null;
+        internal void ResetConsumerName() => __pbn__ConsumerName = null;
         private string __pbn__ConsumerName;
 
         [global::ProtoBuf.ProtoMember(7, Name = @"priority_level")]
-        public int PriorityLevel
+        internal int PriorityLevel
         {
             get { return __pbn__PriorityLevel.GetValueOrDefault(); }
             set { __pbn__PriorityLevel = value; }
         }
-        public bool ShouldSerializePriorityLevel() => __pbn__PriorityLevel != null;
-        public void ResetPriorityLevel() => __pbn__PriorityLevel = null;
+        internal bool ShouldSerializePriorityLevel() => __pbn__PriorityLevel != null;
+        internal void ResetPriorityLevel() => __pbn__PriorityLevel = null;
         private int? __pbn__PriorityLevel;
 
         [global::ProtoBuf.ProtoMember(8, Name = @"durable")]
         [global::System.ComponentModel.DefaultValue(true)]
-        public bool Durable
+        internal bool Durable
         {
             get { return __pbn__Durable ?? true; }
             set { __pbn__Durable = value; }
         }
-        public bool ShouldSerializeDurable() => __pbn__Durable != null;
-        public void ResetDurable() => __pbn__Durable = null;
+        internal bool ShouldSerializeDurable() => __pbn__Durable != null;
+        internal void ResetDurable() => __pbn__Durable = null;
         private bool? __pbn__Durable;
 
         [global::ProtoBuf.ProtoMember(9, Name = @"start_message_id")]
-        public MessageIdData StartMessageId { get; set; }
+        internal MessageIdData StartMessageId { get; set; }
 
         [global::ProtoBuf.ProtoMember(10, Name = @"metadata")]
-        public global::System.Collections.Generic.List<KeyValue> Metadatas { get; } = new global::System.Collections.Generic.List<KeyValue>();
+        internal global::System.Collections.Generic.List<KeyValue> Metadatas { get; } = new global::System.Collections.Generic.List<KeyValue>();
 
         [global::ProtoBuf.ProtoMember(11, Name = @"read_compacted")]
-        public bool ReadCompacted
+        internal bool ReadCompacted
         {
             get { return __pbn__ReadCompacted.GetValueOrDefault(); }
             set { __pbn__ReadCompacted = value; }
         }
-        public bool ShouldSerializeReadCompacted() => __pbn__ReadCompacted != null;
-        public void ResetReadCompacted() => __pbn__ReadCompacted = null;
+        internal bool ShouldSerializeReadCompacted() => __pbn__ReadCompacted != null;
+        internal void ResetReadCompacted() => __pbn__ReadCompacted = null;
         private bool? __pbn__ReadCompacted;
 
         [global::ProtoBuf.ProtoMember(12, Name = @"schema")]
-        public Schema Schema { get; set; }
+        internal Schema Schema { get; set; }
 
         [global::ProtoBuf.ProtoMember(13)]
         [global::System.ComponentModel.DefaultValue(InitialPosition.Latest)]
-        public InitialPosition initialPosition
+        internal InitialPosition initialPosition
         {
             get { return __pbn__initialPosition ?? InitialPosition.Latest; }
             set { __pbn__initialPosition = value; }
         }
-        public bool ShouldSerializeinitialPosition() => __pbn__initialPosition != null;
-        public void ResetinitialPosition() => __pbn__initialPosition = null;
+        internal bool ShouldSerializeinitialPosition() => __pbn__initialPosition != null;
+        internal void ResetinitialPosition() => __pbn__initialPosition = null;
         private InitialPosition? __pbn__initialPosition;
 
         [global::ProtoBuf.ProtoMember(14, Name = @"replicate_subscription_state")]
-        public bool ReplicateSubscriptionState
+        internal bool ReplicateSubscriptionState
         {
             get { return __pbn__ReplicateSubscriptionState.GetValueOrDefault(); }
             set { __pbn__ReplicateSubscriptionState = value; }
         }
-        public bool ShouldSerializeReplicateSubscriptionState() => __pbn__ReplicateSubscriptionState != null;
-        public void ResetReplicateSubscriptionState() => __pbn__ReplicateSubscriptionState = null;
+        internal bool ShouldSerializeReplicateSubscriptionState() => __pbn__ReplicateSubscriptionState != null;
+        internal void ResetReplicateSubscriptionState() => __pbn__ReplicateSubscriptionState = null;
         private bool? __pbn__ReplicateSubscriptionState;
 
         [global::ProtoBuf.ProtoContract()]
-        public enum SubType
+        internal enum SubType
         {
             Exclusive = 0,
             Shared = 1,
@@ -712,7 +712,7 @@ namespace pulsar.proto
         }
 
         [global::ProtoBuf.ProtoContract()]
-        public enum InitialPosition
+        internal enum InitialPosition
         {
             Latest = 0,
             Earliest = 1,
@@ -721,108 +721,108 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandPartitionedTopicMetadata : global::ProtoBuf.IExtensible
+    internal partial class CommandPartitionedTopicMetadata : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"topic", IsRequired = true)]
-        public string Topic { get; set; }
+        internal string Topic { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"original_principal")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string OriginalPrincipal
+        internal string OriginalPrincipal
         {
             get { return __pbn__OriginalPrincipal ?? ""; }
             set { __pbn__OriginalPrincipal = value; }
         }
-        public bool ShouldSerializeOriginalPrincipal() => __pbn__OriginalPrincipal != null;
-        public void ResetOriginalPrincipal() => __pbn__OriginalPrincipal = null;
+        internal bool ShouldSerializeOriginalPrincipal() => __pbn__OriginalPrincipal != null;
+        internal void ResetOriginalPrincipal() => __pbn__OriginalPrincipal = null;
         private string __pbn__OriginalPrincipal;
 
         [global::ProtoBuf.ProtoMember(4, Name = @"original_auth_data")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string OriginalAuthData
+        internal string OriginalAuthData
         {
             get { return __pbn__OriginalAuthData ?? ""; }
             set { __pbn__OriginalAuthData = value; }
         }
-        public bool ShouldSerializeOriginalAuthData() => __pbn__OriginalAuthData != null;
-        public void ResetOriginalAuthData() => __pbn__OriginalAuthData = null;
+        internal bool ShouldSerializeOriginalAuthData() => __pbn__OriginalAuthData != null;
+        internal void ResetOriginalAuthData() => __pbn__OriginalAuthData = null;
         private string __pbn__OriginalAuthData;
 
         [global::ProtoBuf.ProtoMember(5, Name = @"original_auth_method")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string OriginalAuthMethod
+        internal string OriginalAuthMethod
         {
             get { return __pbn__OriginalAuthMethod ?? ""; }
             set { __pbn__OriginalAuthMethod = value; }
         }
-        public bool ShouldSerializeOriginalAuthMethod() => __pbn__OriginalAuthMethod != null;
-        public void ResetOriginalAuthMethod() => __pbn__OriginalAuthMethod = null;
+        internal bool ShouldSerializeOriginalAuthMethod() => __pbn__OriginalAuthMethod != null;
+        internal void ResetOriginalAuthMethod() => __pbn__OriginalAuthMethod = null;
         private string __pbn__OriginalAuthMethod;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandPartitionedTopicMetadataResponse : global::ProtoBuf.IExtensible
+    internal partial class CommandPartitionedTopicMetadataResponse : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"partitions")]
-        public uint Partitions
+        internal uint Partitions
         {
             get { return __pbn__Partitions.GetValueOrDefault(); }
             set { __pbn__Partitions = value; }
         }
-        public bool ShouldSerializePartitions() => __pbn__Partitions != null;
-        public void ResetPartitions() => __pbn__Partitions = null;
+        internal bool ShouldSerializePartitions() => __pbn__Partitions != null;
+        internal void ResetPartitions() => __pbn__Partitions = null;
         private uint? __pbn__Partitions;
 
         [global::ProtoBuf.ProtoMember(2, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"response")]
         [global::System.ComponentModel.DefaultValue(LookupType.Success)]
-        public LookupType Response
+        internal LookupType Response
         {
             get { return __pbn__Response ?? LookupType.Success; }
             set { __pbn__Response = value; }
         }
-        public bool ShouldSerializeResponse() => __pbn__Response != null;
-        public void ResetResponse() => __pbn__Response = null;
+        internal bool ShouldSerializeResponse() => __pbn__Response != null;
+        internal void ResetResponse() => __pbn__Response = null;
         private LookupType? __pbn__Response;
 
         [global::ProtoBuf.ProtoMember(4, Name = @"error")]
         [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
-        public ServerError Error
+        internal ServerError Error
         {
             get { return __pbn__Error ?? ServerError.UnknownError; }
             set { __pbn__Error = value; }
         }
-        public bool ShouldSerializeError() => __pbn__Error != null;
-        public void ResetError() => __pbn__Error = null;
+        internal bool ShouldSerializeError() => __pbn__Error != null;
+        internal void ResetError() => __pbn__Error = null;
         private ServerError? __pbn__Error;
 
         [global::ProtoBuf.ProtoMember(5, Name = @"message")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string Message
+        internal string Message
         {
             get { return __pbn__Message ?? ""; }
             set { __pbn__Message = value; }
         }
-        public bool ShouldSerializeMessage() => __pbn__Message != null;
-        public void ResetMessage() => __pbn__Message = null;
+        internal bool ShouldSerializeMessage() => __pbn__Message != null;
+        internal void ResetMessage() => __pbn__Message = null;
         private string __pbn__Message;
 
         [global::ProtoBuf.ProtoContract()]
-        public enum LookupType
+        internal enum LookupType
         {
             Success = 0,
             Failed = 1,
@@ -831,66 +831,66 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandLookupTopic : global::ProtoBuf.IExtensible
+    internal partial class CommandLookupTopic : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"topic", IsRequired = true)]
-        public string Topic { get; set; }
+        internal string Topic { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"authoritative")]
         [global::System.ComponentModel.DefaultValue(false)]
-        public bool Authoritative
+        internal bool Authoritative
         {
             get { return __pbn__Authoritative ?? false; }
             set { __pbn__Authoritative = value; }
         }
-        public bool ShouldSerializeAuthoritative() => __pbn__Authoritative != null;
-        public void ResetAuthoritative() => __pbn__Authoritative = null;
+        internal bool ShouldSerializeAuthoritative() => __pbn__Authoritative != null;
+        internal void ResetAuthoritative() => __pbn__Authoritative = null;
         private bool? __pbn__Authoritative;
 
         [global::ProtoBuf.ProtoMember(4, Name = @"original_principal")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string OriginalPrincipal
+        internal string OriginalPrincipal
         {
             get { return __pbn__OriginalPrincipal ?? ""; }
             set { __pbn__OriginalPrincipal = value; }
         }
-        public bool ShouldSerializeOriginalPrincipal() => __pbn__OriginalPrincipal != null;
-        public void ResetOriginalPrincipal() => __pbn__OriginalPrincipal = null;
+        internal bool ShouldSerializeOriginalPrincipal() => __pbn__OriginalPrincipal != null;
+        internal void ResetOriginalPrincipal() => __pbn__OriginalPrincipal = null;
         private string __pbn__OriginalPrincipal;
 
         [global::ProtoBuf.ProtoMember(5, Name = @"original_auth_data")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string OriginalAuthData
+        internal string OriginalAuthData
         {
             get { return __pbn__OriginalAuthData ?? ""; }
             set { __pbn__OriginalAuthData = value; }
         }
-        public bool ShouldSerializeOriginalAuthData() => __pbn__OriginalAuthData != null;
-        public void ResetOriginalAuthData() => __pbn__OriginalAuthData = null;
+        internal bool ShouldSerializeOriginalAuthData() => __pbn__OriginalAuthData != null;
+        internal void ResetOriginalAuthData() => __pbn__OriginalAuthData = null;
         private string __pbn__OriginalAuthData;
 
         [global::ProtoBuf.ProtoMember(6, Name = @"original_auth_method")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string OriginalAuthMethod
+        internal string OriginalAuthMethod
         {
             get { return __pbn__OriginalAuthMethod ?? ""; }
             set { __pbn__OriginalAuthMethod = value; }
         }
-        public bool ShouldSerializeOriginalAuthMethod() => __pbn__OriginalAuthMethod != null;
-        public void ResetOriginalAuthMethod() => __pbn__OriginalAuthMethod = null;
+        internal bool ShouldSerializeOriginalAuthMethod() => __pbn__OriginalAuthMethod != null;
+        internal void ResetOriginalAuthMethod() => __pbn__OriginalAuthMethod = null;
         private string __pbn__OriginalAuthMethod;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandLookupTopicResponse : global::ProtoBuf.IExtensible
+    internal partial class CommandLookupTopicResponse : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
@@ -898,86 +898,86 @@ namespace pulsar.proto
 
         [global::ProtoBuf.ProtoMember(1)]
         [global::System.ComponentModel.DefaultValue("")]
-        public string brokerServiceUrl
+        internal string brokerServiceUrl
         {
             get { return __pbn__brokerServiceUrl ?? ""; }
             set { __pbn__brokerServiceUrl = value; }
         }
-        public bool ShouldSerializebrokerServiceUrl() => __pbn__brokerServiceUrl != null;
-        public void ResetbrokerServiceUrl() => __pbn__brokerServiceUrl = null;
+        internal bool ShouldSerializebrokerServiceUrl() => __pbn__brokerServiceUrl != null;
+        internal void ResetbrokerServiceUrl() => __pbn__brokerServiceUrl = null;
         private string __pbn__brokerServiceUrl;
 
         [global::ProtoBuf.ProtoMember(2)]
         [global::System.ComponentModel.DefaultValue("")]
-        public string brokerServiceUrlTls
+        internal string brokerServiceUrlTls
         {
             get { return __pbn__brokerServiceUrlTls ?? ""; }
             set { __pbn__brokerServiceUrlTls = value; }
         }
-        public bool ShouldSerializebrokerServiceUrlTls() => __pbn__brokerServiceUrlTls != null;
-        public void ResetbrokerServiceUrlTls() => __pbn__brokerServiceUrlTls = null;
+        internal bool ShouldSerializebrokerServiceUrlTls() => __pbn__brokerServiceUrlTls != null;
+        internal void ResetbrokerServiceUrlTls() => __pbn__brokerServiceUrlTls = null;
         private string __pbn__brokerServiceUrlTls;
 
         [global::ProtoBuf.ProtoMember(3, Name = @"response")]
         [global::System.ComponentModel.DefaultValue(LookupType.Redirect)]
-        public LookupType Response
+        internal LookupType Response
         {
             get { return __pbn__Response ?? LookupType.Redirect; }
             set { __pbn__Response = value; }
         }
-        public bool ShouldSerializeResponse() => __pbn__Response != null;
-        public void ResetResponse() => __pbn__Response = null;
+        internal bool ShouldSerializeResponse() => __pbn__Response != null;
+        internal void ResetResponse() => __pbn__Response = null;
         private LookupType? __pbn__Response;
 
         [global::ProtoBuf.ProtoMember(4, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(5, Name = @"authoritative")]
         [global::System.ComponentModel.DefaultValue(false)]
-        public bool Authoritative
+        internal bool Authoritative
         {
             get { return __pbn__Authoritative ?? false; }
             set { __pbn__Authoritative = value; }
         }
-        public bool ShouldSerializeAuthoritative() => __pbn__Authoritative != null;
-        public void ResetAuthoritative() => __pbn__Authoritative = null;
+        internal bool ShouldSerializeAuthoritative() => __pbn__Authoritative != null;
+        internal void ResetAuthoritative() => __pbn__Authoritative = null;
         private bool? __pbn__Authoritative;
 
         [global::ProtoBuf.ProtoMember(6, Name = @"error")]
         [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
-        public ServerError Error
+        internal ServerError Error
         {
             get { return __pbn__Error ?? ServerError.UnknownError; }
             set { __pbn__Error = value; }
         }
-        public bool ShouldSerializeError() => __pbn__Error != null;
-        public void ResetError() => __pbn__Error = null;
+        internal bool ShouldSerializeError() => __pbn__Error != null;
+        internal void ResetError() => __pbn__Error = null;
         private ServerError? __pbn__Error;
 
         [global::ProtoBuf.ProtoMember(7, Name = @"message")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string Message
+        internal string Message
         {
             get { return __pbn__Message ?? ""; }
             set { __pbn__Message = value; }
         }
-        public bool ShouldSerializeMessage() => __pbn__Message != null;
-        public void ResetMessage() => __pbn__Message = null;
+        internal bool ShouldSerializeMessage() => __pbn__Message != null;
+        internal void ResetMessage() => __pbn__Message = null;
         private string __pbn__Message;
 
         [global::ProtoBuf.ProtoMember(8, Name = @"proxy_through_service_url")]
         [global::System.ComponentModel.DefaultValue(false)]
-        public bool ProxyThroughServiceUrl
+        internal bool ProxyThroughServiceUrl
         {
             get { return __pbn__ProxyThroughServiceUrl ?? false; }
             set { __pbn__ProxyThroughServiceUrl = value; }
         }
-        public bool ShouldSerializeProxyThroughServiceUrl() => __pbn__ProxyThroughServiceUrl != null;
-        public void ResetProxyThroughServiceUrl() => __pbn__ProxyThroughServiceUrl = null;
+        internal bool ShouldSerializeProxyThroughServiceUrl() => __pbn__ProxyThroughServiceUrl != null;
+        internal void ResetProxyThroughServiceUrl() => __pbn__ProxyThroughServiceUrl = null;
         private bool? __pbn__ProxyThroughServiceUrl;
 
         [global::ProtoBuf.ProtoContract()]
-        public enum LookupType
+        internal enum LookupType
         {
             Redirect = 0,
             Connect = 1,
@@ -987,181 +987,181 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandProducer : global::ProtoBuf.IExtensible
+    internal partial class CommandProducer : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"topic", IsRequired = true)]
-        public string Topic { get; set; }
+        internal string Topic { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"producer_id", IsRequired = true)]
-        public ulong ProducerId { get; set; }
+        internal ulong ProducerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(4, Name = @"producer_name")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string ProducerName
+        internal string ProducerName
         {
             get { return __pbn__ProducerName ?? ""; }
             set { __pbn__ProducerName = value; }
         }
-        public bool ShouldSerializeProducerName() => __pbn__ProducerName != null;
-        public void ResetProducerName() => __pbn__ProducerName = null;
+        internal bool ShouldSerializeProducerName() => __pbn__ProducerName != null;
+        internal void ResetProducerName() => __pbn__ProducerName = null;
         private string __pbn__ProducerName;
 
         [global::ProtoBuf.ProtoMember(5, Name = @"encrypted")]
         [global::System.ComponentModel.DefaultValue(false)]
-        public bool Encrypted
+        internal bool Encrypted
         {
             get { return __pbn__Encrypted ?? false; }
             set { __pbn__Encrypted = value; }
         }
-        public bool ShouldSerializeEncrypted() => __pbn__Encrypted != null;
-        public void ResetEncrypted() => __pbn__Encrypted = null;
+        internal bool ShouldSerializeEncrypted() => __pbn__Encrypted != null;
+        internal void ResetEncrypted() => __pbn__Encrypted = null;
         private bool? __pbn__Encrypted;
 
         [global::ProtoBuf.ProtoMember(6, Name = @"metadata")]
-        public global::System.Collections.Generic.List<KeyValue> Metadatas { get; } = new global::System.Collections.Generic.List<KeyValue>();
+        internal global::System.Collections.Generic.List<KeyValue> Metadatas { get; } = new global::System.Collections.Generic.List<KeyValue>();
 
         [global::ProtoBuf.ProtoMember(7, Name = @"schema")]
-        public Schema Schema { get; set; }
+        internal Schema Schema { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandSend : global::ProtoBuf.IExtensible
+    internal partial class CommandSend : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"producer_id", IsRequired = true)]
-        public ulong ProducerId { get; set; }
+        internal ulong ProducerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"sequence_id", IsRequired = true)]
-        public ulong SequenceId { get; set; }
+        internal ulong SequenceId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"num_messages")]
         [global::System.ComponentModel.DefaultValue(1)]
-        public int NumMessages
+        internal int NumMessages
         {
             get { return __pbn__NumMessages ?? 1; }
             set { __pbn__NumMessages = value; }
         }
-        public bool ShouldSerializeNumMessages() => __pbn__NumMessages != null;
-        public void ResetNumMessages() => __pbn__NumMessages = null;
+        internal bool ShouldSerializeNumMessages() => __pbn__NumMessages != null;
+        internal void ResetNumMessages() => __pbn__NumMessages = null;
         private int? __pbn__NumMessages;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandSendReceipt : global::ProtoBuf.IExtensible
+    internal partial class CommandSendReceipt : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"producer_id", IsRequired = true)]
-        public ulong ProducerId { get; set; }
+        internal ulong ProducerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"sequence_id", IsRequired = true)]
-        public ulong SequenceId { get; set; }
+        internal ulong SequenceId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"message_id")]
-        public MessageIdData MessageId { get; set; }
+        internal MessageIdData MessageId { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandSendError : global::ProtoBuf.IExtensible
+    internal partial class CommandSendError : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"producer_id", IsRequired = true)]
-        public ulong ProducerId { get; set; }
+        internal ulong ProducerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"sequence_id", IsRequired = true)]
-        public ulong SequenceId { get; set; }
+        internal ulong SequenceId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"error", IsRequired = true)]
-        public ServerError Error { get; set; }
+        internal ServerError Error { get; set; }
 
         [global::ProtoBuf.ProtoMember(4, Name = @"message", IsRequired = true)]
-        public string Message { get; set; }
+        internal string Message { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandMessage : global::ProtoBuf.IExtensible
+    internal partial class CommandMessage : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"message_id", IsRequired = true)]
-        public MessageIdData MessageId { get; set; }
+        internal MessageIdData MessageId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"redelivery_count")]
         [global::System.ComponentModel.DefaultValue(0)]
-        public uint RedeliveryCount
+        internal uint RedeliveryCount
         {
             get { return __pbn__RedeliveryCount ?? 0; }
             set { __pbn__RedeliveryCount = value; }
         }
-        public bool ShouldSerializeRedeliveryCount() => __pbn__RedeliveryCount != null;
-        public void ResetRedeliveryCount() => __pbn__RedeliveryCount = null;
+        internal bool ShouldSerializeRedeliveryCount() => __pbn__RedeliveryCount != null;
+        internal void ResetRedeliveryCount() => __pbn__RedeliveryCount = null;
         private uint? __pbn__RedeliveryCount;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandAck : global::ProtoBuf.IExtensible
+    internal partial class CommandAck : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, IsRequired = true)]
-        public AckType ack_type { get; set; }
+        internal AckType ack_type { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"message_id")]
-        public global::System.Collections.Generic.List<MessageIdData> MessageIds { get; } = new global::System.Collections.Generic.List<MessageIdData>();
+        internal global::System.Collections.Generic.List<MessageIdData> MessageIds { get; } = new global::System.Collections.Generic.List<MessageIdData>();
 
         [global::ProtoBuf.ProtoMember(4)]
         [global::System.ComponentModel.DefaultValue(ValidationError.UncompressedSizeCorruption)]
-        public ValidationError validation_error
+        internal ValidationError validation_error
         {
             get { return __pbn__validation_error ?? ValidationError.UncompressedSizeCorruption; }
             set { __pbn__validation_error = value; }
         }
-        public bool ShouldSerializevalidation_error() => __pbn__validation_error != null;
-        public void Resetvalidation_error() => __pbn__validation_error = null;
+        internal bool ShouldSerializevalidation_error() => __pbn__validation_error != null;
+        internal void Resetvalidation_error() => __pbn__validation_error = null;
         private ValidationError? __pbn__validation_error;
 
         [global::ProtoBuf.ProtoMember(5, Name = @"properties")]
-        public global::System.Collections.Generic.List<KeyLongValue> Properties { get; } = new global::System.Collections.Generic.List<KeyLongValue>();
+        internal global::System.Collections.Generic.List<KeyLongValue> Properties { get; } = new global::System.Collections.Generic.List<KeyLongValue>();
 
         [global::ProtoBuf.ProtoContract()]
-        public enum AckType
+        internal enum AckType
         {
             Individual = 0,
             Cumulative = 1,
         }
 
         [global::ProtoBuf.ProtoContract()]
-        public enum ValidationError
+        internal enum ValidationError
         {
             UncompressedSizeCorruption = 0,
             DecompressionError = 1,
@@ -1173,214 +1173,214 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandActiveConsumerChange : global::ProtoBuf.IExtensible
+    internal partial class CommandActiveConsumerChange : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"is_active")]
         [global::System.ComponentModel.DefaultValue(false)]
-        public bool IsActive
+        internal bool IsActive
         {
             get { return __pbn__IsActive ?? false; }
             set { __pbn__IsActive = value; }
         }
-        public bool ShouldSerializeIsActive() => __pbn__IsActive != null;
-        public void ResetIsActive() => __pbn__IsActive = null;
+        internal bool ShouldSerializeIsActive() => __pbn__IsActive != null;
+        internal void ResetIsActive() => __pbn__IsActive = null;
         private bool? __pbn__IsActive;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandFlow : global::ProtoBuf.IExtensible
+    internal partial class CommandFlow : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, IsRequired = true)]
-        public uint messagePermits { get; set; }
+        internal uint messagePermits { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandUnsubscribe : global::ProtoBuf.IExtensible
+    internal partial class CommandUnsubscribe : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandSeek : global::ProtoBuf.IExtensible
+    internal partial class CommandSeek : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"message_id")]
-        public MessageIdData MessageId { get; set; }
+        internal MessageIdData MessageId { get; set; }
 
         [global::ProtoBuf.ProtoMember(4, Name = @"message_publish_time")]
-        public ulong MessagePublishTime
+        internal ulong MessagePublishTime
         {
             get { return __pbn__MessagePublishTime.GetValueOrDefault(); }
             set { __pbn__MessagePublishTime = value; }
         }
-        public bool ShouldSerializeMessagePublishTime() => __pbn__MessagePublishTime != null;
-        public void ResetMessagePublishTime() => __pbn__MessagePublishTime = null;
+        internal bool ShouldSerializeMessagePublishTime() => __pbn__MessagePublishTime != null;
+        internal void ResetMessagePublishTime() => __pbn__MessagePublishTime = null;
         private ulong? __pbn__MessagePublishTime;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandReachedEndOfTopic : global::ProtoBuf.IExtensible
+    internal partial class CommandReachedEndOfTopic : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandCloseProducer : global::ProtoBuf.IExtensible
+    internal partial class CommandCloseProducer : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"producer_id", IsRequired = true)]
-        public ulong ProducerId { get; set; }
+        internal ulong ProducerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandCloseConsumer : global::ProtoBuf.IExtensible
+    internal partial class CommandCloseConsumer : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandRedeliverUnacknowledgedMessages : global::ProtoBuf.IExtensible
+    internal partial class CommandRedeliverUnacknowledgedMessages : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"message_ids")]
-        public global::System.Collections.Generic.List<MessageIdData> MessageIds { get; } = new global::System.Collections.Generic.List<MessageIdData>();
+        internal global::System.Collections.Generic.List<MessageIdData> MessageIds { get; } = new global::System.Collections.Generic.List<MessageIdData>();
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandSuccess : global::ProtoBuf.IExtensible
+    internal partial class CommandSuccess : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"schema")]
-        public Schema Schema { get; set; }
+        internal Schema Schema { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandProducerSuccess : global::ProtoBuf.IExtensible
+    internal partial class CommandProducerSuccess : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"producer_name", IsRequired = true)]
-        public string ProducerName { get; set; }
+        internal string ProducerName { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"last_sequence_id")]
         [global::System.ComponentModel.DefaultValue(-1)]
-        public long LastSequenceId
+        internal long LastSequenceId
         {
             get { return __pbn__LastSequenceId ?? -1; }
             set { __pbn__LastSequenceId = value; }
         }
-        public bool ShouldSerializeLastSequenceId() => __pbn__LastSequenceId != null;
-        public void ResetLastSequenceId() => __pbn__LastSequenceId = null;
+        internal bool ShouldSerializeLastSequenceId() => __pbn__LastSequenceId != null;
+        internal void ResetLastSequenceId() => __pbn__LastSequenceId = null;
         private long? __pbn__LastSequenceId;
 
         [global::ProtoBuf.ProtoMember(4, Name = @"schema_version")]
-        public byte[] SchemaVersion
+        internal byte[] SchemaVersion
         {
             get { return __pbn__SchemaVersion; }
             set { __pbn__SchemaVersion = value; }
         }
-        public bool ShouldSerializeSchemaVersion() => __pbn__SchemaVersion != null;
-        public void ResetSchemaVersion() => __pbn__SchemaVersion = null;
+        internal bool ShouldSerializeSchemaVersion() => __pbn__SchemaVersion != null;
+        internal void ResetSchemaVersion() => __pbn__SchemaVersion = null;
         private byte[] __pbn__SchemaVersion;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandError : global::ProtoBuf.IExtensible
+    internal partial class CommandError : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"error", IsRequired = true)]
-        public ServerError Error { get; set; }
+        internal ServerError Error { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"message", IsRequired = true)]
-        public string Message { get; set; }
+        internal string Message { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandPing : global::ProtoBuf.IExtensible
+    internal partial class CommandPing : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
@@ -1389,7 +1389,7 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandPong : global::ProtoBuf.IExtensible
+    internal partial class CommandPong : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
@@ -1398,234 +1398,234 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandConsumerStats : global::ProtoBuf.IExtensible
+    internal partial class CommandConsumerStats : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(4, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandConsumerStatsResponse : global::ProtoBuf.IExtensible
+    internal partial class CommandConsumerStatsResponse : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"error_code")]
         [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
-        public ServerError ErrorCode
+        internal ServerError ErrorCode
         {
             get { return __pbn__ErrorCode ?? ServerError.UnknownError; }
             set { __pbn__ErrorCode = value; }
         }
-        public bool ShouldSerializeErrorCode() => __pbn__ErrorCode != null;
-        public void ResetErrorCode() => __pbn__ErrorCode = null;
+        internal bool ShouldSerializeErrorCode() => __pbn__ErrorCode != null;
+        internal void ResetErrorCode() => __pbn__ErrorCode = null;
         private ServerError? __pbn__ErrorCode;
 
         [global::ProtoBuf.ProtoMember(3, Name = @"error_message")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string ErrorMessage
+        internal string ErrorMessage
         {
             get { return __pbn__ErrorMessage ?? ""; }
             set { __pbn__ErrorMessage = value; }
         }
-        public bool ShouldSerializeErrorMessage() => __pbn__ErrorMessage != null;
-        public void ResetErrorMessage() => __pbn__ErrorMessage = null;
+        internal bool ShouldSerializeErrorMessage() => __pbn__ErrorMessage != null;
+        internal void ResetErrorMessage() => __pbn__ErrorMessage = null;
         private string __pbn__ErrorMessage;
 
         [global::ProtoBuf.ProtoMember(4)]
-        public double msgRateOut
+        internal double msgRateOut
         {
             get { return __pbn__msgRateOut.GetValueOrDefault(); }
             set { __pbn__msgRateOut = value; }
         }
-        public bool ShouldSerializemsgRateOut() => __pbn__msgRateOut != null;
-        public void ResetmsgRateOut() => __pbn__msgRateOut = null;
+        internal bool ShouldSerializemsgRateOut() => __pbn__msgRateOut != null;
+        internal void ResetmsgRateOut() => __pbn__msgRateOut = null;
         private double? __pbn__msgRateOut;
 
         [global::ProtoBuf.ProtoMember(5)]
-        public double msgThroughputOut
+        internal double msgThroughputOut
         {
             get { return __pbn__msgThroughputOut.GetValueOrDefault(); }
             set { __pbn__msgThroughputOut = value; }
         }
-        public bool ShouldSerializemsgThroughputOut() => __pbn__msgThroughputOut != null;
-        public void ResetmsgThroughputOut() => __pbn__msgThroughputOut = null;
+        internal bool ShouldSerializemsgThroughputOut() => __pbn__msgThroughputOut != null;
+        internal void ResetmsgThroughputOut() => __pbn__msgThroughputOut = null;
         private double? __pbn__msgThroughputOut;
 
         [global::ProtoBuf.ProtoMember(6)]
-        public double msgRateRedeliver
+        internal double msgRateRedeliver
         {
             get { return __pbn__msgRateRedeliver.GetValueOrDefault(); }
             set { __pbn__msgRateRedeliver = value; }
         }
-        public bool ShouldSerializemsgRateRedeliver() => __pbn__msgRateRedeliver != null;
-        public void ResetmsgRateRedeliver() => __pbn__msgRateRedeliver = null;
+        internal bool ShouldSerializemsgRateRedeliver() => __pbn__msgRateRedeliver != null;
+        internal void ResetmsgRateRedeliver() => __pbn__msgRateRedeliver = null;
         private double? __pbn__msgRateRedeliver;
 
         [global::ProtoBuf.ProtoMember(7)]
         [global::System.ComponentModel.DefaultValue("")]
-        public string consumerName
+        internal string consumerName
         {
             get { return __pbn__consumerName ?? ""; }
             set { __pbn__consumerName = value; }
         }
-        public bool ShouldSerializeconsumerName() => __pbn__consumerName != null;
-        public void ResetconsumerName() => __pbn__consumerName = null;
+        internal bool ShouldSerializeconsumerName() => __pbn__consumerName != null;
+        internal void ResetconsumerName() => __pbn__consumerName = null;
         private string __pbn__consumerName;
 
         [global::ProtoBuf.ProtoMember(8)]
-        public ulong availablePermits
+        internal ulong availablePermits
         {
             get { return __pbn__availablePermits.GetValueOrDefault(); }
             set { __pbn__availablePermits = value; }
         }
-        public bool ShouldSerializeavailablePermits() => __pbn__availablePermits != null;
-        public void ResetavailablePermits() => __pbn__availablePermits = null;
+        internal bool ShouldSerializeavailablePermits() => __pbn__availablePermits != null;
+        internal void ResetavailablePermits() => __pbn__availablePermits = null;
         private ulong? __pbn__availablePermits;
 
         [global::ProtoBuf.ProtoMember(9)]
-        public ulong unackedMessages
+        internal ulong unackedMessages
         {
             get { return __pbn__unackedMessages.GetValueOrDefault(); }
             set { __pbn__unackedMessages = value; }
         }
-        public bool ShouldSerializeunackedMessages() => __pbn__unackedMessages != null;
-        public void ResetunackedMessages() => __pbn__unackedMessages = null;
+        internal bool ShouldSerializeunackedMessages() => __pbn__unackedMessages != null;
+        internal void ResetunackedMessages() => __pbn__unackedMessages = null;
         private ulong? __pbn__unackedMessages;
 
         [global::ProtoBuf.ProtoMember(10)]
-        public bool blockedConsumerOnUnackedMsgs
+        internal bool blockedConsumerOnUnackedMsgs
         {
             get { return __pbn__blockedConsumerOnUnackedMsgs.GetValueOrDefault(); }
             set { __pbn__blockedConsumerOnUnackedMsgs = value; }
         }
-        public bool ShouldSerializeblockedConsumerOnUnackedMsgs() => __pbn__blockedConsumerOnUnackedMsgs != null;
-        public void ResetblockedConsumerOnUnackedMsgs() => __pbn__blockedConsumerOnUnackedMsgs = null;
+        internal bool ShouldSerializeblockedConsumerOnUnackedMsgs() => __pbn__blockedConsumerOnUnackedMsgs != null;
+        internal void ResetblockedConsumerOnUnackedMsgs() => __pbn__blockedConsumerOnUnackedMsgs = null;
         private bool? __pbn__blockedConsumerOnUnackedMsgs;
 
         [global::ProtoBuf.ProtoMember(11, Name = @"address")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string Address
+        internal string Address
         {
             get { return __pbn__Address ?? ""; }
             set { __pbn__Address = value; }
         }
-        public bool ShouldSerializeAddress() => __pbn__Address != null;
-        public void ResetAddress() => __pbn__Address = null;
+        internal bool ShouldSerializeAddress() => __pbn__Address != null;
+        internal void ResetAddress() => __pbn__Address = null;
         private string __pbn__Address;
 
         [global::ProtoBuf.ProtoMember(12)]
         [global::System.ComponentModel.DefaultValue("")]
-        public string connectedSince
+        internal string connectedSince
         {
             get { return __pbn__connectedSince ?? ""; }
             set { __pbn__connectedSince = value; }
         }
-        public bool ShouldSerializeconnectedSince() => __pbn__connectedSince != null;
-        public void ResetconnectedSince() => __pbn__connectedSince = null;
+        internal bool ShouldSerializeconnectedSince() => __pbn__connectedSince != null;
+        internal void ResetconnectedSince() => __pbn__connectedSince = null;
         private string __pbn__connectedSince;
 
         [global::ProtoBuf.ProtoMember(13, Name = @"type")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string Type
+        internal string Type
         {
             get { return __pbn__Type ?? ""; }
             set { __pbn__Type = value; }
         }
-        public bool ShouldSerializeType() => __pbn__Type != null;
-        public void ResetType() => __pbn__Type = null;
+        internal bool ShouldSerializeType() => __pbn__Type != null;
+        internal void ResetType() => __pbn__Type = null;
         private string __pbn__Type;
 
         [global::ProtoBuf.ProtoMember(14)]
-        public double msgRateExpired
+        internal double msgRateExpired
         {
             get { return __pbn__msgRateExpired.GetValueOrDefault(); }
             set { __pbn__msgRateExpired = value; }
         }
-        public bool ShouldSerializemsgRateExpired() => __pbn__msgRateExpired != null;
-        public void ResetmsgRateExpired() => __pbn__msgRateExpired = null;
+        internal bool ShouldSerializemsgRateExpired() => __pbn__msgRateExpired != null;
+        internal void ResetmsgRateExpired() => __pbn__msgRateExpired = null;
         private double? __pbn__msgRateExpired;
 
         [global::ProtoBuf.ProtoMember(15)]
-        public ulong msgBacklog
+        internal ulong msgBacklog
         {
             get { return __pbn__msgBacklog.GetValueOrDefault(); }
             set { __pbn__msgBacklog = value; }
         }
-        public bool ShouldSerializemsgBacklog() => __pbn__msgBacklog != null;
-        public void ResetmsgBacklog() => __pbn__msgBacklog = null;
+        internal bool ShouldSerializemsgBacklog() => __pbn__msgBacklog != null;
+        internal void ResetmsgBacklog() => __pbn__msgBacklog = null;
         private ulong? __pbn__msgBacklog;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandGetLastMessageId : global::ProtoBuf.IExtensible
+    internal partial class CommandGetLastMessageId : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"consumer_id", IsRequired = true)]
-        public ulong ConsumerId { get; set; }
+        internal ulong ConsumerId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandGetLastMessageIdResponse : global::ProtoBuf.IExtensible
+    internal partial class CommandGetLastMessageIdResponse : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"last_message_id", IsRequired = true)]
-        public MessageIdData LastMessageId { get; set; }
+        internal MessageIdData LastMessageId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandGetTopicsOfNamespace : global::ProtoBuf.IExtensible
+    internal partial class CommandGetTopicsOfNamespace : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"namespace", IsRequired = true)]
-        public string Namespace { get; set; }
+        internal string Namespace { get; set; }
 
         [global::ProtoBuf.ProtoMember(3)]
         [global::System.ComponentModel.DefaultValue(Mode.Persistent)]
-        public Mode mode
+        internal Mode mode
         {
             get { return __pbn__mode ?? Mode.Persistent; }
             set { __pbn__mode = value; }
         }
-        public bool ShouldSerializemode() => __pbn__mode != null;
-        public void Resetmode() => __pbn__mode = null;
+        internal bool ShouldSerializemode() => __pbn__mode != null;
+        internal void Resetmode() => __pbn__mode = null;
         private Mode? __pbn__mode;
 
         [global::ProtoBuf.ProtoContract()]
-        public enum Mode
+        internal enum Mode
         {
             [global::ProtoBuf.ProtoEnum(Name = @"PERSISTENT")]
             Persistent = 0,
@@ -1638,212 +1638,212 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandGetTopicsOfNamespaceResponse : global::ProtoBuf.IExtensible
+    internal partial class CommandGetTopicsOfNamespaceResponse : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"topics")]
-        public global::System.Collections.Generic.List<string> Topics { get; } = new global::System.Collections.Generic.List<string>();
+        internal global::System.Collections.Generic.List<string> Topics { get; } = new global::System.Collections.Generic.List<string>();
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandGetSchema : global::ProtoBuf.IExtensible
+    internal partial class CommandGetSchema : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"topic", IsRequired = true)]
-        public string Topic { get; set; }
+        internal string Topic { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"schema_version")]
-        public byte[] SchemaVersion
+        internal byte[] SchemaVersion
         {
             get { return __pbn__SchemaVersion; }
             set { __pbn__SchemaVersion = value; }
         }
-        public bool ShouldSerializeSchemaVersion() => __pbn__SchemaVersion != null;
-        public void ResetSchemaVersion() => __pbn__SchemaVersion = null;
+        internal bool ShouldSerializeSchemaVersion() => __pbn__SchemaVersion != null;
+        internal void ResetSchemaVersion() => __pbn__SchemaVersion = null;
         private byte[] __pbn__SchemaVersion;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class CommandGetSchemaResponse : global::ProtoBuf.IExtensible
+    internal partial class CommandGetSchemaResponse : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
-        public ulong RequestId { get; set; }
+        internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(2, Name = @"error_code")]
         [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
-        public ServerError ErrorCode
+        internal ServerError ErrorCode
         {
             get { return __pbn__ErrorCode ?? ServerError.UnknownError; }
             set { __pbn__ErrorCode = value; }
         }
-        public bool ShouldSerializeErrorCode() => __pbn__ErrorCode != null;
-        public void ResetErrorCode() => __pbn__ErrorCode = null;
+        internal bool ShouldSerializeErrorCode() => __pbn__ErrorCode != null;
+        internal void ResetErrorCode() => __pbn__ErrorCode = null;
         private ServerError? __pbn__ErrorCode;
 
         [global::ProtoBuf.ProtoMember(3, Name = @"error_message")]
         [global::System.ComponentModel.DefaultValue("")]
-        public string ErrorMessage
+        internal string ErrorMessage
         {
             get { return __pbn__ErrorMessage ?? ""; }
             set { __pbn__ErrorMessage = value; }
         }
-        public bool ShouldSerializeErrorMessage() => __pbn__ErrorMessage != null;
-        public void ResetErrorMessage() => __pbn__ErrorMessage = null;
+        internal bool ShouldSerializeErrorMessage() => __pbn__ErrorMessage != null;
+        internal void ResetErrorMessage() => __pbn__ErrorMessage = null;
         private string __pbn__ErrorMessage;
 
         [global::ProtoBuf.ProtoMember(4, Name = @"schema")]
-        public Schema Schema { get; set; }
+        internal Schema Schema { get; set; }
 
         [global::ProtoBuf.ProtoMember(5, Name = @"schema_version")]
-        public byte[] SchemaVersion
+        internal byte[] SchemaVersion
         {
             get { return __pbn__SchemaVersion; }
             set { __pbn__SchemaVersion = value; }
         }
-        public bool ShouldSerializeSchemaVersion() => __pbn__SchemaVersion != null;
-        public void ResetSchemaVersion() => __pbn__SchemaVersion = null;
+        internal bool ShouldSerializeSchemaVersion() => __pbn__SchemaVersion != null;
+        internal void ResetSchemaVersion() => __pbn__SchemaVersion = null;
         private byte[] __pbn__SchemaVersion;
 
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public partial class BaseCommand : global::ProtoBuf.IExtensible
+    internal partial class BaseCommand : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
         global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
             => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
 
         [global::ProtoBuf.ProtoMember(1, IsRequired = true)]
-        public Type type { get; set; } = Type.Connect;
+        internal Type type { get; set; } = Type.Connect;
 
         [global::ProtoBuf.ProtoMember(2, Name = @"connect")]
-        public CommandConnect Connect { get; set; }
+        internal CommandConnect Connect { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"connected")]
-        public CommandConnected Connected { get; set; }
+        internal CommandConnected Connected { get; set; }
 
         [global::ProtoBuf.ProtoMember(4, Name = @"subscribe")]
-        public CommandSubscribe Subscribe { get; set; }
+        internal CommandSubscribe Subscribe { get; set; }
 
         [global::ProtoBuf.ProtoMember(5, Name = @"producer")]
-        public CommandProducer Producer { get; set; }
+        internal CommandProducer Producer { get; set; }
 
         [global::ProtoBuf.ProtoMember(6, Name = @"send")]
-        public CommandSend Send { get; set; }
+        internal CommandSend Send { get; set; }
 
         [global::ProtoBuf.ProtoMember(7, Name = @"send_receipt")]
-        public CommandSendReceipt SendReceipt { get; set; }
+        internal CommandSendReceipt SendReceipt { get; set; }
 
         [global::ProtoBuf.ProtoMember(8, Name = @"send_error")]
-        public CommandSendError SendError { get; set; }
+        internal CommandSendError SendError { get; set; }
 
         [global::ProtoBuf.ProtoMember(9, Name = @"message")]
-        public CommandMessage Message { get; set; }
+        internal CommandMessage Message { get; set; }
 
         [global::ProtoBuf.ProtoMember(10, Name = @"ack")]
-        public CommandAck Ack { get; set; }
+        internal CommandAck Ack { get; set; }
 
         [global::ProtoBuf.ProtoMember(11, Name = @"flow")]
-        public CommandFlow Flow { get; set; }
+        internal CommandFlow Flow { get; set; }
 
         [global::ProtoBuf.ProtoMember(12, Name = @"unsubscribe")]
-        public CommandUnsubscribe Unsubscribe { get; set; }
+        internal CommandUnsubscribe Unsubscribe { get; set; }
 
         [global::ProtoBuf.ProtoMember(13, Name = @"success")]
-        public CommandSuccess Success { get; set; }
+        internal CommandSuccess Success { get; set; }
 
         [global::ProtoBuf.ProtoMember(14, Name = @"error")]
-        public CommandError Error { get; set; }
+        internal CommandError Error { get; set; }
 
         [global::ProtoBuf.ProtoMember(15, Name = @"close_producer")]
-        public CommandCloseProducer CloseProducer { get; set; }
+        internal CommandCloseProducer CloseProducer { get; set; }
 
         [global::ProtoBuf.ProtoMember(16, Name = @"close_consumer")]
-        public CommandCloseConsumer CloseConsumer { get; set; }
+        internal CommandCloseConsumer CloseConsumer { get; set; }
 
         [global::ProtoBuf.ProtoMember(17, Name = @"producer_success")]
-        public CommandProducerSuccess ProducerSuccess { get; set; }
+        internal CommandProducerSuccess ProducerSuccess { get; set; }
 
         [global::ProtoBuf.ProtoMember(18, Name = @"ping")]
-        public CommandPing Ping { get; set; }
+        internal CommandPing Ping { get; set; }
 
         [global::ProtoBuf.ProtoMember(19, Name = @"pong")]
-        public CommandPong Pong { get; set; }
+        internal CommandPong Pong { get; set; }
 
         [global::ProtoBuf.ProtoMember(20)]
-        public CommandRedeliverUnacknowledgedMessages redeliverUnacknowledgedMessages { get; set; }
+        internal CommandRedeliverUnacknowledgedMessages redeliverUnacknowledgedMessages { get; set; }
 
         [global::ProtoBuf.ProtoMember(21)]
-        public CommandPartitionedTopicMetadata partitionMetadata { get; set; }
+        internal CommandPartitionedTopicMetadata partitionMetadata { get; set; }
 
         [global::ProtoBuf.ProtoMember(22)]
-        public CommandPartitionedTopicMetadataResponse partitionMetadataResponse { get; set; }
+        internal CommandPartitionedTopicMetadataResponse partitionMetadataResponse { get; set; }
 
         [global::ProtoBuf.ProtoMember(23)]
-        public CommandLookupTopic lookupTopic { get; set; }
+        internal CommandLookupTopic lookupTopic { get; set; }
 
         [global::ProtoBuf.ProtoMember(24)]
-        public CommandLookupTopicResponse lookupTopicResponse { get; set; }
+        internal CommandLookupTopicResponse lookupTopicResponse { get; set; }
 
         [global::ProtoBuf.ProtoMember(25)]
-        public CommandConsumerStats consumerStats { get; set; }
+        internal CommandConsumerStats consumerStats { get; set; }
 
         [global::ProtoBuf.ProtoMember(26)]
-        public CommandConsumerStatsResponse consumerStatsResponse { get; set; }
+        internal CommandConsumerStatsResponse consumerStatsResponse { get; set; }
 
         [global::ProtoBuf.ProtoMember(27)]
-        public CommandReachedEndOfTopic reachedEndOfTopic { get; set; }
+        internal CommandReachedEndOfTopic reachedEndOfTopic { get; set; }
 
         [global::ProtoBuf.ProtoMember(28, Name = @"seek")]
-        public CommandSeek Seek { get; set; }
+        internal CommandSeek Seek { get; set; }
 
         [global::ProtoBuf.ProtoMember(29)]
-        public CommandGetLastMessageId getLastMessageId { get; set; }
+        internal CommandGetLastMessageId getLastMessageId { get; set; }
 
         [global::ProtoBuf.ProtoMember(30)]
-        public CommandGetLastMessageIdResponse getLastMessageIdResponse { get; set; }
+        internal CommandGetLastMessageIdResponse getLastMessageIdResponse { get; set; }
 
         [global::ProtoBuf.ProtoMember(31, Name = @"active_consumer_change")]
-        public CommandActiveConsumerChange ActiveConsumerChange { get; set; }
+        internal CommandActiveConsumerChange ActiveConsumerChange { get; set; }
 
         [global::ProtoBuf.ProtoMember(32)]
-        public CommandGetTopicsOfNamespace getTopicsOfNamespace { get; set; }
+        internal CommandGetTopicsOfNamespace getTopicsOfNamespace { get; set; }
 
         [global::ProtoBuf.ProtoMember(33)]
-        public CommandGetTopicsOfNamespaceResponse getTopicsOfNamespaceResponse { get; set; }
+        internal CommandGetTopicsOfNamespaceResponse getTopicsOfNamespaceResponse { get; set; }
 
         [global::ProtoBuf.ProtoMember(34)]
-        public CommandGetSchema getSchema { get; set; }
+        internal CommandGetSchema getSchema { get; set; }
 
         [global::ProtoBuf.ProtoMember(35)]
-        public CommandGetSchemaResponse getSchemaResponse { get; set; }
+        internal CommandGetSchemaResponse getSchemaResponse { get; set; }
 
         [global::ProtoBuf.ProtoMember(36)]
-        public CommandAuthChallenge authChallenge { get; set; }
+        internal CommandAuthChallenge authChallenge { get; set; }
 
         [global::ProtoBuf.ProtoMember(37)]
-        public CommandAuthResponse authResponse { get; set; }
+        internal CommandAuthResponse authResponse { get; set; }
 
         [global::ProtoBuf.ProtoContract()]
-        public enum Type
+        internal enum Type
         {
             [global::ProtoBuf.ProtoEnum(Name = @"CONNECT")]
             Connect = 2,
@@ -1922,7 +1922,7 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public enum CompressionType
+    internal enum CompressionType
     {
         [global::ProtoBuf.ProtoEnum(Name = @"NONE")]
         None = 0,
@@ -1937,7 +1937,7 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public enum ServerError
+    internal enum ServerError
     {
         UnknownError = 0,
         MetadataError = 1,
@@ -1962,7 +1962,7 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public enum AuthMethod
+    internal enum AuthMethod
     {
         AuthMethodNone = 0,
         AuthMethodYcaV1 = 1,
@@ -1970,7 +1970,7 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
-    public enum ProtocolVersion
+    internal enum ProtocolVersion
     {
         [global::ProtoBuf.ProtoEnum(Name = @"v0")]
         V0 = 0,

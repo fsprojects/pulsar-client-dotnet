@@ -23,6 +23,7 @@
     <Compile Include="Main.fs" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" />
     <ProjectReference Include="..\..\src\Pulsar.Client\Pulsar.Client.fsproj" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />

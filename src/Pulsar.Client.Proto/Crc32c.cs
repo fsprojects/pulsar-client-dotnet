@@ -10,7 +10,7 @@ using System.Security.Cryptography;
 
 namespace Pulsar.Client.Common
 {
-    public static class CRC32C
+    internal static class CRC32C
     {
         static readonly uint[] crc32_tab = {
             0x00000000, 0xf26b8303, 0xe13b70f7, 0x1350f3f4, 0xc79a971f, 0x35f1141c,
@@ -75,7 +75,7 @@ namespace Pulsar.Client.Common
         //    return crc ^ ~0U; //0xFFFFFFFF
         //}
 
-        public static uint Get(uint crc, byte[] buf, int size)
+        internal static uint Get(uint crc, byte[] buf, int size)
         {
             crc = crc ^ ~0U; //0xFFFFFFFF
             for (var i = 0; i < size; i++)
@@ -85,7 +85,7 @@ namespace Pulsar.Client.Common
         }
 
         // Custom version of original, replaced buf with stream
-        public static uint Get(uint crc, Stream str, int size)
+        internal static uint Get(uint crc, Stream str, int size)
         {
             crc = crc ^ ~0U; //0xFFFFFFFF
             while (size-- > 0)

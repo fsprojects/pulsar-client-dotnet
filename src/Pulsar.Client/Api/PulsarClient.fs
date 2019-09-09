@@ -137,7 +137,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             Log.Logger.LogDebug("CreateProducerAsync started")
             let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
             let removeProducer = fun producer -> mb.Post(RemoveProducer producer)
-            if (metadata.Partitions > 1u) then
+            if (metadata.Partitions > 0u) then
                 let! producer = Producer.Init(producerConfig, config, connectionPool, lookupSerivce, removeProducer)
                 producers.Add(producer) |> ignore
                 return producer

@@ -91,8 +91,7 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
 
                     Log.Logger.LogDebug("{0} Clear", prefix)
                     messageIdPartitionMap.Clear()
-                    timePartitions.Clear()
-                    fillTimePartions()
+                    timePartitions |> Seq.iter (fun partition -> partition.Clear())
                     return! loop (TrackerState())
 
                 | Stop ->
