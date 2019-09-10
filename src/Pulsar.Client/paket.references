@@ -5,3 +5,4 @@ Pipelines.Sockets.Unofficial
 Microsoft.IO.RecyclableMemoryStream
 Microsoft.Extensions.Logging.Abstractions
 protobuf-net
+NETStandard.Library
