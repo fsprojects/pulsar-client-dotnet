@@ -13,12 +13,12 @@ open System.Timers
 open System.IO
 open ProtoBuf
 
-type Producer private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                        lookup: BinaryLookupService, cleanup: Producer -> unit) as this =
+type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                                lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) as this =
     let producerId = Generators.getNextProducerId()
 
     let prefix = sprintf "producer(%u, %s)" %producerId producerConfig.ProducerName
-    let producerCreatedTsc = TaskCompletionSource<Producer>(TaskCreationOptions.RunContinuationsAsynchronously)
+    let producerCreatedTsc = TaskCompletionSource<ProducerImpl>(TaskCreationOptions.RunContinuationsAsynchronously)
 
     let pendingMessages = Queue<PendingMessage>()
     let batchItems = ResizeArray<BatchItem>()
@@ -397,33 +397,12 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
         else
             mb.PostAndAsyncReply(fun channel -> BeginSendMessage (message, channel))
 
-    member this.SendAsync (message: byte[]) =
-        task {
-            connectionHandler.CheckIfActive(prefix)
-            let! tcs = this.SendMessage message
-            return! tcs.Task
-        }
-
-    member this.SendAndForgetAsync (message: byte[]) =
-        task {
-            connectionHandler.CheckIfActive(prefix)
-            let! _ = this.SendMessage message
-            return ()
-        }
-
-    member this.CloseAsync() =
-        task {
-            connectionHandler.CheckIfActive(prefix)
-            let! result = mb.PostAndAsyncReply(ProducerMessage.Close)
-            return! result
-        }
-
     member private this.Mb with get(): MailboxProcessor<ProducerMessage> = mb
 
     member this.ProducerId with get() = producerId
 
     override this.Equals producer =
-        producerId = (producer :?> Producer).ProducerId
+        producerId = (producer :?> ProducerImpl).ProducerId
 
     override this.GetHashCode () = int producerId
 
@@ -434,8 +413,32 @@ type Producer private (producerConfig: ProducerConfiguration, clientConfig: Puls
        }
 
     static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                        lookup: BinaryLookupService, cleanup: Producer -> unit) =
+                        lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) =
         task {
-            let producer = new Producer(producerConfig, clientConfig, connectionPool, lookup, cleanup)
-            return! producer.InitInternal()
+            let producer = new ProducerImpl(producerConfig, clientConfig, connectionPool, lookup, cleanup)
+            let! result = producer.InitInternal()
+            return result :> IProducer
         }
+
+    interface IProducer with
+
+        member this.CloseAsync() =
+            task {
+                connectionHandler.CheckIfActive(prefix)
+                let! result = mb.PostAndAsyncReply(ProducerMessage.Close)
+                return! result
+            }
+
+        member this.SendAndForgetAsync (message: byte[]) =
+            task {
+                connectionHandler.CheckIfActive(prefix)
+                let! _ = this.SendMessage message
+                return ()
+            }
+
+        member this.SendAsync (message: byte[]) =
+            task {
+                connectionHandler.CheckIfActive(prefix)
+                let! tcs = this.SendMessage message
+                return! tcs.Task
+            }

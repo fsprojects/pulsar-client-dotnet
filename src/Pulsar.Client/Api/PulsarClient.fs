@@ -14,10 +14,10 @@ type PulsarClientState =
     | Closed
 
 type PulsarClientMessage =
-    | RemoveProducer of Producer
-    | RemoveConsumer of Consumer
-    | AddProducer of Producer
-    | AddConsumer of Consumer
+    | RemoveProducer of IProducer
+    | RemoveConsumer of IConsumer
+    | AddProducer of IProducer
+    | AddConsumer of IConsumer
     | Close of AsyncReplyChannel<Task>
     | Stop
 
@@ -25,8 +25,8 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
 
     let connectionPool = ConnectionPool(config)
     let lookupSerivce = BinaryLookupService(config, connectionPool)
-    let producers = HashSet<Producer>()
-    let consumers = HashSet<Consumer>()
+    let producers = HashSet<IProducer>()
+    let consumers = HashSet<IConsumer>()
     let mutable clientState = Active
 
     let tryStopMailbox() =
@@ -122,11 +122,11 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             let removeConsumer = fun consumer -> mb.Post(RemoveConsumer consumer)
             if (metadata.Partitions > 1u)
             then
-                let! consumer = Consumer.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
+                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
                 consumers.Add(consumer) |> ignore
                 return consumer
             else
-                let! consumer = Consumer.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
+                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
                 consumers.Add(consumer) |> ignore
                 return consumer
         }
@@ -138,11 +138,11 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
             let removeProducer = fun producer -> mb.Post(RemoveProducer producer)
             if (metadata.Partitions > 0u) then
-                let! producer = Producer.Init(producerConfig, config, connectionPool, lookupSerivce, removeProducer)
+                let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, lookupSerivce, removeProducer)
                 producers.Add(producer) |> ignore
                 return producer
             else
-                let! producer = Producer.Init(producerConfig, config, connectionPool, lookupSerivce, removeProducer)
+                let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, lookupSerivce, removeProducer)
                 producers.Add(producer) |> ignore
                 return producer
         }

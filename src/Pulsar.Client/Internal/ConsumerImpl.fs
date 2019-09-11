@@ -23,15 +23,15 @@ type ConsumerState = {
     WaitingChannel: AsyncReplyChannel<Message>
 }
 
-type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                        subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: Consumer -> unit) as this =
+type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                                subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: ConsumerImpl -> unit) as this =
 
     [<Literal>]
     let MAX_REDELIVER_UNACKNOWLEDGED = 1000
     let consumerId = Generators.getNextConsumerId()
     let incomingMessages = new Queue<Message>()
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
-    let subscribeTsc = TaskCompletionSource<Consumer>(TaskCreationOptions.RunContinuationsAsynchronously)
+    let subscribeTsc = TaskCompletionSource<ConsumerImpl>(TaskCreationOptions.RunContinuationsAsynchronously)
     let partitionIndex = -1
     let hasParentConsumer = false
     let prefix = sprintf "consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
@@ -429,57 +429,12 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
     )
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
 
-
-    member this.ReceiveAsync() =
-        task {
-            connectionHandler.CheckIfActive(prefix)
-            return! mb.PostAndAsyncReply(Receive)
-        }
-
-    member this.AcknowledgeAsync (msgId: MessageId) =
-        task {
-            connectionHandler.CheckIfActive(prefix)
-            let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Individual, channel))
-            if not success then
-                raise (ConnectionFailedOnSend "AcknowledgeAsync")
-        }
-
-    member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
-        task {
-            connectionHandler.CheckIfActive(prefix)
-            let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Cumulative, channel))
-            if not success then
-                raise (ConnectionFailedOnSend "AcknowledgeCumulativeAsync")
-        }
-
-    member this.RedeliverUnacknowledgedMessagesAsync () =
-        task {
-            connectionHandler.CheckIfActive(prefix)
-            do! mb.PostAndAsyncReply(RedeliverAllUnacknowledged)
-        }
-
-    member this.CloseAsync() =
-        task {
-            connectionHandler.CheckIfActive(prefix)
-            let! result = mb.PostAndAsyncReply(ConsumerMessage.Close)
-            return! result
-        }
-
-    member this.UnsubscribeAsync() =
-        task {
-            connectionHandler.CheckIfActive(prefix)
-            let! result = mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
-            return! result
-        }
-
-    member this.HasReachedEndOfTopic with get() = hasReachedEndOfTopic
-
     member private this.Mb with get(): MailboxProcessor<ConsumerMessage> = mb
 
     member this.ConsumerId with get() = consumerId
 
     override this.Equals consumer =
-        consumerId = (consumer :?> Consumer).ConsumerId
+        consumerId = (consumer :?> ConsumerImpl).ConsumerId
 
     override this.GetHashCode () = int consumerId
 
@@ -490,11 +445,58 @@ type Consumer private (consumerConfig: ConsumerConfiguration, clientConfig: Puls
         }
 
     static member Init(consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                        subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: Consumer -> unit) =
+                        subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: ConsumerImpl -> unit) =
         task {
-            let consumer = Consumer(consumerConfig, clientConfig, connectionPool, subscriptionMode, lookup, cleanup)
-            return! consumer.InitInternal()
+            let consumer = ConsumerImpl(consumerConfig, clientConfig, connectionPool, subscriptionMode, lookup, cleanup)
+            let! result = consumer.InitInternal()
+            return result :> IConsumer
         }
+
+    interface IConsumer with
+
+        member this.ReceiveAsync() =
+            task {
+                connectionHandler.CheckIfActive(prefix)
+                return! mb.PostAndAsyncReply(Receive)
+            }
+
+        member this.AcknowledgeAsync (msgId: MessageId) =
+            task {
+                connectionHandler.CheckIfActive(prefix)
+                let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Individual, channel))
+                if not success then
+                    raise (ConnectionFailedOnSend "AcknowledgeAsync")
+            }
+
+        member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
+            task {
+                connectionHandler.CheckIfActive(prefix)
+                let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Cumulative, channel))
+                if not success then
+                    raise (ConnectionFailedOnSend "AcknowledgeCumulativeAsync")
+            }
+
+        member this.RedeliverUnacknowledgedMessagesAsync () =
+            task {
+                connectionHandler.CheckIfActive(prefix)
+                do! mb.PostAndAsyncReply(RedeliverAllUnacknowledged)
+            }
+
+        member this.CloseAsync() =
+            task {
+                connectionHandler.CheckIfActive(prefix)
+                let! result = mb.PostAndAsyncReply(ConsumerMessage.Close)
+                return! result
+            }
+
+        member this.UnsubscribeAsync() =
+            task {
+                connectionHandler.CheckIfActive(prefix)
+                let! result = mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
+                return! result
+            }
+
+        member this.HasReachedEndOfTopic with get() = hasReachedEndOfTopic
 
 
 

@@ -35,6 +35,8 @@
     <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\Configuration.fs" />
+    <Compile Include="Api\IConsumer.fs" />
+    <Compile Include="Api\IProducer.fs" />
     <Compile Include="Internal\UnAckedMessageTracker.fs" />
     <Compile Include="Internal\Generators.fs" />
     <Compile Include="Internal\ServiceNameResolver.fs" />
@@ -43,8 +45,8 @@
     <Compile Include="Internal\BinaryLookupService.fs" />
     <Compile Include="Internal\ConnectionHandler.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTracker.fs" />
-    <Compile Include="Api\Consumer.fs" />
-    <Compile Include="Api\Producer.fs" />
+    <Compile Include="Internal\ConsumerImpl.fs" />
+    <Compile Include="Internal\ProducerImpl.fs" />
     <Compile Include="Api\PulsarClient.fs" />
     <Compile Include="Api\ConsumerBuilder.fs" />
     <Compile Include="Api\ProducerBuilder.fs" />

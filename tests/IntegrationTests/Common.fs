@@ -51,21 +51,21 @@ let getNewClient() =
         .ServiceUrl(pulsarAddress)
         .Build()
 
-let produceMessages (producer: Producer) number producerName =
+let produceMessages (producer: IProducer) number producerName =
     task {
         for i in [1..number] do
             let! _ = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
             ()
     }
 
-let fastProduceMessages (producer: Producer) number producerName =
+let fastProduceMessages (producer: IProducer) number producerName =
     task {
         for i in [1..number] do
             let! _ = producer.SendAndForgetAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
             ()
     }
 
-let createSendAndWaitTasks (producer: Producer) number producerName =
+let createSendAndWaitTasks (producer: IProducer) number producerName =
     let createTask taskNumber =
         let message = sprintf "Message #%i Sent from %s on %s" taskNumber producerName (DateTime.Now.ToLongTimeString())
         let messageBytes = Encoding.UTF8.GetBytes(message)
@@ -80,7 +80,7 @@ let getMessageNumber (msg: string) =
     let subString = msg.Substring(ind1+1, ind2 - ind1 - 2)
     int subString
 
-let consumeMessages (consumer: Consumer) number consumerName =
+let consumeMessages (consumer: IConsumer) number consumerName =
     task {
         for i in [1..number] do
             let! message = consumer.ReceiveAsync()
@@ -92,7 +92,7 @@ let consumeMessages (consumer: Consumer) number consumerName =
                 failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
     }
 
-let consumeAndVerifyMessages (consumer: Consumer) consumerName (expectedMessages : string[]) =
+let consumeAndVerifyMessages (consumer: IConsumer) consumerName (expectedMessages : string[]) =
     task {
         for i in [1..expectedMessages.Length] do
             let! message = consumer.ReceiveAsync()
