@@ -123,11 +123,11 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             if (metadata.Partitions > 1u)
             then
                 let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
-                consumers.Add(consumer) |> ignore
+                mb.Post(AddConsumer consumer)
                 return consumer
             else
                 let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
-                consumers.Add(consumer) |> ignore
+                mb.Post(AddConsumer consumer)
                 return consumer
         }
 
@@ -139,11 +139,11 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             let removeProducer = fun producer -> mb.Post(RemoveProducer producer)
             if (metadata.Partitions > 0u) then
                 let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, lookupSerivce, removeProducer)
-                producers.Add(producer) |> ignore
+                mb.Post(AddProducer producer)
                 return producer
             else
                 let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, lookupSerivce, removeProducer)
-                producers.Add(producer) |> ignore
+                mb.Post(AddProducer producer)
                 return producer
         }
 

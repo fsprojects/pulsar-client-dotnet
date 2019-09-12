@@ -116,7 +116,7 @@ let tests =
             let tasks = taskData |> Array.map fst
             let sentMessages = taskData |> Array.map snd
 
-            tasks |> Task.WaitAll
+            do! tasks |> Task.WhenAll |> Async.AwaitTask
             do! consumeAndVerifyMessages consumer "batch consumer" sentMessages |> Async.AwaitTask
 
             Log.Debug("Finished 'Batch get created from several tasks'")

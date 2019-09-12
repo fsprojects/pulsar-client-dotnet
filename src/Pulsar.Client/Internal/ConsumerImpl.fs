@@ -62,7 +62,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
     let unAckedMessageTracker =
         if consumerConfig.AckTimeout > TimeSpan.Zero then
             if consumerConfig.AckTimeoutTickTime > TimeSpan.Zero then
-                let tickDuration = if consumerConfig.AckTimeout > consumerConfig.AckTimeoutTickTime then consumerConfig.AckTimeoutTickTime else consumerConfig.AckTimeoutTickTime
+                let tickDuration = if consumerConfig.AckTimeout > consumerConfig.AckTimeoutTickTime then consumerConfig.AckTimeoutTickTime else consumerConfig.AckTimeout
                 UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, tickDuration, redeliverMessages) :> IUnAckedMessageTracker
             else
                 UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, consumerConfig.AckTimeout, redeliverMessages) :> IUnAckedMessageTracker

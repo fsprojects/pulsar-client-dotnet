@@ -72,7 +72,7 @@ let tests =
                             do! consumer.AcknowledgeAsync(message.MessageId)
                     }:> Task)
 
-            Task.WaitAll(producerTask, consumerTask)
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
             Log.Debug("Finished messages get redelivered if ackTimeout is set")
 
@@ -127,7 +127,7 @@ let tests =
                             do! consumer.AcknowledgeAsync(message.MessageId)
                     }:> Task)
 
-            Task.WaitAll(producerTask, consumerTask)
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
             Log.Debug("Finished messages get redelivered if ackTimeout is set without batching")
 
@@ -185,7 +185,7 @@ let tests =
                         Expect.isEmpty "" hashSet2
                     }:> Task)
 
-            Task.WaitAll(producerTask, consumerTask)
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
             Log.Debug("Finished messages get redelivered if ackTimeout is set for shared subscription")
 
@@ -234,7 +234,7 @@ let tests =
                         do! Task.Delay(100)
                     }:> Task)
 
-            Task.WaitAll(producerTask, consumerTask)
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
             use cts = new CancellationTokenSource()
             cts.CancelAfter(200)
@@ -290,7 +290,7 @@ let tests =
                         do! Task.Delay(100)
                     }:> Task)
 
-            Task.WaitAll(producerTask, consumerTask)
+            let! _ = Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
             use cts = new CancellationTokenSource()
             cts.CancelAfter(200)
@@ -354,7 +354,7 @@ let tests =
                         do! consumer.RedeliverUnacknowledgedMessagesAsync()
                     }:> Task)
 
-            Task.WaitAll(producerTask, consumerTask)
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
             use cts = new CancellationTokenSource()
             cts.CancelAfter(200)

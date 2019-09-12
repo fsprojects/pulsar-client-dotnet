@@ -52,7 +52,7 @@ let tests =
                         do! consumeMessages consumer 100 ""
                     }:> Task)
 
-            Task.WaitAll(producerTask, consumerTask)
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
             Log.Debug("Finished Send and receive 100 messages concurrently works fine with small receiver queue size")
         }
@@ -88,7 +88,7 @@ let tests =
                         do! consumeMessages consumer 100 ""
                     }:> Task)
 
-            Task.WaitAll(producerTask, consumerTask)
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
             Log.Debug("Finished Send and receive 100 messages concurrently works fine with small receiver queue size and no batches")
         }

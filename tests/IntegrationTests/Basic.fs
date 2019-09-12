@@ -52,7 +52,7 @@ let tests =
                         do! consumeMessages consumer 100 "concurrent"
                     }:> Task)
 
-            Task.WaitAll(producerTask, consumerTask)
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
             Log.Debug("Finished Send and receive 100 messages concurrently works fine in default configuration")
         }
@@ -139,10 +139,9 @@ let tests =
                             failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received "consumer2"
                         let! _ = producer2.SendAndForgetAsync(message.Payload)
                         ()
-                } |> Task.WaitAll
-                Log.Debug("t3 ended")
+                } :> Task
             )
-            [|t1; t2; t3|] |> Task.WaitAll
+            do! [|t1; t2; t3|] |> Task.WhenAll |> Async.AwaitTask
 
             Log.Debug("Finished Full roundtrip (emulate Request-Response behaviour)")
         }
