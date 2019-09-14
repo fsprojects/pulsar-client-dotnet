@@ -6,3 +6,7 @@ Microsoft.IO.RecyclableMemoryStream
 Microsoft.Extensions.Logging.Abstractions
 protobuf-net
 NETStandard.Library
+zlib.net-mutliplatform
+K4os.Compression.LZ4
+Snappy.Standard
+ZstdNet

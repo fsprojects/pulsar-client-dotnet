@@ -224,6 +224,14 @@ type ConsumerMessage =
     | Close of AsyncReplyChannel<Task>
     | Unsubscribe of AsyncReplyChannel<Task>
 
+type CompressionType =
+    | None = 0
+    | LZ4 = 1
+    | ZLib = 2
+    | ZStd = 3
+    | Snappy = 4
+
+
 exception InvalidServiceURL
 exception InvalidConfigurationException of string
 exception NotFoundException of string

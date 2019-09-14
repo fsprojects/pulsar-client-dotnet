@@ -45,6 +45,7 @@
     <Compile Include="Internal\BinaryLookupService.fs" />
     <Compile Include="Internal\ConnectionHandler.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTracker.fs" />
+	<Compile Include="Internal\Compression .fs" />
     <Compile Include="Internal\ConsumerImpl.fs" />
     <Compile Include="Internal\ProducerImpl.fs" />
     <Compile Include="Api\PulsarClient.fs" />

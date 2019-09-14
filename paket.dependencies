@@ -10,6 +10,10 @@ nuget Pipelines.Sockets.Unofficial
 nuget TaskBuilder.fs
 nuget protobuf-net
 nuget NETStandard.Library
+nuget zlib.net-mutliplatform
+nuget K4os.Compression.LZ4
+nuget Snappy.Standard
+nuget ZstdNet
 
 group Tests
   framework: netcoreapp2.2
