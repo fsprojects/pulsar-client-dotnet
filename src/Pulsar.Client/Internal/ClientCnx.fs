@@ -292,11 +292,11 @@ type ClientCnx (config: PulsarClientConfiguration,
                 checkServerError cmd.Error cmd.Message
                 handleError %cmd.RequestId cmd.Error cmd.Message
             else
-                let result = PartitionedTopicMetadata { Partitions = cmd.Partitions }
+                let result = PartitionedTopicMetadata { Partitions = int cmd.Partitions }
                 handleSuccess %cmd.RequestId result
         | XCommandSendReceipt cmd ->
             let producerMb = producers.[%cmd.ProducerId]
-            producerMb.Post(SendReceipt { MessageId = MessageId.FromMessageIdData(cmd.MessageId); SequenceId = %cmd.SequenceId })
+            producerMb.Post(SendReceipt { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); SequenceId = %cmd.SequenceId })
         | XCommandSendError cmd ->
             Log.Logger.LogWarning("{0} Received send error from server: {1} : {2}", prefix, cmd.Error, cmd.Message)
             let producerMb = producers.[%cmd.ProducerId]
@@ -314,7 +314,7 @@ type ClientCnx (config: PulsarClientConfiguration,
         | XCommandMessage (cmd, metadata, payload) ->
             let consumerMb = consumers.[%cmd.ConsumerId]
             consumerMb.Post(MessageReceived {
-                MessageId = MessageId.FromMessageIdData(cmd.MessageId)
+                MessageId = { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); Type = Individual; Partition = -1  }
                 RedeliveryCount = cmd.RedeliveryCount
                 Metadata = Metadata.FromMessageMetadata(metadata)
                 Payload = payload })

@@ -18,11 +18,11 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
         |> checkValue
             (fun c ->
                 c.Topic
-                |> throwIfDefault (fun() ->  ArgumentException("Topic name must be set on the producer builder.")))
+                |> invalidArgIfDefault "Topic name must be set on the producer builder.")
         |> checkValue
             (fun c ->
                 c.SubscriptionName
-                |> throwIfBlankString (fun() -> ArgumentException("Subscription name name must be set on the producer builder.")))
+                |> invalidArgIfBlankString "Subscription name name must be set on the producer builder.")
 
     new(client: PulsarClient) = ConsumerBuilder(client, ConsumerConfiguration.Default)
 

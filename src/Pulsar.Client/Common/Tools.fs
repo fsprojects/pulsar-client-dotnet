@@ -8,6 +8,7 @@ open System.Runtime.ExceptionServices
 
 let internal MemoryStreamManager = RecyclableMemoryStreamManager()
 let MagicNumber = int16 0x0e01
+let RandomGenerator = Random()
 
 // Converts
 
@@ -39,11 +40,8 @@ let invalidArgIfNotGreaterThanZero =
 let invalidArgIfLessThanZero =
     invalidArgIf ((>) 0)
 
-let throwIfBlankString createException =
-    throwIf (String.IsNullOrWhiteSpace) createException
-
-let throwIfDefault createException (value: 'a) =
-    throwIf (fun (arg) -> arg = Unchecked.defaultof<'a>) createException value
+let invalidArgIfDefault msg =
+    invalidArgIf (fun (arg) -> arg = Unchecked.defaultof<'a>) msg
 
 let reraize ex =
     (ExceptionDispatchInfo.Capture ex).Throw()
@@ -55,3 +53,9 @@ let asyncDelay delay work =
         do! Async.Sleep delay
         work()
     } |> Async.StartImmediate
+
+let signSafeMod dividend divisor =
+    let modulo = dividend % divisor
+    if modulo < 0
+    then modulo + divisor
+    else modulo

@@ -1,6 +1,7 @@
 ﻿namespace Pulsar.Client.Internal
 
 open System
+open Pulsar.Client.Common
 
 type BackoffConfig =
     {
@@ -23,7 +24,6 @@ type Backoff (config: BackoffConfig) =
     let mutable next = initial
     let mutable mandatoryStopMade = false
     let mutable firstBackoffTime = DateTime.MinValue
-    let random = Random()
 
     member this.Next() =
         let mutable current = next;
@@ -46,7 +46,7 @@ type Backoff (config: BackoffConfig) =
         // Randomly decrease the timeout up to 10% to avoid simultaneous retries
         //// If current < 10ms then current/10 < 1 and we get an exception from Random saying "Bound must be positive"
         if (current > 10.0) then
-            current <- current - random.NextDouble() * (current / 10.0)
+            current <- current - RandomGenerator.NextDouble() * (current / 10.0)
 
         Math.Max(initial, current) |> int
 

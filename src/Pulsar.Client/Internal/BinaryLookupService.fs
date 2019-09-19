@@ -13,6 +13,16 @@ type BinaryLookupService (config: PulsarClientConfiguration, connectionPool: Con
 
     let serviceNameResolver = ServiceNameResolver(config)
 
+    member this.GetPartitionsForTopic (topicName: TopicName) =
+        task {
+            let! metadata = this.GetPartitionedTopicMetadata topicName.CompleteTopicName
+            if metadata.Partitions > 0
+            then
+                return Array.init metadata.Partitions (fun i -> topicName.GetPartition(i))
+            else
+                return [| topicName |]
+        }
+
     member this.GetPartitionedTopicMetadata topicName =
         task {
             let endpoint = serviceNameResolver.ResolveHost()

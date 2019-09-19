@@ -19,7 +19,7 @@ type ChecksumType =
 
 type PartitionedTopicMetadata =
     {
-        Partitions: uint32
+        Partitions: int
     }
 
 type ProducerSuccess =
@@ -76,18 +76,11 @@ type MessageId =
         Partition: int
     }
     with
-        static member FromMessageIdData(messageIdData: MessageIdData) =
-            {
-                LedgerId = %(int64 messageIdData.ledgerId)
-                EntryId = %(int64 messageIdData.entryId)
-                Type = MessageIdType.Individual
-                Partition = messageIdData.Partition
-            }
         static member Earliest =
             {
                 LedgerId = %(-1L)
                 EntryId = %(-1L)
-                Type = MessageIdType.Individual
+                Type = Individual
                 Partition = %(-1)
             }
         member this.ToMessageIdData() =
@@ -105,7 +98,8 @@ type MessageId =
 type SendReceipt =
     {
         SequenceId: SequenceId
-        MessageId: MessageId
+        LedgerId: LedgerId
+        EntryId: EntryId
     }
 
 type LogicalAddress = LogicalAddress of DnsEndPoint
@@ -143,12 +137,16 @@ type Payload = WriterStream -> Task
 type Connection = SocketConnection * WriterStream
 type TrackerState = HashSet<MessageId>
 
+type PendingCallback =
+    | SingleCallback of TaskCompletionSource<MessageId>
+    | BatchCallbacks of TaskCompletionSource<MessageId>[]
+
 type PendingMessage =
     {
         CreatedAt: DateTime
         SequenceId: SequenceId
         Payload: Payload
-        Tcs : TaskCompletionSource<MessageId>
+        Callback : PendingCallback
     }
 
 type BatchItem =
@@ -230,6 +228,11 @@ type CompressionType =
     | ZLib = 2
     | ZStd = 3
     | Snappy = 4
+
+type MessageRoutingMode =
+    | SinglePartition = 0
+    | RoundRobinPartition = 1
+    | CustomPartition = 2
 
 
 exception InvalidServiceURL

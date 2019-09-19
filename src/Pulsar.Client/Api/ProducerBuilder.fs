@@ -14,7 +14,11 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
         |> checkValue
             (fun c ->
                 c.Topic
-                |> throwIfDefault (fun() ->  ArgumentException("Topic name must be set on the producer builder.")))
+                |> invalidArgIfDefault "Topic name must be set on the producer builder.")
+        |> checkValue
+            (fun c ->
+                c.MessageRoutingMode
+                |> invalidArgIf (fun mode -> mode = MessageRoutingMode.CustomPartition && isNull (box config.CustomMessageRouter)) "Valid router should be set with CustomPartition routing mode.")
 
     new(client: PulsarClient) = ProducerBuilder(client, ProducerConfiguration.Default)
 
@@ -39,6 +43,14 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                 MaxPendingMessages =
                     maxPendingMessages
                     |> invalidArgIfNotGreaterThanZero "MaxPendingMessages needs to be greater than 0." })
+
+    member this.MaxPendingMessagesAcrossPartitions maxPendingMessagesAcrossPartitions =
+        ProducerBuilder(
+            client,
+            { config with
+                MaxPendingMessagesAcrossPartitions =
+                    maxPendingMessagesAcrossPartitions
+                    |> invalidArgIfNotGreaterThanZero "MaxPendingMessagesAcrossPartitions needs to be greater than 0." })
 
     member __.EnableBatching enableBatching =
         ProducerBuilder(
@@ -69,6 +81,18 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
             client,
             { config with
                 CompressionType = compressionType })
+
+    member __.MessageRoutingMode messageRoutingMode =
+        ProducerBuilder(
+            client,
+            { config with
+                MessageRoutingMode = messageRoutingMode })
+
+    member __.CustomMessageRouter customMessageRouter =
+        ProducerBuilder(
+            client,
+            { config with
+                CustomMessageRouter = customMessageRouter })
 
     member this.CreateAsync() =
         config

@@ -23,7 +23,7 @@ let pulsarAddress = "pulsar://my-pulsar-cluster:31002"
 let configureLogging() =
     Log.Logger <-
         LoggerConfiguration()
-            .MinimumLevel.Warning()
+            .MinimumLevel.Information()
             .WriteTo.Console(theme = AnsiConsoleTheme.Code, outputTemplate="[{Timestamp:HH:mm:ss.fff} {Level:u3} {ThreadId}] {Message:lj}{NewLine}{Exception}")
             .Enrich.FromLogContext()
             .Enrich.WithThreadId()

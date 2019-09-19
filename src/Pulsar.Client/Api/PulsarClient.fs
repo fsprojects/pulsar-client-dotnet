@@ -24,7 +24,7 @@ type PulsarClientMessage =
 type PulsarClient(config: PulsarClientConfiguration) as this =
 
     let connectionPool = ConnectionPool(config)
-    let lookupSerivce = BinaryLookupService(config, connectionPool)
+    let lookupService = BinaryLookupService(config, connectionPool)
     let producers = HashSet<IProducer>()
     let consumers = HashSet<IConsumer>()
     let mutable clientState = Active
@@ -65,7 +65,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                 | Close channel ->
                     match this.ClientState with
                     | Active ->
-                        Log.Logger.LogInformation("Client closing. URL: {}", lookupSerivce.GetServiceUrl())
+                        Log.Logger.LogInformation("Client closing. URL: {0}", lookupService.GetServiceUrl())
                         this.ClientState <- Closing
                         let producersTasks = producers |> Seq.map (fun producer -> producer.CloseAsync())
                         let consumerTasks = consumers |> Seq.map (fun consumer -> consumer.CloseAsync())
@@ -79,7 +79,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                         } |> channel.Reply
                         return! loop ()
                     | _ ->
-                        channel.Reply(Task.FromException(AlreadyClosedException("Client already closed. URL: " + lookupSerivce.GetServiceUrl())))
+                        channel.Reply(Task.FromException(AlreadyClosedException("Client already closed. URL: " + lookupService.GetServiceUrl())))
                         return! loop ()
                 | Stop ->
                     this.ClientState <- Closed
@@ -104,7 +104,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
     member this.GetPartitionedTopicMetadata topicName =
         task {
             checkIfActive()
-            return! lookupSerivce.GetPartitionedTopicMetadata topicName
+            return! lookupService.GetPartitionedTopicMetadata topicName
         }
 
     member this.CloseAsync() =
@@ -120,13 +120,13 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             Log.Logger.LogDebug("SingleTopicSubscribeAsync started")
             let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic.CompleteTopicName
             let removeConsumer = fun consumer -> mb.Post(RemoveConsumer consumer)
-            if (metadata.Partitions > 1u)
+            if (metadata.Partitions > 1)
             then
-                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
+                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupService, removeConsumer)
                 mb.Post(AddConsumer consumer)
                 return consumer
             else
-                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupSerivce, removeConsumer)
+                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupService, removeConsumer)
                 mb.Post(AddConsumer consumer)
                 return consumer
         }
@@ -137,12 +137,12 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             Log.Logger.LogDebug("CreateProducerAsync started")
             let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
             let removeProducer = fun producer -> mb.Post(RemoveProducer producer)
-            if (metadata.Partitions > 0u) then
-                let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, lookupSerivce, removeProducer)
+            if (metadata.Partitions > 0) then
+                let! producer = PartitionedProducerImpl.Init(producerConfig, config, connectionPool, metadata.Partitions, lookupService, removeProducer)
                 mb.Post(AddProducer producer)
                 return producer
             else
-                let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, lookupSerivce, removeProducer)
+                let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, -1, lookupService, removeProducer)
                 mb.Post(AddProducer producer)
                 return producer
         }

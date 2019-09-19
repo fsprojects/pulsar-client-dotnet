@@ -120,17 +120,17 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                 prefix, ackType, outstandingAcks, batchSize)
             false
 
-    let receiveIndividualMessagesFromBatch (msg: Message) =
-        let batchSize = msg.Metadata.NumMessages
+    let receiveIndividualMessagesFromBatch (rawMessage: Message) =
+        let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
-        use stream = new MemoryStream(msg.Payload)
+        use stream = new MemoryStream(rawMessage.Payload)
         use binaryReader = new BinaryReader(stream)
         for i in 0..batchSize-1 do
             Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
             let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
             let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
-            let messageId = { LedgerId = msg.MessageId.LedgerId; EntryId = msg.MessageId.EntryId; Partition = partitionIndex; Type = Cumulative(%i,acker) }
-            let message = { msg with MessageId = messageId; Payload = singleMessagePayload }
+            let messageId = { LedgerId = rawMessage.MessageId.LedgerId; EntryId = rawMessage.MessageId.EntryId; Partition = partitionIndex; Type = Cumulative(%i,acker) }
+            let message = { rawMessage with MessageId = messageId; Payload = singleMessagePayload }
             incomingMessages.Enqueue(message)
 
 
@@ -247,16 +247,19 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                     else
                         return! loop state
 
-                | ConsumerMessage.MessageReceived message ->
+                | ConsumerMessage.MessageReceived rawMessage ->
 
                     let hasWaitingChannel = state.WaitingChannel <> nullChannel
+                    let msgId = { rawMessage.MessageId with Partition = partitionIndex }
                     Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWatingChannel={3}",
-                        prefix, message.MessageId, incomingMessages.Count, hasWaitingChannel)
-                    if (acksGroupingTracker.IsDuplicate(message.MessageId)) then
-                        Log.Logger.LogInformation("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, message.MessageId)
-                        increaseAvailablePermits message.Metadata.NumMessages
+                        prefix, msgId, incomingMessages.Count, hasWaitingChannel)
+
+                    if (acksGroupingTracker.IsDuplicate(msgId)) then
+                        Log.Logger.LogInformation("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
+                        increaseAvailablePermits rawMessage.Metadata.NumMessages
                     else
-                        if (message.Metadata.NumMessages = 1 && not message.Metadata.HasNumMessagesInBatch) then
+                        if (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
+                            let message = { rawMessage with MessageId = msgId }
                             if not hasWaitingChannel then
                                 incomingMessages.Enqueue(message)
                                 return! loop state
@@ -267,16 +270,16 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                                     incomingMessages.Enqueue(message)
                                     replyWithMessage state.WaitingChannel <| incomingMessages.Dequeue()
                                 return! loop { state with WaitingChannel = nullChannel }
-                        elif message.Metadata.NumMessages > 0 then
+                        elif rawMessage.Metadata.NumMessages > 0 then
                             // handle batch message enqueuing; uncompressed payload has all messages in batch
-                            receiveIndividualMessagesFromBatch message
+                            receiveIndividualMessagesFromBatch rawMessage
                             if hasWaitingChannel then
                                 replyWithMessage state.WaitingChannel <| incomingMessages.Dequeue()
                                 return! loop { state with WaitingChannel = nullChannel }
                             else
                                 return! loop state
                         else
-                            Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, message.Metadata.NumMessages)
+                            Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
                             return! loop state
 
                 | ConsumerMessage.Receive ch ->
@@ -456,13 +459,13 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
 
         member this.ReceiveAsync() =
             task {
-                connectionHandler.CheckIfActive(prefix)
+                connectionHandler.CheckIfActive()
                 return! mb.PostAndAsyncReply(Receive)
             }
 
         member this.AcknowledgeAsync (msgId: MessageId) =
             task {
-                connectionHandler.CheckIfActive(prefix)
+                connectionHandler.CheckIfActive()
                 let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Individual, channel))
                 if not success then
                     raise (ConnectionFailedOnSend "AcknowledgeAsync")
@@ -470,7 +473,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
             task {
-                connectionHandler.CheckIfActive(prefix)
+                connectionHandler.CheckIfActive()
                 let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Cumulative, channel))
                 if not success then
                     raise (ConnectionFailedOnSend "AcknowledgeCumulativeAsync")
@@ -478,20 +481,23 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
 
         member this.RedeliverUnacknowledgedMessagesAsync () =
             task {
-                connectionHandler.CheckIfActive(prefix)
+                connectionHandler.CheckIfActive()
                 do! mb.PostAndAsyncReply(RedeliverAllUnacknowledged)
             }
 
         member this.CloseAsync() =
             task {
-                connectionHandler.CheckIfActive(prefix)
-                let! result = mb.PostAndAsyncReply(ConsumerMessage.Close)
-                return! result
+                match connectionHandler.ConnectionState with
+                | Closing | Closed ->
+                    return ()
+                | _ ->
+                    let! result = mb.PostAndAsyncReply(ConsumerMessage.Close)
+                    return! result
             }
 
         member this.UnsubscribeAsync() =
             task {
-                connectionHandler.CheckIfActive(prefix)
+                connectionHandler.CheckIfActive()
                 let! result = mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
                 return! result
             }

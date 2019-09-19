@@ -5,6 +5,7 @@ open Expecto
 open Expecto.Flip
 open Pulsar.Client.Api
 open Pulsar.Client.UnitTests
+open Pulsar.Client.Common
 
 module ProducerBuilderTests =
 
@@ -60,4 +61,12 @@ module ProducerBuilderTests =
                 -1 |> checkBatchingMaxMessages
             }
 
+            test "Custom routing mode throws an exception for null custom router" {
+                fun() ->
+                    builder()
+                        .MessageRoutingMode(MessageRoutingMode.CustomPartition)
+                        .Topic("Some topic")
+                        .CreateAsync() |> ignore
+                |> Expect.throwsWithMessage<ArgumentException> "Valid router should be set with CustomPartition routing mode."
+            }
         ]

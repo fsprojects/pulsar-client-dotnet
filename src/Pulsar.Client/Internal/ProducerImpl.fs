@@ -14,15 +14,14 @@ open System.IO
 open ProtoBuf
 
 type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) as this =
+                           partitionIndex: int, lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) as this =
     let producerId = Generators.getNextProducerId()
 
     let prefix = sprintf "producer(%u, %s)" %producerId producerConfig.ProducerName
-    let producerCreatedTsc = TaskCompletionSource<ProducerImpl>(TaskCreationOptions.RunContinuationsAsynchronously)
+    let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
 
     let pendingMessages = Queue<PendingMessage>()
     let batchItems = ResizeArray<BatchItem>()
-    let pendingBatches = Dictionary<SequenceId, TaskCompletionSource<MessageId>[]>()
 
     let compressionCodec = CompressionCodec.create producerConfig.CompressionType
 
@@ -50,17 +49,17 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                                         MandatoryStop = TimeSpan.FromMilliseconds(Math.Max(100.0, sendTimeoutMs - 100.0))})
 
 
-    let failPendingMessages (ex: exn) =
+    let failPendingMessage msg (ex: exn) =
+        match msg.Callback with
+        | SingleCallback tsc -> tsc.SetException(ex)
+        | BatchCallbacks tscs ->
+            tscs
+            |> Seq.iter (fun tcs -> tcs.SetException(ex))
 
+    let failPendingMessages (ex: exn) =
         while pendingMessages.Count > 0 do
             let msg = pendingMessages.Dequeue()
-            msg.Tcs.SetException(ex)
-
-        pendingBatches
-        |> Seq.collect (fun i -> i.Value)
-        |> Seq.iter (fun tcs -> tcs.SetException(ex))
-
-        pendingBatches.Clear()
+            failPendingMessage msg ex
 
     let sendTimeoutTimer = new Timer()
     let startSendTimeoutTimer () =
@@ -85,7 +84,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                 let pendingMessage = pendingMessages.Dequeue()
                 this.Mb.Post(SendMessage pendingMessage)
         else
-            producerCreatedTsc.TrySetResult(this) |> ignore
+            producerCreatedTsc.TrySetResult() |> ignore
 
     let verifyIfLocalBufferIsCorrupted (msg: PendingMessage) =
         task {
@@ -233,15 +232,12 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                         let agentMessage = SendMessage {
                                 SequenceId = sequenceId
                                 Payload = payload
-                                Tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+                                Callback = BatchCallbacks
+                                    (batchItems
+                                        |> Seq.map(fun i -> i.Tcs)
+                                        |> Seq.toArray)
                                 CreatedAt = DateTime.Now }
                         this.Mb.Post(agentMessage)
-
-                        let tcss =
-                            batchItems
-                            |> Seq.map(fun i -> i.Tcs)
-                            |> Seq.toArray
-                        pendingBatches.Add(sequenceId, tcss)
                         batchItems.Clear()
                         Log.Logger.LogDebug("{0} Pending batch created. Batch size: {1}", prefix, batchSize)
 
@@ -255,7 +251,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                     let sequenceId = %metadata.SequenceId
                     let payload = Commands.newSend producerId sequenceId 1 metadata encodedMessages
                     let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
-                    this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Tcs = tcs; CreatedAt = DateTime.Now })
+                    this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Callback = SingleCallback tcs; CreatedAt = DateTime.Now })
                     channel.Reply(tcs)
                     return! loop ()
 
@@ -274,7 +270,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                         | _ ->
                             Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                     else
-                        pendingMessage.Tcs.SetException(ProducerQueueIsFullError "Producer send queue is full.")
+                        failPendingMessage pendingMessage (ProducerQueueIsFullError "Producer send queue is full.")
                     return! loop ()
 
                 | ProducerMessage.SendReceipt receipt ->
@@ -283,37 +279,25 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                     let pendingMessage = pendingMessages.Peek()
                     let expectedSequenceId = pendingMessage.SequenceId
                     if sequenceId > expectedSequenceId then
-                        Log.Logger.LogWarning(
-                            "{0} Got ack for msg {1}. expecting {2} - got: {3} - queue-size: {4}",
-                            prefix, receipt.MessageId, expectedSequenceId, sequenceId, pendingMessages.Count)
+                        Log.Logger.LogWarning("{0} Got ack for msg {1}. expecting {2} - queue-size: {3}",
+                            prefix, receipt, expectedSequenceId, pendingMessages.Count)
                         // Force connection closing so that messages can be re-transmitted in a new connection
                         match connectionHandler.ConnectionState with
                         | Ready clientCnx -> clientCnx.Close()
                         | _ -> ()
                     elif sequenceId < expectedSequenceId then
-                        Log.Logger.LogInformation(
-                            "{0} Got ack for timed out msg {1} seq {2} last-seq: {3}",
-                            prefix, receipt.MessageId, sequenceId, expectedSequenceId)
+                        Log.Logger.LogInformation("{0} Got ack for timed out msg {1} last-seq: {2}",
+                            prefix, receipt, expectedSequenceId)
                     else
-                        Log.Logger.LogDebug(
-                            "{0} Received ack for message {1} sequenceId={2}",
-                            prefix, receipt.MessageId, sequenceId)
-
-                        // complete regular message
-                        pendingMessage.Tcs.SetResult(receipt.MessageId)
+                        Log.Logger.LogDebug("{0} Received ack for message {1}",
+                            prefix, receipt)
                         pendingMessages.Dequeue() |> ignore
-
-                        // complete batch messages
-                        let (success, tcss) = pendingBatches.TryGetValue(sequenceId)
-
-                        if (success) then
-                            Log.Logger.LogDebug("{0} Found pending batch for seqienceId: {1}", prefix, sequenceId)
-
-                            tcss |> Array.iter (fun tcs -> tcs.SetResult(receipt.MessageId))
-                            pendingBatches.Remove(sequenceId) |> ignore
-
-                            Log.Logger.LogDebug("{0} batch messages completed for seqienceId: {1}", prefix, sequenceId)
-
+                        let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Individual }
+                        match pendingMessage.Callback with
+                        | SingleCallback tcs ->
+                            tcs.SetResult(msgId)
+                        | BatchCallbacks tcss ->
+                            tcss |> Array.iter (fun tcs -> tcs.SetResult(msgId))
                     return! loop ()
 
                 | ProducerMessage.RecoverChecksumError sequenceId ->
@@ -335,7 +319,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                             if corrupted then
                                 // remove message from pendingMessages queue and fail callback
                                 pendingMessages.Dequeue() |> ignore
-                                pendingMessage.Tcs.SetException(ChecksumException "Checksum failed on corrupt message")
+                                failPendingMessage pendingMessage (ChecksumException "Checksum failed on corrupt message")
                             else
                                 Log.Logger.LogDebug("{0} Message is not corrupted, retry send-message with sequenceId {1}", prefix, sequenceId)
                                 resendMessages()
@@ -427,32 +411,35 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
        }
 
     static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                        lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) =
+                       partitionIndex: int, lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) =
         task {
-            let producer = new ProducerImpl(producerConfig, clientConfig, connectionPool, lookup, cleanup)
-            let! result = producer.InitInternal()
-            return result :> IProducer
+            let producer = new ProducerImpl(producerConfig, clientConfig, connectionPool, partitionIndex, lookup, cleanup)
+            do! producer.InitInternal()
+            return producer :> IProducer
         }
 
     interface IProducer with
 
         member this.CloseAsync() =
             task {
-                connectionHandler.CheckIfActive(prefix)
-                let! result = mb.PostAndAsyncReply(ProducerMessage.Close)
-                return! result
+                match connectionHandler.ConnectionState with
+                | Closing | Closed ->
+                    return ()
+                | _ ->
+                    let! result = mb.PostAndAsyncReply(ProducerMessage.Close)
+                    return! result
             }
 
         member this.SendAndForgetAsync (message: byte[]) =
             task {
-                connectionHandler.CheckIfActive(prefix)
+                connectionHandler.CheckIfActive()
                 let! _ = this.SendMessage message
                 return ()
             }
 
         member this.SendAsync (message: byte[]) =
             task {
-                connectionHandler.CheckIfActive(prefix)
+                connectionHandler.CheckIfActive()
                 let! tcs = this.SendMessage message
                 return! tcs.Task
             }

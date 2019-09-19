@@ -7,7 +7,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 
     let clientExceptionIfBlankString message arg =
         arg
-        |> throwIfBlankString (fun() -> ArgumentException(message))
+        |> invalidArgIfBlankString message
 
     let verify(config : PulsarClientConfiguration) =
         let checkValue check config =
