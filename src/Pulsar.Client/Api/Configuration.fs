@@ -23,10 +23,12 @@ type ConsumerConfiguration =
         SubscriptionName: string
         SubscriptionType: SubscriptionType
         ReceiverQueueSize: int
+        MaxTotalReceiverQueueSizeAcrossPartitions: int
         SubscriptionInitialPosition: SubscriptionInitialPosition
         AckTimeout: TimeSpan
         AckTimeoutTickTime: TimeSpan
         AcknowledgementsGroupTime: TimeSpan
+        AutoUpdatePartitions: bool
     }
     static member Default =
         {
@@ -35,10 +37,12 @@ type ConsumerConfiguration =
             SubscriptionName = ""
             SubscriptionType = SubscriptionType.Exclusive
             ReceiverQueueSize = 1000
+            MaxTotalReceiverQueueSizeAcrossPartitions = 50000
             SubscriptionInitialPosition = SubscriptionInitialPosition.Latest
             AckTimeout = TimeSpan.Zero
             AckTimeoutTickTime = TimeSpan.FromMilliseconds(1000.0)
             AcknowledgementsGroupTime = TimeSpan.FromMilliseconds(100.0)
+            AutoUpdatePartitions = true
         }
 
 type ProducerConfiguration =
@@ -54,13 +58,14 @@ type ProducerConfiguration =
         CompressionType: CompressionType
         MessageRoutingMode: MessageRoutingMode
         CustomMessageRouter: IMessageRouter
+        AutoUpdatePartitions: bool
     }
     static member Default =
         {
             Topic = Unchecked.defaultof<TopicName>
             ProducerName = ""
             MaxPendingMessages = 1000
-            MaxPendingMessagesAcrossPartitions = 5000
+            MaxPendingMessagesAcrossPartitions = 50000
             BatchingEnabled = true
             MaxMessagesPerBatch = 1000
             MaxBatchingPublishDelay = TimeSpan.FromMilliseconds(1.0)
@@ -68,4 +73,5 @@ type ProducerConfiguration =
             CompressionType = CompressionType.None
             MessageRoutingMode = MessageRoutingMode.RoundRobinPartition
             CustomMessageRouter = Unchecked.defaultof<IMessageRouter>
+            AutoUpdatePartitions = true
         }

@@ -15,10 +15,6 @@ open System.IO
 open ProtoBuf
 open pulsar.proto
 
-type SubscriptionMode =
-    | Durable
-    | NonDurable
-
 type ConsumerState = {
     WaitingChannel: AsyncReplyChannel<Message>
 }
@@ -129,7 +125,14 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
             Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
             let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
             let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
-            let messageId = { LedgerId = rawMessage.MessageId.LedgerId; EntryId = rawMessage.MessageId.EntryId; Partition = partitionIndex; Type = Cumulative(%i,acker) }
+            let messageId =
+                {
+                    LedgerId = rawMessage.MessageId.LedgerId
+                    EntryId = rawMessage.MessageId.EntryId
+                    Partition = partitionIndex
+                    Type = Cumulative(%i,acker)
+                    TopicName = %""
+                }
             let message = { rawMessage with MessageId = messageId; Payload = singleMessagePayload }
             incomingMessages.Enqueue(message)
 

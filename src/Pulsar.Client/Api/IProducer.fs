@@ -11,3 +11,5 @@ type IProducer =
     abstract member SendAndForgetAsync: byte[] -> Task<unit>
     /// Clean up resources
     abstract member CloseAsync: unit -> Task<unit>
+    /// Internal client producer id
+    abstract member ProducerId: ProducerId

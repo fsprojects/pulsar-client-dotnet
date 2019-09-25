@@ -314,7 +314,7 @@ type ClientCnx (config: PulsarClientConfiguration,
         | XCommandMessage (cmd, metadata, payload) ->
             let consumerMb = consumers.[%cmd.ConsumerId]
             consumerMb.Post(MessageReceived {
-                MessageId = { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); Type = Individual; Partition = -1  }
+                MessageId = { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); Type = Individual; Partition = -1; TopicName = %""  }
                 RedeliveryCount = cmd.RedeliveryCount
                 Metadata = Metadata.FromMessageMetadata(metadata)
                 Payload = payload })

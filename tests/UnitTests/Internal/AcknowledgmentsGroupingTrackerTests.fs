@@ -21,7 +21,7 @@ let tests =
                     return true
                 }
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.Zero, getState, sendPayload) :> IAcknowledgmentsGroupingTracker
-            do! ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0 }, AckType.Individual)
+            do! ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }, AckType.Individual)
             Expect.isTrue "" sendPayloadCalled
         }
 
@@ -34,7 +34,7 @@ let tests =
                     return true
                 }
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(25.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
-            do! ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0 }, AckType.Individual)
+            do! ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }, AckType.Individual)
             Expect.isFalse "" sendPayloadCalled
         }
 
@@ -47,7 +47,7 @@ let tests =
                     return true
                 }
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(25.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
-            do! ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0 }, AckType.Individual)
+            do! ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }, AckType.Individual)
             do! Async.Sleep(50)
             Expect.isTrue "" sendPayloadCalled
         }
@@ -60,8 +60,8 @@ let tests =
                     sendPayloadCalledCount <- sendPayloadCalledCount + 1
                     return true
                 }
-            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0 }
-            let message2 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Individual; Partition = 0 }
+            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }
+            let message2 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }
 
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(25.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             do! ackTracker.AddAcknowledgment(message2, AckType.Cumulative)
@@ -79,9 +79,9 @@ let tests =
                     sendPayloadCalledCount <- sendPayloadCalledCount + 1
                     return true
                 }
-            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0 }
-            let message2 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Individual; Partition = 0 }
-            let message3 = { LedgerId = %1L; EntryId = %3L; Type = MessageIdType.Individual; Partition = 0 }
+            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }
+            let message2 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }
+            let message3 = { LedgerId = %1L; EntryId = %3L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }
 
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(25.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             do! ackTracker.AddAcknowledgment(message1, AckType.Cumulative)

@@ -292,7 +292,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                         Log.Logger.LogDebug("{0} Received ack for message {1}",
                             prefix, receipt)
                         pendingMessages.Dequeue() |> ignore
-                        let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Individual }
+                        let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Individual; TopicName = %"" }
                         match pendingMessage.Callback with
                         | SingleCallback tcs ->
                             tcs.SetResult(msgId)
@@ -397,10 +397,8 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
 
     member private this.Mb with get(): MailboxProcessor<ProducerMessage> = mb
 
-    member this.ProducerId with get() = producerId
-
     override this.Equals producer =
-        producerId = (producer :?> ProducerImpl).ProducerId
+        producerId = (producer :?> IProducer).ProducerId
 
     override this.GetHashCode () = int producerId
 
@@ -443,3 +441,5 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                 let! tcs = this.SendMessage message
                 return! tcs.Task
             }
+
+        member this.ProducerId with get() = producerId

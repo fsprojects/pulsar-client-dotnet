@@ -54,6 +54,10 @@ type TopicDomain =
     | Persistent
     | NonPersistent
 
+type SubscriptionMode =
+    | Durable
+    | NonDurable
+
 type AckType =
     | Individual
     | Cumulative
@@ -74,6 +78,7 @@ type MessageId =
         EntryId: EntryId
         Type: MessageIdType
         Partition: int
+        TopicName: CompleteTopicName
     }
     with
         static member Earliest =
@@ -82,6 +87,7 @@ type MessageId =
                 EntryId = %(-1L)
                 Type = Individual
                 Partition = %(-1)
+                TopicName = %""
             }
         member this.ToMessageIdData() =
             MessageIdData(

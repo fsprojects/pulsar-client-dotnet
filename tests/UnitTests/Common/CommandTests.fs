@@ -170,7 +170,7 @@ module CommandsTests =
             }
 
             test "newAck should return correct frame" {
-                let messageId = { LedgerId = %1L; EntryId = %2L; Partition = -1; Type = Individual }
+                let messageId = { LedgerId = %1L; EntryId = %2L; Partition = -1; Type = Individual; TopicName = %"" }
                 let consumerId = %1UL
 
                 let totalSize, commandSize, command =

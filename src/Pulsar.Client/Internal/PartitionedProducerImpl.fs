@@ -161,12 +161,17 @@ type PartitionedProducerImpl private (producerConfig: ProducerConfiguration, cli
         loop ()
     )
 
-    do timer.AutoReset <- true
-    do timer.Elapsed.Add(fun _ -> mb.Post TickTime)
-    do timer.Start()
+    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
+
+    do
+        if producerConfig.AutoUpdatePartitions
+        then
+            timer.AutoReset <- true
+            timer.Elapsed.Add(fun _ -> mb.Post TickTime)
+            timer.Start()
 
     override this.Equals producer =
-        producerId = (producer :?> ProducerImpl).ProducerId
+        producerId = (producer :?> IProducer).ProducerId
 
     override this.GetHashCode () = int producerId
 
@@ -225,3 +230,5 @@ type PartitionedProducerImpl private (producerConfig: ProducerConfiguration, cli
                 let partition = this.ChoosePartitionIfActive()
                 return! producers.[partition].SendAsync(message)
             }
+
+        member this.ProducerId with get() = producerId

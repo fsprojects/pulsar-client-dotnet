@@ -120,9 +120,9 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             Log.Logger.LogDebug("SingleTopicSubscribeAsync started")
             let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic.CompleteTopicName
             let removeConsumer = fun consumer -> mb.Post(RemoveConsumer consumer)
-            if (metadata.Partitions > 1)
+            if (metadata.Partitions > 0)
             then
-                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupService, removeConsumer)
+                let! consumer = MultiTopicsConsumerImpl.Init(consumerConfig, config, connectionPool, metadata.Partitions, lookupService, removeConsumer)
                 mb.Post(AddConsumer consumer)
                 return consumer
             else

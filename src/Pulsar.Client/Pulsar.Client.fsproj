@@ -50,6 +50,7 @@
     <Compile Include="Internal\Compression .fs" />
     <Compile Include="Internal\ConsumerImpl.fs" />
     <Compile Include="Internal\ProducerImpl.fs" />
+    <Compile Include="Internal\MultiTopicsConsumerImpl.fs" />
     <Compile Include="Internal\PartitionedProducerImpl.fs" />
     <Compile Include="Api\PulsarClient.fs" />
     <Compile Include="Api\ConsumerBuilder.fs" />
