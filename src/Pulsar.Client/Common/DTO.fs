@@ -200,6 +200,10 @@ type PulsarResponseType =
         | Empty -> ()
         | _ -> failwith "Incorrect return type"
 
+type MessageOrException =
+    | Message of Message
+    | Exn of exn
+
 type ProducerMessage =
     | ConnectionOpened
     | ConnectionFailed of exn
@@ -220,7 +224,7 @@ type ConsumerMessage =
     | ConnectionClosed of obj // ClientCnx
     | ReachedEndOfTheTopic
     | MessageReceived of Message
-    | Receive of AsyncReplyChannel<Message>
+    | Receive of AsyncReplyChannel<MessageOrException>
     | Acknowledge of MessageId * AckType * AsyncReplyChannel<bool>
     | RedeliverUnacknowledged of TrackerState * AsyncReplyChannel<unit>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>

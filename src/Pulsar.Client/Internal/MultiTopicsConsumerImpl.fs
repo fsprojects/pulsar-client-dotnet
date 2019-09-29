@@ -62,7 +62,6 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                 yield { message with MessageId = newMessageId }
         }
 
-    
 
     let mb = MailboxProcessor<MultiTopicConsumerMessage>.Start(fun inbox ->
 

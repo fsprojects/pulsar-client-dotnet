@@ -16,7 +16,7 @@ open ProtoBuf
 open pulsar.proto
 
 type ConsumerState = {
-    WaitingChannel: AsyncReplyChannel<Message>
+    WaitingChannel: AsyncReplyChannel<MessageOrException>
 }
 
 type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
@@ -26,7 +26,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
     let MAX_REDELIVER_UNACKNOWLEDGED = 1000
     let consumerId = Generators.getNextConsumerId()
     let incomingMessages = new Queue<Message>()
-    let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
+    let nullChannel = Unchecked.defaultof<AsyncReplyChannel<MessageOrException>>
     let subscribeTsc = TaskCompletionSource<ConsumerImpl>(TaskCreationOptions.RunContinuationsAsynchronously)
     let hasParentConsumer = false
     let prefix = sprintf "consumer(%u, %s, %i)" %consumerId consumerConfig.ConsumerName partitionIndex
@@ -167,13 +167,15 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
         else
             0
 
-    let replyWithMessage (channel: AsyncReplyChannel<Message>) message =
+    let replyWithMessage (channel: AsyncReplyChannel<MessageOrException>) message =
         messageProcessed message
-        channel.Reply message
+        channel.Reply (Message message)
 
-    let stopConsumer() =
+    let stopConsumer (state: ConsumerState) =
         unAckedMessageTracker.Close()
         cleanup(this)
+        if state.WaitingChannel <> nullChannel then
+            state.WaitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
@@ -224,7 +226,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                                     // unable to create new consumer, fail operation
                                     connectionHandler.Failed()
                                     subscribeTsc.SetException(ex)
-                                    stopConsumer()
+                                    stopConsumer state
                                 else
                                     connectionHandler.ReconnectLater ex
                     | _ ->
@@ -245,7 +247,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                     if (DateTime.Now > subscribeTimeout && subscribeTsc.TrySetException(ex)) then
                         Log.Logger.LogInformation("{0} creation failed", prefix)
                         connectionHandler.Failed()
-                        stopConsumer()
+                        stopConsumer state
                     else
                         return! loop state
 
@@ -253,7 +255,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
 
                     let hasWaitingChannel = state.WaitingChannel <> nullChannel
                     let msgId = { rawMessage.MessageId with Partition = partitionIndex }
-                    Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWatingChannel={3}",
+                    Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3}",
                         prefix, msgId, incomingMessages.Count, hasWaitingChannel)
 
                     if (acksGroupingTracker.IsDuplicate(msgId)) then
@@ -391,7 +393,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
                                 connectionHandler.Closed()
-                                stopConsumer()
+                                stopConsumer state
                             with
                             | ex ->
                                 Log.Logger.LogError(ex, "{0} failed to close", prefix)
@@ -400,7 +402,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                     | _ ->
                         Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
                         connectionHandler.Closed()
-                        stopConsumer()
+                        stopConsumer state
                         channel.Reply(Task.FromResult())
 
                 | ConsumerMessage.Unsubscribe channel ->
@@ -418,7 +420,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
                                 connectionHandler.Closed()
-                                stopConsumer()
+                                stopConsumer state
                             with
                             | ex ->
                                 Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
@@ -462,7 +464,12 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
         member this.ReceiveAsync() =
             task {
                 connectionHandler.CheckIfActive()
-                return! mb.PostAndAsyncReply(Receive)
+                match! mb.PostAndAsyncReply(Receive) with
+                | Message msg ->
+                    return msg
+                | Exn exn ->
+                    reraize exn
+                    return Unchecked.defaultof<Message>
             }
 
         member this.AcknowledgeAsync (msgId: MessageId) =
