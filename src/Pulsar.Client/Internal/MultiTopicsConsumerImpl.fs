@@ -54,11 +54,12 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
 
     let timer = new Timer(1000.0 * 60.0) // 1 minute
 
-    let getStream (consumer: IConsumer) =
+    let getStream (topic: CompleteTopicName) (consumer: IConsumer) =
         asyncSeq {
-            while active do
+            while not consumer.HasReachedEndOfTopic do
                 let! message = (consumer.ReceiveAsync() |> Async.AwaitTask)
-                yield message
+                let newMessageId = { message.MessageId with TopicName = topic }
+                yield { message with MessageId = newMessageId }
         }
 
     
@@ -77,7 +78,7 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                                                         ReceiverQueueSize = receiverQueueSize
                                                         Topic = partitionedTopic }
                             task {
-                                let! result = ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, SubscriptionMode.Durable, lookup, fun _ -> ())
+                                let! result = ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, SubscriptionMode.Durable, lookup, fun _ -> ())
                                 return (partitionedTopic, result)
                             })
                     try
@@ -89,7 +90,7 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                             consumerResults
                                 |> Seq.map (fun (topic, consumer) ->
                                     consumers.Add(topic.CompleteTopicName, consumer)
-                                    getStream consumer)
+                                    getStream topic.CompleteTopicName consumer)
                                 |> Seq.toList
                                 |> AsyncSeq.mergeAll
                         this.ConnectionState <- Ready
@@ -119,11 +120,13 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
 
                     let consumer = consumers.[msgId.TopicName]
                     channel.Reply(consumer.AcknowledgeAsync(msgId))
+                    return! loop state
 
                 | AcknowledgeCumulative (channel, msgId) ->
 
                     let consumer = consumers.[msgId.TopicName]
                     channel.Reply(consumer.AcknowledgeCumulativeAsync(msgId))
+                    return! loop state
 
                 | RedeliverUnacknowledgedMessages channel ->
 
@@ -136,6 +139,7 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                         |> channel.Reply
                     | _ ->
                         channel.Reply(Task.FromException(Exception(prefix + " invalid state: " + this.ConnectionState.ToString())))
+                    return! loop state
 
                 | Close channel ->
 
@@ -182,6 +186,7 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                     consumers
                     |> Seq.forall (fun kv -> kv.Value.HasReachedEndOfTopic)
                     |> channel.Reply
+                    return! loop state
 
                 | TickTime  ->
 
@@ -204,7 +209,7 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                                                                 ReceiverQueueSize = receiverQueueSize
                                                                 Topic = partitionedTopic }
                                     task {
-                                        let! result = ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, SubscriptionMode.Durable, lookup, fun _ -> ())
+                                        let! result = ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, SubscriptionMode.Durable, lookup, fun _ -> ())
                                         return (partitionedTopic, result)
                                     })
                             try
@@ -216,7 +221,7 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                                     consumerResults
                                     |> Seq.map (fun (topic, consumer) ->
                                         consumers.Add(topic.CompleteTopicName, consumer)
-                                        getStream consumer)
+                                        getStream topic.CompleteTopicName consumer)
                                     |> Seq.toList
                                     |> AsyncSeq.mergeAll
                                 Log.Logger.LogDebug("{0} success create consumers for extended partitions. old: {1}, new: {2}",

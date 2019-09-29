@@ -20,7 +20,7 @@ type ConsumerState = {
 }
 
 type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: ConsumerImpl -> unit) as this =
+                           partitionIndex: int, subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: ConsumerImpl -> unit) as this =
 
     [<Literal>]
     let MAX_REDELIVER_UNACKNOWLEDGED = 1000
@@ -28,9 +28,8 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
     let incomingMessages = new Queue<Message>()
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<Message>>
     let subscribeTsc = TaskCompletionSource<ConsumerImpl>(TaskCreationOptions.RunContinuationsAsynchronously)
-    let partitionIndex = -1
     let hasParentConsumer = false
-    let prefix = sprintf "consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
+    let prefix = sprintf "consumer(%u, %s, %i)" %consumerId consumerConfig.ConsumerName partitionIndex
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable hasReachedEndOfTopic = false
     let mutable avalablePermits = 0
@@ -451,9 +450,9 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
         }
 
     static member Init(consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                        subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: ConsumerImpl -> unit) =
+                       partitionIndex: int, subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: ConsumerImpl -> unit) =
         task {
-            let consumer = ConsumerImpl(consumerConfig, clientConfig, connectionPool, subscriptionMode, lookup, cleanup)
+            let consumer = ConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex, subscriptionMode, lookup, cleanup)
             let! result = consumer.InitInternal()
             return result :> IConsumer
         }

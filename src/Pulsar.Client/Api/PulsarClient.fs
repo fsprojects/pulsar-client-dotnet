@@ -126,7 +126,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                 mb.Post(AddConsumer consumer)
                 return consumer
             else
-                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, SubscriptionMode.Durable, lookupService, removeConsumer)
+                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, -1, SubscriptionMode.Durable, lookupService, removeConsumer)
                 mb.Post(AddConsumer consumer)
                 return consumer
         }

@@ -22,6 +22,11 @@ type TopicName private (completeTopicName: string, partition: int) =
 
     let isPersistent = completeTopicName.StartsWith("persistent")
     let isPartitioned = partition > -1
+    let completeTopicName =
+        if isPartitioned then
+            completeTopicName + PartitionTopicSuffix + partition.ToString()
+        else
+            completeTopicName
 
     new(topic: string) =
         let completeTopicName =
@@ -50,9 +55,10 @@ type TopicName private (completeTopicName: string, partition: int) =
     member this.IsPartitioned = isPartitioned
 
     member this.GetPartition(index: int) =
-        if (index = -1 || isPartitioned)
-        then this
-        else TopicName(completeTopicName, index)
+        if (index = -1 || isPartitioned) then
+            this
+        else
+            TopicName(completeTopicName, index)
 
     override this.ToString() =
         %completeTopicName

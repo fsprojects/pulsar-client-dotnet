@@ -58,6 +58,19 @@ let produceMessages (producer: IProducer) number producerName =
             ()
     }
 
+let generateMessages number producerName =
+    [|
+        for i in [1..number] do
+            yield sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString())
+    |]
+
+let producePredefinedMessages (producer: IProducer) (messages: string[]) =
+    task {
+        for msg in messages do
+            let! _ = producer.SendAsync(Encoding.UTF8.GetBytes(msg))
+            ()
+    }
+
 let fastProduceMessages (producer: IProducer) number producerName =
     task {
         for i in [1..number] do
@@ -85,8 +98,9 @@ let consumeMessages (consumer: IConsumer) number consumerName =
         for i in [1..number] do
             let! message = consumer.ReceiveAsync()
             let received = Encoding.UTF8.GetString(message.Payload)
-            do! consumer.AcknowledgeAsync(message.MessageId)
             Log.Debug("{0} received {1}", consumerName, received)
+            do! consumer.AcknowledgeAsync(message.MessageId)
+            Log.Debug("{0} acknowledged {1}", consumerName, received)
             let expected = "Message #" + string i
             if received.StartsWith(expected) |> not then
                 failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
@@ -97,8 +111,9 @@ let consumeAndVerifyMessages (consumer: IConsumer) consumerName (expectedMessage
         for i in [1..expectedMessages.Length] do
             let! message = consumer.ReceiveAsync()
             let received = Encoding.UTF8.GetString(message.Payload)
-            do! consumer.AcknowledgeAsync(message.MessageId)
             Log.Debug("{0} received {1}", consumerName, received)
+            do! consumer.AcknowledgeAsync(message.MessageId)
+            Log.Debug("{0} acknowledged {1}", consumerName, received)
             if expectedMessages |> Array.contains received |> not then
                 failwith <| sprintf "Received unexpected message '%s' consumer %s" received consumerName
     }

@@ -17,7 +17,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                            partitionIndex: int, lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) as this =
     let producerId = Generators.getNextProducerId()
 
-    let prefix = sprintf "producer(%u, %s)" %producerId producerConfig.ProducerName
+    let prefix = sprintf "producer(%u, %s, %i)" %producerId producerConfig.ProducerName partitionIndex
     let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
 
     let pendingMessages = Queue<PendingMessage>()
