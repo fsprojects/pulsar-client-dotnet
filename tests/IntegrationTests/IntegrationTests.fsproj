@@ -13,6 +13,7 @@
     <Compile Include="Acks.fs" />
     <Compile Include="Partitions.fs" />
     <Compile Include="Basic.fs" />
+    <Compile Include="Compression.fs" />
     <None Include="paket.references" />
     <Compile Include="Main.fs" />
   </ItemGroup>
