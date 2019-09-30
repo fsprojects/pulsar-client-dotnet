@@ -2,6 +2,7 @@
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Console;
+using Microsoft.Extensions.Logging;
 using Pulsar.Client.Api;
 
 namespace CsharpExamples
@@ -16,7 +17,14 @@ namespace CsharpExamples
 
             Console.WriteLine("Example started");
 
-            PulsarClient.Logger = new ConsoleLogger("PulsarLogger", (x, y) => true, true);
+            var loggerFactory =
+                LoggerFactory.Create(builder =>
+                    builder
+                        .SetMinimumLevel(LogLevel.Information)
+                        .AddConsole()
+                );
+
+            PulsarClient.Logger = loggerFactory.CreateLogger("PulsarLogger");
 
             var client = new PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)

@@ -11,7 +11,7 @@ Find examples of usage in [/examples](https://github.com/fsharplang-ru/pulsar-cl
 Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix):
 
 - [X] Basic Producer/Consumer API
-- [ ] Partitioned topics
+- [X] Partitioned topics
 - [X] Batching
 - [ ] Compression
 - [ ] TLS

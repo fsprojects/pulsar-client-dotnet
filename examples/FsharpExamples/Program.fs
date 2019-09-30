@@ -11,53 +11,53 @@ open System.Text
 
 [<EntryPoint>]
 let main argv =
-    let f () = Task.FromResult(DateTime.Now)
-    let rec asyncf () =
-        async {
-            let! dt = f() |> Async.AwaitTask
-            Console.WriteLine(dt)
-            return! asyncf()
-        }
-    asyncf() |> Async.RunSynchronously
 
-    //let serviceUrl = "pulsar://my-pulsar-cluster:31002";
-    //let subscriptionName = "my-subscription";
-    //let topicName = sprintf "my-topic-{%i}" DateTime.Now.Ticks;
+    let serviceUrl = "pulsar://my-pulsar-cluster:31002";
+    let subscriptionName = "my-subscription";
+    let topicName = sprintf "my-topic-{%i}" DateTime.Now.Ticks;
 
-    //printfn "Example started"
+    printfn "Example started"
 
-    //PulsarClient.Logger <- ConsoleLogger("PulsarLogger", Func<string,LogLevel,bool>(fun x y -> true), true)
+    let loggerFactory =
+        LoggerFactory.Create(fun builder ->
+            builder
+                .SetMinimumLevel(LogLevel.Information)
+                .AddConsole() |> ignore
+        )
 
-    //let client =
-    //    PulsarClientBuilder()
-    //        .ServiceUrl(serviceUrl)
-    //        .Build()
 
-    //let t = task {
+    PulsarClient.Logger <- loggerFactory.CreateLogger("PulsarLogger")
 
-    //    let! producer =
-    //        ProducerBuilder(client)
-    //            .Topic(topicName)
-    //            .CreateAsync()
+    let client =
+        PulsarClientBuilder()
+            .ServiceUrl(serviceUrl)
+            .Build()
 
-    //    let! consumer =
-    //        ConsumerBuilder(client)
-    //            .Topic(topicName)
-    //            .SubscriptionName(subscriptionName)
-    //            .SubscribeAsync()
+    let t = task {
 
-    //    let! messageId = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Sent from F# at '%A'" DateTime.Now))
-    //    printfn "MessageId is: '%A'" messageId
+        let! producer =
+            ProducerBuilder(client)
+                .Topic(topicName)
+                .CreateAsync()
 
-    //    let! message = consumer.ReceiveAsync()
-    //    printfn "Received: %A" (message.Payload |> Encoding.UTF8.GetString)
+        let! consumer =
+            ConsumerBuilder(client)
+                .Topic(topicName)
+                .SubscriptionName(subscriptionName)
+                .SubscribeAsync()
 
-    //    do! consumer.AcknowledgeAsync(message.MessageId)
-    //}
+        let! messageId = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Sent from F# at '%A'" DateTime.Now))
+        printfn "MessageId is: '%A'" messageId
 
-    //t.Wait()
+        let! message = consumer.ReceiveAsync()
+        printfn "Received: %A" (message.Payload |> Encoding.UTF8.GetString)
 
-    //printfn "Example ended. Press any key to exit"
-    //Console.ReadKey()
+        do! consumer.AcknowledgeAsync(message.MessageId)
+    }
+
+    t.Wait()
+
+    printfn "Example ended. Press any key to exit"
+    Console.ReadKey()
 
     0 // return an integer exit code

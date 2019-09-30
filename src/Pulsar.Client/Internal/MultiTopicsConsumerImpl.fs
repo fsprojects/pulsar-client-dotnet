@@ -50,7 +50,6 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
     let receiverQueueSize = Math.Min(consumerConfig.ReceiverQueueSize, consumerConfig.MaxTotalReceiverQueueSizeAcrossPartitions / numPartitions)
     let mutable connectionState = MultiTopicConnectionState.Uninitialized
     let mutable numPartitions = numPartitions
-    let mutable active = true
 
     let timer = new Timer(1000.0 * 60.0) // 1 minute
 
