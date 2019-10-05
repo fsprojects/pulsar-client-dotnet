@@ -45,16 +45,19 @@ let tests =
                 .SubscriptionName("test-subscription")
                 .SubscribeAsync() |> Async.AwaitTask
 
+        let sendMessages = if enableBatching then fastProduceMessages else produceMessages
+        let messagesCount = 100
+
         let producerTask =
             Task.Run(fun () ->
                 task {
-                    do! produceMessages producer 1 "compression-single"
+                    do! sendMessages producer messagesCount "compression-producer"
                 }:> Task)
 
         let consumerTask =
             Task.Run(fun () ->
                 task {
-                    do! consumeMessages consumer 1 "compression-single"
+                    do! consumeMessages consumer messagesCount "compression-consumer"
                 }:> Task)
 
         do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
@@ -62,19 +65,21 @@ let tests =
         Log.Debug("Finished Send and receive {0} compressed message using '{0}'", singleOrBatched, compressionType)
     }
 
-    let run enableBatching =
+    let sendMessages enableBatching =
         codecs
         |> Seq.map (sendReceive enableBatching)
         |> Async.Parallel
-        |> Async.RunSynchronously
-        |> ignore
+        |> Async.Ignore
+
+    let sendNonBatchedMessages() = sendMessages false
+    let sendBatchedMessages() = sendMessages true
 
     testList "compression" [
         testAsync "Send and receive single compressed message using all implemented compression codecs" {
-            run false
+            do! sendNonBatchedMessages()
         }
 
         testAsync "Send and receive batched compressed message using all implemented compression codecs" {
-            run true
+            do! sendBatchedMessages()
         }
     ]
