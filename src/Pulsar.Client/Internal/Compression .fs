@@ -13,8 +13,8 @@ type internal CompressionCodec =
 
 module internal CompressionCodec =
 
-    let private zlib (bytes : byte[]) (createZLibStream : Stream -> ZOutputStream) =
-        use ms = new MemoryStream()
+    let private zlib (bytes : byte[]) (createZLibStream : Stream -> ZOutputStream) (capacity : int) =
+        use ms = new MemoryStream(capacity)
         use zlib = createZLibStream ms
         zlib.Write(bytes, 0, bytes.Length)
         zlib.finish()
@@ -22,11 +22,11 @@ module internal CompressionCodec =
 
     let private encodeZLib (bytes : byte[]) =
         let createZLibStream ms = new ZOutputStream(ms, zlibConst.Z_DEFAULT_COMPRESSION)
-        createZLibStream |> zlib bytes
+        createZLibStream |> zlib bytes <| 0
 
     let private decodeZLib (uncompressedSize : int) (bytes : byte[]) =
         let createZLibStream ms = new ZOutputStream(ms)
-        createZLibStream |> zlib bytes
+        createZLibStream |> zlib bytes <| uncompressedSize
 
     let private encodeLZ4 (bytes : byte[]) =
         let target = Array.zeroCreate<byte>(LZ4Codec.MaximumOutputSize(bytes.Length))
@@ -42,7 +42,9 @@ module internal CompressionCodec =
         bytes |> SnappyCodec.Compress
 
     let private decodeSnappy (uncompressedSize : int) (bytes : byte[]) =
-        bytes |> SnappyCodec.Uncompress
+        let target = Array.zeroCreate<byte>(uncompressedSize)
+        SnappyCodec.Uncompress(bytes, 0, bytes.Length, target, 0) |> ignore
+        target
 
     let private encodeZStd (bytes : byte[]) =
         use zstd = new Compressor()
@@ -50,7 +52,7 @@ module internal CompressionCodec =
 
     let private decodeZStd (uncompressedSize : int) (bytes : byte[]) =
         use zstd = new Decompressor()
-        bytes |> zstd.Unwrap
+        zstd.Unwrap(bytes, uncompressedSize)
 
     let create = function
         | CompressionType.ZLib -> { Encode = encodeZLib; Decode = decodeZLib }
