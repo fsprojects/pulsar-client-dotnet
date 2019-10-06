@@ -117,17 +117,36 @@ type Broker =
         PhysicalAddress: PhysicalAddress
     }
 
+type CompressionType =
+    | None = 0
+    | LZ4 = 1
+    | ZLib = 2
+    | ZStd = 3
+    | Snappy = 4
 
 type Metadata =
     {
         NumMessages: int
         HasNumMessagesInBatch: bool
+        CompressionType: CompressionType
+        UncompressedMessageSize: int32
     }
     with
         static member FromMessageMetadata(messageMetadata: MessageMetadata) =
+
+            let mapCompressionType = function
+                | pulsar.proto.CompressionType.None -> CompressionType.None
+                | pulsar.proto.CompressionType.Lz4 -> CompressionType.LZ4
+                | pulsar.proto.CompressionType.Zlib -> CompressionType.ZLib
+                | pulsar.proto.CompressionType.Zstd -> CompressionType.ZStd
+                | pulsar.proto.CompressionType.Snappy -> CompressionType.Snappy
+                | _ -> CompressionType.None
+
             {
                 NumMessages = messageMetadata.NumMessagesInBatch
                 HasNumMessagesInBatch = messageMetadata.ShouldSerializeNumMessagesInBatch()
+                CompressionType = messageMetadata.Compression |> mapCompressionType
+                UncompressedMessageSize = messageMetadata.UncompressedSize |> int32
             }
 
 type Message =
@@ -231,13 +250,6 @@ type ConsumerMessage =
     | SendFlowPermits of int
     | Close of AsyncReplyChannel<Task>
     | Unsubscribe of AsyncReplyChannel<Task>
-
-type CompressionType =
-    | None = 0
-    | LZ4 = 1
-    | ZLib = 2
-    | ZStd = 3
-    | Snappy = 4
 
 type MessageRoutingMode =
     | SinglePartition = 0
