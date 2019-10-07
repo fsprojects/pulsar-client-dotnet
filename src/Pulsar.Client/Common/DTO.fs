@@ -12,6 +12,7 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
 open System.Collections.Generic
+open System.Runtime.InteropServices
 
 type ChecksumType =
     | Crc32c
@@ -138,6 +139,16 @@ type Message =
         Payload: byte[]
     }
 
+type MessageBuilder(value : byte[],
+                    [<Optional; DefaultParameterValue(null:string)>] key : string,
+                    [<Optional; DefaultParameterValue(null:IDictionary<string, string>)>] properties : IDictionary<string, string>) =
+    let key: MessageKey =  if isNull key then %"" else %key
+    let properties = if isNull properties then EmptyProps else properties
+
+    member this.Value = value
+    member this.Key = key
+    member this.Properties = properties
+
 type WriterStream = Stream
 type Payload = WriterStream -> Task
 type Connection = SocketConnection * WriterStream
@@ -157,7 +168,7 @@ type PendingMessage =
 
 type BatchItem =
     {
-        Data: byte[]
+        Message: MessageBuilder
         Tcs : TaskCompletionSource<MessageId>
     }
 
@@ -209,13 +220,13 @@ type ProducerMessage =
     | ConnectionFailed of exn
     | ConnectionClosed of obj // ClientCnx
     | SendReceipt of SendReceipt
-    | BeginSendMessage of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
+    | BeginSendMessage of MessageBuilder * AsyncReplyChannel<TaskCompletionSource<MessageId>>
     | SendMessage of PendingMessage
     | RecoverChecksumError of SequenceId
     | Terminated
     | TimeoutCheck
     | Close of AsyncReplyChannel<Task>
-    | StoreBatchItem of byte[] * AsyncReplyChannel<TaskCompletionSource<MessageId>>
+    | StoreBatchItem of MessageBuilder * AsyncReplyChannel<TaskCompletionSource<MessageId>>
     | SendBatchMessage
 
 type ConsumerMessage =
@@ -244,6 +255,9 @@ type MessageRoutingMode =
     | RoundRobinPartition = 1
     | CustomPartition = 2
 
+type HashingScheme =
+    | DotnetStringHash = 0
+    | Murmur3_32Hash = 1
 
 exception InvalidServiceURL
 exception InvalidConfigurationException of string

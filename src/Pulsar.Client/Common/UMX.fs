@@ -12,6 +12,7 @@ open FSharp.UMX
 [<Measure>] type private clientCnxId
 [<Measure>] type private completeTopicName
 [<Measure>] type private batchIndex
+[<Measure>] type private messageKey
 
 type LedgerId = int64<ledgerId>
 type EntryId = int64<entryId>
@@ -22,3 +23,4 @@ type SequenceId = uint64<sequenceId>
 type ClientCnxId = uint64<clientCnxId>
 type CompleteTopicName = string<completeTopicName>
 type BatchIndex = int<batchIndex>
+type MessageKey = string<messageKey>

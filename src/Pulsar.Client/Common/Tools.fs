@@ -9,6 +9,7 @@ open System.Runtime.ExceptionServices
 let internal MemoryStreamManager = RecyclableMemoryStreamManager()
 let MagicNumber = int16 0x0e01
 let RandomGenerator = Random()
+let EmptyProps = dict<string,string> []
 
 // Converts
 

@@ -35,15 +35,24 @@ type PartitionedProducerImpl private (producerConfig: ProducerConfiguration, cli
     let maxPendingMessages = Math.Min(producerConfig.MaxPendingMessages, producerConfig.MaxPendingMessagesAcrossPartitions / numPartitions)
     let mutable connectionState = PartitionedConnectionState.Uninitialized
     let mutable numPartitions = numPartitions
+    let hashingFunction =
+        match producerConfig.HashingScheme with
+        | HashingScheme.DotnetStringHash ->
+            fun (s: String)-> s.GetHashCode()
+        | HashingScheme.Murmur3_32Hash ->
+            MurmurHash3.Hash
+        | _ ->
+            failwith "Unknown HashingScheme"
     let router =
         match producerConfig.MessageRoutingMode with
         | MessageRoutingMode.SinglePartition ->
-            SinglePartitionMessageRouterImpl (RandomGenerator.Next(0, numPartitions)) :> IMessageRouter
+            SinglePartitionMessageRouterImpl (RandomGenerator.Next(0, numPartitions), hashingFunction) :> IMessageRouter
         | MessageRoutingMode.RoundRobinPartition ->
             RoundRobinPartitionMessageRouterImpl (
                 RandomGenerator.Next(0, numPartitions),
                 producerConfig.BatchingEnabled,
-                int producerConfig.MaxBatchingPublishDelay.TotalMilliseconds) :> IMessageRouter
+                int producerConfig.MaxBatchingPublishDelay.TotalMilliseconds,
+                hashingFunction) :> IMessageRouter
         | MessageRoutingMode.CustomPartition ->
             producerConfig.CustomMessageRouter
         | _ ->
@@ -175,14 +184,14 @@ type PartitionedProducerImpl private (producerConfig: ProducerConfiguration, cli
 
     override this.GetHashCode () = int producerId
 
-    member private this.ChoosePartitionIfActive() =
+    member private this.ChoosePartitionIfActive (message: MessageBuilder) =
         match this.ConnectionState with
         | Closing | Closed ->
             raise (AlreadyClosedException(prefix + " already closed"))
         | Uninitialized | Failed ->
             raise (NotConnectedException(prefix + " Invalid connection state: " + this.ConnectionState.ToString()))
         | Ready ->
-            let partition = router.ChoosePartition(numPartitions)
+            let partition = router.ChoosePartition(message.Key, numPartitions)
             if partition < 0 || partition >= numPartitions
             then
                 failwith (prefix + " Illegal partition index chosen by the message routing policy: " + partition.ToString())
@@ -221,13 +230,19 @@ type PartitionedProducerImpl private (producerConfig: ProducerConfiguration, cli
 
         member this.SendAndForgetAsync (message: byte[]) =
             task {
-                let partition = this.ChoosePartitionIfActive()
+                let partition = this.ChoosePartitionIfActive(MessageBuilder(message))
                 return! producers.[partition].SendAndForgetAsync(message)
             }
 
         member this.SendAsync (message: byte[]) =
             task {
-                let partition = this.ChoosePartitionIfActive()
+                let partition = this.ChoosePartitionIfActive(MessageBuilder(message))
+                return! producers.[partition].SendAsync(message)
+            }
+
+        member this.SendAsync (message: MessageBuilder) =
+            task {
+                let partition = this.ChoosePartitionIfActive(message)
                 return! producers.[partition].SendAsync(message)
             }
 

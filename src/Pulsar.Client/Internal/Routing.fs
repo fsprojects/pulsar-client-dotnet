@@ -4,21 +4,30 @@ open System
 open Pulsar.Client.Common
 open System.Threading
 open Pulsar.Client.Api
+open FSharp.UMX
 
-type SinglePartitionMessageRouterImpl (partitionIndex: int) =
+type SinglePartitionMessageRouterImpl (partitionIndex: int, hashFun: string -> int) =
     interface IMessageRouter with
-        member this.ChoosePartition (numPartitions: int) =
-            partitionIndex
+        member this.ChoosePartition (messageKey, numPartitions) =
+            if String.IsNullOrEmpty(%messageKey) then
+                partitionIndex
+            else
+                // If the message has a key, it supersedes the single partition routing policy
+                signSafeMod (hashFun %messageKey) numPartitions
 
-type RoundRobinPartitionMessageRouterImpl (startPartitionIndex: int, isBatchingEnabled: bool, maxBatchingDelayMs: int) =
+type RoundRobinPartitionMessageRouterImpl (startPartitionIndex: int, isBatchingEnabled: bool, maxBatchingDelayMs: int, hashFun: string -> int) =
     let mutable partitionIndex = startPartitionIndex
     let maxBatchingDelayMs = Math.Max(1, maxBatchingDelayMs)
 
     interface IMessageRouter with
-        member this.ChoosePartition (numPartitions: int) =
-            if isBatchingEnabled
-            then
-                let currentMs = DateTime.Now.Millisecond
-                signSafeMod (currentMs / maxBatchingDelayMs + startPartitionIndex) numPartitions
+        member this.ChoosePartition (messageKey, numPartitions) =
+            if String.IsNullOrEmpty(%messageKey) then
+                if isBatchingEnabled
+                then
+                    let currentMs = DateTime.Now.Millisecond
+                    signSafeMod (currentMs / maxBatchingDelayMs + startPartitionIndex) numPartitions
+                else
+                    signSafeMod (Interlocked.Increment(&partitionIndex)) numPartitions
             else
-                signSafeMod (Interlocked.Increment(&partitionIndex)) numPartitions
+                // If the message has a key, it supersedes the single partition routing policy
+                signSafeMod (hashFun %messageKey) numPartitions

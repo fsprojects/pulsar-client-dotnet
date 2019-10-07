@@ -59,6 +59,7 @@ type ProducerConfiguration =
         MessageRoutingMode: MessageRoutingMode
         CustomMessageRouter: IMessageRouter
         AutoUpdatePartitions: bool
+        HashingScheme: HashingScheme
     }
     static member Default =
         {
@@ -74,4 +75,5 @@ type ProducerConfiguration =
             MessageRoutingMode = MessageRoutingMode.RoundRobinPartition
             CustomMessageRouter = Unchecked.defaultof<IMessageRouter>
             AutoUpdatePartitions = true
+            HashingScheme = HashingScheme.DotnetStringHash
         }

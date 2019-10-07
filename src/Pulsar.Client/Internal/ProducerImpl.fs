@@ -25,7 +25,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
 
     let compressionCodec = CompressionCodec.create producerConfig.CompressionType
 
-    let compressionType =
+    let protoCompressionType =
         match producerConfig.CompressionType with
             | CompressionType.None -> pulsar.proto.CompressionType.None
             | CompressionType.ZLib -> pulsar.proto.CompressionType.Zlib
@@ -101,21 +101,24 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
             return checkSum <> computedCheckSum
         }
 
-    let createMessageMetadata (message : byte[]) numMessagesInBatch =
-
+    let createMessageMetadata (message : MessageBuilder) (numMessagesInBatch: int option) =
         let metadata =
             MessageMetadata (
                 SequenceId = %Generators.getNextSequenceId(),
                 PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
                 ProducerName = producerConfig.ProducerName,
-                UncompressedSize = (message.Length |> uint32),
-                Compression = compressionType)
-
-        let numMessages = match numMessagesInBatch with | Some(x) -> x | None -> 1
-
+                UncompressedSize = (message.Value.Length |> uint32)
+            )
+        if protoCompressionType <> pulsar.proto.CompressionType.None then
+            metadata.Compression <- protoCompressionType
+        if String.IsNullOrEmpty(%message.Key) |> not then
+            metadata.PartitionKey <- %message.Key
+            metadata.PartitionKeyB64Encoded <- false
+        if message.Properties.Count > 0 then
+            for property in message.Properties do
+                metadata.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
         if numMessagesInBatch.IsSome then
-            metadata.NumMessagesInBatch <- numMessages
-
+            metadata.NumMessagesInBatch <- numMessagesInBatch.Value
         metadata
 
     let stopProducer() =
@@ -199,7 +202,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                     Log.Logger.LogDebug("{0} Begin store batch item. Batch container size: {1}", prefix, batchItems.Count)
 
                     let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
-                    batchItems.Add({ Data = message; Tcs = tcs })
+                    batchItems.Add({ Message = message; Tcs = tcs })
 
                     Log.Logger.LogDebug("{0} End store batch item. Batch container size: {1}", prefix, batchItems.Count)
 
@@ -219,14 +222,21 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                         use messageStream = MemoryStreamManager.GetStream()
                         use messageWriter = new BinaryWriter(messageStream)
 
-                        for message in batchItems do
-                            let smm = SingleMessageMetadata(PayloadSize = message.Data.Length)
+                        for batchItem in batchItems do
+                            let message = batchItem.Message
+                            let smm = SingleMessageMetadata(PayloadSize = message.Value.Length)
+                            if String.IsNullOrEmpty(%message.Key) |> not then
+                                smm.PartitionKey <- %message.Key
+                                smm.PartitionKeyB64Encoded <- false
+                            if message.Properties.Count > 0 then
+                                for property in message.Properties do
+                                    smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
                             Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
-                            messageWriter.Write(message.Data)
+                            messageWriter.Write(message.Value)
 
                         let batchData = messageStream.ToArray()
                         let encodedBatchData = compressionCodec.Encode batchData
-                        let metadata = createMessageMetadata batchData (Some batchSize)
+                        let metadata = createMessageMetadata (MessageBuilder(encodedBatchData)) (Some batchSize)
                         let sequenceId = %metadata.SequenceId
                         let payload = Commands.newSend producerId sequenceId batchSize metadata encodedBatchData
                         let agentMessage = SendMessage {
@@ -247,9 +257,9 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
 
                     Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
                     let metadata = createMessageMetadata message None
-                    let encodedMessages = compressionCodec.Encode message
+                    let encodedMessage = compressionCodec.Encode message.Value
                     let sequenceId = %metadata.SequenceId
-                    let payload = Commands.newSend producerId sequenceId 1 metadata encodedMessages
+                    let payload = Commands.newSend producerId sequenceId 1 metadata encodedMessage
                     let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
                     this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Callback = SingleCallback tcs; CreatedAt = DateTime.Now })
                     channel.Reply(tcs)
@@ -431,11 +441,18 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
         member this.SendAndForgetAsync (message: byte[]) =
             task {
                 connectionHandler.CheckIfActive()
-                let! _ = this.SendMessage message
+                let! _ = this.SendMessage (MessageBuilder(message))
                 return ()
             }
 
         member this.SendAsync (message: byte[]) =
+            task {
+                connectionHandler.CheckIfActive()
+                let! tcs = this.SendMessage (MessageBuilder(message))
+                return! tcs.Task
+            }
+
+        member this.SendAsync (message: MessageBuilder) =
             task {
                 connectionHandler.CheckIfActive()
                 let! tcs = this.SendMessage message
