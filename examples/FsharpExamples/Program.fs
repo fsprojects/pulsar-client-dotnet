@@ -58,6 +58,6 @@ let main argv =
     t.Wait()
 
     printfn "Example ended. Press any key to exit"
-    Console.ReadKey()
+    Console.ReadKey() |> ignore
 
     0 // return an integer exit code

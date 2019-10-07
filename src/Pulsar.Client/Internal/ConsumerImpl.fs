@@ -178,6 +178,11 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
             state.WaitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
         Log.Logger.LogInformation("{0} stopped", prefix)
 
+    let decompress message =
+        let compressionCodec = message.Metadata.CompressionType |> CompressionCodec.create
+        let uncompressedPayload = compressionCodec.Decode message.Metadata.UncompressedMessageSize message.Payload
+        { message with Payload = uncompressedPayload }
+
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
         let rec loop (state: ConsumerState) =
@@ -263,7 +268,9 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                         increaseAvailablePermits rawMessage.Metadata.NumMessages
                     else
                         if (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
-                            let message = { rawMessage with MessageId = msgId }
+
+                            let message = { rawMessage with MessageId = msgId } |> decompress
+
                             if not hasWaitingChannel then
                                 incomingMessages.Enqueue(message)
                                 return! loop state
@@ -276,7 +283,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                                 return! loop { state with WaitingChannel = nullChannel }
                         elif rawMessage.Metadata.NumMessages > 0 then
                             // handle batch message enqueuing; uncompressed payload has all messages in batch
-                            receiveIndividualMessagesFromBatch rawMessage
+                            receiveIndividualMessagesFromBatch (rawMessage |> decompress)
                             if hasWaitingChannel then
                                 replyWithMessage state.WaitingChannel <| incomingMessages.Dequeue()
                                 return! loop { state with WaitingChannel = nullChannel }

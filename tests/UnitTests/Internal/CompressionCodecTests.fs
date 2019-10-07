@@ -29,7 +29,8 @@ let tests =
         let encoded = hello |> getBytes |> codec.Encode
         Expect.isTrue "" (encoded = expectedBytes)
 
-    let testDecode compressionType uncompressedSize encodedBytes =
+    let testDecode compressionType encodedBytes =
+        let uncompressedSize = helloNone.Length
         let codec = compressionType |> createCodec
         let decoded = encodedBytes |> codec.Decode uncompressedSize |> getString
         decoded |> Expect.equal "" hello
@@ -41,7 +42,7 @@ let tests =
         }
 
         test "None decoding returns same data" {
-            helloNone |> testDecode CompressionType.None 0
+            helloNone |> testDecode CompressionType.None
         }
 
         test "Codec should make ZLib encoding" {
@@ -49,7 +50,7 @@ let tests =
         }
 
         test "Codec should make ZLib decoding" {
-            helloZLib |> testDecode CompressionType.ZLib 0
+            helloZLib |> testDecode CompressionType.ZLib
         }
 
         test "Codec should make LZ4 encoding" {
@@ -57,8 +58,7 @@ let tests =
         }
 
         test "Codec should make LZ4 decoding" {
-            let uncompressedSize = (getBytes hello).Length
-            helloLZ4 |> testDecode CompressionType.LZ4 uncompressedSize
+            helloLZ4 |> testDecode CompressionType.LZ4
         }
 
         test "Codec should make Snappy encoding" {
@@ -66,7 +66,7 @@ let tests =
         }
 
         test "Codec should make Snappy decoding" {
-            helloSnappy |> testDecode CompressionType.Snappy 0
+            helloSnappy |> testDecode CompressionType.Snappy
         }
 
         test "Codec should make ZStd encoding" {
@@ -74,6 +74,6 @@ let tests =
         }
 
         test "Codec should make ZStd decoding" {
-            helloZStd |> testDecode CompressionType.ZStd 0
+            helloZStd |> testDecode CompressionType.ZStd
         }
     ]
