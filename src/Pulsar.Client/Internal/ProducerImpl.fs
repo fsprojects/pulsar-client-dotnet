@@ -235,9 +235,9 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                             messageWriter.Write(message.Value)
 
                         let batchData = messageStream.ToArray()
-                        let encodedBatchData = compressionCodec.Encode batchData
-                        let metadata = createMessageMetadata (MessageBuilder(encodedBatchData)) (Some batchSize)
+                        let metadata = createMessageMetadata (MessageBuilder(batchData)) (Some batchSize)
                         let sequenceId = %metadata.SequenceId
+                        let encodedBatchData = compressionCodec.Encode batchData
                         let payload = Commands.newSend producerId sequenceId batchSize metadata encodedBatchData
                         let agentMessage = SendMessage {
                                 SequenceId = sequenceId
