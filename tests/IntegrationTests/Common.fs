@@ -23,7 +23,7 @@ let pulsarAddress = "pulsar://my-pulsar-cluster:31002"
 let configureLogging() =
     Log.Logger <-
         LoggerConfiguration()
-            .MinimumLevel.Information()
+            .MinimumLevel.Debug()
             .WriteTo.Console(theme = AnsiConsoleTheme.Code, outputTemplate="[{Timestamp:HH:mm:ss.fff} {Level:u3} {ThreadId}] {Message:lj}{NewLine}{Exception}")
             .Enrich.FromLogContext()
             .Enrich.WithThreadId()
@@ -55,6 +55,16 @@ let produceMessages (producer: IProducer) number producerName =
     task {
         for i in [1..number] do
             let! _ = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
+            ()
+    }
+
+let produceMessagesWithProps (producer: IProducer) number producerName =
+    task {
+        for i in [1..number] do
+            let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) )
+            let key = i.ToString()
+            let props = dict [("prop1",key);("prop2",key)]
+            let! _ = producer.SendAsync(MessageBuilder(payload, key, props))
             ()
     }
 
@@ -104,6 +114,25 @@ let consumeMessages (consumer: IConsumer) number consumerName =
             let expected = "Message #" + string i
             if received.StartsWith(expected) |> not then
                 failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
+    }
+
+let consumeMessagesWithProps (consumer: IConsumer) number consumerName =
+    task {
+        for i in [1..number] do
+            let! message = consumer.ReceiveAsync()
+            let received = Encoding.UTF8.GetString(message.Payload)
+            Log.Debug("{0} received {1}", consumerName, received)
+            do! consumer.AcknowledgeAsync(message.MessageId)
+            Log.Debug("{0} acknowledged {1}", consumerName, received)
+            let expected = "Message #" + string i
+            if received.StartsWith(expected) |> not then
+                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
+            if message.MessageKey <> %i.ToString() then
+                failwith <| sprintf "Incorrect message key expected %i received %s consumer %s" i %message.MessageKey consumerName
+            if (message.Properties.Count = 2
+                && message.Properties.["prop1"] = %i.ToString()
+                && message.Properties.["prop2"] = %i.ToString()) |> not then
+                failwith <| sprintf "Incorrect properties %s" consumerName
     }
 
 let consumeAndVerifyMessages (consumer: IConsumer) consumerName (expectedMessages : string[]) =

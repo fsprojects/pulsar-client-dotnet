@@ -152,6 +152,7 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
         | SubscriptionType.Exclusive -> CommandSubscribe.SubType.Exclusive
         | SubscriptionType.Shared -> CommandSubscribe.SubType.Shared
         | SubscriptionType.Failover -> CommandSubscribe.SubType.Failover
+        | SubscriptionType.KeyShared -> CommandSubscribe.SubType.KeyShared
         | _ -> failwith "Unknown subscription type"
 
     let initialPosition =

@@ -282,6 +282,35 @@ type ClientCnx (config: PulsarClientConfiguration,
                         rejectedRequests, rejectedRequestResetTimeSec);
                 this.Close()
 
+    let getMessageReceived (cmd: CommandMessage) (messageMetadata: MessageMetadata) payload =
+        let mapCompressionType = function
+            | pulsar.proto.CompressionType.None -> Pulsar.Client.Common.CompressionType.None
+            | pulsar.proto.CompressionType.Lz4 -> Pulsar.Client.Common.CompressionType.LZ4
+            | pulsar.proto.CompressionType.Zlib -> Pulsar.Client.Common.CompressionType.ZLib
+            | pulsar.proto.CompressionType.Zstd -> Pulsar.Client.Common.CompressionType.ZStd
+            | pulsar.proto.CompressionType.Snappy -> Pulsar.Client.Common.CompressionType.Snappy
+            | _ -> Pulsar.Client.Common.CompressionType.None
+        let medadata = {
+            NumMessages = messageMetadata.NumMessagesInBatch
+            HasNumMessagesInBatch = messageMetadata.ShouldSerializeNumMessagesInBatch()
+            CompressionType = messageMetadata.Compression |> mapCompressionType
+            UncompressedMessageSize = messageMetadata.UncompressedSize |> int32
+        }
+        MessageReceived {
+            MessageId = { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); Type = Individual; Partition = -1; TopicName = %""  }
+            RedeliveryCount = cmd.RedeliveryCount
+            Metadata = medadata
+            Payload = payload
+            MessageKey = %messageMetadata.PartitionKey
+            Properties =
+                if messageMetadata.Properties.Count > 0 then
+                    messageMetadata.Properties
+                    |> Seq.map (fun prop -> (prop.Key, prop.Value))
+                    |> dict
+                else
+                    EmptyProps
+        }
+
     let handleCommand xcmd =
         match xcmd with
         | XCommandConnected cmd ->
@@ -313,11 +342,8 @@ type ClientCnx (config: PulsarClientConfiguration,
             Commands.newPong() |> SocketMessageWithoutReply |> sendMb.Post
         | XCommandMessage (cmd, metadata, payload) ->
             let consumerMb = consumers.[%cmd.ConsumerId]
-            consumerMb.Post(MessageReceived {
-                MessageId = { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); Type = Individual; Partition = -1; TopicName = %""  }
-                RedeliveryCount = cmd.RedeliveryCount
-                Metadata = Metadata.FromMessageMetadata(metadata)
-                Payload = payload })
+            let msgReceived = getMessageReceived cmd metadata payload
+            consumerMb.Post(msgReceived)
         | XCommandLookupTopicResponse cmd ->
             if (cmd.ShouldSerializeError()) then
                 checkServerError cmd.Error cmd.Message

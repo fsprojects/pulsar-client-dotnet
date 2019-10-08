@@ -132,23 +132,6 @@ type Metadata =
         CompressionType: CompressionType
         UncompressedMessageSize: int32
     }
-    with
-        static member FromMessageMetadata(messageMetadata: MessageMetadata) =
-
-            let mapCompressionType = function
-                | pulsar.proto.CompressionType.None -> CompressionType.None
-                | pulsar.proto.CompressionType.Lz4 -> CompressionType.LZ4
-                | pulsar.proto.CompressionType.Zlib -> CompressionType.ZLib
-                | pulsar.proto.CompressionType.Zstd -> CompressionType.ZStd
-                | pulsar.proto.CompressionType.Snappy -> CompressionType.Snappy
-                | _ -> CompressionType.None
-
-            {
-                NumMessages = messageMetadata.NumMessagesInBatch
-                HasNumMessagesInBatch = messageMetadata.ShouldSerializeNumMessagesInBatch()
-                CompressionType = messageMetadata.Compression |> mapCompressionType
-                UncompressedMessageSize = messageMetadata.UncompressedSize |> int32
-            }
 
 type Message =
     {
@@ -156,6 +139,8 @@ type Message =
         Metadata: Metadata
         RedeliveryCount: uint32
         Payload: byte[]
+        MessageKey: MessageKey
+        Properties: IDictionary<string, string>
     }
 
 type MessageBuilder(value : byte[],

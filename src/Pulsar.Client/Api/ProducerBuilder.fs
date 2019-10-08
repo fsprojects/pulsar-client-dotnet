@@ -94,6 +94,12 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
             { config with
                 CustomMessageRouter = customMessageRouter })
 
+    member __.HashingScheme hashingScheme =
+        ProducerBuilder(
+            client,
+            { config with
+                HashingScheme = hashingScheme })
+
     member this.CreateAsync() =
         config
         |> verify

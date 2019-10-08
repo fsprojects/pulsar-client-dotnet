@@ -132,7 +132,19 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                     Type = Cumulative(%i,acker)
                     TopicName = %""
                 }
-            let message = { rawMessage with MessageId = messageId; Payload = singleMessagePayload }
+            let message =
+                { rawMessage with
+                    MessageId = messageId
+                    Payload = singleMessagePayload
+                    Properties =
+                        if singleMessageMetadata.Properties.Count > 0 then
+                            singleMessageMetadata.Properties
+                            |> Seq.map (fun prop -> (prop.Key, prop.Value))
+                            |> dict
+                        else
+                            EmptyProps
+                    MessageKey = %singleMessageMetadata.PartitionKey
+                }
             incomingMessages.Enqueue(message)
 
 
