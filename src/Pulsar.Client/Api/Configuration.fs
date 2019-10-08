@@ -43,6 +43,7 @@ type ConsumerConfiguration =
         ReadCompacted: bool
         NegativeAckRedeliveryDelay: TimeSpan
         ResetIncludeHead: bool
+        DeadLettersProcessor : DeadLettersProcessor option
     }
     static member Default =
         {
@@ -60,6 +61,7 @@ type ConsumerConfiguration =
             ReadCompacted = false
             NegativeAckRedeliveryDelay = TimeSpan.FromMinutes(1.0)
             ResetIncludeHead = false
+            DeadLettersProcessor = None
         }
 
 type ProducerConfiguration =

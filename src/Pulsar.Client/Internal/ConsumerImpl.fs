@@ -32,6 +32,8 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
     let mutable lastDequeuedMessage = MessageId.Earliest
     let mutable startMessageId = startMessageId
     let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
+    let deadLettersProcessor = consumerConfig.DeadLettersProcessor
+
     let connectionHandler =
         ConnectionHandler(prefix,
                           connectionPool,
@@ -161,6 +163,28 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
         | Some startMsgId ->
             subscriptionMode = SubscriptionMode.NonDurable && startMsgId.LedgerId = msgId.LedgerId && startMsgId.EntryId = msgId.EntryId
 
+    let clearDeadLetters() =
+        deadLettersProcessor
+        |> Option.iter (fun p -> p.ClearMessages())
+
+    let removeDeadLetter messageId =
+        deadLettersProcessor
+        |> Option.iter (fun p -> p.RemoveMessage messageId)
+
+    let storeDeadLetter message =
+        deadLettersProcessor
+        |> Option.iter (fun p -> p.AddMessage message)
+
+    let processDeadLetters (messageId : MessageId) =
+        let success =
+            deadLettersProcessor
+            |> Option.map (fun p -> p.ProcessMessages messageId)
+            |> Option.defaultValue false
+
+        (this :> IConsumer).AcknowledgeAsync messageId |> ignore
+
+        success
+
     let receiveIndividualMessagesFromBatch (rawMessage: Message) =
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
@@ -198,6 +222,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                         MessageKey = %singleMessageMetadata.PartitionKey
                     }
                 incomingMessages.Enqueue(message)
+                storeDeadLetter message
         if skippedMessages > 0 then
             increaseAvailablePermits skippedMessages
 
@@ -263,6 +288,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, consumerConfig.Topic)
+                        clearDeadLetters()
                         clientCnx.AddConsumer consumerId this.Mb
                         let requestId = Generators.getNextRequestId()
                         let isDurable = subscriptionMode = SubscriptionMode.Durable
@@ -355,9 +381,13 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                 Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                             else
                                 let message = { rawMessage with MessageId = msgId } |> decompress
+
                                 if not hasWaitingChannel then
                                     incomingMessages.Enqueue(message)
+                                    storeDeadLetter message
                                 else
+                                    storeDeadLetter message
+
                                     let waitingChannel = waiters.Dequeue()
                                     if (incomingMessages.Count = 0) then
                                         replyWithMessage waitingChannel message
@@ -396,6 +426,8 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                         | _ ->
                             do! sendAcknowledge messageId ackType
                             Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
+
+                        removeDeadLetter messageId
                         channel.Reply(true)
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
@@ -412,8 +444,9 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                             let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds);
                             let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
                             for batch in batches do
+                                let batch' = batch |> Array.filter (fun messageId -> processDeadLetters messageId |> not)
                                 let command = Commands.newRedeliverUnacknowledgedMessages consumerId (
-                                                    Some(batch |> Seq.map (fun msgId -> MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)))
+                                                    Some(batch' |> Seq.map (fun msgId -> MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)))
                                                 )
                                 let! success = clientCnx.Send command
                                 if success then
@@ -551,12 +584,15 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                         stopConsumer()
                         channel.Reply(Task.FromResult())
 
+                    clearDeadLetters()
+
                 | ConsumerMessage.Unsubscribe channel ->
 
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         connectionHandler.Closing()
                         unAckedMessageTracker.Close()
+                        clearDeadLetters()
                         Log.Logger.LogInformation("{0} starting unsubscribe ", prefix)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newUnsubscribeConsumer consumerId requestId
