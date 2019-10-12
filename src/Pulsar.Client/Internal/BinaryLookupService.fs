@@ -48,7 +48,11 @@ type BinaryLookupService (config: PulsarClientConfiguration, connectionPool: Con
             let! response = clientCnx.SendAndWaitForReply requestId payload
             let lookupTopicResult = PulsarResponseType.GetLookupTopicResult response
             // (1) build response broker-address
-            let uri = Uri(lookupTopicResult.BrokerServiceUrl)
+            let uri =
+                if config.UseTls then
+                    Uri(lookupTopicResult.BrokerServiceUrlTls)
+                else
+                    Uri(lookupTopicResult.BrokerServiceUrl)
 
             let resultEndpoint = DnsEndPoint(uri.Host, uri.Port)
             // (2) redirect to given address if response is: redirect

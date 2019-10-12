@@ -32,6 +32,7 @@ type LookupTopicResult =
     {
         Proxy: bool
         BrokerServiceUrl : string
+        BrokerServiceUrlTls: string
         Redirect: bool
         Authoritative: bool
     }

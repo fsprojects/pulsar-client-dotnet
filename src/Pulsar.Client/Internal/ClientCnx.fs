@@ -351,6 +351,7 @@ type ClientCnx (config: PulsarClientConfiguration,
             else
                 let result = LookupTopicResult {
                     BrokerServiceUrl = cmd.brokerServiceUrl
+                    BrokerServiceUrlTls = cmd.brokerServiceUrlTls
                     Redirect = (cmd.Response = CommandLookupTopicResponse.LookupType.Redirect)
                     Proxy = cmd.ProxyThroughServiceUrl
                     Authoritative = cmd.Authoritative }
