@@ -16,13 +16,8 @@ let main argv =
         )
     PulsarClient.Logger <- loggerFactory.CreateLogger("PulsarLogger")
 
-    runSimple()
-    |> Async.AwaitTask
-    |> Async.RunSynchronously
-
-    runCustomProps()
-    |> Async.AwaitTask
-    |> Async.RunSynchronously
+    runSimple().Wait()
+    runCustomProps().Wait()
 
     printfn "Example ended. Press any key to exit"
     Console.ReadKey() |> ignore
