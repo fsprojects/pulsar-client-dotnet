@@ -212,7 +212,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                             Commands.newSubscribe
                                 consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName
                                 consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
-                                consumerConfig.SubscriptionInitialPosition
+                                consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted
                         try
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             response |> PulsarResponseType.GetEmpty

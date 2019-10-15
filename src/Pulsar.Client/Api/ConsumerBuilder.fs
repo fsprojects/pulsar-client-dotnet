@@ -23,6 +23,12 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
             (fun c ->
                 c.SubscriptionName
                 |> invalidArgIfBlankString "Subscription name name must be set on the producer builder.")
+        |> checkValue
+            (fun c ->
+                invalidArgIfTrue (
+                    c.ReadCompacted && (not c.Topic.IsPersistent ||
+                        (c.SubscriptionType <> SubscriptionType.Exclusive && c.SubscriptionType <> SubscriptionType.Failover ))
+                ) "Read compacted can only be used with exclusive of failover persistent subscriptions")
 
     new(client: PulsarClient) = ConsumerBuilder(client, ConsumerConfiguration.Default)
 
@@ -82,6 +88,12 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
             client,
             { config with
                 AcknowledgementsGroupTime = ackGroupTime  })
+
+    member this.ReadCompacted readCompacted =
+        ConsumerBuilder(
+            client,
+            { config with
+                ReadCompacted = readCompacted  })
 
     member this.SubscribeAsync() =
         config

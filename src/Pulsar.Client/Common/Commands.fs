@@ -146,7 +146,8 @@ let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) 
     command |> serializeSimpleCommand
 
 let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumerId: ConsumerId) (requestId: RequestId)
-    (consumerName: string) (subscriptionType: SubscriptionType) (subscriptionInitialPosition: SubscriptionInitialPosition) =
+    (consumerName: string) (subscriptionType: SubscriptionType) (subscriptionInitialPosition: SubscriptionInitialPosition)
+    (readCompacted: bool)  =
     let subType =
         match subscriptionType with
         | SubscriptionType.Exclusive -> CommandSubscribe.SubType.Exclusive
@@ -162,7 +163,7 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
         | _ -> failwith "Unknown initialPosition type"
 
     let request = CommandSubscribe(Topic = %topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId,
-                    RequestId = %requestId, ConsumerName =  consumerName, initialPosition = initialPosition)
+                    RequestId = %requestId, ConsumerName =  consumerName, initialPosition = initialPosition, ReadCompacted = readCompacted)
     let command = BaseCommand(``type`` = CommandType.Subscribe, Subscribe = request)
     command |> serializeSimpleCommand
 
