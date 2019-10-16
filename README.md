@@ -20,7 +20,7 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 - [X] Proxy Support
 - [ ] Effectively-Once
 - [ ] Schema
-- [ ] Consumer seek
+- [X] Consumer seek
 - [ ] Multi-topics consumer
 - [ ] Topics regex consumer
 - [X] Compacted topics
