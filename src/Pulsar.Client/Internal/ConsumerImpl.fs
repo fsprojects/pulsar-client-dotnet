@@ -380,6 +380,35 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                     channel.Reply()
                     return! loop state
 
+                | ConsumerMessage.SeekAsync (seekData, channel) ->
+
+                    Log.Logger.LogDebug("{0} SeekAsync", prefix)
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        let requestId = Generators.getNextRequestId()
+                        Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData);
+                        task {
+                            try
+                                let payload =
+                                    match seekData with
+                                    | Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp
+                                    | MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId
+                                let! response = clientCnx.SendAndWaitForReply requestId payload
+                                response |> PulsarResponseType.GetEmpty
+                                acksGroupingTracker.FlushAndClean()
+                                incomingMessages.Clear()
+                                Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
+                            with
+                            | ex ->
+                                Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
+                                reraize ex
+                        } |> channel.Reply
+                        return! loop state
+                    | _ ->
+                        channel.Reply(Task.FromException(NotConnectedException "Not connected to broker"))
+                        Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
+                        return! loop state
+
                 | ConsumerMessage.SendFlowPermits numMessages ->
 
                     Log.Logger.LogDebug("{0} SendFlowPermits {1}", prefix, numMessages)
@@ -408,7 +437,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                         let payload = Commands.newCloseConsumer consumerId requestId
                         task {
                             try
-                                let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                                let! response = clientCnx.SendAndWaitForReply requestId payload
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
                                 connectionHandler.Closed()
@@ -435,7 +464,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                         let payload = Commands.newUnsubscribeConsumer consumerId requestId
                         task {
                             try
-                                let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                                let! response = clientCnx.SendAndWaitForReply requestId payload
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
                                 connectionHandler.Closed()
@@ -511,6 +540,20 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
             task {
                 connectionHandler.CheckIfActive()
                 do! mb.PostAndAsyncReply(RedeliverAllUnacknowledged)
+            }
+
+        member this.SeekAsync (messageId: MessageId) =
+            task {
+                connectionHandler.CheckIfActive()
+                let! result = mb.PostAndAsyncReply(fun channel -> SeekAsync (MessageId messageId, channel))
+                return! result
+            }
+
+        member this.SeekAsync (timestamp: uint64) =
+            task {
+                connectionHandler.CheckIfActive()
+                let! result = mb.PostAndAsyncReply(fun channel -> SeekAsync (Timestamp timestamp, channel))
+                return! result
             }
 
         member this.CloseAsync() =

@@ -90,13 +90,21 @@ type MessageId =
                 Partition = %(-1)
                 TopicName = %""
             }
-        member this.ToMessageIdData() =
+        static member Latest =
+            {
+                LedgerId = %(Int64.MaxValue)
+                EntryId = %(Int64.MaxValue)
+                Type = Individual
+                Partition = %(-1)
+                TopicName = %""
+            }
+        member internal this.ToMessageIdData() =
             MessageIdData(
                 ledgerId = uint64 %this.LedgerId,
                 entryId = uint64 %this.EntryId,
                 Partition = this.Partition
             )
-        member this.PrevBatchMessageId
+        member internal this.PrevBatchMessageId
             with get() =
                 {
                     this with EntryId = this.EntryId - %1L
@@ -219,6 +227,10 @@ type MessageOrException =
     | Message of Message
     | Exn of exn
 
+type SeekData =
+    | MessageId of MessageId
+    | Timestamp of uint64
+
 type ProducerMessage =
     | ConnectionOpened
     | ConnectionFailed of exn
@@ -243,6 +255,7 @@ type ConsumerMessage =
     | Acknowledge of MessageId * AckType * AsyncReplyChannel<bool>
     | RedeliverUnacknowledged of TrackerState * AsyncReplyChannel<unit>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
+    | SeekAsync of SeekData * AsyncReplyChannel<Task>
     | SendFlowPermits of int
     | Close of AsyncReplyChannel<Task>
     | Unsubscribe of AsyncReplyChannel<Task>

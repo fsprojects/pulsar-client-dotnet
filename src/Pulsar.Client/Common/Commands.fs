@@ -136,6 +136,23 @@ let newProducer (topicName : CompleteTopicName) (producerName: string) (producer
     let command = BaseCommand(``type`` = CommandType.Producer, Producer = request)
     command |> serializeSimpleCommand
 
+let newSeekByMsgId (consumerId: ConsumerId) (requestId : RequestId) (messageId: MessageId) =
+    let request =
+        CommandSeek(
+            ConsumerId = %consumerId, RequestId = %requestId,
+            MessageId = MessageIdData(ledgerId = uint64(%messageId.LedgerId), entryId = uint64(%messageId.EntryId))
+        )
+    let command = BaseCommand(``type`` = CommandType.Seek, Seek = request)
+    command |> serializeSimpleCommand
+
+let newSeekByTimestamp (consumerId: ConsumerId) (requestId : RequestId) (timestamp: uint64) =
+    let request =
+        CommandSeek(
+            ConsumerId = %consumerId, RequestId = %requestId, MessagePublishTime = timestamp
+        )
+    let command = BaseCommand(``type`` = CommandType.Seek, Seek = request)
+    command |> serializeSimpleCommand
+
 let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) (mode : TopicDomain) =
     let mode =
         match mode with

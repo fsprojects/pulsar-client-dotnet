@@ -146,6 +146,47 @@ let tests =
             Log.Debug("Finished Full roundtrip (emulate Request-Response behaviour)")
         }
 
+        testAsync "Consumer seek earliest redelivers all messages" {
+
+            Log.Debug("Started Consumer seek earliest redelivers all messages")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let producerName = "seekProducer"
+            let consumerName = "seekConsumer"
+            let numberOfMessages = 100
+
+            let! producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! produceMessages producer numberOfMessages producerName
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! consumeMessages consumer numberOfMessages consumerName
+                    }:> Task)
+
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! consumer.SeekAsync(MessageId.Earliest) |> Async.AwaitTask
+            do! consumeMessages consumer numberOfMessages consumerName |> Async.AwaitTask
+
+            Log.Debug("Finished Consumer seek earliest redelivers all messages")
+        }
+
         testAsync "Client, producer and consumer can't be accessed after close" {
 
             Log.Debug("Started 'Client, producer and consumer can't be accessed after close'")

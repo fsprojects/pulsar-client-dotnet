@@ -19,3 +19,7 @@ type IConsumer =
     abstract member UnsubscribeAsync: unit -> Task<unit>
     /// Return true if the topic was terminated and this consumer has already consumed all the messages in the topic.
     abstract member HasReachedEndOfTopic: bool
+    /// Reset the subscription associated with this consumer to a specific message id.
+    abstract member SeekAsync: MessageId -> Task<unit>
+    /// Reset the subscription associated with this consumer to a specific message publish time (timestamp).
+    abstract member SeekAsync: uint64 -> Task<unit>

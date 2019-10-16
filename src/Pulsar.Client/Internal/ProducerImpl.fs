@@ -213,6 +213,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                     channel.Reply(tcs)
                     return! loop ()
 
+                // TODO remove extra mailbox message as not needed, extract function
                 | ProducerMessage.SendBatchMessage ->
 
                     let batchSize = batchItems.Count
