@@ -240,10 +240,10 @@ type ProducerMessage =
     | SendMessage of PendingMessage
     | RecoverChecksumError of SequenceId
     | Terminated
-    | TimeoutCheck
     | Close of AsyncReplyChannel<Task>
     | StoreBatchItem of MessageBuilder * AsyncReplyChannel<TaskCompletionSource<MessageId>>
-    | SendBatchMessage
+    | SendBatchTick
+    | SendTimeoutTick
 
 type ConsumerMessage =
     | ConnectionOpened

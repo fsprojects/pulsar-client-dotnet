@@ -66,7 +66,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
         if sendTimeoutMs > 0.0 then
             sendTimeoutTimer.Interval <- sendTimeoutMs
             sendTimeoutTimer.AutoReset <- true
-            sendTimeoutTimer.Elapsed.Add(fun _ -> this.Mb.Post TimeoutCheck)
+            sendTimeoutTimer.Elapsed.Add(fun _ -> this.Mb.Post SendTimeoutTick)
             sendTimeoutTimer.Start()
 
     let batchTimer = new Timer()
@@ -74,7 +74,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
         if producerConfig.BatchingEnabled && producerConfig.MaxBatchingPublishDelay <> TimeSpan.Zero then
             batchTimer.Interval <- producerConfig.MaxBatchingPublishDelay.TotalMilliseconds
             batchTimer.AutoReset <- true
-            batchTimer.Elapsed.Add(fun _ -> this.Mb.Post SendBatchMessage)
+            batchTimer.Elapsed.Add(fun _ -> this.Mb.Post SendBatchTick)
             batchTimer.Start()
 
     let resendMessages () =
@@ -120,6 +120,42 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
         if numMessagesInBatch.IsSome then
             metadata.NumMessagesInBatch <- numMessagesInBatch.Value
         metadata
+
+    let trySendBatchMessage() =
+        let batchSize = batchItems.Count
+        if batchSize > 0 then
+            Log.Logger.LogDebug("{0} SendBatchMessage started", prefix)
+
+            use messageStream = MemoryStreamManager.GetStream()
+            use messageWriter = new BinaryWriter(messageStream)
+
+            for batchItem in batchItems do
+                let message = batchItem.Message
+                let smm = SingleMessageMetadata(PayloadSize = message.Value.Length)
+                if String.IsNullOrEmpty(%message.Key) |> not then
+                    smm.PartitionKey <- %message.Key
+                    smm.PartitionKeyB64Encoded <- false
+                if message.Properties.Count > 0 then
+                    for property in message.Properties do
+                        smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
+                Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
+                messageWriter.Write(message.Value)
+
+            let batchData = messageStream.ToArray()
+            let metadata = createMessageMetadata (MessageBuilder(batchData)) (Some batchSize)
+            let sequenceId = %metadata.SequenceId
+            let encodedBatchData = compressionCodec.Encode batchData
+            let payload = Commands.newSend producerId sequenceId batchSize metadata encodedBatchData
+            this.Mb.Post(SendMessage {
+                               SequenceId = sequenceId
+                               Payload = payload
+                               Callback = BatchCallbacks
+                                   (batchItems
+                                       |> Seq.map(fun i -> i.Tcs)
+                                       |> Seq.toArray)
+                               CreatedAt = DateTime.Now })
+            batchItems.Clear()
+            Log.Logger.LogDebug("{0} Pending batch created. Batch size: {1}", prefix, batchSize)
 
     let stopProducer() =
         sendTimeoutTimer.Stop()
@@ -208,50 +244,9 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
 
                     if batchItems.Count = producerConfig.MaxMessagesPerBatch then
                         Log.Logger.LogDebug("{0} Max batch container size exceeded", prefix)
-                        this.Mb.Post SendBatchMessage
+                        trySendBatchMessage()
 
                     channel.Reply(tcs)
-                    return! loop ()
-
-                // TODO remove extra mailbox message as not needed, extract function
-                | ProducerMessage.SendBatchMessage ->
-
-                    let batchSize = batchItems.Count
-                    if batchSize > 0 then
-                        Log.Logger.LogDebug("{0} SendBatchMessage started", prefix)
-
-                        use messageStream = MemoryStreamManager.GetStream()
-                        use messageWriter = new BinaryWriter(messageStream)
-
-                        for batchItem in batchItems do
-                            let message = batchItem.Message
-                            let smm = SingleMessageMetadata(PayloadSize = message.Value.Length)
-                            if String.IsNullOrEmpty(%message.Key) |> not then
-                                smm.PartitionKey <- %message.Key
-                                smm.PartitionKeyB64Encoded <- false
-                            if message.Properties.Count > 0 then
-                                for property in message.Properties do
-                                    smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
-                            Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
-                            messageWriter.Write(message.Value)
-
-                        let batchData = messageStream.ToArray()
-                        let metadata = createMessageMetadata (MessageBuilder(batchData)) (Some batchSize)
-                        let sequenceId = %metadata.SequenceId
-                        let encodedBatchData = compressionCodec.Encode batchData
-                        let payload = Commands.newSend producerId sequenceId batchSize metadata encodedBatchData
-                        let agentMessage = SendMessage {
-                                SequenceId = sequenceId
-                                Payload = payload
-                                Callback = BatchCallbacks
-                                    (batchItems
-                                        |> Seq.map(fun i -> i.Tcs)
-                                        |> Seq.toArray)
-                                CreatedAt = DateTime.Now }
-                        this.Mb.Post(agentMessage)
-                        batchItems.Clear()
-                        Log.Logger.LogDebug("{0} Pending batch created. Batch size: {1}", prefix, batchSize)
-
                     return! loop ()
 
                 | ProducerMessage.BeginSendMessage (message, channel) ->
@@ -349,7 +344,12 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                         failPendingMessages(TopicTerminatedException("The topic has been terminated"))
                     return! loop ()
 
-                | ProducerMessage.TimeoutCheck ->
+                | ProducerMessage.SendBatchTick ->
+
+                    trySendBatchMessage()
+                    return! loop ()
+
+                | ProducerMessage.SendTimeoutTick ->
 
                     match connectionHandler.ConnectionState with
                     | Closed | Terminated -> ()
