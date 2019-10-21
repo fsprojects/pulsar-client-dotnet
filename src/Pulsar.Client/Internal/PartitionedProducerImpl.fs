@@ -3,14 +3,10 @@
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
 open FSharp.UMX
-open pulsar.proto
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open System
 open Microsoft.Extensions.Logging
-open System.Collections.Generic
-open System.Timers
-open System.IO
 open System.Threading
 open System.Timers
 

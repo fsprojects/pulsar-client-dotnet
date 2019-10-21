@@ -6,11 +6,8 @@ open FSharp.UMX
 open System.Collections.Generic
 open System
 open Pulsar.Client.Internal
-open System.Runtime.CompilerServices
 open Pulsar.Client.Common
 open Microsoft.Extensions.Logging
-open System.Threading
-open System.Runtime.InteropServices
 open System.IO
 open ProtoBuf
 open pulsar.proto
@@ -28,7 +25,6 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
     let incomingMessages = new Queue<Message>()
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<MessageOrException>>
     let subscribeTsc = TaskCompletionSource<ConsumerImpl>(TaskCreationOptions.RunContinuationsAsynchronously)
-    let hasParentConsumer = false
     let prefix = sprintf "consumer(%u, %s, %i)" %consumerId consumerConfig.ConsumerName partitionIndex
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable hasReachedEndOfTopic = false
@@ -153,11 +149,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
     let messageProcessed (msg: Message) =
         increaseAvailablePermits 1
         if consumerConfig.AckTimeout <> TimeSpan.Zero then
-            if hasParentConsumer then
-                // we should no longer track this message, TopicsConsumer will take care from now onwards
-                unAckedMessageTracker.Remove msg.MessageId |> ignore
-            else
-                unAckedMessageTracker.Add msg.MessageId |> ignore
+            unAckedMessageTracker.Add msg.MessageId |> ignore
 
     let removeExpiredMessagesFromQueue (msgIds: TrackerState) =
         if incomingMessages.Count > 0 then
@@ -219,13 +211,8 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                             Log.Logger.LogInformation("{0} subscribed", prefix)
                             connectionHandler.ResetBackoff()
                             let initialFlowCount = consumerConfig.ReceiverQueueSize
-                            let firstTimeConnect = subscribeTsc.TrySetResult(this)
-                            let isDurable = subscriptionMode = SubscriptionMode.Durable;
-                            // if the consumer is not partitioned or is re-connected and is partitioned, we send the flow
-                            // command to receive messages.
-                            // For readers too (isDurable==false), the partition idx will be set though we have to
-                            // send available permits immediately after establishing the reader session
-                            if (not (firstTimeConnect && hasParentConsumer && isDurable) && consumerConfig.ReceiverQueueSize <> 0) then
+                            subscribeTsc.TrySetResult(this) |> ignore
+                            if initialFlowCount <> 0 then
                                 let flowCommand = Commands.newFlow consumerId initialFlowCount
                                 let! success = clientCnx.Send flowCommand
                                 if success then

@@ -13,7 +13,6 @@ open System.Reflection
 open Pulsar.Client.Internal
 open System.IO.Pipelines
 open Pulsar.Client.Api
-open System.Text
 
 type ConnectionPool (config: PulsarClientConfiguration) =
 

@@ -6,14 +6,9 @@ open FSharp.UMX
 open System.Collections.Generic
 open System
 open Pulsar.Client.Internal
-open System.Runtime.CompilerServices
 open Pulsar.Client.Common
 open Microsoft.Extensions.Logging
 open System.Threading
-open System.Runtime.InteropServices
-open System.IO
-open ProtoBuf
-open pulsar.proto
 open System.Timers
 open FSharp.Control
 

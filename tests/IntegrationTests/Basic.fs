@@ -9,10 +9,6 @@ open System.Text
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open Serilog
-open Microsoft.Extensions.Logging
-open Microsoft.Extensions.DependencyInjection
-open Serilog.Sinks.SystemConsole.Themes
-open System.Collections.Generic
 open Pulsar.Client.IntegrationTests
 open Pulsar.Client.IntegrationTests.Common
 open FSharp.UMX
