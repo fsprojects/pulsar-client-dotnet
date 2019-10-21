@@ -8,12 +8,14 @@ type PulsarClientConfiguration =
         ServiceUrl: string
         OperationTimeout: TimeSpan
         MaxNumberOfRejectedRequestPerConnection: int
+        Authentication: Authentication
     }
     static member Default =
         {
             ServiceUrl = ""
             OperationTimeout = TimeSpan.FromMilliseconds(30000.0)
             MaxNumberOfRejectedRequestPerConnection = 50
+            Authentication = Authentication.AuthenticationDisabled
         }
 
 type ConsumerConfiguration =

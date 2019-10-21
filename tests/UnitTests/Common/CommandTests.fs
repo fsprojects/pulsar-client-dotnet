@@ -89,12 +89,14 @@ module CommandsTests =
             test "newConnect should return correct frame" {
                 let clientVersion = "client-version"
                 let protocolVersion = ProtocolVersion.V1
+                let authMethodName = "none"
+                let authData = { Bytes = [||] }
 
                 let totalSize, commandSize, command =
-                    serializeDeserializeSimpleCommand (newConnect clientVersion protocolVersion None)
+                    serializeDeserializeSimpleCommand (newConnect authMethodName authData clientVersion protocolVersion None)
 
-                totalSize |> Expect.equal "" 26
-                commandSize |> Expect.equal "" 22
+                totalSize |> Expect.equal "" 32
+                commandSize |> Expect.equal "" 28
                 command.``type``  |> Expect.equal "" CommandType.Connect
                 command.Connect.ClientVersion |> Expect.equal "" clientVersion
                 command.Connect.ProtocolVersion |> Expect.equal "" ((int) protocolVersion)

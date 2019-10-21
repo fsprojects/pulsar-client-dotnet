@@ -13,6 +13,7 @@ open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
 open System.Collections.Generic
 open System.Runtime.InteropServices
+open System.Text
 
 type ChecksumType =
     | Crc32c
@@ -230,6 +231,12 @@ type MessageOrException =
 type SeekData =
     | MessageId of MessageId
     | Timestamp of uint64
+
+type AuthData =
+    {
+        Bytes: byte[]
+    }
+    static member INIT_AUTH_DATA = Encoding.UTF8.GetBytes("PulsarAuthInit")
 
 type ProducerMessage =
     | ConnectionOpened

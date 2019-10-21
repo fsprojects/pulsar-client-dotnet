@@ -33,10 +33,15 @@
     <Compile Include="Common\TopicName.fs" />
     <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Common\Commands.fs" />
+    <Compile Include="Api\AuthenticationDataProvider.fs" />
+    <Compile Include="Api\Authentication.fs" />
     <Compile Include="Api\IMessageRouter.fs" />
     <Compile Include="Api\IConsumer.fs" />
     <Compile Include="Api\IProducer.fs" />
     <Compile Include="Api\Configuration.fs" />
+    <Compile Include="Auth\AuthenticationDataToken.fs" />
+    <Compile Include="Auth\AuthenticationToken.fs" />
+    <Compile Include="Auth\DefaultImplementation.fs" />
     <Compile Include="Internal\Backoff.fs" />
     <Compile Include="Internal\Routing.fs" />
     <Compile Include="Internal\UnAckedMessageTracker.fs" />
@@ -52,6 +57,7 @@
     <Compile Include="Internal\ProducerImpl.fs" />
     <Compile Include="Internal\MultiTopicsConsumerImpl.fs" />
     <Compile Include="Internal\PartitionedProducerImpl.fs" />
+    <Compile Include="Api\AuthenticationFactory.fs" />
     <Compile Include="Api\PulsarClient.fs" />
     <Compile Include="Api\ConsumerBuilder.fs" />
     <Compile Include="Api\ProducerBuilder.fs" />

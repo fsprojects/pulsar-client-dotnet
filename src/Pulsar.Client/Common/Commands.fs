@@ -7,6 +7,7 @@ open System.IO
 open System.Net
 open Microsoft.Extensions.Logging
 open Pulsar.Client.Internal
+open Pulsar.Client
 
 type internal CommandType = BaseCommand.Type
 
@@ -113,8 +114,12 @@ let newMultiMessageAck (consumerId : ConsumerId) (messages: MessageId seq) : Pay
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 
-let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : Payload =
-    let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion)
+let newConnect (authMethodName: string) (authData: Common.AuthData) (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : Payload =
+    let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion, AuthMethodName = authMethodName)
+    if authMethodName = "ycav1" then
+        request.AuthMethod <- AuthMethod.AuthMethodYcaV1
+    if authData.Bytes.Length > 0 then
+        request.AuthData <- authData.Bytes
     match proxyToBroker with
     | Some logicalAddress -> request.ProxyToBrokerUrl <- sprintf "%s:%d" logicalAddress.Host logicalAddress.Port
     | None -> ()
