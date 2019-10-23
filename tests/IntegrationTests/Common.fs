@@ -23,7 +23,7 @@ let pulsarAddress = "pulsar://my-pulsar-cluster:31002"
 let configureLogging() =
     Log.Logger <-
         LoggerConfiguration()
-            .MinimumLevel.Debug()
+            .MinimumLevel.Warning()
             .WriteTo.Console(theme = AnsiConsoleTheme.Code, outputTemplate="[{Timestamp:HH:mm:ss.fff} {Level:u3} {ThreadId}] {Message:lj}{NewLine}{Exception}")
             .Enrich.FromLogContext()
             .Enrich.WithThreadId()
@@ -65,6 +65,14 @@ let produceMessagesWithProps (producer: IProducer) number producerName =
             let key = i.ToString()
             let props = dict [("prop1",key);("prop2",key)]
             let! _ = producer.SendAsync(MessageBuilder(payload, key, props))
+            ()
+    }
+
+let produceMessagesWithSameKey (producer: IProducer) number key producerName =
+    task {
+        for i in [1..number] do
+            let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) )
+            let! _ = producer.SendAsync(MessageBuilder(payload, key))
             ()
     }
 

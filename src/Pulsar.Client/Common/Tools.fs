@@ -25,12 +25,16 @@ let inline int16FromBigEndian(num : Int16) =
 // Exception helper
 
 let throwIf predicate createException arg =
-    if predicate(arg)
-    then raise(createException())
-    else arg
+    if predicate(arg) then
+        raise(createException())
+    else
+        arg
 
 let invalidArgIf predicate message =
     throwIf predicate (fun() -> ArgumentException(message))
+
+let invalidArgIfTrue value message =
+    if value then raise (ArgumentException(message))
 
 let invalidArgIfBlankString =
     invalidArgIf (String.IsNullOrWhiteSpace)

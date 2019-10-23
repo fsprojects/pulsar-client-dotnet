@@ -35,6 +35,7 @@ let runCustomProps () =
                 .Topic(topicName)
                 .SubscriptionName(subscriptionName)
                 .SubscribeAsync()
+
         let payload = Encoding.UTF8.GetBytes(sprintf "Sent from F# at '%A'" DateTime.Now)
         let! messageId = producer.SendAsync(MessageBuilder(payload, "F#", dict [("1","one")]))
         printfn "MessageId is: '%A'" messageId

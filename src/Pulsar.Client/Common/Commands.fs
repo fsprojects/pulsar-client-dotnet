@@ -7,6 +7,7 @@ open System.IO
 open System.Net
 open Microsoft.Extensions.Logging
 open Pulsar.Client.Internal
+open Pulsar.Client
 
 type internal CommandType = BaseCommand.Type
 
@@ -113,8 +114,12 @@ let newMultiMessageAck (consumerId : ConsumerId) (messages: MessageId seq) : Pay
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 
-let newConnect (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : Payload =
-    let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion)
+let newConnect (authMethodName: string) (authData: Common.AuthData) (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : Payload =
+    let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion, AuthMethodName = authMethodName)
+    if authMethodName = "ycav1" then
+        request.AuthMethod <- AuthMethod.AuthMethodYcaV1
+    if authData.Bytes.Length > 0 then
+        request.AuthData <- authData.Bytes
     match proxyToBroker with
     | Some logicalAddress -> request.ProxyToBrokerUrl <- sprintf "%s:%d" logicalAddress.Host logicalAddress.Port
     | None -> ()
@@ -136,6 +141,23 @@ let newProducer (topicName : CompleteTopicName) (producerName: string) (producer
     let command = BaseCommand(``type`` = CommandType.Producer, Producer = request)
     command |> serializeSimpleCommand
 
+let newSeekByMsgId (consumerId: ConsumerId) (requestId : RequestId) (messageId: MessageId) =
+    let request =
+        CommandSeek(
+            ConsumerId = %consumerId, RequestId = %requestId,
+            MessageId = MessageIdData(ledgerId = uint64(%messageId.LedgerId), entryId = uint64(%messageId.EntryId))
+        )
+    let command = BaseCommand(``type`` = CommandType.Seek, Seek = request)
+    command |> serializeSimpleCommand
+
+let newSeekByTimestamp (consumerId: ConsumerId) (requestId : RequestId) (timestamp: uint64) =
+    let request =
+        CommandSeek(
+            ConsumerId = %consumerId, RequestId = %requestId, MessagePublishTime = timestamp
+        )
+    let command = BaseCommand(``type`` = CommandType.Seek, Seek = request)
+    command |> serializeSimpleCommand
+
 let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) (mode : TopicDomain) =
     let mode =
         match mode with
@@ -146,7 +168,8 @@ let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) 
     command |> serializeSimpleCommand
 
 let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumerId: ConsumerId) (requestId: RequestId)
-    (consumerName: string) (subscriptionType: SubscriptionType) (subscriptionInitialPosition: SubscriptionInitialPosition) =
+    (consumerName: string) (subscriptionType: SubscriptionType) (subscriptionInitialPosition: SubscriptionInitialPosition)
+    (readCompacted: bool)  =
     let subType =
         match subscriptionType with
         | SubscriptionType.Exclusive -> CommandSubscribe.SubType.Exclusive
@@ -162,7 +185,7 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
         | _ -> failwith "Unknown initialPosition type"
 
     let request = CommandSubscribe(Topic = %topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId,
-                    RequestId = %requestId, ConsumerName =  consumerName, initialPosition = initialPosition)
+                    RequestId = %requestId, ConsumerName =  consumerName, initialPosition = initialPosition, ReadCompacted = readCompacted)
     let command = BaseCommand(``type`` = CommandType.Subscribe, Subscribe = request)
     command |> serializeSimpleCommand
 

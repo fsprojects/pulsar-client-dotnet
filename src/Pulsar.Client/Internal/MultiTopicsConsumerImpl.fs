@@ -6,14 +6,9 @@ open FSharp.UMX
 open System.Collections.Generic
 open System
 open Pulsar.Client.Internal
-open System.Runtime.CompilerServices
 open Pulsar.Client.Common
 open Microsoft.Extensions.Logging
 open System.Threading
-open System.Runtime.InteropServices
-open System.IO
-open ProtoBuf
-open pulsar.proto
 open System.Timers
 open FSharp.Control
 
@@ -318,6 +313,12 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                 let! result = mb.PostAndAsyncReply(RedeliverUnacknowledgedMessages)
                 return! result
             }
+
+        member this.SeekAsync (messageId: MessageId) =
+            Task.FromException(exn "Seek operation not supported on multitopics consumer") :?> Task<unit>
+
+        member this.SeekAsync (timestamp: uint64) =
+            Task.FromException(exn "Seek operation not supported on multitopics consumer") :?> Task<unit>
 
         member this.CloseAsync() =
             task {

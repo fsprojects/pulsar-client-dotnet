@@ -6,11 +6,8 @@ open FSharp.UMX
 open System.Collections.Generic
 open System
 open Pulsar.Client.Internal
-open System.Runtime.CompilerServices
 open Pulsar.Client.Common
 open Microsoft.Extensions.Logging
-open System.Threading
-open System.Runtime.InteropServices
 open System.IO
 open ProtoBuf
 open pulsar.proto
@@ -28,7 +25,6 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
     let incomingMessages = new Queue<Message>()
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<MessageOrException>>
     let subscribeTsc = TaskCompletionSource<ConsumerImpl>(TaskCreationOptions.RunContinuationsAsynchronously)
-    let hasParentConsumer = false
     let prefix = sprintf "consumer(%u, %s, %i)" %consumerId consumerConfig.ConsumerName partitionIndex
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable hasReachedEndOfTopic = false
@@ -153,11 +149,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
     let messageProcessed (msg: Message) =
         increaseAvailablePermits 1
         if consumerConfig.AckTimeout <> TimeSpan.Zero then
-            if hasParentConsumer then
-                // we should no longer track this message, TopicsConsumer will take care from now onwards
-                unAckedMessageTracker.Remove msg.MessageId |> ignore
-            else
-                unAckedMessageTracker.Add msg.MessageId |> ignore
+            unAckedMessageTracker.Add msg.MessageId |> ignore
 
     let removeExpiredMessagesFromQueue (msgIds: TrackerState) =
         if incomingMessages.Count > 0 then
@@ -212,20 +204,15 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                             Commands.newSubscribe
                                 consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName
                                 consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
-                                consumerConfig.SubscriptionInitialPosition
+                                consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted
                         try
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             response |> PulsarResponseType.GetEmpty
                             Log.Logger.LogInformation("{0} subscribed", prefix)
                             connectionHandler.ResetBackoff()
                             let initialFlowCount = consumerConfig.ReceiverQueueSize
-                            let firstTimeConnect = subscribeTsc.TrySetResult(this)
-                            let isDurable = subscriptionMode = SubscriptionMode.Durable;
-                            // if the consumer is not partitioned or is re-connected and is partitioned, we send the flow
-                            // command to receive messages.
-                            // For readers too (isDurable==false), the partition idx will be set though we have to
-                            // send available permits immediately after establishing the reader session
-                            if (not (firstTimeConnect && hasParentConsumer && isDurable) && consumerConfig.ReceiverQueueSize <> 0) then
+                            subscribeTsc.TrySetResult(this) |> ignore
+                            if initialFlowCount <> 0 then
                                 let flowCommand = Commands.newFlow consumerId initialFlowCount
                                 let! success = clientCnx.Send flowCommand
                                 if success then
@@ -380,6 +367,35 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                     channel.Reply()
                     return! loop state
 
+                | ConsumerMessage.SeekAsync (seekData, channel) ->
+
+                    Log.Logger.LogDebug("{0} SeekAsync", prefix)
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        let requestId = Generators.getNextRequestId()
+                        Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData);
+                        task {
+                            try
+                                let payload =
+                                    match seekData with
+                                    | Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp
+                                    | MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId
+                                let! response = clientCnx.SendAndWaitForReply requestId payload
+                                response |> PulsarResponseType.GetEmpty
+                                acksGroupingTracker.FlushAndClean()
+                                incomingMessages.Clear()
+                                Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
+                            with
+                            | ex ->
+                                Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
+                                reraize ex
+                        } |> channel.Reply
+                        return! loop state
+                    | _ ->
+                        channel.Reply(Task.FromException(NotConnectedException "Not connected to broker"))
+                        Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
+                        return! loop state
+
                 | ConsumerMessage.SendFlowPermits numMessages ->
 
                     Log.Logger.LogDebug("{0} SendFlowPermits {1}", prefix, numMessages)
@@ -408,7 +424,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                         let payload = Commands.newCloseConsumer consumerId requestId
                         task {
                             try
-                                let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                                let! response = clientCnx.SendAndWaitForReply requestId payload
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
                                 connectionHandler.Closed()
@@ -435,7 +451,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                         let payload = Commands.newUnsubscribeConsumer consumerId requestId
                         task {
                             try
-                                let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                                let! response = clientCnx.SendAndWaitForReply requestId payload
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
                                 connectionHandler.Closed()
@@ -511,6 +527,20 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
             task {
                 connectionHandler.CheckIfActive()
                 do! mb.PostAndAsyncReply(RedeliverAllUnacknowledged)
+            }
+
+        member this.SeekAsync (messageId: MessageId) =
+            task {
+                connectionHandler.CheckIfActive()
+                let! result = mb.PostAndAsyncReply(fun channel -> SeekAsync (MessageId messageId, channel))
+                return! result
+            }
+
+        member this.SeekAsync (timestamp: uint64) =
+            task {
+                connectionHandler.CheckIfActive()
+                let! result = mb.PostAndAsyncReply(fun channel -> SeekAsync (Timestamp timestamp, channel))
+                return! result
             }
 
         member this.CloseAsync() =

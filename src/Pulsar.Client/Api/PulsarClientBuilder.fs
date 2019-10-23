@@ -41,6 +41,11 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
             { config with
                 UseTls = useTls }
 
+    member this.Authentication authentication =
+        PulsarClientBuilder
+            { config with
+                Authentication = authentication |> invalidArgIfDefault "Authentication can't be null" }
+
     member this.Build() =
         config
         |> verify

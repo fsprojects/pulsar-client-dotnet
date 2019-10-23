@@ -33,14 +33,15 @@ type ConnectionPool (config: PulsarClientConfiguration) =
             let writerStream = StreamConnection.GetWriter(socketConnection.Output)
             let connection = (socketConnection, writerStream)
             let initialConnectionTsc = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
-
             let unregisterClientCnx (broker: Broker) =
                 connections.TryRemove(broker.LogicalAddress) |> ignore
             let clientCnx = ClientCnx(config, broker, connection, initialConnectionTsc, unregisterClientCnx)
-
             let proxyToBroker = if physicalAddress = logicalAddress then None else Some logicalAddress
-            let connectPayload =
-                Commands.newConnect clientVersion protocolVersion proxyToBroker
+            let authenticationDataProvider = config.Authentication.GetAuthData(physicalAddress.Host);
+            let authData = authenticationDataProvider.Authenticate({ Bytes = AuthData.INIT_AUTH_DATA })
+            let authMethodName = config.Authentication.GetAuthMethodName()
+            let connectPayload = Commands.newConnect authMethodName authData clientVersion protocolVersion proxyToBroker
+
             let! success = clientCnx.Send connectPayload
             if not success then
                 raise (ConnectionFailedOnSend "ConnectionPool connect")

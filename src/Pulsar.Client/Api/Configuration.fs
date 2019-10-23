@@ -9,6 +9,7 @@ type PulsarClientConfiguration =
         OperationTimeout: TimeSpan
         MaxNumberOfRejectedRequestPerConnection: int
         UseTls: bool
+        Authentication: Authentication
     }
     static member Default =
         {
@@ -16,6 +17,7 @@ type PulsarClientConfiguration =
             OperationTimeout = TimeSpan.FromMilliseconds(30000.0)
             MaxNumberOfRejectedRequestPerConnection = 50
             UseTls = false
+            Authentication = Authentication.AuthenticationDisabled
         }
 
 type ConsumerConfiguration =
@@ -31,6 +33,7 @@ type ConsumerConfiguration =
         AckTimeoutTickTime: TimeSpan
         AcknowledgementsGroupTime: TimeSpan
         AutoUpdatePartitions: bool
+        ReadCompacted: bool
     }
     static member Default =
         {
@@ -45,6 +48,7 @@ type ConsumerConfiguration =
             AckTimeoutTickTime = TimeSpan.FromMilliseconds(1000.0)
             AcknowledgementsGroupTime = TimeSpan.FromMilliseconds(100.0)
             AutoUpdatePartitions = true
+            ReadCompacted = false
         }
 
 type ProducerConfiguration =

@@ -89,12 +89,14 @@ module CommandsTests =
             test "newConnect should return correct frame" {
                 let clientVersion = "client-version"
                 let protocolVersion = ProtocolVersion.V1
+                let authMethodName = "none"
+                let authData = { Bytes = [||] }
 
                 let totalSize, commandSize, command =
-                    serializeDeserializeSimpleCommand (newConnect clientVersion protocolVersion None)
+                    serializeDeserializeSimpleCommand (newConnect authMethodName authData clientVersion protocolVersion None)
 
-                totalSize |> Expect.equal "" 26
-                commandSize |> Expect.equal "" 22
+                totalSize |> Expect.equal "" 32
+                commandSize |> Expect.equal "" 28
                 command.``type``  |> Expect.equal "" CommandType.Connect
                 command.Connect.ClientVersion |> Expect.equal "" clientVersion
                 command.Connect.ProtocolVersion |> Expect.equal "" ((int) protocolVersion)
@@ -145,10 +147,10 @@ module CommandsTests =
                 let requestId = %1UL
 
                 let totalSize, commandSize, command =
-                    serializeDeserializeSimpleCommand (newSubscribe topicName "test-subscription" consumerId requestId consumerName SubscriptionType.Exclusive SubscriptionInitialPosition.Earliest)
+                    serializeDeserializeSimpleCommand (newSubscribe topicName "test-subscription" consumerId requestId consumerName SubscriptionType.Exclusive SubscriptionInitialPosition.Earliest false)
 
-                totalSize |> Expect.equal "" 62
-                commandSize |> Expect.equal "" 58
+                totalSize |> Expect.equal "" 64
+                commandSize |> Expect.equal "" 60
                 command.``type``  |> Expect.equal "" CommandType.Subscribe
                 command.Subscribe.Topic |> Expect.equal "" %topicName
                 command.Subscribe.RequestId |> Expect.equal "" %requestId
@@ -228,5 +230,20 @@ module CommandsTests =
                 command.``type``  |> Expect.equal "" CommandType.Unsubscribe
                 command.Unsubscribe.ConsumerId |> Expect.equal "" %consumerId
                 command.Unsubscribe.RequestId |> Expect.equal "" %requestId
+            }
+
+            test "newSeek should return correct frame" {
+                let consumerId = %1UL
+                let requestId = %1UL
+                let timestamp = 1UL
+
+                let totalSize, commandSize, command =
+                    serializeDeserializeSimpleCommand (newSeekByTimestamp consumerId requestId timestamp)
+
+                totalSize |> Expect.equal "" 15
+                commandSize |> Expect.equal "" 11
+                command.``type``  |> Expect.equal "" CommandType.Seek
+                command.Seek.ConsumerId |> Expect.equal "" %consumerId
+                command.Seek.RequestId |> Expect.equal "" %requestId
             }
         ]

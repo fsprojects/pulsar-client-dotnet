@@ -13,6 +13,7 @@ open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
 open System.Collections.Generic
 open System.Runtime.InteropServices
+open System.Text
 
 type ChecksumType =
     | Crc32c
@@ -91,13 +92,21 @@ type MessageId =
                 Partition = %(-1)
                 TopicName = %""
             }
-        member this.ToMessageIdData() =
+        static member Latest =
+            {
+                LedgerId = %(Int64.MaxValue)
+                EntryId = %(Int64.MaxValue)
+                Type = Individual
+                Partition = %(-1)
+                TopicName = %""
+            }
+        member internal this.ToMessageIdData() =
             MessageIdData(
                 ledgerId = uint64 %this.LedgerId,
                 entryId = uint64 %this.EntryId,
                 Partition = this.Partition
             )
-        member this.PrevBatchMessageId
+        member internal this.PrevBatchMessageId
             with get() =
                 {
                     this with EntryId = this.EntryId - %1L
@@ -220,6 +229,16 @@ type MessageOrException =
     | Message of Message
     | Exn of exn
 
+type SeekData =
+    | MessageId of MessageId
+    | Timestamp of uint64
+
+type AuthData =
+    {
+        Bytes: byte[]
+    }
+    static member INIT_AUTH_DATA = Encoding.UTF8.GetBytes("PulsarAuthInit")
+
 type ProducerMessage =
     | ConnectionOpened
     | ConnectionFailed of exn
@@ -229,10 +248,10 @@ type ProducerMessage =
     | SendMessage of PendingMessage
     | RecoverChecksumError of SequenceId
     | Terminated
-    | TimeoutCheck
     | Close of AsyncReplyChannel<Task>
     | StoreBatchItem of MessageBuilder * AsyncReplyChannel<TaskCompletionSource<MessageId>>
-    | SendBatchMessage
+    | SendBatchTick
+    | SendTimeoutTick
 
 type ConsumerMessage =
     | ConnectionOpened
@@ -244,6 +263,7 @@ type ConsumerMessage =
     | Acknowledge of MessageId * AckType * AsyncReplyChannel<bool>
     | RedeliverUnacknowledged of TrackerState * AsyncReplyChannel<unit>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
+    | SeekAsync of SeekData * AsyncReplyChannel<Task>
     | SendFlowPermits of int
     | Close of AsyncReplyChannel<Task>
     | Unsubscribe of AsyncReplyChannel<Task>

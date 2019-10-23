@@ -5,6 +5,7 @@ open Expecto
 open Expecto.Flip
 open Pulsar.Client.Api
 open Pulsar.Client.UnitTests
+open Pulsar.Client.Common
 
 module ConsumerBuilderTests =
 
@@ -70,12 +71,35 @@ module ConsumerBuilderTests =
                     "Subscription name name must be set on the producer builder."
             }
 
-            test "SubscribeAsync throws if ackTimeout is less than minimal" {
+            test "AckTimeout throws if ackTimeout is less than minimal" {
                 (fun () ->
                     builder()
                         .Topic("topic-name")
                         .SubscriptionName("test-subscription")
                         .AckTimeout(TimeSpan.FromSeconds(0.5)) |> ignore)
                     |> Expect.throwsWithMessage<ArgumentException>  "Ack timeout should be greater than 1000 ms"
+            }
+
+            test "SubscribeAsync throws if compacted and shared" {
+                let checkReadCompacted subscription =
+                    (fun () ->
+                        builder()
+                            .Topic("topic-name")
+                            .SubscriptionName("test-subscription")
+                            .SubscriptionType(subscription)
+                            .ReadCompacted(true)
+                            .SubscribeAsync()|> ignore)
+                        |> Expect.throwsWithMessage<ArgumentException>  "Read compacted can only be used with exclusive of failover persistent subscriptions"
+                [SubscriptionType.Shared; SubscriptionType.KeyShared] |> List.iter checkReadCompacted
+            }
+
+            test "SubscribeAsync throws if compacted and non-persistent topic" {
+                (fun () ->
+                    builder()
+                        .Topic("non-persistent://my-tenant/my-namespace/my-topic")
+                        .SubscriptionName("test-subscription")
+                        .ReadCompacted(true)
+                        .SubscribeAsync()|> ignore)
+                    |> Expect.throwsWithMessage<ArgumentException>  "Read compacted can only be used with exclusive of failover persistent subscriptions"
             }
         ]

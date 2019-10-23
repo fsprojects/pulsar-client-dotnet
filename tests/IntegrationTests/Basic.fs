@@ -9,10 +9,6 @@ open System.Text
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open Serilog
-open Microsoft.Extensions.Logging
-open Microsoft.Extensions.DependencyInjection
-open Serilog.Sinks.SystemConsole.Themes
-open System.Collections.Generic
 open Pulsar.Client.IntegrationTests
 open Pulsar.Client.IntegrationTests.Common
 open FSharp.UMX
@@ -146,6 +142,47 @@ let tests =
             Log.Debug("Finished Full roundtrip (emulate Request-Response behaviour)")
         }
 
+        testAsync "Consumer seek earliest redelivers all messages" {
+
+            Log.Debug("Started Consumer seek earliest redelivers all messages")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let producerName = "seekProducer"
+            let consumerName = "seekConsumer"
+            let numberOfMessages = 100
+
+            let! producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! produceMessages producer numberOfMessages producerName
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! consumeMessages consumer numberOfMessages consumerName
+                    }:> Task)
+
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! consumer.SeekAsync(MessageId.Earliest) |> Async.AwaitTask
+            do! consumeMessages consumer numberOfMessages consumerName |> Async.AwaitTask
+
+            Log.Debug("Finished Consumer seek earliest redelivers all messages")
+        }
+
         testAsync "Client, producer and consumer can't be accessed after close" {
 
             Log.Debug("Started 'Client, producer and consumer can't be accessed after close'")
@@ -191,42 +228,4 @@ let tests =
             Log.Debug("Finished 'Client, producer and consumer can't be accessed after close'")
         }
 
-        testAsync "Keys and properties are propertly passed" {
-
-            Log.Debug("Started Keys and properties are propertly passed")
-            let client = getClient()
-            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let producerName = "propsTestProducer"
-            let consumerName = "propsTestConsumer"
-
-            let! producer =
-                ProducerBuilder(client)
-                    .Topic(topicName)
-                    .ProducerName(producerName)
-                    .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
-
-            let! consumer =
-                ConsumerBuilder(client)
-                    .Topic(topicName)
-                    .ConsumerName(consumerName)
-                    .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
-
-            let producerTask =
-                Task.Run(fun () ->
-                    task {
-                        do! produceMessagesWithProps producer 100 producerName
-                    }:> Task)
-
-            let consumerTask =
-                Task.Run(fun () ->
-                    task {
-                        do! consumeMessagesWithProps consumer 100 consumerName
-                    }:> Task)
-
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
-
-            Log.Debug("Finished Keys and properties are propertly passed")
-        }
     ]
