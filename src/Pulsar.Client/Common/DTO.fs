@@ -14,6 +14,7 @@ open Microsoft.Extensions.Logging
 open System.Collections.Generic
 open System.Runtime.InteropServices
 open System.Text
+open System.Net.Sockets
 
 type ChecksumType =
     | Crc32c
@@ -165,7 +166,13 @@ type MessageBuilder(value : byte[],
 
 type WriterStream = Stream
 type Payload = WriterStream -> Task
-type Connection = SocketConnection * WriterStream
+type Connection =
+    {
+        Input: PipeReader
+        Output: WriterStream
+        IsActive: unit -> bool
+        Dispose: unit -> unit
+    }
 type TrackerState = HashSet<MessageId>
 
 type PendingCallback =

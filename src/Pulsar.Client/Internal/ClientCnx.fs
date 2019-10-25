@@ -143,10 +143,9 @@ type ClientCnx (config: PulsarClientConfiguration,
 
     let sendSerializedPayload (serializedPayload: Payload ) =
         task {
-            let (conn, streamWriter) = connection
             try
-                do! streamWriter |> serializedPayload
-                let connected = conn.Socket.Connected
+                do! connection.Output |> serializedPayload
+                let connected = connection.IsActive()
                 if (not connected) then
                     Log.Logger.LogWarning("{0} socket was disconnected normally on writing", prefix)
                     operationsMb.Post(ChannelInactive)
@@ -380,9 +379,8 @@ type ClientCnx (config: PulsarClientConfiguration,
     let readSocket () =
         task {
             Log.Logger.LogDebug("{0} Started read socket", prefix)
-            let (conn, _) = connection
             let mutable continueLooping = true
-            let reader = conn.Input
+            let reader = connection.Input
 
             try
                 while continueLooping do
@@ -446,9 +444,7 @@ type ClientCnx (config: PulsarClientConfiguration,
         operationsMb.Post(AddConsumer (consumerId, consumerMb))
 
     member this.Close() =
-        let (conn, writeStream) = connection
-        conn.Dispose()
-        writeStream.Dispose()
+        connection.Dispose()
 
     member this.Dispose() =
         sendMb.Post(SocketMessage.Stop)

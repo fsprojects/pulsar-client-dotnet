@@ -46,9 +46,9 @@ let tests =
                     sendPayloadCalled <- true
                     return true
                 }
-            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(25.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             do! ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }, AckType.Individual)
-            do! Async.Sleep(50)
+            do! Async.Sleep(100)
             Expect.isTrue "" sendPayloadCalled
         }
 
@@ -63,9 +63,9 @@ let tests =
             let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }
             let message2 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }
 
-            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(25.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             do! ackTracker.AddAcknowledgment(message2, AckType.Cumulative)
-            do! Async.Sleep(50)
+            do! Async.Sleep(100)
             Expect.equal "" 1 sendPayloadCalledCount
             let isDuplicate = ackTracker.IsDuplicate message1
             Expect.isTrue "" isDuplicate
@@ -83,11 +83,11 @@ let tests =
             let message2 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }
             let message3 = { LedgerId = %1L; EntryId = %3L; Type = MessageIdType.Individual; Partition = 0; TopicName = %"" }
 
-            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(25.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             do! ackTracker.AddAcknowledgment(message1, AckType.Cumulative)
             do! ackTracker.AddAcknowledgment(message2, AckType.Cumulative)
             do! ackTracker.AddAcknowledgment(message3, AckType.Cumulative)
-            do! Async.Sleep(50)
+            do! Async.Sleep(100)
             Expect.equal "" 1 sendPayloadCalledCount
             let isDuplicate = ackTracker.IsDuplicate message1
             Expect.isTrue "" isDuplicate

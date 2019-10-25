@@ -22,6 +22,7 @@ let tests =
             Log.Debug("Started Send and receive 100 messages concurrently works fine in default configuration")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let numberOfMessages = 100
 
             let! producer =
                 ProducerBuilder(client)
@@ -39,13 +40,13 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer 100 "concurrent"
+                        do! produceMessages producer numberOfMessages "concurrent"
                     }:> Task)
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages consumer 100 "concurrent"
+                        do! consumeMessages consumer numberOfMessages "concurrent"
                     }:> Task)
 
             do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask

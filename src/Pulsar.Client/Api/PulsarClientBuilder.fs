@@ -5,10 +5,6 @@ open System
 
 type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 
-    let clientExceptionIfBlankString message arg =
-        arg
-        |> invalidArgIfBlankString message
-
     let verify(config : PulsarClientConfiguration) =
         let checkValue check config =
             check config |> ignore
@@ -18,17 +14,21 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
         |> checkValue
             (fun c ->
                 c.ServiceUrl
-                |> clientExceptionIfBlankString "Service Url needs to be specified on the PulsarClientBuilder object.")
+                |> invalidArgIfDefault "Service Url needs to be specified on the PulsarClientBuilder object.")
 
     new() = PulsarClientBuilder(PulsarClientConfiguration.Default)
 
     member this.ServiceUrl (url: string) =
 
+        let uri =
+            url
+            |> invalidArgIfBlankString "ServiceUrl must not be blank."
+            |> Uri
         let useTls = config.UseTls || url.StartsWith("pulsar+ssl")
 
         PulsarClientBuilder
             { config with
-                ServiceUrl = url |> invalidArgIfBlankString "ServiceUrl must not be blank." 
+                ServiceUrl = uri
                 UseTls = useTls }
 
     member this.MaxNumberOfRejectedRequestPerConnection num =
@@ -40,6 +40,21 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
         PulsarClientBuilder
             { config with
                 UseTls = useTls }
+
+    member this.EnableTlsHostnameVerification enableTlsHostnameVerification =
+        PulsarClientBuilder
+            { config with
+                TlsHostnameVerificationEnable = enableTlsHostnameVerification }
+
+    member this.AllowTlsInsecureConnection allowTlsInsecureConnection =
+        PulsarClientBuilder
+            { config with
+                TlsAllowInsecureConnection = allowTlsInsecureConnection }
+
+    member this.TlsTrustCertificate tlsTrustCertificate =
+        PulsarClientBuilder
+            { config with
+                TlsTrustCertificate = tlsTrustCertificate }
 
     member this.Authentication authentication =
         PulsarClientBuilder

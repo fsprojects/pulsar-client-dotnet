@@ -10,7 +10,7 @@ open Pulsar.Client.Common
 module ProducerBuilderTests =
 
     let private builder() =
-        ProducerBuilder(PulsarClient(PulsarClientConfiguration.Default))
+        ProducerBuilder(PulsarClient({ PulsarClientConfiguration.Default with ServiceUrl = Uri("pulsar://localhost:6650") }))
 
     let configure builderF builder =
         fun() ->  builder |> builderF |> ignore

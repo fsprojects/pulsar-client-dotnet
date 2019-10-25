@@ -65,7 +65,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                 | Close channel ->
                     match this.ClientState with
                     | Active ->
-                        Log.Logger.LogInformation("Client closing. URL: {0}", lookupService.GetServiceUrl())
+                        Log.Logger.LogInformation("Client closing. URL: {0}", config.ServiceUrl)
                         this.ClientState <- Closing
                         let producersTasks = producers |> Seq.map (fun producer -> producer.CloseAsync())
                         let consumerTasks = consumers |> Seq.map (fun consumer -> consumer.CloseAsync())
@@ -79,7 +79,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                         } |> channel.Reply
                         return! loop ()
                     | _ ->
-                        channel.Reply(Task.FromException(AlreadyClosedException("Client already closed. URL: " + lookupService.GetServiceUrl())))
+                        channel.Reply(Task.FromException(AlreadyClosedException("Client already closed. URL: " + config.ServiceUrl.ToString())))
                         return! loop ()
                 | Stop ->
                     this.ClientState <- Closed

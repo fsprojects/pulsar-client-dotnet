@@ -11,7 +11,7 @@ open Microsoft.Extensions.Logging
 
 type BinaryLookupService (config: PulsarClientConfiguration, connectionPool: ConnectionPool) =
 
-    let serviceNameResolver = ServiceNameResolver(config)
+    let endpoint = DnsEndPoint(config.ServiceUrl.Host, config.ServiceUrl.Port)
 
     member this.GetPartitionsForTopic (topicName: TopicName) =
         task {
@@ -25,7 +25,6 @@ type BinaryLookupService (config: PulsarClientConfiguration, connectionPool: Con
 
     member this.GetPartitionedTopicMetadata topicName =
         task {
-            let endpoint = serviceNameResolver.ResolveHost()
             let! clientCnx = connectionPool.GetBrokerlessConnection endpoint
             let requestId = Generators.getNextRequestId()
             let payload = Commands.newPartitionMetadataRequest topicName requestId
@@ -33,12 +32,8 @@ type BinaryLookupService (config: PulsarClientConfiguration, connectionPool: Con
             return PulsarResponseType.GetPartitionedTopicMetadata response
         }
 
-    member this.GetServiceUrl() = serviceNameResolver.GetServiceUrl()
-
-    member this.UpdateServiceUrl(serviceUrl) = serviceNameResolver.UpdateServiceUrl(serviceUrl)
-
     member this.GetBroker(topicName: CompleteTopicName) =
-        this.FindBroker(serviceNameResolver.ResolveHost(), false, topicName)
+        this.FindBroker(endpoint, false, topicName)
 
     member private this.FindBroker(endpoint: DnsEndPoint, autoritative: bool, topicName: CompleteTopicName) =
         task {
@@ -71,7 +66,7 @@ type BinaryLookupService (config: PulsarClientConfiguration, connectionPool: Con
             let backoff = Backoff { BackoffConfig.Default with
                                         Initial = TimeSpan.FromMilliseconds(100.0)
                                         MandatoryStop = (config.OperationTimeout + config.OperationTimeout) }
-            let! result = this.GetTopicsUnderNamespace(serviceNameResolver.ResolveHost(), ns, backoff, int config.OperationTimeout.TotalMilliseconds, mode)
+            let! result = this.GetTopicsUnderNamespace(endpoint, ns, backoff, int config.OperationTimeout.TotalMilliseconds, mode)
             return result
         }
 

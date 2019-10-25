@@ -2,21 +2,28 @@
 
 open Pulsar.Client.Common
 open System
+open System.Security.Cryptography.X509Certificates
 
 type PulsarClientConfiguration =
     {
-        ServiceUrl: string
+        ServiceUrl: Uri
         OperationTimeout: TimeSpan
         MaxNumberOfRejectedRequestPerConnection: int
         UseTls: bool
+        TlsHostnameVerificationEnable: bool
+        TlsAllowInsecureConnection: bool
+        TlsTrustCertificate: X509Certificate2
         Authentication: Authentication
     }
     static member Default =
         {
-            ServiceUrl = ""
+            ServiceUrl = null
             OperationTimeout = TimeSpan.FromMilliseconds(30000.0)
             MaxNumberOfRejectedRequestPerConnection = 50
             UseTls = false
+            TlsHostnameVerificationEnable = false
+            TlsAllowInsecureConnection = false
+            TlsTrustCertificate = null
             Authentication = Authentication.AuthenticationDisabled
         }
 

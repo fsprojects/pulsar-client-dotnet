@@ -57,7 +57,7 @@ let tests =
             let redeliver msgIds =
                 let length = msgIds |> Seq.length
                 tsc.SetResult(length)
-            let tracker = UnAckedMessageTracker("", TimeSpan.FromMilliseconds(50.0), TimeSpan.FromMilliseconds(25.0), redeliver) :> IUnAckedMessageTracker
+            let tracker = UnAckedMessageTracker("", TimeSpan.FromMilliseconds(100.0), TimeSpan.FromMilliseconds(50.0), redeliver) :> IUnAckedMessageTracker
             let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %"" }
             let msgId2 = { msgId1 with EntryId = %2L }
             let msgId3 = { msgId1 with EntryId = %3L }
@@ -74,7 +74,7 @@ let tests =
             let redeliver msgIds =
                 let length = msgIds |> Seq.length
                 tsc.SetResult(length)
-            let tracker = UnAckedMessageTracker("", TimeSpan.FromMilliseconds(50.0), TimeSpan.FromMilliseconds(25.0), redeliver) :> IUnAckedMessageTracker
+            let tracker = UnAckedMessageTracker("", TimeSpan.FromMilliseconds(100.0), TimeSpan.FromMilliseconds(50.0), redeliver) :> IUnAckedMessageTracker
             let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %"" }
             let msgId2 = { msgId1 with EntryId = %2L }
             let msgId3 = { msgId1 with EntryId = %3L }

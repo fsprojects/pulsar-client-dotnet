@@ -13,6 +13,9 @@ open System.Reflection
 open Pulsar.Client.Internal
 open System.IO.Pipelines
 open Pulsar.Client.Api
+open System.Net.Sockets
+open System.Net.Security
+open System.Security.Cryptography.X509Certificates
 
 type ConnectionPool (config: PulsarClientConfiguration) =
 
@@ -24,14 +27,98 @@ type ConnectionPool (config: PulsarClientConfiguration) =
 
     let connections = ConcurrentDictionary<LogicalAddress, Lazy<Task<ClientCnx>>>()
 
+    // from https://github.com/mgravell/Pipelines.Sockets.Unofficial/blob/master/src/Pipelines.Sockets.Unofficial/SocketConnection.Connect.cs
+    let getSocket (endpoint: DnsEndPoint) =
+        let addressFamily =
+            if endpoint.AddressFamily = AddressFamily.Unspecified then
+                AddressFamily.InterNetwork
+            else
+                endpoint.AddressFamily
+        let protocolType =
+            if addressFamily = AddressFamily.Unix then
+                ProtocolType.Unspecified
+            else
+                ProtocolType.Tcp
+        let socket = new Socket(addressFamily, SocketType.Stream, protocolType)
+        SocketConnection.SetRecommendedClientOptions(socket)
+
+        use args = new SocketAwaitableEventArgs(PipeScheduler.ThreadPool)
+        args.RemoteEndPoint <- endpoint
+        Log.Logger.LogDebug("Socket connecting to {0}", endpoint)
+
+        if (socket.ConnectAsync(args) |> not) then
+            args.Complete()
+        task {
+            let! _ = args
+            Log.Logger.LogDebug("Socket connected to {0}", endpoint)
+            return socket
+        }
+
+    let remoteCertificateValidationCallback (sender: obj) (cert: X509Certificate) (chain: X509Chain) (errors: SslPolicyErrors) =
+        match errors with
+        | SslPolicyErrors.None ->
+            Log.Logger.LogDebug("No certificate errors")
+            true
+        | SslPolicyErrors.RemoteCertificateNotAvailable ->
+            Log.Logger.LogError("RemoteCertificateNotAvailable")
+            false
+        | SslPolicyErrors.RemoteCertificateNameMismatch ->
+            let result = not config.TlsHostnameVerificationEnable
+            let log = if result then Log.Logger.LogWarning else Log.Logger.LogError
+            log("RemoteCertificateNameMismatch")
+            result
+        | SslPolicyErrors.RemoteCertificateChainErrors ->
+            let result =
+                config.TlsAllowInsecureConnection
+                ||
+                if isNull config.TlsTrustCertificate then
+                    false
+                else
+                    chain.ChainPolicy.ExtraStore.Add(config.TlsTrustCertificate) |> ignore
+                    use cert2 = new X509Certificate2(cert)
+                    chain.Build(cert2)
+            let log = if result then Log.Logger.LogWarning else Log.Logger.LogError
+            log("RemoteCertificateChainErrors")
+            result
+        | error ->
+            Log.Logger.LogError("Unknown ssl error: {0}", error)
+            false
+
     let connect (broker: Broker) =
         Log.Logger.LogInformation("Connecting to {0}", broker)
         task {
             let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
             let (LogicalAddress logicalAddress) = broker.LogicalAddress
-            let! socketConnection = SocketConnection.ConnectAsync(physicalAddress, PipeOptions(pauseWriterThreshold = 5_242_880L ))
-            let writerStream = StreamConnection.GetWriter(socketConnection.Output)
-            let connection = (socketConnection, writerStream)
+            let pipeOptions = PipeOptions(pauseWriterThreshold = 5_242_880L )
+            let! socket = getSocket physicalAddress
+
+            let! connection =
+                task {
+                    if config.UseTls then
+                        Log.Logger.LogDebug("Configuring ssl for {0}", physicalAddress)
+                        let sslStream = new SslStream(new NetworkStream(socket), false, RemoteCertificateValidationCallback(remoteCertificateValidationCallback))
+                        do! sslStream.AuthenticateAsClientAsync(config.ServiceUrl.Host)
+                        let pipeConnection = StreamConnection.GetDuplex(sslStream, pipeOptions)
+                        let writerStream = StreamConnection.GetWriter(pipeConnection.Output)
+                        return
+                            {
+                                Input = pipeConnection.Input
+                                Output = writerStream
+                                IsActive = fun () -> socket.Connected
+                                Dispose = sslStream.Dispose
+                            }
+                    else
+                        let pipeConnection = SocketConnection.Create(socket, pipeOptions)
+                        let writerStream = StreamConnection.GetWriter(pipeConnection.Output)
+                        return
+                            {
+                                Input = pipeConnection.Input
+                                Output = writerStream
+                                IsActive = fun () -> socket.Connected
+                                Dispose = pipeConnection.Dispose
+                            }
+                }
+
             let initialConnectionTsc = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
             let unregisterClientCnx (broker: Broker) =
                 connections.TryRemove(broker.LogicalAddress) |> ignore
