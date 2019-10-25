@@ -14,8 +14,8 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 - [X] Partitioned topics
 - [X] Batching
 - [X] Compression
-- [ ] TLS
-- [ ] Authentication
+- [X] TLS
+- [X] Authentication (token-based)
 - [ ] Reader API
 - [X] Proxy Support
 - [ ] Effectively-Once
