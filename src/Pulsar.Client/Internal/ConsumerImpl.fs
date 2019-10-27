@@ -60,6 +60,8 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
         else
             UnAckedMessageTracker.UNACKED_MESSAGE_TRACKER_DISABLED
 
+    let negativeAcksTracker = NegativeAcksTracker(prefix, consumerConfig.NegativeAckRedeliveryDelay, redeliverMessages)
+
     let getConnectionState() = connectionHandler.ConnectionState
     let sendAckPayload (cnx: ClientCnx) payload = cnx.Send payload
 
@@ -151,7 +153,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
         if consumerConfig.AckTimeout <> TimeSpan.Zero then
             unAckedMessageTracker.Add msg.MessageId |> ignore
 
-    let removeExpiredMessagesFromQueue (msgIds: TrackerState) =
+    let removeExpiredMessagesFromQueue (msgIds: RedeliverSet) =
         if incomingMessages.Count > 0 then
             let peek = incomingMessages.Peek()
             if msgIds.Contains peek.MessageId then
@@ -177,6 +179,7 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
 
     let stopConsumer (state: ConsumerState) =
         unAckedMessageTracker.Close()
+        negativeAcksTracker.Close()
         cleanup(this)
         if state.WaitingChannel <> nullChannel then
             state.WaitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
@@ -561,6 +564,13 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
             }
 
         member this.HasReachedEndOfTopic with get() = hasReachedEndOfTopic
+
+        member this.NegativeAcknowledge msgId =
+            task {
+                negativeAcksTracker.Add(msgId) |> ignore
+                // Ensure the message is not redelivered for ack-timeout, since we did receive an "ack"
+                unAckedMessageTracker.Remove(msgId) |> ignore
+            }
 
 
 

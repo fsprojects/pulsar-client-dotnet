@@ -41,6 +41,7 @@ type ConsumerConfiguration =
         AcknowledgementsGroupTime: TimeSpan
         AutoUpdatePartitions: bool
         ReadCompacted: bool
+        NegativeAckRedeliveryDelay: TimeSpan
     }
     static member Default =
         {
@@ -56,6 +57,7 @@ type ConsumerConfiguration =
             AcknowledgementsGroupTime = TimeSpan.FromMilliseconds(100.0)
             AutoUpdatePartitions = true
             ReadCompacted = false
+            NegativeAckRedeliveryDelay = TimeSpan.FromMinutes(1.0)
         }
 
 type ProducerConfiguration =

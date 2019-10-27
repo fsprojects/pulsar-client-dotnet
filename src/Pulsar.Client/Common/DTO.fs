@@ -173,7 +173,7 @@ type Connection =
         IsActive: unit -> bool
         Dispose: unit -> unit
     }
-type TrackerState = HashSet<MessageId>
+type RedeliverSet = HashSet<MessageId>
 
 type PendingCallback =
     | SingleCallback of TaskCompletionSource<MessageId>
@@ -268,7 +268,7 @@ type ConsumerMessage =
     | MessageReceived of Message
     | Receive of AsyncReplyChannel<MessageOrException>
     | Acknowledge of MessageId * AckType * AsyncReplyChannel<bool>
-    | RedeliverUnacknowledged of TrackerState * AsyncReplyChannel<unit>
+    | RedeliverUnacknowledged of RedeliverSet * AsyncReplyChannel<unit>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
     | SeekAsync of SeekData * AsyncReplyChannel<Task>
     | SendFlowPermits of int

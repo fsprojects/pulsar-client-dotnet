@@ -95,6 +95,12 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
             { config with
                 ReadCompacted = readCompacted  })
 
+    member this.NegativeAckRedeliveryDelay negativeAckRedeliveryDelay =
+        ConsumerBuilder(
+            client,
+            { config with
+                NegativeAckRedeliveryDelay = negativeAckRedeliveryDelay  })
+
     member this.SubscribeAsync() =
         config
         |> verify

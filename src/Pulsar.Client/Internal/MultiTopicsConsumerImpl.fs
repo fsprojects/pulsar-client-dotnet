@@ -23,6 +23,7 @@ type MultiTopicConsumerMessage =
     | Init
     | Receive of AsyncReplyChannel<Async<Message option>>
     | Acknowledge of AsyncReplyChannel<Task<unit>> * MessageId
+    | NegativeAcknowledge of AsyncReplyChannel<Task<unit>> * MessageId
     | AcknowledgeCumulative of AsyncReplyChannel<Task<unit>> * MessageId
     | RedeliverUnacknowledgedMessages of AsyncReplyChannel<Task>
     | Close of AsyncReplyChannel<Task<unit>>
@@ -113,6 +114,12 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
 
                     let consumer = consumers.[msgId.TopicName]
                     channel.Reply(consumer.AcknowledgeAsync(msgId))
+                    return! loop state
+
+                | NegativeAcknowledge (channel, msgId) ->
+
+                    let consumer = consumers.[msgId.TopicName]
+                    channel.Reply(consumer.NegativeAcknowledge(msgId))
                     return! loop state
 
                 | AcknowledgeCumulative (channel, msgId) ->
@@ -335,5 +342,8 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
         member this.HasReachedEndOfTopic with get() =
             mb.PostAndReply(HasReachedEndOfTheTopic)
 
-
-
+        member this.NegativeAcknowledge msgId =
+            task {
+                let! result = mb.PostAndAsyncReply(fun channel -> NegativeAcknowledge(channel, msgId))
+                return! result
+            }

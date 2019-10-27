@@ -45,6 +45,7 @@
     <Compile Include="Internal\Backoff.fs" />
     <Compile Include="Internal\Routing.fs" />
     <Compile Include="Internal\UnAckedMessageTracker.fs" />
+    <Compile Include="Internal\NegativeAcksTracker.fs" />
     <Compile Include="Internal\Generators.fs" />
     <Compile Include="Internal\ClientCnx.fs" />
     <Compile Include="Internal\ConnectionPool.fs" />

@@ -23,3 +23,5 @@ type IConsumer =
     abstract member SeekAsync: MessageId -> Task<unit>
     /// Reset the subscription associated with this consumer to a specific message publish time (timestamp).
     abstract member SeekAsync: uint64 -> Task<unit>
+    /// Acknowledge the failure to process a single message.
+    abstract member NegativeAcknowledge: MessageId -> Task<unit>

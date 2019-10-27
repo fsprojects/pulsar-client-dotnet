@@ -18,6 +18,7 @@
     <Compile Include="Internal\CompressionCodecTests.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTrackerTests.fs" />
     <Compile Include="Internal\UnAckedMessageTrackerTests.fs" />
+    <Compile Include="Internal\NegativeAcksTracker.fs" />
     <None Include="paket.references" />
     <Compile Include="Tests.fs" />
     <Compile Include="Main.fs" />

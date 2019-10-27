@@ -21,22 +21,23 @@ type IUnAckedMessageTracker =
     abstract member RemoveMessagesTill: MessageId -> int
     abstract member Close: unit -> unit
 
-type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: TimeSpan, redeliverUnacknowledgedMessages: TrackerState -> unit) =
+type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: TimeSpan, redeliverUnacknowledgedMessages: RedeliverSet -> unit) =
 
-    let messageIdPartitionMap = SortedDictionary<MessageId, TrackerState>()
-    let timePartitions = Queue<TrackerState>()
+    let messageIdPartitionMap = SortedDictionary<MessageId, RedeliverSet>()
+    let timePartitions = Queue<RedeliverSet>()
     let prefix = prefix + " Tracker"
 
     let fillTimePartions() =
         let stepsCount = Math.Ceiling(ackTimeout.TotalMilliseconds / tickDuration.TotalMilliseconds) |> int
         for _ in [1..stepsCount] do
-            timePartitions.Enqueue(TrackerState())
+            timePartitions.Enqueue(RedeliverSet())
 
     let mb = MailboxProcessor<TrackerMessage>.Start(fun inbox ->
-        let rec loop (state: TrackerState)  =
+        let rec loop (state: RedeliverSet)  =
             async {
                 let! message = inbox.Receive()
                 match message with
+
                 | TrackerMessage.Add (msgId, channel) ->
 
                     Log.Logger.LogDebug("{0} Adding message {1}", prefix, msgId)
@@ -52,7 +53,7 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
                 | TrackerMessage.Remove (msgId, channel) ->
 
                     Log.Logger.LogDebug("{0} Removing message {1}", prefix, msgId)
-                    let mutable targetState: TrackerState = null
+                    let mutable targetState: RedeliverSet = null
                     if messageIdPartitionMap.TryGetValue(msgId, &targetState) then
                         targetState.Remove(msgId) |> ignore
                         messageIdPartitionMap.Remove(msgId) |> ignore
@@ -85,14 +86,14 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
                         for msgId in timedOutMessages do
                             messageIdPartitionMap.Remove(msgId) |> ignore
                         redeliverUnacknowledgedMessages timedOutMessages
-                    return! loop (TrackerState())
+                    return! loop (RedeliverSet())
 
                 | Clear ->
 
                     Log.Logger.LogDebug("{0} Clear", prefix)
                     messageIdPartitionMap.Clear()
                     timePartitions |> Seq.iter (fun partition -> partition.Clear())
-                    return! loop (TrackerState())
+                    return! loop (RedeliverSet())
 
                 | Stop ->
 
@@ -100,7 +101,7 @@ type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: T
                     messageIdPartitionMap.Clear()
                     timePartitions.Clear()
             }
-        loop (TrackerState())
+        loop (RedeliverSet())
     )
 
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
