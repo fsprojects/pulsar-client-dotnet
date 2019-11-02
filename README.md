@@ -16,7 +16,7 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 - [X] Compression
 - [X] TLS
 - [X] Authentication (token-based)
-- [ ] Reader API
+- [X] Reader API
 - [X] Proxy Support
 - [ ] Effectively-Once
 - [ ] Schema
@@ -25,7 +25,7 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 - [ ] Topics regex consumer
 - [X] Compacted topics
 - [X] User defined properties producer/consumer
-- [ ] Reader hasMessageAvailable
+- [X] Reader hasMessageAvailable
 - [ ] Hostname verification
 - [ ] Multi Hosts Service Url support
 
