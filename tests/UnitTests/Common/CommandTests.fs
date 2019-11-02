@@ -147,10 +147,12 @@ module CommandsTests =
                 let requestId = %1UL
 
                 let totalSize, commandSize, command =
-                    serializeDeserializeSimpleCommand (newSubscribe topicName "test-subscription" consumerId requestId consumerName SubscriptionType.Exclusive SubscriptionInitialPosition.Earliest false)
+                    serializeDeserializeSimpleCommand
+                        (newSubscribe topicName "test-subscription" consumerId requestId consumerName
+                            SubscriptionType.Exclusive SubscriptionInitialPosition.Earliest false None true)
 
-                totalSize |> Expect.equal "" 64
-                commandSize |> Expect.equal "" 60
+                totalSize |> Expect.equal "" 66
+                commandSize |> Expect.equal "" 62
                 command.``type``  |> Expect.equal "" CommandType.Subscribe
                 command.Subscribe.Topic |> Expect.equal "" %topicName
                 command.Subscribe.RequestId |> Expect.equal "" %requestId

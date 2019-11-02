@@ -11,24 +11,30 @@ open Microsoft.Extensions.Logging
 open System.IO
 open ProtoBuf
 open pulsar.proto
+open System.Collections.Generic
+open System.Linq
 
 type ConsumerState = {
     WaitingChannel: AsyncReplyChannel<MessageOrException>
 }
 
-type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                           partitionIndex: int, subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: ConsumerImpl -> unit) as this =
+type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                           partitionIndex: int, subscriptionMode: SubscriptionMode, startMessageId: MessageId option, lookup: BinaryLookupService,
+                           cleanup: ConsumerImpl -> unit) as this =
 
     [<Literal>]
     let MAX_REDELIVER_UNACKNOWLEDGED = 1000
     let consumerId = Generators.getNextConsumerId()
     let incomingMessages = new Queue<Message>()
     let nullChannel = Unchecked.defaultof<AsyncReplyChannel<MessageOrException>>
-    let subscribeTsc = TaskCompletionSource<ConsumerImpl>(TaskCreationOptions.RunContinuationsAsynchronously)
+    let subscribeTsc = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
     let prefix = sprintf "consumer(%u, %s, %i)" %consumerId consumerConfig.ConsumerName partitionIndex
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable hasReachedEndOfTopic = false
     let mutable avalablePermits = 0
+    let mutable lastMessageIdInBroker = MessageId.Earliest
+    let mutable lastDequeuedMessage = MessageId.Earliest
+    let mutable startMessageId = startMessageId
     let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
     let connectionHandler =
         ConnectionHandler(prefix,
@@ -39,11 +45,28 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                           (fun ex -> this.Mb.Post(ConsumerMessage.ConnectionFailed ex)),
                           Backoff({ BackoffConfig.Default with Initial = TimeSpan.FromMilliseconds(100.0); Max = TimeSpan.FromSeconds(60.0) }))
 
+    let hasMoreMessages (lastMessageIdInBroker: MessageId) (lastDequeuedMessage: MessageId) =
+        if (lastMessageIdInBroker > lastDequeuedMessage && lastMessageIdInBroker.EntryId <> %(-1L)) then
+            true
+        else
+            lastMessageIdInBroker = lastDequeuedMessage && incomingMessages.Count > 0
+
     let increaseAvailablePermits delta =
         avalablePermits <- avalablePermits + delta
         if avalablePermits >= receiverQueueRefillThreshold then
             this.Mb.Post(ConsumerMessage.SendFlowPermits avalablePermits)
             avalablePermits <- 0
+
+    let getStartMessageId() =
+        if incomingMessages.Count > 0 then
+            let lastMessage = incomingMessages.Last()
+            lastMessage.MessageId
+        else if lastDequeuedMessage <> MessageId.Earliest then
+            lastDequeuedMessage
+        else
+            match startMessageId with
+            | Some msgId -> msgId
+            | None -> MessageId.Earliest
 
     let redeliverMessages messages =
         async {
@@ -113,42 +136,79 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                 prefix, ackType, outstandingAcks, batchSize)
             false
 
+    let isPriorEntryIndex idx =
+        match startMessageId with
+        | None -> false
+        | Some startMsgId ->
+            if consumerConfig.ResetIncludeHead then
+                idx < startMsgId.EntryId
+            else
+                idx <= startMsgId.EntryId
+
+    let isPriorBatchIndex idx =
+        match startMessageId with
+        | None -> false
+        | Some startMsgId ->
+            match startMsgId.Type with
+            | Individual -> false
+            | Cumulative (batchIndex, _) ->
+                if consumerConfig.ResetIncludeHead then
+                    idx < batchIndex
+                else
+                    idx <= batchIndex
+
+    let isNonDurableAndSameEntryAndLedger (msgId: MessageId) =
+        match startMessageId with
+        | None ->
+            false
+        | Some startMsgId ->
+            subscriptionMode = SubscriptionMode.NonDurable && startMsgId.LedgerId = msgId.LedgerId && startMsgId.EntryId = msgId.EntryId
+
     let receiveIndividualMessagesFromBatch (rawMessage: Message) =
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
+        let mutable skippedMessages = 0
         use stream = new MemoryStream(rawMessage.Payload)
         use binaryReader = new BinaryReader(stream)
         for i in 0..batchSize-1 do
             Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
             let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
             let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
-            let messageId =
-                {
-                    LedgerId = rawMessage.MessageId.LedgerId
-                    EntryId = rawMessage.MessageId.EntryId
-                    Partition = partitionIndex
-                    Type = Cumulative(%i,acker)
-                    TopicName = %""
-                }
-            let message =
-                { rawMessage with
-                    MessageId = messageId
-                    Payload = singleMessagePayload
-                    Properties =
-                        if singleMessageMetadata.Properties.Count > 0 then
-                            singleMessageMetadata.Properties
-                            |> Seq.map (fun prop -> (prop.Key, prop.Value))
-                            |> dict
-                        else
-                            EmptyProps
-                    MessageKey = %singleMessageMetadata.PartitionKey
-                }
-            incomingMessages.Enqueue(message)
+
+            if isNonDurableAndSameEntryAndLedger(rawMessage.MessageId) && isPriorBatchIndex(%i) then
+                Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1} in batch", prefix, startMessageId)
+                skippedMessages <- skippedMessages + 1
+            else
+                let messageId =
+                    {
+                        LedgerId = rawMessage.MessageId.LedgerId
+                        EntryId = rawMessage.MessageId.EntryId
+                        Partition = partitionIndex
+                        Type = Cumulative(%i, acker)
+                        TopicName = %""
+                    }
+                let message =
+                    { rawMessage with
+                        MessageId = messageId
+                        Payload = singleMessagePayload
+                        Properties =
+                            if singleMessageMetadata.Properties.Count > 0 then
+                                singleMessageMetadata.Properties
+                                |> Seq.map (fun prop -> (prop.Key, prop.Value))
+                                |> dict
+                            else
+                                EmptyProps
+                        MessageKey = %singleMessageMetadata.PartitionKey
+                    }
+                incomingMessages.Enqueue(message)
+        if skippedMessages > 0 then
+            increaseAvailablePermits skippedMessages
 
 
     /// Record the event that one message has been processed by the application.
     /// Periodically, it sends a Flow command to notify the broker that it can push more messages
     let messageProcessed (msg: Message) =
+        lastDequeuedMessage <- msg.MessageId
         increaseAvailablePermits 1
         if consumerConfig.AckTimeout <> TimeSpan.Zero then
             unAckedMessageTracker.Add msg.MessageId |> ignore
@@ -203,18 +263,24 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                         Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, consumerConfig.Topic)
                         clientCnx.AddConsumer consumerId this.Mb
                         let requestId = Generators.getNextRequestId()
+                        let isDurable = subscriptionMode = SubscriptionMode.Durable
+                        startMessageId <-
+                            if isDurable then
+                                None
+                            else
+                                getStartMessageId() |> Some
                         let payload =
                             Commands.newSubscribe
                                 consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName
                                 consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
-                                consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted
+                                consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted startMessageId isDurable
                         try
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             response |> PulsarResponseType.GetEmpty
                             Log.Logger.LogInformation("{0} subscribed", prefix)
                             connectionHandler.ResetBackoff()
                             let initialFlowCount = consumerConfig.ReceiverQueueSize
-                            subscribeTsc.TrySetResult(this) |> ignore
+                            subscribeTsc.TrySetResult() |> ignore
                             if initialFlowCount <> 0 then
                                 let flowCommand = Commands.newFlow consumerId initialFlowCount
                                 let! success = clientCnx.Send flowCommand
@@ -270,23 +336,26 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                         increaseAvailablePermits rawMessage.Metadata.NumMessages
                     else
                         if (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
-
-                            let message = { rawMessage with MessageId = msgId } |> decompress
-
-                            if not hasWaitingChannel then
-                                incomingMessages.Enqueue(message)
+                            if isNonDurableAndSameEntryAndLedger(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
+                                // We need to discard entries that were prior to startMessageId
+                                Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                                 return! loop state
                             else
-                                if (incomingMessages.Count = 0) then
-                                    replyWithMessage state.WaitingChannel message
-                                else
+                                let message = { rawMessage with MessageId = msgId } |> decompress
+                                if not hasWaitingChannel then
                                     incomingMessages.Enqueue(message)
-                                    replyWithMessage state.WaitingChannel <| incomingMessages.Dequeue()
-                                return! loop { state with WaitingChannel = nullChannel }
+                                    return! loop state
+                                else
+                                    if (incomingMessages.Count = 0) then
+                                        replyWithMessage state.WaitingChannel message
+                                    else
+                                        incomingMessages.Enqueue(message)
+                                        replyWithMessage state.WaitingChannel <| incomingMessages.Dequeue()
+                                    return! loop { state with WaitingChannel = nullChannel }
                         elif rawMessage.Metadata.NumMessages > 0 then
                             // handle batch message enqueuing; uncompressed payload has all messages in batch
                             receiveIndividualMessagesFromBatch (rawMessage |> decompress)
-                            if hasWaitingChannel then
+                            if hasWaitingChannel && incomingMessages.Count > 0 then
                                 replyWithMessage state.WaitingChannel <| incomingMessages.Dequeue()
                                 return! loop { state with WaitingChannel = nullChannel }
                             else
@@ -379,12 +448,13 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                         Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData);
                         task {
                             try
-                                let payload =
+                                let (payload, lastMessage) =
                                     match seekData with
-                                    | Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp
-                                    | MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId
+                                    | Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
+                                    | MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
                                 let! response = clientCnx.SendAndWaitForReply requestId payload
                                 response |> PulsarResponseType.GetEmpty
+                                lastDequeuedMessage <- lastMessage
                                 acksGroupingTracker.FlushAndClean()
                                 incomingMessages.Clear()
                                 Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
@@ -416,6 +486,33 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
 
                     Log.Logger.LogWarning("{0} ReachedEndOfTheTopic", prefix)
                     hasReachedEndOfTopic <- true
+
+                | ConsumerMessage.HasMessageAvailable channel ->
+
+                    Log.Logger.LogDebug("{0} HasMessageAvailable", prefix)
+                    if hasMoreMessages lastMessageIdInBroker lastDequeuedMessage then
+                        channel.Reply(Task.FromResult(true))
+                    else
+                        match connectionHandler.ConnectionState with
+                        | Ready clientCnx ->
+                            let requestId = Generators.getNextRequestId()
+                            let payload = Commands.newGetLastMessageId consumerId requestId
+                            task {
+                                try
+                                    let! response = clientCnx.SendAndWaitForReply requestId payload
+                                    let lastMessageId = response |> PulsarResponseType.GetLastMessageId
+                                    lastMessageIdInBroker <- lastMessageId
+                                    return hasMoreMessages lastMessageIdInBroker lastDequeuedMessage
+                                with
+                                | ex ->
+                                    Log.Logger.LogError(ex, "{0} failed getLastMessageId", prefix)
+                                    reraize ex
+                                    return false // not executed, needed for typecheck
+                            } |> channel.Reply
+                        | _ ->
+                            channel.Reply(Task.FromException(NotConnectedException "Not connected to broker") :?> Task<bool>)
+                            Log.Logger.LogError("{0} not connected, skipping HasMessageAvailable {1}", prefix)
+                    return! loop state
 
                 | ConsumerMessage.Close channel ->
 
@@ -478,23 +575,31 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
 
     member this.ConsumerId with get() = consumerId
 
+    member this.HasMessageAvailableAsync() =
+        task {
+            connectionHandler.CheckIfActive()
+            let! result = mb.PostAndAsyncReply(fun channel -> HasMessageAvailable channel)
+            return! result
+        }
+
     override this.Equals consumer =
         consumerId = (consumer :?> ConsumerImpl).ConsumerId
 
     override this.GetHashCode () = int consumerId
 
-    member private this.InitInternal() =
+    member internal this.InitInternal() =
         task {
             do connectionHandler.GrabCnx()
             return! subscribeTsc.Task
         }
 
     static member Init(consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                       partitionIndex: int, subscriptionMode: SubscriptionMode, lookup: BinaryLookupService, cleanup: ConsumerImpl -> unit) =
+                       partitionIndex: int, subscriptionMode: SubscriptionMode, startMessageId: MessageId option, lookup: BinaryLookupService,
+                       cleanup: ConsumerImpl -> unit) =
         task {
-            let consumer = ConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex, subscriptionMode, lookup, cleanup)
-            let! result = consumer.InitInternal()
-            return result :> IConsumer
+            let consumer = ConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex, subscriptionMode, startMessageId, lookup, cleanup)
+            do! consumer.InitInternal()
+            return consumer :> IConsumer
         }
 
     interface IConsumer with
@@ -571,6 +676,8 @@ type ConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: 
                 // Ensure the message is not redelivered for ack-timeout, since we did receive an "ack"
                 unAckedMessageTracker.Remove(msgId) |> ignore
             }
+
+        member this.Topic with get() = %consumerConfig.Topic.CompleteTopicName
 
 
 

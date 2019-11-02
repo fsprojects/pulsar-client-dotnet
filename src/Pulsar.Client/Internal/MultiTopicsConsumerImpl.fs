@@ -72,7 +72,9 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                                                         ReceiverQueueSize = receiverQueueSize
                                                         Topic = partitionedTopic }
                             task {
-                                let! result = ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, SubscriptionMode.Durable, lookup, fun _ -> ())
+                                let! result =
+                                    ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, SubscriptionMode.Durable,
+                                                      None, lookup, fun _ -> ())
                                 return (partitionedTopic, result)
                             })
                     try
@@ -209,7 +211,9 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                                                                 ReceiverQueueSize = receiverQueueSize
                                                                 Topic = partitionedTopic }
                                     task {
-                                        let! result = ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, SubscriptionMode.Durable, lookup, fun _ -> ())
+                                        let! result =
+                                            ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, SubscriptionMode.Durable,
+                                                              None, lookup, fun _ -> ())
                                         return (partitionedTopic, result)
                                     })
                             try
@@ -347,3 +351,5 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                 let! result = mb.PostAndAsyncReply(fun channel -> NegativeAcknowledge(channel, msgId))
                 return! result
             }
+
+        member this.Topic with get() = %consumerConfig.Topic.CompleteTopicName

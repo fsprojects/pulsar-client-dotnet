@@ -169,7 +169,7 @@ let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) 
 
 let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumerId: ConsumerId) (requestId: RequestId)
     (consumerName: string) (subscriptionType: SubscriptionType) (subscriptionInitialPosition: SubscriptionInitialPosition)
-    (readCompacted: bool)  =
+    (readCompacted: bool) (startMessageId: MessageId option) (durable: bool) =
     let subType =
         match subscriptionType with
         | SubscriptionType.Exclusive -> CommandSubscribe.SubType.Exclusive
@@ -184,8 +184,14 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
         | SubscriptionInitialPosition.Latest -> CommandSubscribe.InitialPosition.Latest
         | _ -> failwith "Unknown initialPosition type"
 
+    let startMessageId =
+        match startMessageId with
+        | Some msgId -> msgId.ToMessageIdData()
+        | None -> null
+
     let request = CommandSubscribe(Topic = %topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId,
-                    RequestId = %requestId, ConsumerName =  consumerName, initialPosition = initialPosition, ReadCompacted = readCompacted)
+                    RequestId = %requestId, ConsumerName =  consumerName, initialPosition = initialPosition, ReadCompacted = readCompacted,
+                    StartMessageId = startMessageId, Durable = durable)
     let command = BaseCommand(``type`` = CommandType.Subscribe, Subscribe = request)
     command |> serializeSimpleCommand
 
@@ -218,4 +224,9 @@ let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Op
     | None -> ()
 
     let command = BaseCommand(``type`` = CommandType.RedeliverUnacknowledgedMessages, redeliverUnacknowledgedMessages = request)
+    command |> serializeSimpleCommand
+
+let newGetLastMessageId (consumerId: ConsumerId) (requestId: RequestId) =
+    let request = CommandGetLastMessageId(ConsumerId = %consumerId, RequestId = %requestId)
+    let command = BaseCommand(``type`` = CommandType.GetLastMessageId, getLastMessageId = request)
     command |> serializeSimpleCommand

@@ -39,6 +39,7 @@ type PulsarCommand =
     | XCommandSuccess of CommandSuccess
     | XCommandSendError of CommandSendError
     | XCommandGetTopicsOfNamespaceResponse of CommandGetTopicsOfNamespaceResponse
+    | XCommandGetLastMessageIdResponse of CommandGetLastMessageIdResponse
     | XCommandCloseProducer of CommandCloseProducer
     | XCommandCloseConsumer of CommandCloseConsumer
     | XCommandReachedEndOfTopic of CommandReachedEndOfTopic
@@ -210,6 +211,8 @@ type ClientCnx (config: PulsarClientConfiguration,
             Ok (XCommandReachedEndOfTopic command.reachedEndOfTopic)
         | BaseCommand.Type.GetTopicsOfNamespaceResponse ->
             Ok (XCommandGetTopicsOfNamespaceResponse command.getTopicsOfNamespaceResponse)
+        | BaseCommand.Type.GetLastMessageIdResponse ->
+            Ok (XCommandGetLastMessageIdResponse command.getLastMessageIdResponse)
         | BaseCommand.Type.Error ->
             Ok (XCommandError command.Error)
         | unknownType ->
@@ -296,7 +299,7 @@ type ClientCnx (config: PulsarClientConfiguration,
             UncompressedMessageSize = messageMetadata.UncompressedSize |> int32
         }
         MessageReceived {
-            MessageId = { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); Type = Individual; Partition = -1; TopicName = %""  }
+            MessageId = { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); Type = Individual; Partition = -1; TopicName = %"" }
             RedeliveryCount = cmd.RedeliveryCount
             Metadata = medadata
             Payload = payload
@@ -371,6 +374,14 @@ type ClientCnx (config: PulsarClientConfiguration,
             consumerMb.Post ReachedEndOfTheTopic
         | XCommandGetTopicsOfNamespaceResponse cmd ->
             let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
+            handleSuccess %cmd.RequestId result
+        | XCommandGetLastMessageIdResponse cmd ->
+            let result = LastMessageId {
+                LedgerId = %(int64 cmd.LastMessageId.ledgerId)
+                EntryId = %(int64 cmd.LastMessageId.entryId)
+                Type = Individual
+                Partition = cmd.LastMessageId.Partition
+                TopicName = %"" }
             handleSuccess %cmd.RequestId result
         | XCommandError cmd ->
             Log.Logger.LogError("{0} CommandError Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)

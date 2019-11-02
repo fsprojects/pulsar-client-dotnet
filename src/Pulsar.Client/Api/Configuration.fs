@@ -42,6 +42,7 @@ type ConsumerConfiguration =
         AutoUpdatePartitions: bool
         ReadCompacted: bool
         NegativeAckRedeliveryDelay: TimeSpan
+        ResetIncludeHead: bool
     }
     static member Default =
         {
@@ -58,6 +59,7 @@ type ConsumerConfiguration =
             AutoUpdatePartitions = true
             ReadCompacted = false
             NegativeAckRedeliveryDelay = TimeSpan.FromMinutes(1.0)
+            ResetIncludeHead = false
         }
 
 type ProducerConfiguration =
@@ -91,4 +93,25 @@ type ProducerConfiguration =
             CustomMessageRouter = Unchecked.defaultof<IMessageRouter>
             AutoUpdatePartitions = true
             HashingScheme = HashingScheme.DotnetStringHash
+        }
+
+type ReaderConfiguration =
+    {
+        Topic: TopicName
+        StartMessageId: MessageId
+        SubscriptionRolePrefix: string
+        ReceiverQueueSize: int
+        ReadCompacted: bool
+        ReaderName: string
+        ResetIncludeHead: bool
+    }
+    static member Default =
+        {
+            Topic = Unchecked.defaultof<TopicName>
+            StartMessageId = Unchecked.defaultof<MessageId>
+            SubscriptionRolePrefix = ""
+            ReceiverQueueSize = 1000
+            ReadCompacted = false
+            ReaderName = ""
+            ResetIncludeHead = false
         }

@@ -10,6 +10,11 @@ module internal TopicNameHelpers =
     let DefaultTenant = "public"
     let DefaultNamespace = "default"
     let PartitionTopicSuffix = "-partition-"
+    let GetPartitionIndex (completeTopicName: string) =
+        if completeTopicName.Contains(PartitionTopicSuffix) then
+            completeTopicName.Substring(completeTopicName.LastIndexOf('-') + 1) |> int
+        else
+            -1
 
 // Full name example - persistent://tenant/namespace/topic
 // The short topic name can be:
@@ -29,6 +34,7 @@ type TopicName private (completeTopicName: string, partition: int) =
             completeTopicName
 
     new(topic: string) =
+
         let completeTopicName =
             if String.IsNullOrWhiteSpace(topic)
             then failwith "Topic name should not be empty"
@@ -46,13 +52,15 @@ type TopicName private (completeTopicName: string, partition: int) =
                             sprintf "%s://%s/%s/%s" DefaultDomain DefaultTenant DefaultNamespace topic
                         else
                             failwith "Invalid short topic name '" + topic + "', it should be in the format of <tenant>/<namespace>/<topic> or <topic>"
-        TopicName(%completeTopicName, -1)
+        TopicName(%completeTopicName, GetPartitionIndex(completeTopicName))
 
     member this.CompleteTopicName: CompleteTopicName = %completeTopicName
 
     member this.IsPersistent = isPersistent
 
     member this.IsPartitioned = isPartitioned
+
+    member this.PartitionIndex = partition
 
     member this.GetPartition(index: int) =
         if (index = -1 || isPartitioned) then

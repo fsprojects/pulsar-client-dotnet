@@ -204,6 +204,7 @@ type PulsarResponseType =
     | LookupTopicResult of LookupTopicResult
     | ProducerSuccess of ProducerSuccess
     | TopicsOfNamespace of TopicsOfNamespace
+    | LastMessageId of MessageId
     | Error
     | Empty
 
@@ -225,6 +226,11 @@ type PulsarResponseType =
     static member GetTopicsOfNamespace req =
         match req with
         | TopicsOfNamespace x -> x
+        | _ -> failwith "Incorrect return type"
+
+    static member GetLastMessageId req =
+        match req with
+        | LastMessageId msgId -> msgId
         | _ -> failwith "Incorrect return type"
 
     static member GetEmpty req =
@@ -272,6 +278,7 @@ type ConsumerMessage =
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
     | SeekAsync of SeekData * AsyncReplyChannel<Task>
     | SendFlowPermits of int
+    | HasMessageAvailable of AsyncReplyChannel<Task<bool>>
     | Close of AsyncReplyChannel<Task>
     | Unsubscribe of AsyncReplyChannel<Task>
 

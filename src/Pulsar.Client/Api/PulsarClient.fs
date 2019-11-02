@@ -126,7 +126,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                 mb.Post(AddConsumer consumer)
                 return consumer
             else
-                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, -1, SubscriptionMode.Durable, lookupService, removeConsumer)
+                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, -1, SubscriptionMode.Durable, None, lookupService, removeConsumer)
                 mb.Post(AddConsumer consumer)
                 return consumer
         }
@@ -145,6 +145,19 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                 let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, -1, lookupService, removeProducer)
                 mb.Post(AddProducer producer)
                 return producer
+        }
+
+    member this.CreateReaderAsync (readerConfig: ReaderConfiguration) =
+        task {
+            checkIfActive()
+            Log.Logger.LogDebug("CreateReaderAsync started")
+            let! metadata = this.GetPartitionedTopicMetadata readerConfig.Topic.CompleteTopicName
+            if (metadata.Partitions > 0)
+            then
+                return failwith "Topic reader cannot be created on a partitioned topic"
+            else
+                let! reader = Reader.Init(readerConfig, config, connectionPool, lookupService)
+                return reader
         }
 
     member private this.Mb with get(): MailboxProcessor<PulsarClientMessage> = mb
