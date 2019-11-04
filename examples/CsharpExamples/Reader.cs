@@ -20,7 +20,6 @@ namespace CsharpExamples
 
             var producer = await new ProducerBuilder(client)
                 .Topic(topicName)
-                .EnableBatching(false)
                 .CreateAsync();
 
             var messageId1 = await producer.SendAsync(Encoding.UTF8.GetBytes($"Sent 1 from C# at '{DateTime.Now}'"));

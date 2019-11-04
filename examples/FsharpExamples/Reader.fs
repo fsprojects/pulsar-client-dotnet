@@ -23,7 +23,6 @@ let runReader () =
         let! producer =
             ProducerBuilder(client)
                 .Topic(topicName)
-                .EnableBatching(false)
                 .CreateAsync()
 
         let! messageId1 = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Sent 1 from F# at '%A'" DateTime.Now))

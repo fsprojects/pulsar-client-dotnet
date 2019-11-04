@@ -12,13 +12,13 @@ let main argv =
     let loggerFactory =
         LoggerFactory.Create(fun builder ->
             builder
-                .SetMinimumLevel(LogLevel.Debug)
+                .SetMinimumLevel(LogLevel.Information)
                 .AddConsole() |> ignore
         )
     PulsarClient.Logger <- loggerFactory.CreateLogger("PulsarLogger")
 
-    //runSimple().Wait()
-    //runCustomProps().Wait()
+    runSimple().Wait()
+    runCustomProps().Wait()
     runReader().Wait()
 
     printfn "Example ended. Press any key to exit"
