@@ -31,6 +31,10 @@ type BatchMessageAcker(batchSize: int) =
 
     member val PrevBatchCumulativelyAcked = false with get, set
 
+    // Stub for batches that don't need acker at all
+    static member NullAcker =
+        Unchecked.defaultof<BatchMessageAcker>
+
     override this.Equals acker =  true
 
     override this.GetHashCode () = 0

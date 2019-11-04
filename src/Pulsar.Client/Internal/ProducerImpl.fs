@@ -54,7 +54,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
         | SingleCallback tsc -> tsc.SetException(ex)
         | BatchCallbacks tscs ->
             tscs
-            |> Seq.iter (fun tcs -> tcs.SetException(ex))
+            |> Seq.iter (fun (_, tcs) -> tcs.SetException(ex))
 
     let failPendingMessages (ex: exn) =
         while pendingMessages.Count > 0 do
@@ -128,18 +128,21 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
 
             use messageStream = MemoryStreamManager.GetStream()
             use messageWriter = new BinaryWriter(messageStream)
-
-            for batchItem in batchItems do
-                let message = batchItem.Message
-                let smm = SingleMessageMetadata(PayloadSize = message.Value.Length)
-                if String.IsNullOrEmpty(%message.Key) |> not then
-                    smm.PartitionKey <- %message.Key
-                    smm.PartitionKeyB64Encoded <- false
-                if message.Properties.Count > 0 then
-                    for property in message.Properties do
-                        smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
-                Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
-                messageWriter.Write(message.Value)
+            let callbacks =
+                batchItems
+                |> Seq.mapi (fun index batchItem ->
+                    let message = batchItem.Message
+                    let smm = SingleMessageMetadata(PayloadSize = message.Value.Length)
+                    if String.IsNullOrEmpty(%message.Key) |> not then
+                        smm.PartitionKey <- %message.Key
+                        smm.PartitionKeyB64Encoded <- false
+                    if message.Properties.Count > 0 then
+                        for property in message.Properties do
+                            smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
+                    Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
+                    messageWriter.Write(message.Value)
+                    ({ MessageId.Earliest with Type = Cumulative(%index, BatchMessageAcker.NullAcker) }), batchItem.Tcs)
+                |> Seq.toArray
 
             let batchData = messageStream.ToArray()
             let metadata = createMessageMetadata (MessageBuilder(batchData)) (Some batchSize)
@@ -149,10 +152,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
             this.Mb.Post(SendMessage {
                                SequenceId = sequenceId
                                Payload = payload
-                               Callback = BatchCallbacks
-                                   (batchItems
-                                       |> Seq.map(fun i -> i.Tcs)
-                                       |> Seq.toArray)
+                               Callback = BatchCallbacks callbacks
                                CreatedAt = DateTime.Now })
             batchItems.Clear()
             Log.Logger.LogDebug("{0} Pending batch created. Batch size: {1}", prefix, batchSize)
@@ -279,7 +279,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                         failPendingMessage pendingMessage (ProducerQueueIsFullError "Producer send queue is full.")
                     return! loop ()
 
-                | ProducerMessage.SendReceipt receipt ->
+                | ProducerMessage.AckReceived receipt ->
 
                     let sequenceId = receipt.SequenceId
                     let pendingMessage = pendingMessages.Peek()
@@ -298,12 +298,13 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                         Log.Logger.LogDebug("{0} Received ack for message {1}",
                             prefix, receipt)
                         pendingMessages.Dequeue() |> ignore
-                        let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Individual; TopicName = %"" }
                         match pendingMessage.Callback with
                         | SingleCallback tcs ->
-                            tcs.SetResult(msgId)
+                            tcs.SetResult({ LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Individual; TopicName = %"" })
                         | BatchCallbacks tcss ->
-                            tcss |> Array.iter (fun tcs -> tcs.SetResult(msgId))
+                            tcss
+                            |> Array.iter (fun (msgId, tcs) ->
+                                tcs.SetResult({ msgId with LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex }))
                     return! loop ()
 
                 | ProducerMessage.RecoverChecksumError sequenceId ->

@@ -327,7 +327,7 @@ type ClientCnx (config: PulsarClientConfiguration,
                 handleSuccess %cmd.RequestId result
         | XCommandSendReceipt cmd ->
             let producerMb = producers.[%cmd.ProducerId]
-            producerMb.Post(SendReceipt { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); SequenceId = %cmd.SequenceId })
+            producerMb.Post(AckReceived { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); SequenceId = %cmd.SequenceId })
         | XCommandSendError cmd ->
             Log.Logger.LogWarning("{0} Received send error from server: {1} : {2}", prefix, cmd.Error, cmd.Message)
             let producerMb = producers.[%cmd.ProducerId]

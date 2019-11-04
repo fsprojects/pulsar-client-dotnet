@@ -2,21 +2,17 @@
 
 // Learn more about F# at http://fsharp.org
 open System
-open System.Threading.Tasks
-
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
-open Microsoft.Extensions.Logging.Console
-open Microsoft.Extensions.Logging
 open System.Text
 open Pulsar.Client.Common
 open FSharp.UMX
 
 let runCustomProps () =
 
-    let serviceUrl = "pulsar://my-pulsar-cluster:31002";
-    let subscriptionName = "my-subscription";
-    let topicName = sprintf "my-topic-{%i}" DateTime.Now.Ticks;
+    let serviceUrl = "pulsar://my-pulsar-cluster:31002"
+    let subscriptionName = "my-subscription"
+    let topicName = sprintf "my-topic-%i" DateTime.Now.Ticks
 
     let client =
         PulsarClientBuilder()

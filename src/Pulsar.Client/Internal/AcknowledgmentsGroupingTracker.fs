@@ -71,7 +71,7 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
                             return false
                     }
                 if not result then
-                    Log.Logger.LogWarning("{0} Cannot flush pending acks since we're not connected to broker", prefix)
+                    Log.Logger.LogDebug("{0} Cannot flush pending acks since we're not connected to broker", prefix)
                 return ()
         }
 
@@ -135,7 +135,7 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
                     do! flush lastCumulativeAck
                     return! loop lastCumulativeAck
                 | Stop ->
-                    pendingIndividualAcks.Clear()
+                    do! flush lastCumulativeAck
             }
         loop MessageId.Earliest
     )

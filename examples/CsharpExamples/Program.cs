@@ -19,6 +19,7 @@ namespace CsharpExamples
 
             await Simple.RunSimple();
             await CustomProps.RunCustomProps();
+            await ReaderApi.RunReader();
 
             Console.WriteLine("Example ended. Press any key to exit");
             Console.ReadKey();

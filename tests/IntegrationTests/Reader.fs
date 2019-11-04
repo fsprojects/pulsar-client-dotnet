@@ -32,13 +32,14 @@ let tests =
             return resizeArray
         }
 
-    let bascisReaderCheck batching =
+    let basicReaderCheck batching =
         task {
             Log.Debug("Started Reader basic configuration works fine batching: " + batching.ToString())
             let client = getClient()
             let topicName = "public/retention/" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
-            let producerName = "nonBatchReaderProducer"
+            let producerName = "readerProducer"
+            let readerName = "basicReader"
 
             let! producer =
                 ProducerBuilder(client)
@@ -52,6 +53,7 @@ let tests =
             let! reader =
                 ReaderBuilder(client)
                     .Topic(topicName)
+                    .ReaderName(readerName)
                     .StartMessageId(MessageId.Earliest)
                     .CreateAsync()
 
@@ -70,7 +72,8 @@ let tests =
             let client = getClient()
             let topicName = "public/retention/" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
-            let producerName = "nonBatchReaderProducer"
+            let producerName = "readerProducer"
+            let readerName = "producerIdReader"
 
             let! producer =
                 ProducerBuilder(client)
@@ -85,6 +88,7 @@ let tests =
             let! reader =
                 ReaderBuilder(client)
                     .Topic(topicName)
+                    .ReaderName(readerName + "1")
                     .StartMessageId(MessageId.Earliest)
                     .CreateAsync()
             let! result = readerLoopRead reader
@@ -94,6 +98,7 @@ let tests =
             let! reader2 =
                 ReaderBuilder(client)
                     .Topic(topicName)
+                    .ReaderName(readerName + "2")
                     .StartMessageId(result.[0].MessageId)
                     .CreateAsync()
             let! result2 = readerLoopRead reader2
@@ -102,6 +107,7 @@ let tests =
             let! reader3 =
                 ReaderBuilder(client)
                     .Topic(topicName)
+                    .ReaderName(readerName + "3")
                     .StartMessageId(result.[0].MessageId)
                     .StartMessageIdInclusive(true)
                     .CreateAsync() |> Async.AwaitTask
@@ -114,15 +120,51 @@ let tests =
             Log.Debug("Finished Muliple readers non-batching configuration works fine batching: " + batching.ToString())
         }
 
+    let checkReadingFromProducerMessageId batching =
+        task {
+            Log.Debug("Started Check reading from producer messageId. Batching: " + batching.ToString())
+
+            let client = getClient()
+            let topicName = "public/retention/" + Guid.NewGuid().ToString("N")
+            let producerName = "readerProducer"
+            let readerName = "producerIdReader"
+
+            let! producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(batching)
+                    .CreateAsync()
+
+            let! msgId1 = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #1 Sent from %s on %s" producerName (DateTime.Now.ToLongTimeString()) ))
+            Log.Debug("msgId1 is {0}", msgId1)
+            let! msgId2 = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #2 Sent from %s on %s" producerName (DateTime.Now.ToLongTimeString()) ))
+            Log.Debug("msgId2 is {0}", msgId2)
+            do! producer.CloseAsync()
+
+            let! reader =
+                ReaderBuilder(client)
+                    .Topic(topicName)
+                    .ReaderName(readerName)
+                    .StartMessageId(msgId1)
+                    .CreateAsync()
+
+            let! result = readerLoopRead reader
+            Expect.equal "" 1 result.Count
+            do! reader.CloseAsync()
+
+            Log.Debug("Finished Check reading from producer messageId. Batching: " + batching.ToString())
+        }
+
 
     testList "reader" [
 
         testAsync "Reader non-batching configuration works fine" {
-            do! bascisReaderCheck false |> Async.AwaitTask
+            do! basicReaderCheck false |> Async.AwaitTask
         }
 
         testAsync "Reader batching configuration works fine" {
-            do! bascisReaderCheck true |> Async.AwaitTask
+            do! basicReaderCheck true |> Async.AwaitTask
         }
 
         testAsync "Muliple readers non-batching configuration works fine" {
@@ -131,5 +173,13 @@ let tests =
 
         testAsync "Muliple readers batching configuration works fine" {
             do! checkMultipleReaders true |> Async.AwaitTask
+        }
+
+        testAsync "Check reading from producer messageId without batching" {
+            do! checkReadingFromProducerMessageId false |> Async.AwaitTask
+        }
+
+        testAsync "Check reading from producer messageId with batching" {
+            do! checkReadingFromProducerMessageId true |> Async.AwaitTask
         }
     ]

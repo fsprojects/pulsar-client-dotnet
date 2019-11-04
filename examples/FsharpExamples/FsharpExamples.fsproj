@@ -7,6 +7,7 @@
   <ItemGroup>
     <None Include="paket.references" />
     <Compile Include="CustomProps.fs" />
+    <Compile Include="Reader.fs" />
     <Compile Include="Simple.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

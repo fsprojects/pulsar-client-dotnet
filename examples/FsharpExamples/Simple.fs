@@ -8,9 +8,9 @@ open System.Text
 
 let runSimple () =
 
-    let serviceUrl = "pulsar://my-pulsar-cluster:31002";
-    let subscriptionName = "my-subscription";
-    let topicName = sprintf "my-topic-{%i}" DateTime.Now.Ticks;
+    let serviceUrl = "pulsar://my-pulsar-cluster:31002"
+    let subscriptionName = "my-subscription"
+    let topicName = sprintf "my-topic-%i" DateTime.Now.Ticks;
 
     let client =
         PulsarClientBuilder()

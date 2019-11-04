@@ -177,7 +177,7 @@ type RedeliverSet = HashSet<MessageId>
 
 type PendingCallback =
     | SingleCallback of TaskCompletionSource<MessageId>
-    | BatchCallbacks of TaskCompletionSource<MessageId>[]
+    | BatchCallbacks of (MessageId * TaskCompletionSource<MessageId>)[]
 
 type PendingMessage =
     {
@@ -256,7 +256,7 @@ type ProducerMessage =
     | ConnectionOpened
     | ConnectionFailed of exn
     | ConnectionClosed of obj // ClientCnx
-    | SendReceipt of SendReceipt
+    | AckReceived of SendReceipt
     | BeginSendMessage of MessageBuilder * AsyncReplyChannel<TaskCompletionSource<MessageId>>
     | SendMessage of PendingMessage
     | RecoverChecksumError of SequenceId

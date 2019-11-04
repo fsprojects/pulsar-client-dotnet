@@ -4,6 +4,7 @@ open Pulsar.Client.Api
 open Microsoft.Extensions.Logging
 open Simple
 open CustomProps
+open ReaderApi
 
 [<EntryPoint>]
 let main argv =
@@ -11,13 +12,14 @@ let main argv =
     let loggerFactory =
         LoggerFactory.Create(fun builder ->
             builder
-                .SetMinimumLevel(LogLevel.Information)
+                .SetMinimumLevel(LogLevel.Debug)
                 .AddConsole() |> ignore
         )
     PulsarClient.Logger <- loggerFactory.CreateLogger("PulsarLogger")
 
-    runSimple().Wait()
-    runCustomProps().Wait()
+    //runSimple().Wait()
+    //runCustomProps().Wait()
+    runReader().Wait()
 
     printfn "Example ended. Press any key to exit"
     Console.ReadKey() |> ignore
