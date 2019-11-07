@@ -47,7 +47,7 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
                         | Ready cnx ->
                             let mutable success = true
                             if cumulativeAckFlushRequired then
-                                let payload = Commands.newAck consumerId lastCumulativeAck AckType.Cumulative
+                                let payload = Commands.newAck consumerId lastCumulativeAck.LedgerId lastCumulativeAck.EntryId AckType.Cumulative
                                 let! ackSuccess = sendAckPayload cnx payload
                                 if ackSuccess then
                                     cumulativeAckFlushRequired <- false
@@ -59,7 +59,7 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
                                         while pendingIndividualAcks.Count > 0 do
                                             let message = pendingIndividualAcks.Min
                                             pendingIndividualAcks.Remove(message) |> ignore
-                                            yield message
+                                            yield (message.LedgerId, message.EntryId)
                                     }
                                 let payload = Commands.newMultiMessageAck consumerId messages
                                 let! ackSuccess = sendAckPayload cnx payload
@@ -75,13 +75,13 @@ type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackG
                 return ()
         }
 
-    let doImmediateAck msgId ackType =
+    let doImmediateAck (msgId: MessageId) ackType =
         async {
             let! result =
                 async {
                     match getState() with
                     | Ready cnx ->
-                        let payload = Commands.newAck consumerId msgId ackType
+                        let payload = Commands.newAck consumerId msgId.LedgerId msgId.EntryId ackType
                         return! sendAckPayload cnx payload
                     | _ ->
                         return false

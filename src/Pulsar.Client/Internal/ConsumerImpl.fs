@@ -57,16 +57,17 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
             this.Mb.Post(ConsumerMessage.SendFlowPermits avalablePermits)
             avalablePermits <- 0
 
-    let getStartMessageId() =
+    let clearReceiverQueue() =
         if incomingMessages.Count > 0 then
             let lastMessage = incomingMessages.Last()
-            lastMessage.MessageId
+            Some lastMessage.MessageId
         else if lastDequeuedMessage <> MessageId.Earliest then
-            lastDequeuedMessage
+            // If the queue was empty we need to restart from the message just after the last one that has been dequeued
+            // in the past
+            Some lastDequeuedMessage
         else
-            match startMessageId with
-            | Some msgId -> msgId
-            | None -> MessageId.Earliest
+            // No message was received or dequeued by this consumer. Next message would still be the startMessageId
+            startMessageId
 
     let redeliverMessages messages =
         async {
@@ -250,6 +251,10 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
         let uncompressedPayload = compressionCodec.Decode message.Metadata.UncompressedMessageSize message.Payload
         { message with Payload = uncompressedPayload }
 
+    let consumerIsReconnectedToBroker() =
+        Log.Logger.LogInformation("{0} subscribed to topic {1}", prefix, consumerConfig.Topic)
+        avalablePermits <- 0
+
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
         let rec loop (state: ConsumerState) =
@@ -264,20 +269,32 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                         clientCnx.AddConsumer consumerId this.Mb
                         let requestId = Generators.getNextRequestId()
                         let isDurable = subscriptionMode = SubscriptionMode.Durable
-                        startMessageId <-
+                        startMessageId <- clearReceiverQueue()
+                        let msgIdData =
                             if isDurable then
-                                None
+                                null
                             else
-                                getStartMessageId() |> Some
+                                match startMessageId with
+                                | None ->
+                                    Log.Logger.LogWarning("{0} Start messageId is missing")
+                                    null
+                                | Some msgId ->
+                                    let data = MessageIdData(ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)
+                                    match msgId.Type with
+                                    | Individual ->
+                                        ()
+                                    | Cumulative (index, _) ->
+                                        data.BatchIndex <- %index
+                                    data
                         let payload =
                             Commands.newSubscribe
                                 consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName
                                 consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
-                                consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted startMessageId isDurable
+                                consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted msgIdData isDurable
                         try
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             response |> PulsarResponseType.GetEmpty
-                            Log.Logger.LogInformation("{0} subscribed", prefix)
+                            consumerIsReconnectedToBroker()
                             connectionHandler.ResetBackoff()
                             let initialFlowCount = consumerConfig.ReceiverQueueSize
                             subscribeTsc.TrySetResult() |> ignore
@@ -402,7 +419,9 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                             let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds);
                             let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
                             for batch in batches do
-                                let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some(batch))
+                                let command = Commands.newRedeliverUnacknowledgedMessages consumerId (
+                                                    Some(batch |> Seq.map (fun msgId -> MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)))
+                                                )
                                 let! success = clientCnx.Send command
                                 if success then
                                     Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)

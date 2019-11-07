@@ -101,12 +101,6 @@ type MessageId =
                 Partition = %(-1)
                 TopicName = %""
             }
-        member internal this.ToMessageIdData() =
-            MessageIdData(
-                ledgerId = uint64 %this.LedgerId,
-                entryId = uint64 %this.EntryId,
-                Partition = this.Partition
-            )
         member internal this.PrevBatchMessageId
             with get() =
                 {

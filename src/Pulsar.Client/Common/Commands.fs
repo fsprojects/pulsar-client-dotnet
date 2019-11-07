@@ -100,16 +100,16 @@ let newSend (producerId : ProducerId) (sequenceId : SequenceId) (numMessages : i
     let command = BaseCommand(``type`` = CommandType.Send, Send = request)
     serializePayloadCommand command msgMetadata payload
 
-let newAck (consumerId : ConsumerId) (messageId: MessageId) (ackType : AckType) : Payload =
+let newAck (consumerId : ConsumerId) (ledgerId: LedgerId) (entryId: EntryId) (ackType : AckType) : Payload =
     let request = CommandAck(ConsumerId = %consumerId, ack_type = ackType.ToCommandAckType())
-    request.MessageIds.Add(messageId.ToMessageIdData())
+    request.MessageIds.Add(MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId))
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 
-let newMultiMessageAck (consumerId : ConsumerId) (messages: MessageId seq) : Payload =
+let newMultiMessageAck (consumerId : ConsumerId) (messages: seq<LedgerId*EntryId>) : Payload =
     let request = CommandAck(ConsumerId = %consumerId, ack_type = CommandAck.AckType.Individual)
     messages
-    |> Seq.map (fun messageId -> messageId.ToMessageIdData())
+    |> Seq.map (fun (ledgerId, entryId) -> MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId))
     |> request.MessageIds.AddRange
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
@@ -169,7 +169,7 @@ let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) 
 
 let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumerId: ConsumerId) (requestId: RequestId)
     (consumerName: string) (subscriptionType: SubscriptionType) (subscriptionInitialPosition: SubscriptionInitialPosition)
-    (readCompacted: bool) (startMessageId: MessageId option) (durable: bool) =
+    (readCompacted: bool) (startMessageId: MessageIdData) (durable: bool) =
     let subType =
         match subscriptionType with
         | SubscriptionType.Exclusive -> CommandSubscribe.SubType.Exclusive
@@ -183,11 +183,6 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
         | SubscriptionInitialPosition.Earliest -> CommandSubscribe.InitialPosition.Earliest
         | SubscriptionInitialPosition.Latest -> CommandSubscribe.InitialPosition.Latest
         | _ -> failwith "Unknown initialPosition type"
-
-    let startMessageId =
-        match startMessageId with
-        | Some msgId -> msgId.ToMessageIdData()
-        | None -> null
 
     let request = CommandSubscribe(Topic = %topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId,
                     RequestId = %requestId, ConsumerName =  consumerName, initialPosition = initialPosition, ReadCompacted = readCompacted,
@@ -215,12 +210,10 @@ let newCloseProducer (producerId: ProducerId) (requestId : RequestId) =
     let command = BaseCommand(``type`` = CommandType.CloseProducer, CloseProducer = request)
     command |> serializeSimpleCommand
 
-let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<#seq<MessageId>>) =
+let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<seq<MessageIdData>>) =
     let request = CommandRedeliverUnacknowledgedMessages(ConsumerId = %consumerId)
     match messageIds with
-    | Some ids -> ids |> Seq.iter (fun msgId ->
-        Log.Logger.LogDebug("{0} should be redelivered", msgId)
-        request.MessageIds.Add(msgId.ToMessageIdData()))
+    | Some ids -> ids |> Seq.iter (fun msgIdData -> request.MessageIds.Add(msgIdData))
     | None -> ()
 
     let command = BaseCommand(``type`` = CommandType.RedeliverUnacknowledgedMessages, redeliverUnacknowledgedMessages = request)
