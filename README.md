@@ -26,7 +26,7 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 - [X] Compacted topics
 - [X] User defined properties producer/consumer
 - [X] Reader hasMessageAvailable
-- [ ] Hostname verification
+- [X] Hostname verification
 - [ ] Multi Hosts Service Url support
 
 

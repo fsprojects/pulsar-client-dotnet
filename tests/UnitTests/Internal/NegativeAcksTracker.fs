@@ -22,6 +22,7 @@ let tests =
             let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %"" }
             let msgId2 = { msgId1 with EntryId = %2L }
             let msgId3 = { msgId1 with EntryId = %3L }
+            do! Async.Sleep(50)
             tracker.Add msgId1 |> Expect.isTrue ""
             tracker.Add msgId2 |> Expect.isTrue ""
             tracker.Add msgId3 |> Expect.isTrue ""
