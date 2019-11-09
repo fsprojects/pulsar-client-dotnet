@@ -15,6 +15,7 @@ open System.Collections.Generic
 open System.Runtime.InteropServices
 open System.Text
 open System.Net.Sockets
+open ProtoBuf
 
 type ChecksumType =
     | Crc32c
@@ -106,6 +107,41 @@ type MessageId =
                 {
                     this with EntryId = this.EntryId - %1L
                 }
+        member this.ToByteArray() =
+            let data = MessageIdData(ledgerId = uint64 %this.LedgerId, entryId = uint64 %this.EntryId)
+            if this.Partition >= 0 then
+                data.Partition <- this.Partition
+            match this.Type with
+            | Cumulative (batchIndex, _) when %batchIndex >= 0 ->
+                data.BatchIndex <- %batchIndex
+            | _ ->
+                ()
+            use stream = MemoryStreamManager.GetStream()
+            Serializer.Serialize(stream, data)
+            stream.ToArray()
+        static member FromByteArray (data: byte[]) =
+            use stream = new MemoryStream(data)
+            let msgData = Serializer.Deserialize<MessageIdData>(stream)
+            if msgData.BatchIndex >= 0 then
+                {
+                    LedgerId = %(int64 msgData.ledgerId)
+                    EntryId = %(int64 msgData.entryId)
+                    Type = Cumulative (%msgData.BatchIndex, BatchMessageAcker.NullAcker)
+                    Partition = msgData.Partition
+                    TopicName = %""
+                }
+            else
+                {
+                    LedgerId = %(int64 msgData.ledgerId)
+                    EntryId = %(int64 msgData.entryId)
+                    Type = Individual
+                    Partition = msgData.Partition
+                    TopicName = %""
+                }
+        static member FromByteArrayWithTopic (data: byte[], topicName: string) =
+            let initial = MessageId.FromByteArray(data)
+            { initial with TopicName = TopicName(topicName).CompleteTopicName }
+
 
 type SendReceipt =
     {

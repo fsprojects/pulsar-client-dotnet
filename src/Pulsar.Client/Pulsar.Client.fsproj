@@ -29,8 +29,8 @@
     <Compile Include="Internal\Log.fs" />
     <Compile Include="Internal\BatchMessageAcker.fs" />
     <Compile Include="Common\Tools.fs" />
-    <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\TopicName.fs" />
+    <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\AuthenticationDataProvider.fs" />
