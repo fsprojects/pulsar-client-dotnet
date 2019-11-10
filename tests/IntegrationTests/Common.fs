@@ -96,6 +96,14 @@ let fastProduceMessages (producer: IProducer) number producerName =
             ()
     }
 
+let fastProduceMessagesWithSameKey (producer: IProducer) number key producerName =
+    task {
+        for i in [1..number] do
+            let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) )
+            let! _ = producer.SendAndForgetAsync(MessageBuilder(payload, key))
+            ()
+    }
+
 let createSendAndWaitTasks (producer: IProducer) number producerName =
     let createTask taskNumber =
         let message = sprintf "Message #%i Sent from %s on %s" taskNumber producerName (DateTime.Now.ToLongTimeString())

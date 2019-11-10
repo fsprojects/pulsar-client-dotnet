@@ -6,9 +6,13 @@ open System
 
 module internal TopicNameHelpers =
     let FullTopicRegex = Regex(@"^(persistent|non-persistent):\/\/([^\/]+)\/([^\/]+)\/([^\/]+)$")
+    [<Literal>]
     let DefaultDomain = "persistent"
+    [<Literal>]
     let DefaultTenant = "public"
+    [<Literal>]
     let DefaultNamespace = "default"
+    [<Literal>]
     let PartitionTopicSuffix = "-partition-"
     let GetPartitionIndex (completeTopicName: string) =
         if completeTopicName.Contains(PartitionTopicSuffix) then

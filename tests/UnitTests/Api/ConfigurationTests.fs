@@ -24,8 +24,8 @@ module ConfigurationTests =
                 config.ProducerName |> Expect.equal (incorrectDefault "ProducerName") String.Empty
                 config.MaxPendingMessages |> Expect.equal (incorrectDefault "MaxPendingMessages") 1000
                 config.BatchingEnabled |> Expect.equal (incorrectDefault "BatchingEnabled") true
-                config.MaxMessagesPerBatch |> Expect.equal (incorrectDefault "BatchingMaxMessages") 1000
-                config.MaxBatchingPublishDelay |> Expect.equal (incorrectDefault "MaxBatchingPublishDelay") (TimeSpan.FromMilliseconds(1.0))
+                config.BatchingMaxMessages |> Expect.equal (incorrectDefault "BatchingMaxMessages") 1000
+                config.BatchingMaxPublishDelay |> Expect.equal (incorrectDefault "MaxBatchingPublishDelay") (TimeSpan.FromMilliseconds(1.0))
                 config.SendTimeout |> Expect.equal (incorrectDefault "SendTimeout") (TimeSpan.FromSeconds(30.0))
                 config.CompressionType |> Expect.equal (incorrectDefault "CompressionType") (CompressionType.None)
             }

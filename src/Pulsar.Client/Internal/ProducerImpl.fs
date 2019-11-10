@@ -21,7 +21,6 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
     let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
 
     let pendingMessages = Queue<PendingMessage>()
-    let batchItems = ResizeArray<BatchItem>()
 
     let compressionCodec = CompressionCodec.create producerConfig.CompressionType
 
@@ -48,6 +47,13 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                                         Max = TimeSpan.FromSeconds(60.0)
                                         MandatoryStop = TimeSpan.FromMilliseconds(Math.Max(100.0, sendTimeoutMs - 100.0))})
 
+    let batchMessageContainer =
+        match producerConfig.BatchBuilder with
+        | BatchBuilder.Default ->
+            DefaultBatchMessageContainer(prefix, producerConfig) :> IBatchMessageContainer
+        | BatchBuilder.KeyBased ->
+            KeyBasedBatchMessageContainer(prefix, producerConfig) :> IBatchMessageContainer
+        | _ -> failwith "Unknown BatchBuilder type"
 
     let failPendingMessage msg (ex: exn) =
         match msg.Callback with
@@ -56,10 +62,16 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
             tscs
             |> Seq.iter (fun (_, tcs) -> tcs.SetException(ex))
 
+    let failPendingBatchMessages (ex: exn) =
+        if batchMessageContainer.GetNumMessagesInBatch() > 0 then
+            batchMessageContainer.Discard(ex)
+
     let failPendingMessages (ex: exn) =
         while pendingMessages.Count > 0 do
             let msg = pendingMessages.Dequeue()
             failPendingMessage msg ex
+        if producerConfig.BatchingEnabled then
+            failPendingBatchMessages ex
 
     let sendTimeoutTimer = new Timer()
     let startSendTimeoutTimer () =
@@ -71,11 +83,10 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
 
     let batchTimer = new Timer()
     let startSendBatchTimer () =
-        if producerConfig.BatchingEnabled && producerConfig.MaxBatchingPublishDelay <> TimeSpan.Zero then
-            batchTimer.Interval <- producerConfig.MaxBatchingPublishDelay.TotalMilliseconds
-            batchTimer.AutoReset <- true
-            batchTimer.Elapsed.Add(fun _ -> this.Mb.Post SendBatchTick)
-            batchTimer.Start()
+        batchTimer.Interval <- producerConfig.BatchingMaxPublishDelay.TotalMilliseconds
+        batchTimer.AutoReset <- true
+        batchTimer.Elapsed.Add(fun _ -> this.Mb.Post SendBatchTick)
+        batchTimer.Start()
 
     let resendMessages () =
         if pendingMessages.Count > 0 then
@@ -121,41 +132,29 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
             metadata.NumMessagesInBatch <- numMessagesInBatch.Value
         metadata
 
-    let trySendBatchMessage() =
-        let batchSize = batchItems.Count
+    let sendOneBatch (batchPayload: byte[], batchCallbacks: BatchCallback[]) =
+        let batchSize = batchCallbacks.Length
+        let metadata = createMessageMetadata (MessageBuilder batchPayload) (Some batchSize)
+        let sequenceId = %metadata.SequenceId
+        let encodedBatchPayload = compressionCodec.Encode batchPayload
+        let payload = Commands.newSend producerId sequenceId batchSize metadata encodedBatchPayload
+        this.Mb.Post(SendMessage {
+            SequenceId = sequenceId
+            Payload = payload
+            Callback = BatchCallbacks batchCallbacks
+            CreatedAt = DateTime.Now
+        })
+
+    let batchMessageAndSend() =
+        let batchSize = batchMessageContainer.GetNumMessagesInBatch()
+        Log.Logger.LogDebug("{0} Batching the messages from the batch container with {1} messages", prefix, batchSize)
         if batchSize > 0 then
-            Log.Logger.LogDebug("{0} SendBatchMessage started", prefix)
-
-            use messageStream = MemoryStreamManager.GetStream()
-            use messageWriter = new BinaryWriter(messageStream)
-            let callbacks =
-                batchItems
-                |> Seq.mapi (fun index batchItem ->
-                    let message = batchItem.Message
-                    let smm = SingleMessageMetadata(PayloadSize = message.Value.Length)
-                    if String.IsNullOrEmpty(%message.Key) |> not then
-                        smm.PartitionKey <- %message.Key
-                        smm.PartitionKeyB64Encoded <- false
-                    if message.Properties.Count > 0 then
-                        for property in message.Properties do
-                            smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
-                    Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
-                    messageWriter.Write(message.Value)
-                    ({ MessageId.Earliest with Type = Cumulative(%index, BatchMessageAcker.NullAcker) }), batchItem.Tcs)
-                |> Seq.toArray
-
-            let batchData = messageStream.ToArray()
-            let metadata = createMessageMetadata (MessageBuilder(batchData)) (Some batchSize)
-            let sequenceId = %metadata.SequenceId
-            let encodedBatchData = compressionCodec.Encode batchData
-            let payload = Commands.newSend producerId sequenceId batchSize metadata encodedBatchData
-            this.Mb.Post(SendMessage {
-                               SequenceId = sequenceId
-                               Payload = payload
-                               Callback = BatchCallbacks callbacks
-                               CreatedAt = DateTime.Now })
-            batchItems.Clear()
-            Log.Logger.LogDebug("{0} Pending batch created. Batch size: {1}", prefix, batchSize)
+            if batchMessageContainer.IsMultiBatches then
+                batchMessageContainer.CreateOpSendMsgs()
+                |> Seq.iter sendOneBatch
+            else
+                batchMessageContainer.CreateOpSendMsg() |> sendOneBatch
+        batchMessageContainer.Clear()
 
     let stopProducer() =
         sendTimeoutTimer.Stop()
@@ -183,6 +182,8 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                             let success = response |> PulsarResponseType.GetProducerSuccess
                             Log.Logger.LogInformation("{0} registered with name {1}", prefix, success.GeneratedProducerName)
                             connectionHandler.ResetBackoff()
+                            if producerConfig.BatchingEnabled then
+                                startSendBatchTimer()
                             resendMessages()
                         with
                         | ex ->
@@ -235,17 +236,23 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
 
                 | ProducerMessage.StoreBatchItem (message, channel) ->
 
-                    Log.Logger.LogDebug("{0} Begin store batch item. Batch container size: {1}", prefix, batchItems.Count)
-
+                    Log.Logger.LogDebug("{0} StoreBatchItem", prefix)
                     let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
-                    batchItems.Add({ Message = message; Tcs = tcs })
-
-                    Log.Logger.LogDebug("{0} End store batch item. Batch container size: {1}", prefix, batchItems.Count)
-
-                    if batchItems.Count = producerConfig.MaxMessagesPerBatch then
-                        Log.Logger.LogDebug("{0} Max batch container size exceeded", prefix)
-                        trySendBatchMessage()
-
+                    let batchItem = { Message = message; Tcs = tcs }
+                    if batchMessageContainer.HaveEnoughSpace(message) then
+                        // handle boundary cases where message being added would exceed
+                        // batch size and/or max message size
+                        batchMessageContainer.Add(batchItem)
+                        let containerSize = batchMessageContainer.GetCurrentBatchSize()
+                        let containerNumMessages = batchMessageContainer.GetNumMessagesInBatch()
+                        if containerNumMessages = producerConfig.BatchingMaxMessages
+                            || containerSize >= BatchHelpers.MAX_MESSAGE_BATCH_SIZE_BYTES   then
+                            Log.Logger.LogDebug("{0} Max batch container size exceeded", prefix)
+                            batchMessageAndSend()
+                    else
+                       Log.Logger.LogDebug("{0} Closing out batch to accommodate large message with size {1}", prefix, batchItem.Message.Value.Length)
+                       batchMessageAndSend()
+                       batchMessageContainer.Add(batchItem)
                     channel.Reply(tcs)
                     return! loop ()
 
@@ -347,7 +354,7 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
 
                 | ProducerMessage.SendBatchTick ->
 
-                    trySendBatchMessage()
+                    batchMessageAndSend()
                     return! loop ()
 
                 | ProducerMessage.SendTimeoutTick ->
@@ -399,7 +406,6 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
 
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startSendTimeoutTimer()
-    do startSendBatchTimer()
 
     member private this.SendMessage message =
         if producerConfig.BatchingEnabled then
@@ -444,6 +450,13 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
             task {
                 connectionHandler.CheckIfActive()
                 let! _ = this.SendMessage (MessageBuilder(message))
+                return ()
+            }
+
+        member this.SendAndForgetAsync (message: MessageBuilder) =
+            task {
+                connectionHandler.CheckIfActive()
+                let! _ = this.SendMessage message
                 return ()
             }
 

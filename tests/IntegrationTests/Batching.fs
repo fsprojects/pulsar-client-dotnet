@@ -122,9 +122,9 @@ let tests =
             Log.Debug("Finished 'Batch get created from several tasks'")
         }
 
-        testAsync "Keys and properties are propertly passed with batching" {
+        testAsync "Keys and properties are propertly passed with default batching" {
 
-            Log.Debug("Started Keys and properties are propertly passed")
+            Log.Debug("Started Keys and properties are propertly passed with default batching")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let producerName = "propsTestProducer"
@@ -158,6 +158,55 @@ let tests =
 
             do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
-            Log.Debug("Finished Keys and properties are propertly passed")
+            Log.Debug("Finished Keys and properties are propertly passed with default batching")
+        }
+
+        testAsync "Keys and properties are propertly passed with key-based batching" {
+
+            Log.Debug("Started Keys and properties are propertly passed with key-based batching")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let producerName = "propsTestProducer"
+            let consumerName = "propsTestConsumer"
+            let numberOfMessages = 10
+
+            let! producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(true)
+                    .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(100.0))
+                    .BatchBuilder(BatchBuilder.KeyBased)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let producer1Task =
+                Task.Run(fun () ->
+                    task {
+                        do! fastProduceMessagesWithSameKey producer numberOfMessages "key1" (producerName + "1")
+                    }:> Task)
+
+            let producer2Task =
+                Task.Run(fun () ->
+                    task {
+                        do! fastProduceMessagesWithSameKey producer numberOfMessages "key2" (producerName + "2")
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! consumeMessages consumer numberOfMessages consumerName
+                        do! consumeMessages consumer numberOfMessages consumerName
+                    }:> Task)
+
+            do! Task.WhenAll(producer1Task, producer2Task, consumerTask) |> Async.AwaitTask
+
+            Log.Debug("Finished Keys and properties are propertly passed with key-based batching")
         }
     ]

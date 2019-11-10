@@ -56,7 +56,7 @@ module ProducerBuilderTests =
                 let checkBatchingMaxMessages batchingMaxMessages =
                     builder()
                     |> configure(fun b -> b.BatchingMaxMessages batchingMaxMessages)
-                    |> Expect.throwsWithMessage<ArgumentException> "BatchingMaxMessages needs to be non negative integer."
+                    |> Expect.throwsWithMessage<ArgumentException> "BatchingMaxMessages needs to be greater than 0."
 
                 -1 |> checkBatchingMaxMessages
             }

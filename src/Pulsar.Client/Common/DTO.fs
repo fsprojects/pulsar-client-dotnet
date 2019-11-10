@@ -55,6 +55,10 @@ type SubscriptionInitialPosition =
     | Latest = 0
     | Earliest = 1
 
+type BatchBuilder =
+    | Default = 0
+    | KeyBased = 1
+
 type TopicDomain =
     | Persistent
     | NonPersistent
@@ -205,9 +209,10 @@ type Connection =
     }
 type RedeliverSet = HashSet<MessageId>
 
+type BatchCallback = MessageId * TaskCompletionSource<MessageId>
 type PendingCallback =
     | SingleCallback of TaskCompletionSource<MessageId>
-    | BatchCallbacks of (MessageId * TaskCompletionSource<MessageId>)[]
+    | BatchCallbacks of BatchCallback[]
 
 type PendingMessage =
     {

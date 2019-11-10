@@ -47,7 +47,7 @@ type PartitionedProducerImpl private (producerConfig: ProducerConfiguration, cli
             RoundRobinPartitionMessageRouterImpl (
                 RandomGenerator.Next(0, numPartitions),
                 producerConfig.BatchingEnabled,
-                int producerConfig.MaxBatchingPublishDelay.TotalMilliseconds,
+                int producerConfig.BatchingMaxPublishDelay.TotalMilliseconds,
                 hashingFunction) :> IMessageRouter
         | MessageRoutingMode.CustomPartition ->
             producerConfig.CustomMessageRouter
@@ -227,6 +227,12 @@ type PartitionedProducerImpl private (producerConfig: ProducerConfiguration, cli
         member this.SendAndForgetAsync (message: byte[]) =
             task {
                 let partition = this.ChoosePartitionIfActive(MessageBuilder(message))
+                return! producers.[partition].SendAndForgetAsync(message)
+            }
+
+        member this.SendAndForgetAsync (message: MessageBuilder) =
+            task {
+                let partition = this.ChoosePartitionIfActive(message)
                 return! producers.[partition].SendAndForgetAsync(message)
             }
 

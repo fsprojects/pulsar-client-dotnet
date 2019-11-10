@@ -57,18 +57,26 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
             client,
             { config with BatchingEnabled = enableBatching })
 
-    member __.BatchingMaxMessages maxMessagesPerBatch =
+    member __.BatchingMaxMessages batchingMaxMessages =
         ProducerBuilder(
             client,
             { config with
-                MaxMessagesPerBatch =
-                    maxMessagesPerBatch
-                    |> invalidArgIfLessThanZero "BatchingMaxMessages needs to be non negative integer." })
+                BatchingMaxMessages =
+                    batchingMaxMessages
+                    |> invalidArgIfNotGreaterThanZero "BatchingMaxMessages needs to be greater than 0." })
 
     member __.BatchingMaxPublishDelay batchingMaxPublishDelay =
         ProducerBuilder(
             client,
-            { config with MaxBatchingPublishDelay = batchingMaxPublishDelay })
+            { config with
+                BatchingMaxPublishDelay =
+                    batchingMaxPublishDelay
+                    |> invalidArgIf ((>=) TimeSpan.Zero) "BatchingMaxPublishDelay needs to be greater than 0." })
+
+    member __.BatchBuilder batchBuilder =
+        ProducerBuilder(
+            client,
+            { config with BatchBuilder = batchBuilder })
 
     member __.SendTimeout sendTimeout =
         ProducerBuilder(

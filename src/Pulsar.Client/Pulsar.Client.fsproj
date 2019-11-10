@@ -42,6 +42,7 @@
     <Compile Include="Auth\AuthenticationDataToken.fs" />
     <Compile Include="Auth\AuthenticationToken.fs" />
     <Compile Include="Auth\DefaultImplementation.fs" />
+    <Compile Include="Internal\BatchMessageContainer.fs" />
     <Compile Include="Internal\Backoff.fs" />
     <Compile Include="Internal\Routing.fs" />
     <Compile Include="Internal\UnAckedMessageTracker.fs" />

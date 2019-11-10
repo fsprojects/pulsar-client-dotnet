@@ -69,8 +69,9 @@ type ProducerConfiguration =
         MaxPendingMessagesAcrossPartitions: int
         MaxPendingMessages: int
         BatchingEnabled: bool
-        MaxMessagesPerBatch: int
-        MaxBatchingPublishDelay: TimeSpan
+        BatchingMaxMessages: int
+        BatchingMaxPublishDelay: TimeSpan
+        BatchBuilder: BatchBuilder
         SendTimeout: TimeSpan
         CompressionType: CompressionType
         MessageRoutingMode: MessageRoutingMode
@@ -85,8 +86,9 @@ type ProducerConfiguration =
             MaxPendingMessages = 1000
             MaxPendingMessagesAcrossPartitions = 50000
             BatchingEnabled = true
-            MaxMessagesPerBatch = 1000
-            MaxBatchingPublishDelay = TimeSpan.FromMilliseconds(1.0)
+            BatchingMaxMessages = 1000
+            BatchingMaxPublishDelay = TimeSpan.FromMilliseconds(1.0)
+            BatchBuilder = BatchBuilder.Default
             SendTimeout = TimeSpan.FromMilliseconds(30000.0)
             CompressionType = CompressionType.None
             MessageRoutingMode = MessageRoutingMode.RoundRobinPartition

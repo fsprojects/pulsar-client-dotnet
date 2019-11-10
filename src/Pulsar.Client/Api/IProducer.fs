@@ -11,6 +11,8 @@ type IProducer =
     abstract member SendAsync: MessageBuilder -> Task<MessageId>
     /// Complete as soon as message gets in client's internal message queue, don't wait for any confirmations
     abstract member SendAndForgetAsync: byte[] -> Task<unit>
+    /// Complete as soon as message gets in client's internal message queue, don't wait for any confirmations
+    abstract member SendAndForgetAsync: MessageBuilder -> Task<unit>
     /// Clean up resources
     abstract member CloseAsync: unit -> Task<unit>
     /// Internal client producer id
