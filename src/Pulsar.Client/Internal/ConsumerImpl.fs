@@ -14,10 +14,6 @@ open pulsar.proto
 open System.Collections.Generic
 open System.Linq
 
-type ConsumerState = {
-    WaitingChannel: AsyncReplyChannel<MessageOrException>
-}
-
 type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, subscriptionMode: SubscriptionMode, startMessageId: MessageId option, lookup: BinaryLookupService,
                            cleanup: ConsumerImpl -> unit) as this =
@@ -26,7 +22,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
     let MAX_REDELIVER_UNACKNOWLEDGED = 1000
     let consumerId = Generators.getNextConsumerId()
     let incomingMessages = new Queue<Message>()
-    let nullChannel = Unchecked.defaultof<AsyncReplyChannel<MessageOrException>>
+    let waiters = new Queue<AsyncReplyChannel<MessageOrException>>()
     let subscribeTsc = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
     let prefix = sprintf "consumer(%u, %s, %i)" %consumerId consumerConfig.ConsumerName partitionIndex
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
@@ -238,12 +234,13 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
         messageProcessed message
         channel.Reply (Message message)
 
-    let stopConsumer (state: ConsumerState) =
+    let stopConsumer () =
         unAckedMessageTracker.Close()
         negativeAcksTracker.Close()
         cleanup(this)
-        if state.WaitingChannel <> nullChannel then
-            state.WaitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
+        while waiters.Count > 0 do
+            let waitingChannel = waiters.Dequeue()
+            waitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let decompress message =
@@ -257,7 +254,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
 
     let mb = MailboxProcessor<ConsumerMessage>.Start(fun inbox ->
 
-        let rec loop (state: ConsumerState) =
+        let rec loop () =
             async {
                 let! msg = inbox.Receive()
                 match msg with
@@ -316,12 +313,12 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                     // unable to create new consumer, fail operation
                                     connectionHandler.Failed()
                                     subscribeTsc.SetException(ex)
-                                    stopConsumer state
+                                    stopConsumer()
                                 else
                                     connectionHandler.ReconnectLater ex
                     | _ ->
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
-                    return! loop state
+                    return! loop ()
 
                 | ConsumerMessage.ConnectionClosed clientCnx ->
 
@@ -329,7 +326,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     let clientCnx = clientCnx :?> ClientCnx
                     connectionHandler.ConnectionClosed clientCnx
                     clientCnx.RemoveConsumer(consumerId)
-                    return! loop state
+                    return! loop ()
 
                 | ConsumerMessage.ConnectionFailed ex ->
 
@@ -337,13 +334,13 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     if (DateTime.Now > subscribeTimeout && subscribeTsc.TrySetException(ex)) then
                         Log.Logger.LogInformation("{0} creation failed", prefix)
                         connectionHandler.Failed()
-                        stopConsumer state
+                        stopConsumer()
                     else
-                        return! loop state
+                        return! loop ()
 
                 | ConsumerMessage.MessageReceived rawMessage ->
 
-                    let hasWaitingChannel = state.WaitingChannel <> nullChannel
+                    let hasWaitingChannel = waiters.Count > 0
                     let msgId = { rawMessage.MessageId with Partition = partitionIndex }
                     Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3}",
                         prefix, msgId, incomingMessages.Count, hasWaitingChannel)
@@ -356,40 +353,36 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                             if isNonDurableAndSameEntryAndLedger(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
                                 // We need to discard entries that were prior to startMessageId
                                 Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
-                                return! loop state
                             else
                                 let message = { rawMessage with MessageId = msgId } |> decompress
                                 if not hasWaitingChannel then
                                     incomingMessages.Enqueue(message)
-                                    return! loop state
                                 else
+                                    let waitingChannel = waiters.Dequeue()
                                     if (incomingMessages.Count = 0) then
-                                        replyWithMessage state.WaitingChannel message
+                                        replyWithMessage waitingChannel message
                                     else
                                         incomingMessages.Enqueue(message)
-                                        replyWithMessage state.WaitingChannel <| incomingMessages.Dequeue()
-                                    return! loop { state with WaitingChannel = nullChannel }
+                                        replyWithMessage waitingChannel <| incomingMessages.Dequeue()
                         elif rawMessage.Metadata.NumMessages > 0 then
                             // handle batch message enqueuing; uncompressed payload has all messages in batch
                             receiveIndividualMessagesFromBatch (rawMessage |> decompress)
                             if hasWaitingChannel && incomingMessages.Count > 0 then
-                                replyWithMessage state.WaitingChannel <| incomingMessages.Dequeue()
-                                return! loop { state with WaitingChannel = nullChannel }
-                            else
-                                return! loop state
+                                let waitingChannel = waiters.Dequeue()
+                                replyWithMessage waitingChannel <| incomingMessages.Dequeue()
                         else
                             Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
-                            return! loop state
+                        return! loop ()
 
                 | ConsumerMessage.Receive ch ->
 
                     Log.Logger.LogDebug("{0} Receive", prefix)
                     if incomingMessages.Count > 0 then
                         replyWithMessage ch <| incomingMessages.Dequeue()
-                        return! loop state
                     else
+                        waiters.Enqueue(ch)
                         Log.Logger.LogDebug("{0} GetMessage waiting", prefix)
-                        return! loop { state with WaitingChannel = ch }
+                    return! loop ()
 
                 | ConsumerMessage.Acknowledge (messageId, ackType, channel) ->
 
@@ -407,7 +400,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                         channel.Reply(false)
-                    return! loop state
+                    return! loop ()
 
                 | ConsumerMessage.RedeliverUnacknowledged (messageIds, channel) ->
 
@@ -435,7 +428,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     | _ ->
                         this.Mb.Post(RedeliverAllUnacknowledged channel)
                         Log.Logger.LogInformation("{0} We cannot redeliver single messages if subscription type is not Shared", prefix)
-                    return! loop state
+                    return! loop ()
 
                 | ConsumerMessage.RedeliverAllUnacknowledged channel ->
 
@@ -456,7 +449,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
                     channel.Reply()
-                    return! loop state
+                    return! loop ()
 
                 | ConsumerMessage.SeekAsync (seekData, channel) ->
 
@@ -482,11 +475,10 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                 Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
                                 reraize ex
                         } |> channel.Reply
-                        return! loop state
                     | _ ->
                         channel.Reply(Task.FromException(NotConnectedException "Not connected to broker"))
                         Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
-                        return! loop state
+                    return! loop ()
 
                 | ConsumerMessage.SendFlowPermits numMessages ->
 
@@ -499,7 +491,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                             Log.Logger.LogWarning("{0} failed SendFlowPermits {1}", prefix, numMessages)
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping SendFlowPermits {1}", prefix, numMessages)
-                    return! loop state
+                    return! loop ()
 
                 | ConsumerMessage.ReachedEndOfTheTopic ->
 
@@ -531,7 +523,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                         | _ ->
                             channel.Reply(Task.FromException(NotConnectedException "Not connected to broker") :?> Task<bool>)
                             Log.Logger.LogError("{0} not connected, skipping HasMessageAvailable {1}", prefix)
-                    return! loop state
+                    return! loop ()
 
                 | ConsumerMessage.Close channel ->
 
@@ -547,7 +539,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
                                 connectionHandler.Closed()
-                                stopConsumer state
+                                stopConsumer()
                             with
                             | ex ->
                                 Log.Logger.LogError(ex, "{0} failed to close", prefix)
@@ -556,7 +548,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     | _ ->
                         Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
                         connectionHandler.Closed()
-                        stopConsumer state
+                        stopConsumer()
                         channel.Reply(Task.FromResult())
 
                 | ConsumerMessage.Unsubscribe channel ->
@@ -574,7 +566,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                 response |> PulsarResponseType.GetEmpty
                                 clientCnx.RemoveConsumer(consumerId)
                                 connectionHandler.Closed()
-                                stopConsumer state
+                                stopConsumer()
                             with
                             | ex ->
                                 Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
@@ -583,10 +575,10 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     | _ ->
                         Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
                         channel.Reply(Task.FromException(Exception("Not connected to broker")))
-                        return! loop state
+                        return! loop ()
 
             }
-        loop { WaitingChannel = nullChannel }
+        loop ()
     )
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
 
