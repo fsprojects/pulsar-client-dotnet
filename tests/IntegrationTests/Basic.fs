@@ -144,9 +144,9 @@ let tests =
             Log.Debug("Finished Full roundtrip (emulate Request-Response behaviour)")
         }
 
-        testAsync "Concurrent send and receives work fine" {
+        testAsync "Concurrent send and receive work fine" {
 
-            Log.Debug("Started Concurrent send and receives work fine")
+            Log.Debug("Started Concurrent send and receive work fine")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 100
@@ -173,26 +173,33 @@ let tests =
                         task {
                             do! produceMessages producer numberOfMessages producerName
                         } :> Task))
+
             let mutable processedCount = 0
-            let tsc = new CancellationToken()
+            let consumerTask i =
+                fun () ->
+                    task {
+                        while true do
+                            let! message = consumer.ReceiveAsync()
+                            let received = Encoding.UTF8.GetString(message.Payload)
+                            Log.Debug("{0}-{1} received {2}", consumerName, i, received)
+                            do! consumer.AcknowledgeAsync(message.MessageId)
+                            Log.Debug("{0}-{1} acknowledged {2}", consumerName, i, received)
+                            if Interlocked.Increment(&processedCount) = (numberOfMessages*3) then
+                                do! consumer.CloseAsync()
+                    } :> Task
             let consumerTasks =
                 [| 1..3 |]
-                |> Array.map (fun i ->
-                    Task.Run(fun () ->
-                        task {
-                            while true do
-                                let! message = consumer.ReceiveAsync()
-                                let received = Encoding.UTF8.GetString(message.Payload)
-                                Log.Debug("{0}-{1} received {2}", consumerName, i, received)
-                                do! consumer.AcknowledgeAsync(message.MessageId)
-                                Log.Debug("{0}-{1} acknowledged {2}", consumerName, i, received)
-                                if Interlocked.Increment(&processedCount) = (numberOfMessages*3) then
-                                    Log.Information("All messages received")
-                        } :> Task, tsc) :> Task)
+                |> Array.map (fun i -> Task.Run(consumerTask i))
 
             let resultTasks = Array.append consumerTasks producerTasks
-            do! Task.WhenAll(resultTasks) |> Async.AwaitTask
-            Log.Debug("Finished Concurrent send and receives work fine")
+            try
+                do! Task.WhenAll(resultTasks) |> Async.AwaitTask
+            with
+            | ex when ex.InnerException.GetType() = typeof<AlreadyClosedException> ->
+                ()
+            | ex ->
+                failtestf "Incorrect exception type %A" (ex.GetType().FullName)
+            Log.Debug("Finished Concurrent send and receive work fine")
         }
 
         testAsync "Consumer seek earliest redelivers all messages" {
