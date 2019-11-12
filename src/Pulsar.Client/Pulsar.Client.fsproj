@@ -5,11 +5,11 @@
     <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);CopyProjectReferencesToPackage</TargetsForTfmSpecificBuildOutput>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>0.8.2</Version>
+    <Version>0.9.0</Version>
     <Company>F# community</Company>
     <Description>.NET client for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>MessageId serialization support</PackageReleaseNotes>
+    <PackageReleaseNotes>Support for key-based batching and concurrent consumer receive calls.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryType>GitHub</RepositoryType>
     <PackageTags>pulsar</PackageTags>
