@@ -14,13 +14,13 @@ open ProtoBuf
 open System.Threading
 open Pulsar.Client.Api
 
-type RequestsOperation =
+type internal RequestsOperation =
     | AddRequest of RequestId * TaskCompletionSource<PulsarResponseType>
     | CompleteRequest of RequestId * PulsarResponseType
     | FailRequest of RequestId * exn
     | FailAllRequestsAndStop
 
-type CnxOperation =
+type internal CnxOperation =
     | AddProducer of ProducerId * MailboxProcessor<ProducerMessage>
     | AddConsumer of ConsumerId * MailboxProcessor<ConsumerMessage>
     | RemoveConsumer of ConsumerId
@@ -28,7 +28,7 @@ type CnxOperation =
     | ChannelInactive
     | Stop
 
-type PulsarCommand =
+type internal PulsarCommand =
     | XCommandConnected of CommandConnected
     | XCommandPartitionedTopicMetadataResponse of CommandPartitionedTopicMetadataResponse
     | XCommandSendReceipt of CommandSendReceipt
@@ -45,17 +45,17 @@ type PulsarCommand =
     | XCommandReachedEndOfTopic of CommandReachedEndOfTopic
     | XCommandError of CommandError
 
-type CommandParseError =
+type internal CommandParseError =
     | IncompleteCommand
     | UnknownCommandType of BaseCommand.Type
 
-type SocketMessage =
+type internal SocketMessage =
     | SocketMessageWithReply of Payload * AsyncReplyChannel<bool>
     | SocketMessageWithoutReply of Payload
     | SocketRequestMessageWithReply of RequestId * Payload * AsyncReplyChannel<Task<PulsarResponseType>>
     | Stop
 
-type ClientCnx (config: PulsarClientConfiguration,
+type internal ClientCnx (config: PulsarClientConfiguration,
                 broker: Broker,
                 connection: Connection,
                 initialConnectionTsc: TaskCompletionSource<ClientCnx>,

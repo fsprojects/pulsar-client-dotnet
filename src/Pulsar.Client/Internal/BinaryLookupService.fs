@@ -9,7 +9,7 @@ open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 
 
-type BinaryLookupService (config: PulsarClientConfiguration, connectionPool: ConnectionPool) =
+type internal BinaryLookupService (config: PulsarClientConfiguration, connectionPool: ConnectionPool) =
 
     let endpoint = DnsEndPoint(config.ServiceUrl.Host, config.ServiceUrl.Port)
 

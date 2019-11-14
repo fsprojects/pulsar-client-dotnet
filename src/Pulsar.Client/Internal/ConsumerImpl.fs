@@ -14,7 +14,7 @@ open pulsar.proto
 open System.Collections.Generic
 open System.Linq
 
-type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, subscriptionMode: SubscriptionMode, startMessageId: MessageId option, lookup: BinaryLookupService,
                            cleanup: ConsumerImpl -> unit) as this =
 
@@ -598,7 +598,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
 
     override this.GetHashCode () = int consumerId
 
-    member internal this.InitInternal() =
+    member this.InitInternal() =
         task {
             do connectionHandler.GrabCnx()
             return! subscribeTsc.Task

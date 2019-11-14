@@ -6,7 +6,7 @@ open System.Collections.Generic
 open Microsoft.Extensions.Logging
 open System.Timers
 
-type TrackerMessage =
+type internal TrackerMessage =
     | Add of (MessageId*AsyncReplyChannel<bool>)
     | Remove of (MessageId*AsyncReplyChannel<bool>)
     | RemoveMessagesTill of (MessageId*AsyncReplyChannel<int>)
@@ -14,14 +14,14 @@ type TrackerMessage =
     | Clear
     | Stop
 
-type IUnAckedMessageTracker =
+type internal IUnAckedMessageTracker =
     abstract member Clear: unit -> unit
     abstract member Add: MessageId -> bool
     abstract member Remove: MessageId -> bool
     abstract member RemoveMessagesTill: MessageId -> int
     abstract member Close: unit -> unit
 
-type UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: TimeSpan, redeliverUnacknowledgedMessages: RedeliverSet -> unit) =
+type internal UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: TimeSpan, redeliverUnacknowledgedMessages: RedeliverSet -> unit) =
 
     let messageIdPartitionMap = SortedDictionary<MessageId, RedeliverSet>()
     let timePartitions = Queue<RedeliverSet>()

@@ -4,34 +4,26 @@ open System.Net
 open System
 open pulsar.proto
 open System.IO.Pipelines
-open Pipelines.Sockets.Unofficial
 open System.IO
 open System.Threading.Tasks
 open FSharp.UMX
-open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Internal
-open Microsoft.Extensions.Logging
 open System.Collections.Generic
 open System.Runtime.InteropServices
 open System.Text
-open System.Net.Sockets
 open ProtoBuf
 
-type ChecksumType =
-    | Crc32c
-    | No
-
-type PartitionedTopicMetadata =
+type internal PartitionedTopicMetadata =
     {
         Partitions: int
     }
 
-type ProducerSuccess =
+type internal ProducerSuccess =
     {
         GeneratedProducerName: string
     }
 
-type LookupTopicResult =
+type internal LookupTopicResult =
     {
         Proxy: bool
         BrokerServiceUrl : string
@@ -40,7 +32,7 @@ type LookupTopicResult =
         Authoritative: bool
     }
 
-type TopicsOfNamespace =
+type internal TopicsOfNamespace =
     {
         Topics : string list
     }
@@ -59,15 +51,15 @@ type BatchBuilder =
     | Default = 0
     | KeyBased = 1
 
-type TopicDomain =
+type internal TopicDomain =
     | Persistent
     | NonPersistent
 
-type SubscriptionMode =
+type internal SubscriptionMode =
     | Durable
     | NonDurable
 
-type AckType =
+type internal AckType =
     | Individual
     | Cumulative
     member this.ToCommandAckType() =
@@ -147,17 +139,17 @@ type MessageId =
             { initial with TopicName = TopicName(topicName).CompleteTopicName }
 
 
-type SendReceipt =
+type internal SendReceipt =
     {
         SequenceId: SequenceId
         LedgerId: LedgerId
         EntryId: EntryId
     }
 
-type LogicalAddress = LogicalAddress of DnsEndPoint
-type PhysicalAddress = PhysicalAddress of DnsEndPoint
+type internal LogicalAddress = LogicalAddress of DnsEndPoint
+type internal PhysicalAddress = PhysicalAddress of DnsEndPoint
 
-type Broker =
+type internal Broker =
     {
         LogicalAddress: LogicalAddress
         PhysicalAddress: PhysicalAddress
@@ -198,23 +190,23 @@ type MessageBuilder(value : byte[],
     member this.Key = key
     member this.Properties = properties
 
-type WriterStream = Stream
-type Payload = WriterStream -> Task
-type Connection =
+type internal WriterStream = Stream
+type internal Payload = WriterStream -> Task
+type internal Connection =
     {
         Input: PipeReader
         Output: WriterStream
         IsActive: unit -> bool
         Dispose: unit -> unit
     }
-type RedeliverSet = HashSet<MessageId>
+type internal RedeliverSet = HashSet<MessageId>
 
-type BatchCallback = MessageId * TaskCompletionSource<MessageId>
-type PendingCallback =
+type internal BatchCallback = MessageId * TaskCompletionSource<MessageId>
+type internal PendingCallback =
     | SingleCallback of TaskCompletionSource<MessageId>
     | BatchCallbacks of BatchCallback[]
 
-type PendingMessage =
+type internal PendingMessage =
     {
         CreatedAt: DateTime
         SequenceId: SequenceId
@@ -222,19 +214,19 @@ type PendingMessage =
         Callback : PendingCallback
     }
 
-type BatchItem =
+type internal BatchItem =
     {
         Message: MessageBuilder
         Tcs : TaskCompletionSource<MessageId>
     }
 
-type PendingBatch =
+type internal PendingBatch =
     {
         SequenceId: SequenceId
         CompletionSources : TaskCompletionSource<MessageId> list
     }
 
-type PulsarResponseType =
+type internal PulsarResponseType =
     | PartitionedTopicMetadata of PartitionedTopicMetadata
     | LookupTopicResult of LookupTopicResult
     | ProducerSuccess of ProducerSuccess
@@ -273,11 +265,11 @@ type PulsarResponseType =
         | Empty -> ()
         | _ -> failwith "Incorrect return type"
 
-type MessageOrException =
+type internal MessageOrException =
     | Message of Message
     | Exn of exn
 
-type SeekData =
+type internal SeekData =
     | MessageId of MessageId
     | Timestamp of uint64
 
@@ -287,7 +279,7 @@ type AuthData =
     }
     static member INIT_AUTH_DATA = Encoding.UTF8.GetBytes("PulsarAuthInit")
 
-type ProducerMessage =
+type internal ProducerMessage =
     | ConnectionOpened
     | ConnectionFailed of exn
     | ConnectionClosed of obj // ClientCnx
@@ -301,7 +293,7 @@ type ProducerMessage =
     | SendBatchTick
     | SendTimeoutTick
 
-type ConsumerMessage =
+type internal ConsumerMessage =
     | ConnectionOpened
     | ConnectionFailed of exn
     | ConnectionClosed of obj // ClientCnx

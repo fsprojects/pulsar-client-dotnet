@@ -3,7 +3,7 @@
 open System
 open Pulsar.Client.Common
 
-type BackoffConfig =
+type internal BackoffConfig =
     {
         Initial: TimeSpan
         Max: TimeSpan
@@ -16,7 +16,7 @@ type BackoffConfig =
             MandatoryStop = TimeSpan.Zero
         }
 
-type Backoff (config: BackoffConfig) =
+type internal Backoff (config: BackoffConfig) =
 
     let initial = config.Initial.TotalMilliseconds
     let max = config.Max.TotalMilliseconds

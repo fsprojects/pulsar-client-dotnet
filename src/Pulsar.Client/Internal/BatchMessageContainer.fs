@@ -34,7 +34,7 @@ module internal BatchHelpers =
         let batchPayload = messageStream.ToArray()
         (batchPayload, batchCallbacks)
 
-type IBatchMessageContainer =
+type internal IBatchMessageContainer =
     abstract member Add: BatchItem -> unit
     abstract member GetNumMessagesInBatch: unit -> int
     abstract member GetCurrentBatchSize: unit -> int
@@ -49,7 +49,7 @@ open BatchHelpers
 open System.Collections.Generic
 open Microsoft.Extensions.Logging
 
-type DefaultBatchMessageContainer(prefix: string, config: ProducerConfiguration) =
+type internal DefaultBatchMessageContainer(prefix: string, config: ProducerConfiguration) =
     let prefix = prefix + " DefaultBatcher"
     let mutable currentBatchSizeBytes = 0
     let batchItems = ResizeArray<BatchItem>()
@@ -79,7 +79,7 @@ type DefaultBatchMessageContainer(prefix: string, config: ProducerConfiguration)
             batchItems |> Seq.iter(fun batchItem -> batchItem.Tcs.SetException(ex))
             (this :> IBatchMessageContainer).Clear()
 
-type KeyBasedBatchMessageContainer(prefix: string, config: ProducerConfiguration) =
+type internal KeyBasedBatchMessageContainer(prefix: string, config: ProducerConfiguration) =
     let prefix = prefix + " KeyBasedBatcher"
     let mutable currentBatchSizeBytes = 0
     let mutable numMessagesInBatch = 0

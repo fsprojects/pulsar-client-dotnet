@@ -42,6 +42,12 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         | Active ->  ()
         | _ ->  raise <| AlreadyClosedException("Client already closed. State: " + this.ClientState.ToString())
 
+    let getPartitionedTopicMetadata topicName =
+        task {
+            checkIfActive()
+            return! lookupService.GetPartitionedTopicMetadata topicName
+        }
+
     let mb = MailboxProcessor<PulsarClientMessage>.Start(fun inbox ->
 
         let rec loop () =
@@ -101,12 +107,6 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             return! this.SingleTopicSubscribeAsync consumerConfig
         }
 
-    member this.GetPartitionedTopicMetadata topicName =
-        task {
-            checkIfActive()
-            return! lookupService.GetPartitionedTopicMetadata topicName
-        }
-
     member this.CloseAsync() =
         task {
             checkIfActive()
@@ -118,7 +118,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         task {
             checkIfActive()
             Log.Logger.LogDebug("SingleTopicSubscribeAsync started")
-            let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic.CompleteTopicName
+            let! metadata = getPartitionedTopicMetadata consumerConfig.Topic.CompleteTopicName
             let removeConsumer = fun consumer -> mb.Post(RemoveConsumer consumer)
             if (metadata.Partitions > 0)
             then
@@ -135,7 +135,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         task {
             checkIfActive()
             Log.Logger.LogDebug("CreateProducerAsync started")
-            let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
+            let! metadata = getPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
             let removeProducer = fun producer -> mb.Post(RemoveProducer producer)
             if (metadata.Partitions > 0) then
                 let! producer = PartitionedProducerImpl.Init(producerConfig, config, connectionPool, metadata.Partitions, lookupService, removeProducer)
@@ -151,7 +151,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         task {
             checkIfActive()
             Log.Logger.LogDebug("CreateReaderAsync started")
-            let! metadata = this.GetPartitionedTopicMetadata readerConfig.Topic.CompleteTopicName
+            let! metadata = getPartitionedTopicMetadata readerConfig.Topic.CompleteTopicName
             if (metadata.Partitions > 0)
             then
                 return failwith "Topic reader cannot be created on a partitioned topic"

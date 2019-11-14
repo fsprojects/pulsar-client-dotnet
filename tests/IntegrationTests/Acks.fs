@@ -133,7 +133,7 @@ let tests =
 
         }
 
-        testAsync "Messages get redelivered if ackTimeout is set for shared subscription" {
+        ftestAsync "Messages get redelivered if ackTimeout is set for shared subscription" {
 
             Log.Debug("Started messages get redelivered if ackTimeout is set for shared subscription")
             let client = getClient()

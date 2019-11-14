@@ -5,12 +5,12 @@ open System.Threading
 open Pulsar.Client.Common
 open Pulsar.Client.Api
 
-type ConnectionHandlerMessage =
+type internal ConnectionHandlerMessage =
     | GrabCnx
     | ReconnectLater of exn
     | ConnectionClosed of ClientCnx
 
-type ConnectionState =
+type internal ConnectionState =
     | Ready of ClientCnx
     | Connecting
     | Closing
@@ -19,7 +19,7 @@ type ConnectionState =
     | Failed
     | Uninitialized
 
-type ConnectionHandler( parentPrefix: string,
+type internal ConnectionHandler( parentPrefix: string,
                         connectionPool: ConnectionPool,
                         lookup: BinaryLookupService,
                         topic: CompleteTopicName,

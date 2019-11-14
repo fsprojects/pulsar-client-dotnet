@@ -10,19 +10,19 @@ open Microsoft.Extensions.Logging
 open System.Threading
 open System.Timers
 
-type PartitionedProducerMessage =
+type internal PartitionedProducerMessage =
     | Init
     | Close of AsyncReplyChannel<Task<unit>>
     | TickTime
 
-type PartitionedConnectionState =
+type internal PartitionedConnectionState =
     | Uninitialized
     | Failed
     | Ready
     | Closing
     | Closed
 
-type PartitionedProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+type internal PartitionedProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                                       numPartitions: int, lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) as this =
     let producerId = Generators.getNextProducerId()
     let prefix = sprintf "p/producer(%u, %s)" %producerId producerConfig.ProducerName

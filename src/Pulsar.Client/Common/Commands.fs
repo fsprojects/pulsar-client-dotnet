@@ -1,4 +1,4 @@
-﻿module Pulsar.Client.Common.Commands
+﻿module internal Pulsar.Client.Common.Commands
 
 open pulsar.proto
 open FSharp.UMX
@@ -9,11 +9,11 @@ open Microsoft.Extensions.Logging
 open Pulsar.Client.Internal
 open Pulsar.Client
 
-type internal CommandType = BaseCommand.Type
+type CommandType = BaseCommand.Type
 
 Serializer.PrepareSerializer<BaseCommand>()
 
-let internal serializeSimpleCommand(command : BaseCommand) =
+let serializeSimpleCommand(command : BaseCommand) =
     fun (output: Stream) ->
         use stream = MemoryStreamManager.GetStream()
 
@@ -36,7 +36,7 @@ let internal serializeSimpleCommand(command : BaseCommand) =
         Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
         stream.CopyToAsync(output)
 
-let internal serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[]) =
+let serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[]) =
     fun (output: Stream) ->
         use stream = MemoryStreamManager.GetStream()
 
