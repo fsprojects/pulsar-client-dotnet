@@ -17,3 +17,5 @@ type IProducer =
     abstract member CloseAsync: unit -> Task<unit>
     /// Internal client producer id
     abstract member ProducerId: ProducerId
+    /// Get the topic which producer is publishing to
+    abstract member Topic: string

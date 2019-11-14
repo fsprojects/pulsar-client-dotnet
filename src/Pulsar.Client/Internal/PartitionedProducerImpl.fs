@@ -248,4 +248,6 @@ type PartitionedProducerImpl private (producerConfig: ProducerConfiguration, cli
                 return! producers.[partition].SendAsync(message)
             }
 
-        member this.ProducerId with get() = producerId
+        member this.ProducerId = producerId
+
+        member this.Topic = %producerConfig.Topic.CompleteTopicName

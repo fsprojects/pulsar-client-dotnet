@@ -474,4 +474,6 @@ type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: 
                 return! tcs.Task
             }
 
-        member this.ProducerId with get() = producerId
+        member this.ProducerId = producerId
+
+        member this.Topic = %producerConfig.Topic.CompleteTopicName

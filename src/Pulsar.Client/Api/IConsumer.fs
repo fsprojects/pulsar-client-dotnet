@@ -25,5 +25,7 @@ type IConsumer =
     abstract member SeekAsync: uint64 -> Task<unit>
     /// Acknowledge the failure to process a single message.
     abstract member NegativeAcknowledge: MessageId -> Task<unit>
+    /// Internal client consumer id
+    abstract member ConsumerId: ConsumerId
     /// Get a topic for the consumer
     abstract member Topic: string

@@ -594,7 +594,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
         }
 
     override this.Equals consumer =
-        consumerId = (consumer :?> ConsumerImpl).ConsumerId
+        consumerId = (consumer :?> IConsumer).ConsumerId
 
     override this.GetHashCode () = int consumerId
 
@@ -687,6 +687,8 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                 // Ensure the message is not redelivered for ack-timeout, since we did receive an "ack"
                 unAckedMessageTracker.Remove(msgId) |> ignore
             }
+
+        member this.ConsumerId = consumerId
 
         member this.Topic with get() = %consumerConfig.Topic.CompleteTopicName
 

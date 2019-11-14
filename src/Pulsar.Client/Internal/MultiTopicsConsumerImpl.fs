@@ -352,4 +352,6 @@ type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, cli
                 return! result
             }
 
-        member this.Topic with get() = %consumerConfig.Topic.CompleteTopicName
+        member this.ConsumerId = consumerId
+
+        member this.Topic = %consumerConfig.Topic.CompleteTopicName
