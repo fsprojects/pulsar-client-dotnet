@@ -171,7 +171,8 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
 
     let processDeadLetters (messageId : MessageId) =
         let success = deadLettersProcessor.ProcessMessages messageId
-        (this :> IConsumer).AcknowledgeAsync messageId |> ignore
+        if success then
+            (this :> IConsumer).AcknowledgeAsync messageId |> ignore
         success
 
     let receiveIndividualMessagesFromBatch (rawMessage: Message) =
