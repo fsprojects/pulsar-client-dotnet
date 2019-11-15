@@ -22,7 +22,7 @@ let tests =
     let getDeadLettersPolicy() = DeadLettersPolicy(0, sprintf "public/default/topic-%s-DLQ" (newGuid()))
 
     let subscriptionName = "dlqSubscription"
-    let numberOfMessages = 50
+    let numberOfMessages = 10
 
     let logTestStart testDescription = Log.Debug(sprintf "Started '%s'" testDescription)
     let logTestEnd testDescription = Log.Debug(sprintf "Finished '%s'" testDescription)
@@ -38,7 +38,7 @@ let tests =
             .Topic(topicName)
             .SubscriptionName(subscriptionName)
             .SubscriptionType(SubscriptionType.Shared)
-            .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(4.0))
+            .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
             .DeadLettersPolicy(deadLettersPolicy)
 
     let buildDlqConsumer(consumerName, topicName) =
@@ -101,7 +101,7 @@ let tests =
                 [|
                     producerTask
                     consumerTask
-                    Task.Delay(TimeSpan.FromSeconds(8.0))
+                    Task.Delay(TimeSpan.FromSeconds(2.0))
                     dlqConsumerTask
                 |]
 
@@ -155,7 +155,7 @@ let tests =
                 [|
                     producerTask
                     consumerTask
-                    Task.Delay(TimeSpan.FromSeconds(8.0))
+                    Task.Delay(TimeSpan.FromSeconds(2.0))
                     dlqConsumerTask
                 |]
 
@@ -208,7 +208,7 @@ let tests =
                 [|
                     producerTask
                     consumerTask
-                    Task.Delay(TimeSpan.FromSeconds(8.0))
+                    Task.Delay(TimeSpan.FromSeconds(2.0))
                     dlqConsumerTask
                 |]
 
