@@ -1,9 +1,8 @@
 ﻿namespace Pulsar.Client.Api
 
 open Pulsar.Client.Common
-open FSharp.UMX
+open Pulsar.Client.Internal
 open System
-open FSharp.Control.Tasks.V2.ContextInsensitive
 
 type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguration) =
 
@@ -115,13 +114,14 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
         let getTopicName() = config.Topic.ToString()
         let getSubscriptionName() = config.SubscriptionName
         let createProducer deadLetterTopic = ProducerBuilder(client).Topic(deadLetterTopic).CreateAsync()
-        let deadLettersProcessor = DeadLettersProcessor(policy, getTopicName, getSubscriptionName, createProducer)
+        let deadLettersProcessor =
+            DeadLettersProcessor(policy, getTopicName, getSubscriptionName, createProducer) :> IDeadLettersProcessor
 
         ConsumerBuilder(
             client,
             { config with
                 AckTimeoutTickTime = ackTimeoutTickTime
-                DeadLettersProcessor = deadLettersProcessor |> Some })
+                DeadLettersProcessor = deadLettersProcessor })
 
     member this.SubscribeAsync() =
         config

@@ -163,26 +163,15 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
         | Some startMsgId ->
             subscriptionMode = SubscriptionMode.NonDurable && startMsgId.LedgerId = msgId.LedgerId && startMsgId.EntryId = msgId.EntryId
 
-    let clearDeadLetters() =
-        deadLettersProcessor
-        |> Option.iter (fun p -> p.ClearMessages())
+    let clearDeadLetters() = deadLettersProcessor.ClearMessages()
 
-    let removeDeadLetter messageId =
-        deadLettersProcessor
-        |> Option.iter (fun p -> p.RemoveMessage messageId)
+    let removeDeadLetter messageId = deadLettersProcessor.RemoveMessage messageId
 
-    let storeDeadLetter message =
-        deadLettersProcessor
-        |> Option.iter (fun p -> p.AddMessage message)
+    let storeDeadLetter message = deadLettersProcessor.AddMessage message
 
     let processDeadLetters (messageId : MessageId) =
-        let success =
-            deadLettersProcessor
-            |> Option.map (fun p -> p.ProcessMessages messageId)
-            |> Option.defaultValue false
-
+        let success = deadLettersProcessor.ProcessMessages messageId
         (this :> IConsumer).AcknowledgeAsync messageId |> ignore
-
         success
 
     let receiveIndividualMessagesFromBatch (rawMessage: Message) =

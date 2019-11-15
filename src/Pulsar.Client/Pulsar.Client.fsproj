@@ -39,6 +39,7 @@
     <Compile Include="Api\IConsumer.fs" />
     <Compile Include="Api\IProducer.fs" />
     <Compile Include="Api\DeadLetters.fs" />
+    <Compile Include="Internal\DeadLetters.fs" />
     <Compile Include="Api\Configuration.fs" />
     <Compile Include="Auth\AuthenticationDataToken.fs" />
     <Compile Include="Auth\AuthenticationToken.fs" />
