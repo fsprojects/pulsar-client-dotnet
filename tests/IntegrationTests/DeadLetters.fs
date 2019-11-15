@@ -31,7 +31,6 @@ let tests =
         ProducerBuilder(client)
             .ProducerName(producerName)
             .Topic(topicName)
-            .EnableBatching(false)
 
     let buildConsumer(consumerName, topicName, deadLettersPolicy) =
         ConsumerBuilder(client)
@@ -70,7 +69,10 @@ let tests =
             let topicName = getTopicName()
             let policy = getDeadLettersPolicy()
 
-            let! producer = buildProducer(producerName, topicName).CreateAsync() |> Async.AwaitTask
+            let! producer =
+                buildProducer(producerName, topicName)
+                    .EnableBatching(false)
+                    .CreateAsync() |> Async.AwaitTask
 
             let! consumer = buildConsumer(consumerName, topicName, policy).SubscribeAsync() |> Async.AwaitTask
 
@@ -97,8 +99,8 @@ let tests =
 
             let tasks =
                 [|
-                    producerTask;
-                    consumerTask;
+                    producerTask
+                    consumerTask
                     Task.Delay(TimeSpan.FromSeconds(8.0))
                     dlqConsumerTask
                 |]
@@ -120,7 +122,10 @@ let tests =
             let topicName = getTopicName()
             let policy = DeadLettersPolicy(0)
 
-            let! producer = buildProducer(producerName, topicName).CreateAsync() |> Async.AwaitTask
+            let! producer =
+                buildProducer(producerName, topicName)
+                    .EnableBatching(false)
+                    .CreateAsync() |> Async.AwaitTask
 
             let! consumer = buildConsumer(consumerName, topicName, policy).SubscribeAsync() |> Async.AwaitTask
 
@@ -148,8 +153,8 @@ let tests =
 
             let tasks =
                 [|
-                    producerTask;
-                    consumerTask;
+                    producerTask
+                    consumerTask
                     Task.Delay(TimeSpan.FromSeconds(8.0))
                     dlqConsumerTask
                 |]
@@ -173,7 +178,6 @@ let tests =
 
             let! producer =
                 buildProducer(producerName, topicName)
-                    .EnableBatching(true)
                     .BatchingMaxMessages(numberOfMessages)
                     .CreateAsync() |> Async.AwaitTask
 
@@ -202,8 +206,8 @@ let tests =
 
             let tasks =
                 [|
-                    producerTask;
-                    consumerTask;
+                    producerTask
+                    consumerTask
                     Task.Delay(TimeSpan.FromSeconds(8.0))
                     dlqConsumerTask
                 |]

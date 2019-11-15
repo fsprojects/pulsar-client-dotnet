@@ -55,7 +55,6 @@ type DeadLettersProcessor
             if  store.ContainsKey messageId then
 
                 store.[messageId]
-                |> List.ofSeq
                 |> Seq.map (fun m -> MessageBuilder(m.Payload, %m.MessageKey, m.Properties))
                 |> Seq.iter (fun builder -> sendAndForgetAsync(builder) |> ignore)
 

@@ -381,13 +381,11 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                 Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                             else
                                 let message = { rawMessage with MessageId = msgId } |> decompress
+                                storeDeadLetter message
 
                                 if not hasWaitingChannel then
                                     incomingMessages.Enqueue(message)
-                                    storeDeadLetter message
                                 else
-                                    storeDeadLetter message
-
                                     let waitingChannel = waiters.Dequeue()
                                     if (incomingMessages.Count = 0) then
                                         replyWithMessage waitingChannel message
@@ -444,9 +442,9 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                             let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds);
                             let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
                             for batch in batches do
-                                let batch' = batch |> Array.filter (fun messageId -> processDeadLetters messageId |> not)
+                                let nonDeadBatch = batch |> Array.filter (fun messageId -> processDeadLetters messageId |> not)
                                 let command = Commands.newRedeliverUnacknowledgedMessages consumerId (
-                                                    Some(batch' |> Seq.map (fun msgId -> MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)))
+                                                    Some(nonDeadBatch |> Seq.map (fun msgId -> MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)))
                                                 )
                                 let! success = clientCnx.Send command
                                 if success then
