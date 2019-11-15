@@ -114,7 +114,7 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
 
         let getTopicName() = config.Topic.ToString()
         let getSubscriptionName() = config.SubscriptionName
-        let createProducer deadLetterTopic = ProducerBuilder(client).Topic(deadLetterTopic).CreateAsync().Result
+        let createProducer deadLetterTopic = ProducerBuilder(client).Topic(deadLetterTopic).CreateAsync()
         let deadLettersProcessor = DeadLettersProcessor(policy, getTopicName, getSubscriptionName, createProducer)
 
         ConsumerBuilder(

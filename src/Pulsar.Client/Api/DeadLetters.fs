@@ -7,6 +7,7 @@ open System.Collections.Generic
 open System.Runtime.InteropServices
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open FSharp.UMX
+open System.Threading.Tasks
 
 type DeadLettersPolicy(maxRedeliveryCount : int, [<Optional; DefaultParameterValue(null : string)>] deadLetterTopic : string) =
     member __.MaxRedeliveryCount = maxRedeliveryCount
@@ -16,7 +17,7 @@ type DeadLettersProcessor
     (policy: DeadLettersPolicy,
      getTopicName: unit -> string,
      getSubscriptionNameName: unit -> string,
-     createProducer: string -> IProducer) =
+     createProducer: string -> Task<IProducer>) =
 
     let store = Dictionary<MessageId, ResizeArray<Message>>()
 
@@ -33,7 +34,8 @@ type DeadLettersProcessor
 
     let sendAndForgetAsync (builder : MessageBuilder) =
         task {
-            let! _ = producer.Value.SendAsync(builder)
+            let! p = producer.Value
+            p.SendAsync(builder) |> ignore
             return ()
         }
 
