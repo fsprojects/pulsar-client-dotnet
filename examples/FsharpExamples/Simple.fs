@@ -34,7 +34,7 @@ let runSimple () =
         printfn "MessageId is: '%A'" messageId
 
         let! message = consumer.ReceiveAsync()
-        printfn "Received: %A" (message.Payload |> Encoding.UTF8.GetString)
+        printfn "Received: %A" (message.Data |> Encoding.UTF8.GetString)
 
         do! consumer.AcknowledgeAsync(message.MessageId)
     }

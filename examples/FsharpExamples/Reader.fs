@@ -37,5 +37,5 @@ let runReader () =
                 .CreateAsync()
 
         let! message = reader.ReadNextAsync()
-        printfn "Received: %A" (message.Payload |> Encoding.UTF8.GetString)
+        printfn "Received: %A" (message.Data |> Encoding.UTF8.GetString)
     }

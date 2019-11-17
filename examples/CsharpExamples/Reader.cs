@@ -33,7 +33,7 @@ namespace CsharpExamples
                 .CreateAsync();
 
             var message = await reader.ReadNextAsync();
-            Console.WriteLine($"Received: {Encoding.UTF8.GetString(message.Payload)}");
+            Console.WriteLine($"Received: {Encoding.UTF8.GetString(message.Data)}");
         }
     }
 }
