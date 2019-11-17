@@ -114,12 +114,12 @@ let tests =
                         let! msg1 = consumer1.ReceiveAsync()
                         let! msg2 = consumer1.ReceiveAsync()
                         let! msg3 = consumer1.ReceiveAsync()
-                        let prefix = (string msg1.MessageKey).Substring(0,6)
+                        let prefix = (string msg1.Key).Substring(0,6)
                         [msg1;msg2;msg3]
                             |> List.iteri
                             (fun i elem ->
-                                let strKey = string elem.MessageKey
-                                let message = Encoding.UTF8.GetString(elem.Payload)
+                                let strKey = string elem.Key
+                                let message = Encoding.UTF8.GetString(elem.Data)
                                 if (strKey = prefix && message.StartsWith(prefix) && message.EndsWith(i.ToString())) |> not then
                                     failwith <| sprintf "Incorrect key %s prefix %s consumer %s" strKey prefix consumerName1
                                 else
@@ -134,12 +134,12 @@ let tests =
                         let! msg1 = consumer2.ReceiveAsync()
                         let! msg2 = consumer2.ReceiveAsync()
                         let! msg3 = consumer2.ReceiveAsync()
-                        let prefix = (string msg1.MessageKey).Substring(0,6)
+                        let prefix = (string msg1.Key).Substring(0,6)
                         [msg1;msg2;msg3]
                             |> List.iteri
                             (fun i elem ->
-                                let strKey = string elem.MessageKey
-                                let message = Encoding.UTF8.GetString(elem.Payload)
+                                let strKey = string elem.Key
+                                let message = Encoding.UTF8.GetString(elem.Data)
                                 if (strKey = prefix && message.StartsWith(prefix) && message.EndsWith(i.ToString())) |> not then
                                     failwith <| sprintf "Incorrect key %s prefix %s consumer %s" strKey prefix consumerName2
                                 else

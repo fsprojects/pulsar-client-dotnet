@@ -162,7 +162,7 @@ type CompressionType =
     | ZStd = 3
     | Snappy = 4
 
-type Metadata =
+type internal Metadata =
     {
         NumMessages: int
         HasNumMessagesInBatch: bool
@@ -170,13 +170,21 @@ type Metadata =
         UncompressedMessageSize: int32
     }
 
-type Message =
+type internal RawMessage =
     {
         MessageId: MessageId
         Metadata: Metadata
         RedeliveryCount: uint32
         Payload: byte[]
         MessageKey: MessageKey
+        Properties: IDictionary<string, string>
+    }
+
+type Message =
+    {
+        MessageId: MessageId
+        Data: byte[]
+        Key: string
         Properties: IDictionary<string, string>
     }
 
@@ -298,7 +306,7 @@ type internal ConsumerMessage =
     | ConnectionFailed of exn
     | ConnectionClosed of obj // ClientCnx
     | ReachedEndOfTheTopic
-    | MessageReceived of Message
+    | MessageReceived of RawMessage
     | Receive of AsyncReplyChannel<MessageOrException>
     | Acknowledge of MessageId * AckType * AsyncReplyChannel<bool>
     | RedeliverUnacknowledged of RedeliverSet * AsyncReplyChannel<unit>

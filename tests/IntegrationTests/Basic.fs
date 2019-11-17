@@ -129,13 +129,13 @@ let tests =
                 task {
                     for i in 1..messagesNumber do
                         let! message = consumer2.ReceiveAsync()
-                        let received = Encoding.UTF8.GetString(message.Payload)
+                        let received = Encoding.UTF8.GetString(message.Data)
                         do! consumer2.AcknowledgeAsync(message.MessageId)
                         Log.Debug("{0} received {1}", "consumer2", received)
                         let expected = "Message #" + string i
                         if received.StartsWith(expected) |> not then
                             failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received "consumer2"
-                        let! _ = producer2.SendAndForgetAsync(message.Payload)
+                        let! _ = producer2.SendAndForgetAsync(message.Data)
                         ()
                 } :> Task
             )
@@ -180,7 +180,7 @@ let tests =
                     task {
                         while true do
                             let! message = consumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("{0}-{1} received {2}", consumerName, i, received)
                             do! consumer.AcknowledgeAsync(message.MessageId)
                             Log.Debug("{0}-{1} acknowledged {2}", consumerName, i, received)

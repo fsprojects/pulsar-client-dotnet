@@ -24,7 +24,7 @@ let tests =
             let resizeArray = ResizeArray<Message>()
             while continueLooping do
                 let! msg = reader.ReadNextAsync()
-                let received = Encoding.UTF8.GetString(msg.Payload)
+                let received = Encoding.UTF8.GetString(msg.Data)
                 Log.Debug("received {0}", received)
                 resizeArray.Add(msg)
                 let! hasNewMessage = reader.HasMessageAvailableAsync()

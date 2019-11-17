@@ -141,7 +141,7 @@ let tests =
                     task {
                         for i in [1..100] do
                             let! message = enumerator.MoveNext()
-                            let received = Encoding.UTF8.GetString(message.Value.Payload)
+                            let received = Encoding.UTF8.GetString(message.Value.Data)
                             Log.Debug("Some consumer received {1}", received)
                             if allMessages |> Array.contains received |> not then
                                 failwith <| sprintf "Received unexpected message '%s'" received

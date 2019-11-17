@@ -161,11 +161,11 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
         | Some startMsgId ->
             subscriptionMode = SubscriptionMode.NonDurable && startMsgId.LedgerId = msgId.LedgerId && startMsgId.EntryId = msgId.EntryId
 
-    let receiveIndividualMessagesFromBatch (rawMessage: Message) =
+    let receiveIndividualMessagesFromBatch (rawMessage: RawMessage) (decompressedPayload: byte[]) =
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
         let mutable skippedMessages = 0
-        use stream = new MemoryStream(rawMessage.Payload)
+        use stream = new MemoryStream(decompressedPayload)
         use binaryReader = new BinaryReader(stream)
         for i in 0..batchSize-1 do
             Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
@@ -185,9 +185,8 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                         TopicName = %""
                     }
                 let message =
-                    { rawMessage with
+                    {
                         MessageId = messageId
-                        Payload = singleMessagePayload
                         Properties =
                             if singleMessageMetadata.Properties.Count > 0 then
                                 singleMessageMetadata.Properties
@@ -195,7 +194,8 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                                 |> dict
                             else
                                 EmptyProps
-                        MessageKey = %singleMessageMetadata.PartitionKey
+                        Key = singleMessageMetadata.PartitionKey
+                        Data = singleMessagePayload
                     }
                 incomingMessages.Enqueue(message)
         if skippedMessages > 0 then
@@ -243,10 +243,10 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
             waitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
         Log.Logger.LogInformation("{0} stopped", prefix)
 
-    let decompress message =
-        let compressionCodec = message.Metadata.CompressionType |> CompressionCodec.create
-        let uncompressedPayload = compressionCodec.Decode message.Metadata.UncompressedMessageSize message.Payload
-        { message with Payload = uncompressedPayload }
+    let getDecompressPayload originalMessage =
+        let compressionCodec = originalMessage.Metadata.CompressionType |> CompressionCodec.create
+        let uncompressedPayload = compressionCodec.Decode originalMessage.Metadata.UncompressedMessageSize originalMessage.Payload
+        uncompressedPayload
 
     let consumerIsReconnectedToBroker() =
         Log.Logger.LogInformation("{0} subscribed to topic {1}", prefix, consumerConfig.Topic)
@@ -354,7 +354,12 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                                 // We need to discard entries that were prior to startMessageId
                                 Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                             else
-                                let message = { rawMessage with MessageId = msgId } |> decompress
+                                let message = {
+                                    MessageId = msgId
+                                    Data = getDecompressPayload rawMessage
+                                    Key = %rawMessage.MessageKey
+                                    Properties = rawMessage.Properties
+                                }
                                 if not hasWaitingChannel then
                                     incomingMessages.Enqueue(message)
                                 else
@@ -366,7 +371,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                                         replyWithMessage waitingChannel <| incomingMessages.Dequeue()
                         elif rawMessage.Metadata.NumMessages > 0 then
                             // handle batch message enqueuing; uncompressed payload has all messages in batch
-                            receiveIndividualMessagesFromBatch (rawMessage |> decompress)
+                            receiveIndividualMessagesFromBatch rawMessage (getDecompressPayload rawMessage)
                             if hasWaitingChannel && incomingMessages.Count > 0 then
                                 let waitingChannel = waiters.Dequeue()
                                 replyWithMessage waitingChannel <| incomingMessages.Dequeue()
