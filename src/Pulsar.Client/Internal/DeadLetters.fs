@@ -4,9 +4,10 @@ open System
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System.Collections.Generic
-open FSharp.Control.Tasks.V2.ContextInsensitive
 open FSharp.UMX
 open System.Threading.Tasks
+open FSharp.Control.Tasks
+open Microsoft.Extensions.Logging
 
 type internal DeadLettersProcessor
     (policy: DeadLettersPolicy,
@@ -16,23 +17,32 @@ type internal DeadLettersProcessor
 
     let store = Dictionary<MessageId, ResizeArray<Message>>()
 
-    let producer = lazy (
+    let topicName =
+        if String.IsNullOrEmpty(policy.DeadLetterTopic) |> not then
+            policy.DeadLetterTopic
+        else
+            (sprintf "%s-%s-DLQ" (getTopicName()) (getSubscriptionNameName()))
 
-        let topicName =
-            if String.IsNullOrEmpty(policy.DeadLetterTopic) |> not then
-                policy.DeadLetterTopic
-            else
-                (sprintf "%s-%s-DLQ" (getTopicName()) (getSubscriptionNameName()))
+    let producer = lazy (
 
         createProducer topicName
     )
 
-    let sendAndForgetAsync (builder : MessageBuilder) =
+    let sendMessageAsync (builder : MessageBuilder) messageId  =
         task {
-            let! p = producer.Value
-            p.SendAsync(builder) |> ignore
-            return ()
-        }
+            try
+                let! p = producer.Value
+                do! (p.SendAsync(builder) :> Task)
+                return true
+            with
+            | ex ->
+                Log.Logger.LogError(
+                    ex,
+                    "Send to dead letter topic exception with topic: {0}, messageId: {1}",
+                    topicName,
+                    messageId)
+                return false
+        } |> Async.AwaitTask
 
     interface IDeadLettersProcessor with
         member __.ClearMessages() =
@@ -47,15 +57,15 @@ type internal DeadLettersProcessor
         member __.RemoveMessage messageId =
             store.Remove(messageId) |> ignore
 
-        member this.ProcessMessages messageId =
+        member __.ProcessMessages messageId =
             if  store.ContainsKey messageId then
-
                 store.[messageId]
                 |> Seq.map (fun m -> MessageBuilder(m.Payload, %m.MessageKey, m.Properties))
-                |> Seq.iter (fun builder -> sendAndForgetAsync(builder) |> ignore)
-
-                messageId |> (this :> IDeadLettersProcessor).RemoveMessage
-                true
+                |> Seq.map (fun builder -> sendMessageAsync builder messageId)
+                |> Async.Parallel
+                |> Async.RunSynchronously
+                |> Array.contains false
+                |> not 
             else
                 false
 
