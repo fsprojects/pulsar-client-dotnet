@@ -107,6 +107,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
             do! acksGroupingTracker.AddAcknowledgment(messageId, ackType)
             // Consumer acknowledgment operation immediately succeeds. In any case, if we're not able to send ack to broker,
             // the messages will be re-delivered
+            deadLettersProcessor.RemoveMessage messageId
         }
 
     let markAckForBatchMessage (msgId: MessageId) ackType (batchDetails: BatchDetails) =
@@ -164,8 +165,6 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
             subscriptionMode = SubscriptionMode.NonDurable && startMsgId.LedgerId = msgId.LedgerId && startMsgId.EntryId = msgId.EntryId
 
     let clearDeadLetters() = deadLettersProcessor.ClearMessages()
-
-    let removeDeadLetter messageId = deadLettersProcessor.RemoveMessage messageId
 
     let storeDeadLetter messageId message = deadLettersProcessor.AddMessage messageId message
 
@@ -419,7 +418,6 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                             do! sendAcknowledge messageId ackType
                             Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
 
-                        removeDeadLetter messageId
                         channel.Reply(true)
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
