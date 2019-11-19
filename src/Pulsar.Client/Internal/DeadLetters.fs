@@ -6,7 +6,6 @@ open Pulsar.Client.Common
 open System.Collections.Generic
 open FSharp.UMX
 open System.Threading.Tasks
-open FSharp.Control.Tasks
 open Microsoft.Extensions.Logging
 
 type internal DeadLettersProcessor
@@ -28,29 +27,22 @@ type internal DeadLettersProcessor
         createProducer topicName
     )
 
-    let sendMessageAsync (builder : MessageBuilder) messageId  =
-        task {
-            try
-                let! p = producer.Value
-                do! (p.SendAsync(builder) :> Task)
-                return true
-            with
-            | ex ->
-                Log.Logger.LogError(
-                    ex,
-                    "Send to dead letter topic exception with topic: {0}, messageId: {1}",
-                    topicName,
-                    messageId)
-                return false
-        } |> Async.AwaitTask
+    let sendMessage (builder : MessageBuilder) messageId  =
+        try
+            let p = producer.Value |> Async.AwaitTask |> Async.RunSynchronously
+            p.SendAsync(builder) |> Async.AwaitTask |> Async.Ignore |> Async.RunSynchronously
+            true
+        with
+        | ex ->
+            Log.Logger.LogError(
+                ex,
+                "Send to dead letter topic exception with topic: {0}, messageId: {1}",
+                topicName,
+                messageId)
+            false
 
-    let toStoreFormat (messageId : MessageId) = {
-        LedgerId = messageId.LedgerId
-        EntryId = messageId.EntryId
-        Partition = messageId.Partition
-        Type = MessageIdType.Individual
-        TopicName = %""
-    }
+    let toStoreFormat (messageId : MessageId) =
+        { messageId with Type = Individual }
 
     interface IDeadLettersProcessor with
         member __.ClearMessages() =
@@ -68,23 +60,23 @@ type internal DeadLettersProcessor
         member __.RemoveMessage messageId =
             store.Remove(messageId) |> ignore
 
-        member __.ProcessMessages messageId =
+        member __.ProcessMessages messageId = async {
             let messageId = messageId |> toStoreFormat
             if store.ContainsKey messageId then
-                store.[messageId]
-                |> Seq.map (fun m -> MessageBuilder(m.Payload, %m.MessageKey, m.Properties))
-                |> Seq.map (fun builder -> sendMessageAsync builder messageId)
-                |> Async.Parallel
-                |> Async.RunSynchronously
-                |> Array.contains false
-                |> not 
+                return
+                    store.[messageId]
+                    |> Seq.map (fun m -> MessageBuilder(m.Payload, %m.MessageKey, m.Properties))
+                    |> Seq.map (fun builder -> sendMessage builder messageId)
+                    |> Seq.contains false
+                    |> not 
             else
-                false
+                return false
+        }
 
     static member Disabled = {
         new IDeadLettersProcessor with
             member __.ClearMessages() = ()
             member __.AddMessage _ _ = ()
             member __.RemoveMessage _ = ()
-            member __.ProcessMessages _ = false
+            member __.ProcessMessages _ = async { return false }
     }
