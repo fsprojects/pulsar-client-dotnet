@@ -167,7 +167,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
 
     let removeDeadLetter messageId = deadLettersProcessor.RemoveMessage messageId
 
-    let storeDeadLetter message = deadLettersProcessor.AddMessage message
+    let storeDeadLetter messageId message = deadLettersProcessor.AddMessage messageId message
 
     let processDeadLetters (messageId : MessageId) =
         let success = deadLettersProcessor.ProcessMessages messageId
@@ -212,7 +212,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                         MessageKey = %singleMessageMetadata.PartitionKey
                     }
                 incomingMessages.Enqueue(message)
-                storeDeadLetter message
+                storeDeadLetter rawMessage.MessageId message
         if skippedMessages > 0 then
             increaseAvailablePermits skippedMessages
 
@@ -371,7 +371,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                 Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                             else
                                 let message = { rawMessage with MessageId = msgId } |> decompress
-                                storeDeadLetter message
+                                storeDeadLetter message.MessageId message
 
                                 if not hasWaitingChannel then
                                     incomingMessages.Enqueue(message)

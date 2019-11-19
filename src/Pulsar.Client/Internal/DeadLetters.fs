@@ -44,21 +44,33 @@ type internal DeadLettersProcessor
                 return false
         } |> Async.AwaitTask
 
+    let toStoreFormat (messageId : MessageId) = {
+        LedgerId = messageId.LedgerId
+        EntryId = messageId.EntryId
+        Partition = messageId.Partition
+        Type = MessageIdType.Individual
+        TopicName = %""
+    }
+
     interface IDeadLettersProcessor with
         member __.ClearMessages() =
             store.Clear()
 
-        member __.AddMessage (message : Message) =
-            let id = message.MessageId
+        member __.AddMessage messageId message =
             if message.RedeliveryCount |> int >= policy.MaxRedeliveryCount then
-                if store.ContainsKey(id) |> not then store.[id] <- ResizeArray<Message>()
-                store.[id].Add(message)
+                let messageId = messageId |> toStoreFormat
+
+                if store.ContainsKey(messageId) |> not then
+                    store.[messageId] <- ResizeArray<Message>()
+
+                store.[messageId].Add(message)
 
         member __.RemoveMessage messageId =
             store.Remove(messageId) |> ignore
 
         member __.ProcessMessages messageId =
-            if  store.ContainsKey messageId then
+            let messageId = messageId |> toStoreFormat
+            if store.ContainsKey messageId then
                 store.[messageId]
                 |> Seq.map (fun m -> MessageBuilder(m.Payload, %m.MessageKey, m.Properties))
                 |> Seq.map (fun builder -> sendMessageAsync builder messageId)
@@ -72,7 +84,7 @@ type internal DeadLettersProcessor
     static member Disabled = {
         new IDeadLettersProcessor with
             member __.ClearMessages() = ()
-            member __.AddMessage _ = ()
+            member __.AddMessage _ _ = ()
             member __.RemoveMessage _ = ()
             member __.ProcessMessages _ = false
     }

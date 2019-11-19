@@ -9,6 +9,6 @@ type DeadLettersPolicy(maxRedeliveryCount : int, [<Optional; DefaultParameterVal
 
 type IDeadLettersProcessor =
     abstract member ClearMessages: unit -> unit
-    abstract member AddMessage: Message -> unit
+    abstract member AddMessage: MessageId -> Message -> unit
     abstract member RemoveMessage: MessageId -> unit
     abstract member ProcessMessages: MessageId -> bool
