@@ -169,14 +169,12 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
     let storeDeadLetter messageId message = deadLettersProcessor.AddMessage messageId message
 
     let processDeadLetters (messageId : MessageId) =
-        let success =
-            deadLettersProcessor.ProcessMessages messageId
-            |> Async.RunSynchronously
-
-        if success then
-            (this :> IConsumer).AcknowledgeAsync messageId |> ignore
-
-        success
+        task {
+            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId
+            if deadMessageProcessed then
+                do! (this :> IConsumer).AcknowledgeAsync messageId
+            return deadMessageProcessed
+        }
 
     let receiveIndividualMessagesFromBatch (rawMessage: Message) =
         let batchSize = rawMessage.Metadata.NumMessages
@@ -434,7 +432,11 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                             let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds);
                             let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
                             for batch in batches do
-                                let nonDeadBatch = batch |> Array.filter (fun messageId -> processDeadLetters messageId |> not)
+                                let nonDeadBatch = ResizeArray<MessageId>()
+                                for messageId in batch do
+                                    let! isDead = processDeadLetters messageId |> Async.AwaitTask
+                                    if not isDead then
+                                        nonDeadBatch.Add messageId
                                 let command = Commands.newRedeliverUnacknowledgedMessages consumerId (
                                                     Some(nonDeadBatch |> Seq.map (fun msgId -> MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)))
                                                 )

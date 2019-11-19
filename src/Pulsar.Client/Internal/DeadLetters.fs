@@ -7,6 +7,7 @@ open System.Collections.Generic
 open FSharp.UMX
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 type internal DeadLettersProcessor
     (policy: DeadLettersPolicy,
@@ -28,18 +29,11 @@ type internal DeadLettersProcessor
     )
 
     let sendMessage (builder : MessageBuilder) messageId  =
-        try
-            let p = producer.Value |> Async.AwaitTask |> Async.RunSynchronously
-            p.SendAsync(builder) |> Async.AwaitTask |> Async.Ignore |> Async.RunSynchronously
-            true
-        with
-        | ex ->
-            Log.Logger.LogError(
-                ex,
-                "Send to dead letter topic exception with topic: {0}, messageId: {1}",
-                topicName,
-                messageId)
-            false
+        task {
+            let! p = producer.Value
+            let! _ = p.SendAsync(builder)
+            return ()
+        }
 
     let toStoreFormat (messageId : MessageId) =
         { messageId with Type = Individual }
@@ -60,23 +54,32 @@ type internal DeadLettersProcessor
         member __.RemoveMessage messageId =
             store.Remove(messageId) |> ignore
 
-        member __.ProcessMessages messageId = async {
-            let messageId = messageId |> toStoreFormat
-            if store.ContainsKey messageId then
-                return
-                    store.[messageId]
-                    |> Seq.map (fun m -> MessageBuilder(m.Payload, %m.MessageKey, m.Properties))
-                    |> Seq.map (fun builder -> sendMessage builder messageId)
-                    |> Seq.contains false
-                    |> not 
-            else
-                return false
-        }
+        member __.ProcessMessages messageId =
+            task {
+                let messageId = messageId |> toStoreFormat
+                if store.ContainsKey messageId then
+                    let messages = store.[messageId]
+                    try
+                        for message in messages do
+                            let mb = MessageBuilder(message.Payload, %message.MessageKey, message.Properties)
+                            do! sendMessage mb messageId
+                        return true
+                    with
+                    | ex ->
+                        Log.Logger.LogError(
+                            ex,
+                            "Send to dead letter topic exception with topic: {0}, messageId: {1}",
+                            topicName,
+                            messageId)
+                        return false
+                else
+                    return false
+            }
 
     static member Disabled = {
         new IDeadLettersProcessor with
             member __.ClearMessages() = ()
             member __.AddMessage _ _ = ()
             member __.RemoveMessage _ = ()
-            member __.ProcessMessages _ = async { return false }
+            member __.ProcessMessages _ = Task.FromResult(false)
     }
