@@ -172,7 +172,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
         task {
             let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId
             if deadMessageProcessed then
-                do! (this :> IConsumer).AcknowledgeAsync messageId
+                do! sendAcknowledge messageId AckType.Individual
             return deadMessageProcessed
         }
 
