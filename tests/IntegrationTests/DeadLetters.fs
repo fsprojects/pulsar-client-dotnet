@@ -8,6 +8,7 @@ open System.Threading.Tasks
 open Pulsar.Client.Common
 open Serilog
 open Pulsar.Client.IntegrationTests.Common
+open System.Text
 
 [<Tests>]
 let tests =
@@ -202,6 +203,70 @@ let tests =
                 Task.Run(fun () ->
                     task {
                         do! consumeMessages dlqConsumer numberOfMessages dlqConsumerName
+                    }:> Task)
+
+            let tasks =
+                [|
+                    producerTask
+                    consumerTask
+                    Task.Delay(TimeSpan.FromSeconds(2.0))
+                    dlqConsumerTask
+                |]
+
+            do! Task.WhenAll(tasks) |> Async.AwaitTask
+
+            description |> logTestEnd
+        }
+
+        testAsync "Some failed batch messages get stored in a configured default letter topic" {
+
+            let description = "Failed batch stored in a configured dead letter topic"
+
+            description |> logTestStart
+
+            let producerName = getProducerName()
+            let consumerName = getConsumerName()
+            let dlqConsumerName = getDlqConsumerName()
+            let topicName = getTopicName()
+            let policy = getDeadLettersPolicy()
+
+            let! producer =
+                buildProducer(producerName, topicName)
+                    .BatchingMaxMessages(numberOfMessages)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer = buildConsumer(consumerName, topicName, policy).SubscribeAsync() |> Async.AwaitTask
+
+            let! dlqConsumer =
+                buildDlqConsumer(dlqConsumerName, policy.DeadLetterTopic).SubscribeAsync() |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! produceMessages producer numberOfMessages producerName
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        for i in 1..numberOfMessages do
+                            let! message = consumer.ReceiveAsync()
+                            if i = 5 || i = 6 then
+                                do! consumer.NegativeAcknowledge(message.MessageId)
+                            else
+                                do! consumer.AcknowledgeAsync(message.MessageId)
+                    }:> Task)
+
+            let dlqConsumerTask =
+                Task.Run(fun () ->
+                    task {
+                        for i in 5..6 do
+                            let! message = dlqConsumer.ReceiveAsync()
+                            let received = Encoding.UTF8.GetString(message.Payload)
+                            do! dlqConsumer.AcknowledgeAsync(message.MessageId)
+                            let expected = "Message #" + string i
+                            if received.StartsWith(expected) |> not then
+                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received dlqConsumerName
                     }:> Task)
 
             let tasks =
