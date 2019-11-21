@@ -136,6 +136,17 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                 prefix, ackType, outstandingAcks, batchSize)
             false
 
+    let trySendAcknowledge messageId ackType =
+        async {
+            match messageId.Type with
+            | Cumulative batchDetails when not (markAckForBatchMessage messageId ackType batchDetails) ->
+                // other messages in batch are still pending ack.
+                ()
+            | _ ->
+                do! sendAcknowledge messageId ackType
+                Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
+        }
+
     let isPriorEntryIndex idx =
         match startMessageId with
         | None -> false
@@ -172,7 +183,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
         task {
             let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId
             if deadMessageProcessed then
-                do! sendAcknowledge messageId AckType.Individual
+                do! trySendAcknowledge messageId AckType.Individual
             return deadMessageProcessed
         }
 
@@ -408,14 +419,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     Log.Logger.LogDebug("{0} Acknowledge", prefix)
                     match connectionHandler.ConnectionState with
                     | Ready _ ->
-                        match messageId.Type with
-                        | Cumulative batchDetails when not (markAckForBatchMessage messageId ackType batchDetails) ->
-                            // other messages in batch are still pending ack.
-                            ()
-                        | _ ->
-                            do! sendAcknowledge messageId ackType
-                            Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
-
+                        do! trySendAcknowledge messageId ackType
                         channel.Reply(true)
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
