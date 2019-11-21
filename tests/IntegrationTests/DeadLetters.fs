@@ -102,7 +102,6 @@ let tests =
                 [|
                     producerTask
                     consumerTask
-                    Task.Delay(TimeSpan.FromSeconds(2.0))
                     dlqConsumerTask
                 |]
 
@@ -156,7 +155,6 @@ let tests =
                 [|
                     producerTask
                     consumerTask
-                    Task.Delay(TimeSpan.FromSeconds(2.0))
                     dlqConsumerTask
                 |]
 
@@ -209,7 +207,6 @@ let tests =
                 [|
                     producerTask
                     consumerTask
-                    Task.Delay(TimeSpan.FromSeconds(2.0))
                     dlqConsumerTask
                 |]
 
@@ -273,7 +270,6 @@ let tests =
                 [|
                     producerTask
                     consumerTask
-                    Task.Delay(TimeSpan.FromSeconds(2.0))
                     dlqConsumerTask
                 |]
 
