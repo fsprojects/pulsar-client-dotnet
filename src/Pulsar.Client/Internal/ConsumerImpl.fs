@@ -136,7 +136,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                 prefix, ackType, outstandingAcks, batchSize)
             false
 
-    let trySendAcknowledge messageId ackType =
+    let trySendAcknowledge ackType messageId =
         async {
             match messageId.Type with
             | Cumulative batchDetails when not (markAckForBatchMessage messageId ackType batchDetails) ->
@@ -177,19 +177,27 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
 
     let clearDeadLetters() = deadLettersProcessor.ClearMessages()
 
-    let storeDeadLetter messageId message = deadLettersProcessor.AddMessage messageId message
+    let getNewIndividualMsgIdWithPartition messageId =
+        { messageId with Type = Individual; Partition = partitionIndex; TopicName = %"" }
 
     let processDeadLetters (messageId : MessageId) =
         task {
-            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId
-            if deadMessageProcessed then
-                do! trySendAcknowledge messageId AckType.Individual
+            let messageId =
+                match messageId.Type with
+                | Individual -> messageId
+                | Cumulative _ -> getNewIndividualMsgIdWithPartition messageId
+            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId (trySendAcknowledge AckType.Individual)
             return deadMessageProcessed
         }
 
     let receiveIndividualMessagesFromBatch (rawMessage: Message) =
         let batchSize = rawMessage.Metadata.NumMessages
+        let batchMessageId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
         let acker = BatchMessageAcker(batchSize)
+        let possibleToDeadLetter =
+            if rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount
+            then ResizeArray<Message>()
+            else null
         let mutable skippedMessages = 0
         use stream = new MemoryStream(rawMessage.Payload)
         use binaryReader = new BinaryReader(stream)
@@ -204,27 +212,32 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
             else
                 let messageId =
                     {
-                        LedgerId = rawMessage.MessageId.LedgerId
-                        EntryId = rawMessage.MessageId.EntryId
-                        Partition = partitionIndex
-                        Type = Cumulative(%i, acker)
-                        TopicName = %""
+                        rawMessage.MessageId with
+                            Partition = partitionIndex
+                            Type = Cumulative(%i, acker)
+                            TopicName = %""
                     }
                 let message =
-                    { rawMessage with
-                        MessageId = messageId
-                        Payload = singleMessagePayload
-                        Properties =
-                            if singleMessageMetadata.Properties.Count > 0 then
-                                singleMessageMetadata.Properties
-                                |> Seq.map (fun prop -> (prop.Key, prop.Value))
-                                |> dict
-                            else
-                                EmptyProps
-                        MessageKey = %singleMessageMetadata.PartitionKey
+                    {
+                        rawMessage with
+                            MessageId = messageId
+                            Payload = singleMessagePayload
+                            Properties =
+                                if singleMessageMetadata.Properties.Count > 0 then
+                                    singleMessageMetadata.Properties
+                                    |> Seq.map (fun prop -> (prop.Key, prop.Value))
+                                    |> dict
+                                else
+                                    EmptyProps
+                            MessageKey = %singleMessageMetadata.PartitionKey
                     }
+                if (possibleToDeadLetter |> isNull |> not) then
+                    possibleToDeadLetter.Add(message)
                 incomingMessages.Enqueue(message)
-                storeDeadLetter rawMessage.MessageId message
+
+        if (possibleToDeadLetter |> isNull |> not) then
+            deadLettersProcessor.AddMessage batchMessageId possibleToDeadLetter
+
         if skippedMessages > 0 then
             increaseAvailablePermits skippedMessages
 
@@ -263,6 +276,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
 
     let stopConsumer () =
         unAckedMessageTracker.Close()
+        clearDeadLetters()
         negativeAcksTracker.Close()
         cleanup(this)
         while waiters.Count > 0 do
@@ -290,11 +304,11 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, consumerConfig.Topic)
-                        clearDeadLetters()
                         clientCnx.AddConsumer consumerId this.Mb
                         let requestId = Generators.getNextRequestId()
                         let isDurable = subscriptionMode = SubscriptionMode.Durable
                         startMessageId <- clearReceiverQueue()
+                        clearDeadLetters()
                         let msgIdData =
                             if isDurable then
                                 null
@@ -369,7 +383,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                 | ConsumerMessage.MessageReceived rawMessage ->
 
                     let hasWaitingChannel = waiters.Count > 0
-                    let msgId = { rawMessage.MessageId with Partition = partitionIndex }
+                    let msgId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
                     Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3}",
                         prefix, msgId, incomingMessages.Count, hasWaitingChannel)
 
@@ -383,7 +397,9 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                 Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                             else
                                 let message = { rawMessage with MessageId = msgId } |> decompress
-                                storeDeadLetter message.MessageId message
+
+                                if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
+                                    deadLettersProcessor.AddMessage message.MessageId (ResizeArray(seq { message }))
 
                                 if not hasWaitingChannel then
                                     incomingMessages.Enqueue(message)
@@ -419,7 +435,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     Log.Logger.LogDebug("{0} Acknowledge", prefix)
                     match connectionHandler.ConnectionState with
                     | Ready _ ->
-                        do! trySendAcknowledge messageId ackType
+                        do! trySendAcknowledge ackType messageId
                         channel.Reply(true)
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
@@ -579,8 +595,6 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                         connectionHandler.Closed()
                         stopConsumer()
                         channel.Reply(Task.FromResult())
-
-                    clearDeadLetters()
 
                 | ConsumerMessage.Unsubscribe channel ->
 

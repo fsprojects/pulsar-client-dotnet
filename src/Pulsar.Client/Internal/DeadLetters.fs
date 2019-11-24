@@ -24,62 +24,52 @@ type internal DeadLettersProcessor
             (sprintf "%s-%s-DLQ" (getTopicName()) (getSubscriptionNameName()))
 
     let producer = lazy (
-
         createProducer topicName
     )
 
-    let sendMessage (builder : MessageBuilder) messageId  =
+    let sendMessage (builder : MessageBuilder) =
         task {
             let! p = producer.Value
             let! _ = p.SendAsync(builder)
             return ()
         }
 
-    let toStoreFormat (messageId : MessageId) =
-        { messageId with Type = Individual }
-
     interface IDeadLettersProcessor with
-        member __.ClearMessages() =
+        member this.ClearMessages() =
             store.Clear()
 
-        member __.AddMessage messageId message =
-            if message.RedeliveryCount |> int >= policy.MaxRedeliveryCount then
-                let messageId = messageId |> toStoreFormat
+        member this.AddMessage messageId messages =
+            store.[messageId] <- messages
 
-                if store.ContainsKey(messageId) |> not then
-                    store.[messageId] <- ResizeArray<Message>()
-
-                store.[messageId].Add(message)
-
-        member __.RemoveMessage messageId =
+        member this.RemoveMessage messageId =
             store.Remove(messageId) |> ignore
 
-        member __.ProcessMessages messageId =
+        member this.ProcessMessages messageId acknowledge =
             task {
-                let messageId = messageId |> toStoreFormat
-                if store.ContainsKey messageId then
-                    let messages = store.[messageId]
+                match store.TryGetValue messageId with
+                | true, messages ->
+                    Log.Logger.LogInformation("DeadLetter processing topic: {0}, messageId: {1}, messagesCount: {2}", topicName, messageId, messages.Count)
                     try
                         for message in messages do
                             let mb = MessageBuilder(message.Payload, %message.MessageKey, message.Properties)
-                            do! sendMessage mb messageId
+                            do! sendMessage mb
+                        do! acknowledge messageId
                         return true
                     with
                     | ex ->
-                        Log.Logger.LogError(
-                            ex,
-                            "Send to dead letter topic exception with topic: {0}, messageId: {1}",
-                            topicName,
-                            messageId)
+                        Log.Logger.LogError(ex, "Send to dead letter topic exception with topic: {0}, messageId: {1}", topicName, messageId)
                         return false
-                else
+                | false, _ ->
                     return false
             }
 
+        member this.MaxRedeliveryCount = policy.MaxRedeliveryCount |> uint32
+
     static member Disabled = {
         new IDeadLettersProcessor with
-            member __.ClearMessages() = ()
-            member __.AddMessage _ _ = ()
-            member __.RemoveMessage _ = ()
-            member __.ProcessMessages _ = Task.FromResult(false)
+            member this.ClearMessages() = ()
+            member this.AddMessage _ _ = ()
+            member this.RemoveMessage _ = ()
+            member this.ProcessMessages _ _ = Task.FromResult(false)
+            member this.MaxRedeliveryCount = UInt32.MaxValue
     }
