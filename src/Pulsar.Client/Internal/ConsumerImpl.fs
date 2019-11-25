@@ -147,6 +147,8 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                 Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
         }
 
+    let trySendIndividualAcknowledge = trySendAcknowledge AckType.Individual
+
     let isPriorEntryIndex idx =
         match startMessageId with
         | None -> false
@@ -186,7 +188,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                 match messageId.Type with
                 | Individual -> messageId
                 | Cumulative _ -> getNewIndividualMsgIdWithPartition messageId
-            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId (trySendAcknowledge AckType.Individual)
+            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId trySendIndividualAcknowledge
             return deadMessageProcessed
         }
 
