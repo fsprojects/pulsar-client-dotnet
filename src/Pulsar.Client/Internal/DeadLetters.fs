@@ -53,7 +53,7 @@ type internal DeadLettersProcessor
                         for message in messages do
                             let mb = MessageBuilder(message.Payload, %message.MessageKey, message.Properties)
                             do! sendMessage mb
-                        do! acknowledge messageId
+                        do! acknowledge()
                         return true
                     with
                     | ex ->

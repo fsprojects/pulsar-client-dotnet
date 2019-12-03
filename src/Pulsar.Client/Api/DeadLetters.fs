@@ -12,5 +12,5 @@ type IDeadLettersProcessor =
     abstract member ClearMessages: unit -> unit
     abstract member AddMessage: MessageId -> ResizeArray<Message> -> unit
     abstract member RemoveMessage: MessageId -> unit
-    abstract member ProcessMessages: MessageId -> (MessageId -> Async<unit>) -> Task<bool>
+    abstract member ProcessMessages: MessageId -> (unit -> Async<unit>) -> Task<bool>
     abstract member MaxRedeliveryCount: uint32

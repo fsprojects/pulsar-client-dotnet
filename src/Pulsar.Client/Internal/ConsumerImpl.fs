@@ -184,11 +184,14 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
 
     let processDeadLetters (messageId : MessageId) =
         task {
+            let acknowledge() = trySendIndividualAcknowledge messageId
+
             let messageId =
                 match messageId.Type with
                 | Individual -> messageId
                 | Cumulative _ -> getNewIndividualMsgIdWithPartition messageId
-            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId trySendIndividualAcknowledge
+
+            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId acknowledge
             return deadMessageProcessed
         }
 
