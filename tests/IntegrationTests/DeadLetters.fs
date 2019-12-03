@@ -30,6 +30,8 @@ let tests =
 
     let buildProducer(producerName, topicName) =
         ProducerBuilder(client)
+            .BatchingMaxPublishDelay(TimeSpan.FromMinutes(1.))
+            .BatchingMaxMessages(numberOfMessages)
             .ProducerName(producerName)
             .Topic(topicName)
 
@@ -39,7 +41,7 @@ let tests =
             .Topic(topicName)
             .SubscriptionName(subscriptionName)
             .SubscriptionType(SubscriptionType.Shared)
-            .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
+            .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(1.))
             .DeadLettersPolicy(deadLettersPolicy)
 
     let buildDlqConsumer(consumerName, topicName) =
@@ -177,7 +179,6 @@ let tests =
 
             let! producer =
                 buildProducer(producerName, topicName)
-                    .BatchingMaxMessages(numberOfMessages)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer = buildConsumer(consumerName, topicName, policy).SubscribeAsync() |> Async.AwaitTask
@@ -188,7 +189,7 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer numberOfMessages producerName
+                        do! fastProduceMessages producer numberOfMessages producerName
                     }:> Task)
 
             let consumerTask =
@@ -225,11 +226,13 @@ let tests =
             let consumerName = getConsumerName()
             let dlqConsumerName = getDlqConsumerName()
             let topicName = getTopicName()
-            let policy = getDeadLettersPolicy()
+            let policy = DeadLettersPolicy(1, getDeadLettersPolicy().DeadLetterTopic)
+            let lBorder = 5
+            let uBorder = 6
 
             let! producer =
                 buildProducer(producerName, topicName)
-                    .BatchingMaxMessages(numberOfMessages)
+                    .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(50.))
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer = buildConsumer(consumerName, topicName, policy).SubscribeAsync() |> Async.AwaitTask
@@ -240,15 +243,20 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer numberOfMessages producerName
+                        do! fastProduceMessages producer numberOfMessages producerName
                     }:> Task)
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
+
                         for i in 1..numberOfMessages do
                             let! message = consumer.ReceiveAsync()
-                            if i = 5 || i = 6 then
+                            do! consumer.NegativeAcknowledge(message.MessageId)
+
+                        for i in 1..numberOfMessages do
+                            let! message = consumer.ReceiveAsync()
+                            if i = lBorder || i = uBorder then
                                 do! consumer.NegativeAcknowledge(message.MessageId)
                             else
                                 do! consumer.AcknowledgeAsync(message.MessageId)
@@ -257,13 +265,13 @@ let tests =
             let dlqConsumerTask =
                 Task.Run(fun () ->
                     task {
-                        for i in 5..6 do
+                        for i in lBorder..uBorder do
                             let! message = dlqConsumer.ReceiveAsync()
                             let received = Encoding.UTF8.GetString(message.Payload)
                             do! dlqConsumer.AcknowledgeAsync(message.MessageId)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then
-                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received dlqConsumerName
+                                failwith <| sprintf "Incorrect dead letter. Expected '%s' received '%s' consumer '%s'" expected received dlqConsumerName
                     }:> Task)
 
             let tasks =
