@@ -1,3 +1,4 @@
+bin/pulsar-admin namespaces create public/default
 bin/pulsar-admin namespaces create public/retention
 bin/pulsar-admin namespaces set-retention public/retention --time 3h --size 1G
 bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned --partitions 3

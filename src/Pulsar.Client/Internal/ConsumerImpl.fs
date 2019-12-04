@@ -455,10 +455,10 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                         match connectionHandler.ConnectionState with
                         | Ready clientCnx ->
                             let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds);
-                            let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
-                            for batch in batches do
+                            let chunks = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
+                            for chunk in chunks do
                                 let nonDeadBatch = ResizeArray<MessageId>()
-                                for messageId in batch do
+                                for messageId in chunk do
                                     let! isDead = processDeadLetters messageId |> Async.AwaitTask
                                     if not isDead then
                                         nonDeadBatch.Add messageId
