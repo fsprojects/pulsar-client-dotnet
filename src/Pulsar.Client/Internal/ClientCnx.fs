@@ -90,7 +90,7 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                     return! loop()
                 | FailAllRequestsAndStop ->
                     requests |> Seq.iter (fun kv ->
-                        kv.Value.SetException(Exception("ChannelInactive fired")))
+                        kv.Value.SetException(ConnectException("Disconnected.")))
                     requests.Clear()
             }
         loop ()
@@ -146,11 +146,7 @@ type internal ClientCnx (config: PulsarClientConfiguration,
         task {
             try
                 do! connection.Output |> serializedPayload
-                let connected = connection.IsActive()
-                if (not connected) then
-                    Log.Logger.LogWarning("{0} socket was disconnected normally on writing", prefix)
-                    operationsMb.Post(ChannelInactive)
-                return connected
+                return true
             with ex ->
                 Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally on writing", prefix)
                 operationsMb.Post(ChannelInactive)
@@ -169,12 +165,13 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                     let! connected = sendSerializedPayload payload |> Async.AwaitTask
                     return! loop ()
                 | SocketRequestMessageWithReply (reqId, payload, replyChannel) ->
-                    let! connected = sendSerializedPayload payload |> Async.AwaitTask
                     let tsc = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
-                    requestsMb.Post(AddRequest(reqId, tsc))
+                    let! connected = sendSerializedPayload payload |> Async.AwaitTask
+                    if connected then
+                        requestsMb.Post(AddRequest(reqId, tsc))
+                    else
+                        tsc.SetException(ConnectException("Disconnected on send"))
                     replyChannel.Reply(tsc.Task)
-                    if not connected then
-                        tsc.SetException(Exception("Disconnected"))
                     return! loop ()
                 | SocketMessage.Stop ->
                     Log.Logger.LogDebug("{0} sendMb stopped", prefix)
@@ -398,7 +395,7 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                     let! result = reader.ReadAsync()
                     let buffer = result.Buffer
                     if result.IsCompleted then
-                        if initialConnectionTsc.TrySetException(Exception("Unable to initiate connection")) then
+                        if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
                             Log.Logger.LogWarning("{0} New connection was aborted", prefix)
                         Log.Logger.LogWarning("{0} Socket was disconnected normally while reading", prefix)
                         operationsMb.Post(ChannelInactive)
@@ -414,7 +411,7 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                         | Result.Error (UnknownCommandType unknownType), _ ->
                             failwithf "Unknown command type %A" unknownType
             with ex ->
-                if initialConnectionTsc.TrySetException(Exception("Unable to initiate connection")) then
+                if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
                     Log.Logger.LogWarning("{0} New connection was aborted", prefix)
                 Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally while reading", prefix)
                 operationsMb.Post(ChannelInactive)

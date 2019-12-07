@@ -104,7 +104,6 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                             {
                                 Input = pipeConnection.Input
                                 Output = writerStream
-                                IsActive = fun () -> socket.Connected
                                 Dispose = sslStream.Dispose
                             }
                     else
@@ -114,7 +113,6 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                             {
                                 Input = pipeConnection.Input
                                 Output = writerStream
-                                IsActive = fun () -> socket.Connected
                                 Dispose = pipeConnection.Dispose
                             }
                 }

@@ -204,7 +204,6 @@ type internal Connection =
     {
         Input: PipeReader
         Output: WriterStream
-        IsActive: unit -> bool
         Dispose: unit -> unit
     }
 type internal RedeliverSet = HashSet<MessageId>
