@@ -13,44 +13,24 @@ open System.Text
 [<Tests>]
 let tests =
 
-    let client = getClient()
-
-    let newGuid() = Guid.NewGuid().ToString("N")
-    let getTopicName() = "public/default/topic-" + newGuid()
-    let getProducerName() = sprintf "dlqProducer-%s" (newGuid())
-    let getConsumerName() = sprintf "negativeConsumer-%s" (newGuid())
-    let getDlqConsumerName() = sprintf "dlqConsumer-%s" (newGuid())
-    let getDeadLettersPolicy() = DeadLettersPolicy(0, sprintf "public/default/topic-%s-DLQ" (newGuid()))
-
-    let subscriptionName = "dlqSubscription"
-    let numberOfMessages = 10
-
     let logTestStart testDescription = Log.Debug(sprintf "Started '%s'" testDescription)
     let logTestEnd testDescription = Log.Debug(sprintf "Finished '%s'" testDescription)
+    let createProducer() = getClient() |> ProducerBuilder
+    let createConsumer() = getClient() |> ConsumerBuilder
 
-    let buildProducer(producerName, topicName) =
-        ProducerBuilder(client)
-            .ProducerName(producerName)
-            .Topic(topicName)
-
-    let buildConsumer(consumerName, topicName, deadLettersPolicy) =
-        ConsumerBuilder(client)
-            .ConsumerName(consumerName)
-            .Topic(topicName)
-            .SubscriptionName(subscriptionName)
-            .SubscriptionType(SubscriptionType.Shared)
-            .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
-            .DeadLettersPolicy(deadLettersPolicy)
-
-    let buildDlqConsumer(consumerName, topicName) =
-        ConsumerBuilder(client)
-            .ConsumerName(consumerName)
-            .Topic(topicName)
-            .SubscriptionName(subscriptionName)
-            .SubscriptionType(SubscriptionType.Shared)
+    let getTestConfig() =
+        let newGuid = Guid.NewGuid().ToString("N")
+        {|
+            TopicName = sprintf "public/default/topic-%s" newGuid
+            ProducerName = sprintf "dlqProducer-%s" newGuid
+            ConsumerName = sprintf "negativeConsumer-%s" newGuid
+            DlqConsumerName = sprintf "dlqConsumer-%s" newGuid
+            DeadLettersPolicy = DeadLettersPolicy(0, sprintf "public/default/topic-%s-DLQ" newGuid)
+            SubscriptionName = "dlqSubscription"
+            NumberOfMessages = 10
+        |}
 
     let receiveAndAckNegative (consumer: IConsumer) number =
-
         task {
             for _ in 1..number do
                 let! message = consumer.ReceiveAsync()
@@ -64,38 +44,52 @@ let tests =
 
             description |> logTestStart
 
-            let producerName = getProducerName()
-            let consumerName = getConsumerName()
-            let dlqConsumerName = getDlqConsumerName()
-            let topicName = getTopicName()
-            let policy = getDeadLettersPolicy()
+            let config = getTestConfig()
 
             let! producer =
-                buildProducer(producerName, topicName)
+                createProducer()
+                    .ProducerName(config.ProducerName)
+                    .Topic(config.TopicName)
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync()
+                    |> Async.AwaitTask
 
-            let! consumer = buildConsumer(consumerName, topicName, policy).SubscribeAsync() |> Async.AwaitTask
+            let! consumer =
+                createConsumer()
+                    .ConsumerName(config.ConsumerName)
+                    .Topic(config.TopicName)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
+                    .DeadLettersPolicy(config.DeadLettersPolicy)
+                    .SubscribeAsync()
+                    |> Async.AwaitTask
 
             let! dlqConsumer =
-                buildDlqConsumer(dlqConsumerName, policy.DeadLetterTopic).SubscribeAsync() |> Async.AwaitTask
+                createConsumer()
+                    .ConsumerName(config.DlqConsumerName)
+                    .Topic(config.DeadLettersPolicy.DeadLetterTopic)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscribeAsync()
+                    |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer numberOfMessages producerName
+                        do! produceMessages producer config.NumberOfMessages config.ProducerName
                     }:> Task)
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! receiveAndAckNegative consumer numberOfMessages
+                        do! receiveAndAckNegative consumer config.NumberOfMessages
                     }:> Task)
 
             let dlqConsumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages dlqConsumer numberOfMessages dlqConsumerName
+                        do! consumeMessages dlqConsumer config.NumberOfMessages config.DlqConsumerName
                     }:> Task)
 
             let tasks =
@@ -116,39 +110,52 @@ let tests =
 
             description |> logTestStart
 
-            let producerName = getProducerName()
-            let consumerName = getConsumerName()
-            let dlqConsumerName = getDlqConsumerName()
-            let topicName = getTopicName()
-            let policy = DeadLettersPolicy(0)
+            let config = getTestConfig()
 
             let! producer =
-                buildProducer(producerName, topicName)
+                createProducer()
+                    .ProducerName(config.ProducerName)
+                    .Topic(config.TopicName)
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync()
+                    |> Async.AwaitTask
 
-            let! consumer = buildConsumer(consumerName, topicName, policy).SubscribeAsync() |> Async.AwaitTask
+            let! consumer =
+                createConsumer()
+                    .ConsumerName(config.ConsumerName)
+                    .Topic(config.TopicName)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
+                    .DeadLettersPolicy(DeadLettersPolicy(0))
+                    .SubscribeAsync()
+                    |> Async.AwaitTask
 
             let! dlqConsumer =
-                buildDlqConsumer(dlqConsumerName, sprintf "%s-%s-DLQ" topicName subscriptionName)
-                    .SubscribeAsync() |> Async.AwaitTask
+                createConsumer()
+                    .ConsumerName(config.DlqConsumerName)
+                    .Topic(sprintf "%s-%s-DLQ" config.TopicName config.SubscriptionName)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscribeAsync()
+                    |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer numberOfMessages producerName
+                        do! produceMessages producer config.NumberOfMessages config.ProducerName
                     }:> Task)
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! receiveAndAckNegative consumer numberOfMessages
+                        do! receiveAndAckNegative consumer config.NumberOfMessages
                     }:> Task)
 
             let dlqConsumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages dlqConsumer numberOfMessages dlqConsumerName
+                        do! consumeMessages dlqConsumer config.NumberOfMessages config.DlqConsumerName
                     }:> Task)
 
             let tasks =
@@ -169,38 +176,52 @@ let tests =
 
             description |> logTestStart
 
-            let producerName = getProducerName()
-            let consumerName = getConsumerName()
-            let dlqConsumerName = getDlqConsumerName()
-            let topicName = getTopicName()
-            let policy = getDeadLettersPolicy()
+            let config = getTestConfig()
 
             let! producer =
-                buildProducer(producerName, topicName)
-                    .BatchingMaxMessages(numberOfMessages)
-                    .CreateAsync() |> Async.AwaitTask
+                createProducer()
+                    .ProducerName(config.ProducerName)
+                    .Topic(config.TopicName)
+                    .BatchingMaxMessages(config.NumberOfMessages)
+                    .CreateAsync()
+                    |> Async.AwaitTask
 
-            let! consumer = buildConsumer(consumerName, topicName, policy).SubscribeAsync() |> Async.AwaitTask
+            let! consumer =
+                createConsumer()
+                    .ConsumerName(config.ConsumerName)
+                    .Topic(config.TopicName)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
+                    .DeadLettersPolicy(config.DeadLettersPolicy)
+                    .SubscribeAsync()
+                    |> Async.AwaitTask
 
             let! dlqConsumer =
-                buildDlqConsumer(dlqConsumerName, policy.DeadLetterTopic).SubscribeAsync() |> Async.AwaitTask
+                createConsumer()
+                    .ConsumerName(config.DlqConsumerName)
+                    .Topic(config.DeadLettersPolicy.DeadLetterTopic)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscribeAsync()
+                    |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer numberOfMessages producerName
+                        do! produceMessages producer config.NumberOfMessages config.ProducerName
                     }:> Task)
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! receiveAndAckNegative consumer numberOfMessages
+                        do! receiveAndAckNegative consumer config.NumberOfMessages
                     }:> Task)
 
             let dlqConsumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages dlqConsumer numberOfMessages dlqConsumerName
+                        do! consumeMessages dlqConsumer config.NumberOfMessages config.DlqConsumerName
                     }:> Task)
 
             let tasks =
@@ -221,32 +242,46 @@ let tests =
 
             description |> logTestStart
 
-            let producerName = getProducerName()
-            let consumerName = getConsumerName()
-            let dlqConsumerName = getDlqConsumerName()
-            let topicName = getTopicName()
-            let policy = getDeadLettersPolicy()
+            let config = getTestConfig()
 
             let! producer =
-                buildProducer(producerName, topicName)
-                    .BatchingMaxMessages(numberOfMessages)
-                    .CreateAsync() |> Async.AwaitTask
+                createProducer()
+                    .ProducerName(config.ProducerName)
+                    .Topic(config.TopicName)
+                    .BatchingMaxMessages(config.NumberOfMessages)
+                    .CreateAsync()
+                    |> Async.AwaitTask
 
-            let! consumer = buildConsumer(consumerName, topicName, policy).SubscribeAsync() |> Async.AwaitTask
+            let! consumer =
+                createConsumer()
+                    .ConsumerName(config.ConsumerName)
+                    .Topic(config.TopicName)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
+                    .DeadLettersPolicy(config.DeadLettersPolicy)
+                    .SubscribeAsync()
+                    |> Async.AwaitTask
 
             let! dlqConsumer =
-                buildDlqConsumer(dlqConsumerName, policy.DeadLetterTopic).SubscribeAsync() |> Async.AwaitTask
+                createConsumer()
+                    .ConsumerName(config.DlqConsumerName)
+                    .Topic(config.DeadLettersPolicy.DeadLetterTopic)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscribeAsync()
+                    |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer numberOfMessages producerName
+                        do! produceMessages producer config.NumberOfMessages config.ProducerName
                     }:> Task)
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        for i in 1..numberOfMessages do
+                        for i in 1..config.NumberOfMessages do
                             let! message = consumer.ReceiveAsync()
                             if i = 5 || i = 6 then
                                 do! consumer.NegativeAcknowledge(message.MessageId)
@@ -263,7 +298,12 @@ let tests =
                             do! dlqConsumer.AcknowledgeAsync(message.MessageId)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then
-                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received dlqConsumerName
+                                failwith
+                                <| sprintf
+                                    "Incorrect message expected %s received %s consumer %s"
+                                    expected
+                                    received
+                                    config.DlqConsumerName
                     }:> Task)
 
             let tasks =
