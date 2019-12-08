@@ -209,7 +209,7 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer config.NumberOfMessages config.ProducerName
+                        do! fastProduceMessages producer config.NumberOfMessages config.ProducerName
                     }:> Task)
 
             let consumerTask =
@@ -275,15 +275,18 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer config.NumberOfMessages config.ProducerName
+                        do! fastProduceMessages producer config.NumberOfMessages config.ProducerName
                     }:> Task)
+
+            let lBorder = 5
+            let uBorder = 6
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
                         for i in 1..config.NumberOfMessages do
                             let! message = consumer.ReceiveAsync()
-                            if i = 5 || i = 6 then
+                            if i = lBorder || i = uBorder then
                                 do! consumer.NegativeAcknowledge(message.MessageId)
                             else
                                 do! consumer.AcknowledgeAsync(message.MessageId)
@@ -292,7 +295,7 @@ let tests =
             let dlqConsumerTask =
                 Task.Run(fun () ->
                     task {
-                        for i in 5..6 do
+                        for i in lBorder..uBorder do
                             let! message = dlqConsumer.ReceiveAsync()
                             let received = Encoding.UTF8.GetString(message.Payload)
                             do! dlqConsumer.AcknowledgeAsync(message.MessageId)
