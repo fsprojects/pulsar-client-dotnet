@@ -243,6 +243,9 @@ let tests =
             description |> logTestStart
 
             let config = getTestConfig()
+            let lBorder = 5
+            let uBorder = 6
+            let redeliveryCount = 1
 
             let! producer =
                 createProducer()
@@ -259,7 +262,7 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
-                    .DeadLettersPolicy(config.DeadLettersPolicy)
+                    .DeadLettersPolicy(DeadLettersPolicy(redeliveryCount, config.DeadLettersPolicy.DeadLetterTopic))
                     .SubscribeAsync()
                     |> Async.AwaitTask
 
@@ -278,18 +281,16 @@ let tests =
                         do! fastProduceMessages producer config.NumberOfMessages config.ProducerName
                     }:> Task)
 
-            let lBorder = 5
-            let uBorder = 6
-
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        for i in 1..config.NumberOfMessages do
-                            let! message = consumer.ReceiveAsync()
-                            if i = lBorder || i = uBorder then
-                                do! consumer.NegativeAcknowledge(message.MessageId)
-                            else
-                                do! consumer.AcknowledgeAsync(message.MessageId)
+                        for i in 0..redeliveryCount do
+                            for i in 1..config.NumberOfMessages do
+                                let! message = consumer.ReceiveAsync()
+                                if i = lBorder || i = uBorder then
+                                    do! consumer.NegativeAcknowledge(message.MessageId)
+                                else
+                                    do! consumer.AcknowledgeAsync(message.MessageId)
                     }:> Task)
 
             let dlqConsumerTask =
