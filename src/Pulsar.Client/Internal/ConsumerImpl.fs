@@ -189,7 +189,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
             let messageId =
                 match messageId.Type with
                 | Individual -> messageId
-                | Cumulative _ -> { messageId with Partition = partitionIndex; TopicName = %"" }
+                | Cumulative _ -> getNewIndividualMsgIdWithPartition messageId
 
             let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId acknowledge
             return deadMessageProcessed
@@ -197,6 +197,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
 
     let receiveIndividualMessagesFromBatch (rawMessage: Message) =
         let batchSize = rawMessage.Metadata.NumMessages
+        let batchMessageId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
         let acker = BatchMessageAcker(batchSize)
         let possibleToDeadLetter =
             if rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount
@@ -236,13 +237,11 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                             MessageKey = %singleMessageMetadata.PartitionKey
                     }
                 if (possibleToDeadLetter |> isNull |> not) then
-                    deadLettersProcessor.AddMessage messageId (ResizeArray(seq{ message }))
-                    //possibleToDeadLetter.Add(message)
-
+                    possibleToDeadLetter.Add(message)
                 incomingMessages.Enqueue(message)
 
-        //if (possibleToDeadLetter |> isNull |> not) then
-        //    deadLettersProcessor.AddMessage batchMessageId possibleToDeadLetter
+        if (possibleToDeadLetter |> isNull |> not) then
+            deadLettersProcessor.AddMessage batchMessageId possibleToDeadLetter
 
         if skippedMessages > 0 then
             increaseAvailablePermits skippedMessages
@@ -738,7 +737,6 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                 negativeAcksTracker.Add(msgId) |> ignore
                 // Ensure the message is not redelivered for ack-timeout, since we did receive an "ack"
                 unAckedMessageTracker.Remove(msgId) |> ignore
-                ()
             }
 
         member this.ConsumerId = consumerId
