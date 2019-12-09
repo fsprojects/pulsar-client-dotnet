@@ -184,25 +184,13 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
 
     let processDeadLetters (messageId : MessageId) =
         task {
-            let acknowledge() = trySendIndividualAcknowledge messageId
-
-            let messageId =
-                match messageId.Type with
-                | Individual -> messageId
-                | Cumulative _ -> getNewIndividualMsgIdWithPartition messageId
-
-            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId acknowledge
+            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId trySendIndividualAcknowledge
             return deadMessageProcessed
         }
 
     let receiveIndividualMessagesFromBatch (rawMessage: Message) =
         let batchSize = rawMessage.Metadata.NumMessages
-        let batchMessageId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
         let acker = BatchMessageAcker(batchSize)
-        let possibleToDeadLetter =
-            if rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount
-            then ResizeArray<Message>()
-            else null
         let mutable skippedMessages = 0
         use stream = new MemoryStream(rawMessage.Payload)
         use binaryReader = new BinaryReader(stream)
@@ -236,12 +224,9 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                     EmptyProps
                             MessageKey = %singleMessageMetadata.PartitionKey
                     }
-                if (possibleToDeadLetter |> isNull |> not) then
-                    possibleToDeadLetter.Add(message)
+                if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
+                    deadLettersProcessor.AddMessage messageId message
                 incomingMessages.Enqueue(message)
-
-        if (possibleToDeadLetter |> isNull |> not) then
-            deadLettersProcessor.AddMessage batchMessageId possibleToDeadLetter
 
         if skippedMessages > 0 then
             increaseAvailablePermits skippedMessages
@@ -404,7 +389,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                 let message = { rawMessage with MessageId = msgId } |> decompress
 
                                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
-                                    deadLettersProcessor.AddMessage message.MessageId (ResizeArray(seq { message }))
+                                    deadLettersProcessor.AddMessage message.MessageId message
 
                                 if not hasWaitingChannel then
                                     incomingMessages.Enqueue(message)

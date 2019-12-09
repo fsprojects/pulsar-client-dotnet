@@ -113,7 +113,11 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
 
         let getTopicName() = config.Topic.ToString()
         let getSubscriptionName() = config.SubscriptionName
-        let createProducer deadLetterTopic = ProducerBuilder(client).Topic(deadLetterTopic).CreateAsync()
+        let createProducer deadLetterTopic =
+            ProducerBuilder(client)
+                .Topic(deadLetterTopic)
+                .EnableBatching(false) // dead letters are sent one by one anyway
+                .CreateAsync()
         let deadLettersProcessor =
             DeadLettersProcessor(policy, getTopicName, getSubscriptionName, createProducer) :> IDeadLettersProcessor
 

@@ -65,7 +65,6 @@
     <Compile Include="Api\PulsarClient.fs" />
     <Compile Include="Api\ProducerBuilder.fs" />
     <Compile Include="Api\ConsumerBuilder.fs" />
-    <Compile Include="Api\ProducerBuilder.fs" />
     <Compile Include="Api\ReaderBuilder.fs" />
     <Compile Include="Api\PulsarClientBuilder.fs" />
   </ItemGroup>

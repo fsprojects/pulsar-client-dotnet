@@ -15,7 +15,7 @@ type internal DeadLettersProcessor
      getSubscriptionNameName: unit -> string,
      createProducer: string -> Task<IProducer>) =
 
-    let store = Dictionary<MessageId, ResizeArray<Message>>()
+    let store = Dictionary<MessageId, Message>()
 
     let topicName =
         if String.IsNullOrEmpty(policy.DeadLetterTopic) |> not then
@@ -38,8 +38,8 @@ type internal DeadLettersProcessor
         member this.ClearMessages() =
             store.Clear()
 
-        member this.AddMessage messageId messages =
-            store.[messageId] <- messages
+        member this.AddMessage messageId message =
+            store.[messageId] <- message
 
         member this.RemoveMessage messageId =
             store.Remove(messageId) |> ignore
@@ -47,13 +47,12 @@ type internal DeadLettersProcessor
         member this.ProcessMessages messageId acknowledge =
             task {
                 match store.TryGetValue messageId with
-                | true, messages ->
-                    Log.Logger.LogInformation("DeadLetter processing topic: {0}, messageId: {1}, messagesCount: {2}", topicName, messageId, messages.Count)
+                | true, message ->
+                    Log.Logger.LogInformation("DeadLetter processing topic: {0}, messageId: {1}", topicName, messageId)
                     try
-                        for message in messages do
-                            let mb = MessageBuilder(message.Payload, %message.MessageKey, message.Properties)
-                            do! sendMessage mb
-                        do! acknowledge()
+                        let mb = MessageBuilder(message.Payload, %message.MessageKey, message.Properties)
+                        do! sendMessage mb
+                        do! acknowledge messageId
                         return true
                     with
                     | ex ->

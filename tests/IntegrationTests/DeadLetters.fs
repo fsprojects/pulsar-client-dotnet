@@ -60,7 +60,7 @@ let tests =
                     .Topic(config.TopicName)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
-                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
                     .DeadLettersPolicy(config.DeadLettersPolicy)
                     .SubscribeAsync()
                     |> Async.AwaitTask
@@ -126,7 +126,7 @@ let tests =
                     .Topic(config.TopicName)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
-                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
                     .DeadLettersPolicy(DeadLettersPolicy(0))
                     .SubscribeAsync()
                     |> Async.AwaitTask
@@ -192,7 +192,7 @@ let tests =
                     .Topic(config.TopicName)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
-                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
                     .DeadLettersPolicy(config.DeadLettersPolicy)
                     .SubscribeAsync()
                     |> Async.AwaitTask
@@ -261,7 +261,7 @@ let tests =
                     .Topic(config.TopicName)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
-                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(1.0))
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
                     .DeadLettersPolicy(DeadLettersPolicy(redeliveryCount, config.DeadLettersPolicy.DeadLetterTopic))
                     .SubscribeAsync()
                     |> Async.AwaitTask
@@ -287,7 +287,7 @@ let tests =
                         for i in 0..redeliveryCount do
                             for i in 1..config.NumberOfMessages do
                                 let! message = consumer.ReceiveAsync()
-                                if i = lBorder || i = uBorder then
+                                if i >= lBorder && i <= uBorder then
                                     do! consumer.NegativeAcknowledge(message.MessageId)
                                 else
                                     do! consumer.AcknowledgeAsync(message.MessageId)
