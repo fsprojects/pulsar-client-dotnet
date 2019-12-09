@@ -284,7 +284,7 @@ let tests =
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        for i in 0..redeliveryCount do
+                        for _ in 0..redeliveryCount do
                             for i in 1..config.NumberOfMessages do
                                 let! message = consumer.ReceiveAsync()
                                 if i = lBorder || i = uBorder then

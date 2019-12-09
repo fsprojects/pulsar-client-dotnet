@@ -2,7 +2,6 @@
 
 open System
 open Pulsar.Client.Common
-open Pulsar.Client.Api
 open System.Collections.Generic
 open System.Timers
 open Microsoft.Extensions.Logging
@@ -20,7 +19,7 @@ type NegativeAcksTracker (prefix: string, negativeAckRedeliveryDelay: TimeSpan, 
     let prefix = prefix + " NegativeTracker"
 
     let mb = MailboxProcessor<NegativeAcksTrackerMessage>.Start(fun inbox ->
-        let rec loop (state: Dictionary<MessageId, DateTime>)  =
+        let rec loop (state: Map<MessageId, DateTime>)  =
             async {
                 let! message = inbox.Receive()
                 match message with
@@ -29,35 +28,28 @@ type NegativeAcksTracker (prefix: string, negativeAckRedeliveryDelay: TimeSpan, 
 
                     Log.Logger.LogDebug("{0} Adding message {1}", prefix, msgId)
                     if state.ContainsKey(msgId) |> not then
-                        state.Add(msgId, DateTime.Now.Add(nackDelay))
+                        let newState = state.Add(msgId, DateTime.Now.Add(nackDelay))
                         channel.Reply(true)
+                        return! loop newState
                     else
                         Log.Logger.LogWarning("{0} Duplicate message add {1}", prefix, msgId)
                         channel.Reply(false)
-                    return! loop state
+                        return! loop state
 
                 | TickTime ->
+                    let parts = state |> Map.partition (fun _ value -> value < DateTime.Now)
+                    let redelivery = parts |> fst |> Map.toSeq |> Seq.map fst |> HashSet<MessageId>
+                    let remainder = parts |> snd
 
-                    if state.Count > 0 then
-                        let result = HashSet<MessageId>()
-                        for item in state do
-                            if item.Value < DateTime.Now then
-                                result.Add(item.Key) |> ignore
-                        if result.Count > 0 then
-                            for itemToRemove in result do
-                                state.Remove(itemToRemove) |> ignore
-                            Log.Logger.LogDebug("{0} Redelivering {1} messages", prefix, result.Count)
-                            redeliverUnacknowledgedMessages result
-                    else
-                        ()
-                    return! loop state
+                    if redelivery.Count > 0 then
+                        Log.Logger.LogDebug("{0} Redelivering {1} messages", prefix, redelivery.Count)
+                        redeliverUnacknowledgedMessages redelivery
 
+                    return! loop remainder
                 | Stop ->
-
                     Log.Logger.LogDebug("{0} Stop", prefix)
-                    state.Clear()
             }
-        loop (Dictionary<MessageId, DateTime>())
+        loop (Map.empty<MessageId, DateTime>)
     )
 
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
