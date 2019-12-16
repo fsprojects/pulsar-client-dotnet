@@ -2,17 +2,16 @@
 
 open System
 open Pulsar.Client.Common
-open Pulsar.Client.Api
 open System.Collections.Generic
 open System.Timers
 open Microsoft.Extensions.Logging
 
-type NegativeAcksTrackerMessage =
+type internal NegativeAcksTrackerMessage =
     | Add of (MessageId*AsyncReplyChannel<bool>)
     | TickTime
     | Stop
 
-type NegativeAcksTracker (prefix: string, negativeAckRedeliveryDelay: TimeSpan, redeliverUnacknowledgedMessages: RedeliverSet -> unit) =
+type internal NegativeAcksTracker (prefix: string, negativeAckRedeliveryDelay: TimeSpan, redeliverUnacknowledgedMessages: RedeliverSet -> unit) =
 
     let MIN_NACK_DELAY = TimeSpan.FromMilliseconds(100.0)
     let nackDelay = if negativeAckRedeliveryDelay > MIN_NACK_DELAY then negativeAckRedeliveryDelay else MIN_NACK_DELAY

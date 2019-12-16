@@ -33,7 +33,7 @@ type Reader private (config: ReaderConfiguration, clientConfig: PulsarClientConf
             return! consumer.InitInternal()
         }
 
-    static member Init(config: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool, lookup: BinaryLookupService) =
+    static member internal Init(config: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool, lookup: BinaryLookupService) =
         task {
             let reader = Reader(config, clientConfig, connectionPool, lookup)
             do! reader.InitInternal()

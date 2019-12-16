@@ -17,7 +17,7 @@ open System.Net.Sockets
 open System.Net.Security
 open System.Security.Cryptography.X509Certificates
 
-type ConnectionPool (config: PulsarClientConfiguration) =
+type internal ConnectionPool (config: PulsarClientConfiguration) =
 
     let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
     let protocolVersion =
@@ -104,7 +104,6 @@ type ConnectionPool (config: PulsarClientConfiguration) =
                             {
                                 Input = pipeConnection.Input
                                 Output = writerStream
-                                IsActive = fun () -> socket.Connected
                                 Dispose = sslStream.Dispose
                             }
                     else
@@ -114,7 +113,6 @@ type ConnectionPool (config: PulsarClientConfiguration) =
                             {
                                 Input = pipeConnection.Input
                                 Output = writerStream
-                                IsActive = fun () -> socket.Connected
                                 Dispose = pipeConnection.Dispose
                             }
                 }

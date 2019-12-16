@@ -54,7 +54,7 @@ let tests =
                     task {
                         for i in [1..100] do
                             let! message = consumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("{0} received {1}", consumerName, received)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then
@@ -64,7 +64,7 @@ let tests =
                         do! Task.Delay(1100)
                         for i in [91..100] do
                             let! message = consumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("{0} received {1}", consumerName, received)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then
@@ -109,7 +109,7 @@ let tests =
                     task {
                         for i in [1..100] do
                             let! message = consumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("{0} received {1}", consumerName, received)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then
@@ -119,7 +119,7 @@ let tests =
                         do! Task.Delay(1100)
                         for i in [91..100] do
                             let! message = consumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("{0} received {1}", consumerName, received)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then
@@ -167,7 +167,7 @@ let tests =
                         let hashSet2 = HashSet [91..100]
                         for i in [1..100] do
                             let! message = consumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             let receivedNumber = getMessageNumber received
                             hashSet1.Remove receivedNumber |> ignore
                             Log.Debug("{0} received {1}", "AckTimeoutConsumer", received)
@@ -177,7 +177,7 @@ let tests =
                         do! Task.Delay(1100)
                         for i in [91..100] do
                             let! message = consumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             let receivedNumber = getMessageNumber received
                             hashSet2.Remove receivedNumber |> ignore
                             Log.Debug("{0} received {1}", "AckTimeoutConsumer", received)
@@ -224,7 +224,7 @@ let tests =
                         let mutable messageId = MessageId.Earliest
                         for i in [1..100] do
                             let! message = consumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("{0} received {1}", consumerName, received)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then
@@ -343,7 +343,7 @@ let tests =
                     task {
                         for i in [1..messagesCount] do
                             let! message = consumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("{0} received {1}", consumerName, received)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then
@@ -401,7 +401,7 @@ let tests =
                     task {
                         for i in [1..10] do
                             let! message = consumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("{0} received {1}", consumerName, received)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then
@@ -412,7 +412,7 @@ let tests =
                                 do! consumer.NegativeAcknowledge(message.MessageId)
                         for i in [10..10] do
                             let! message = consumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("{0} received {1}", consumerName, received)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then

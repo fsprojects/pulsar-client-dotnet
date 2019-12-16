@@ -13,7 +13,7 @@ open System.Timers
 open System.IO
 open ProtoBuf
 
-type ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+type internal ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) as this =
     let producerId = Generators.getNextProducerId()
 

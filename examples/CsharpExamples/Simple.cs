@@ -30,7 +30,7 @@ namespace CsharpExamples
             Console.WriteLine($"MessageId is: '{messageId}'");
 
             var message = await consumer.ReceiveAsync();
-            Console.WriteLine($"Received: {Encoding.UTF8.GetString(message.Payload)}");
+            Console.WriteLine($"Received: {Encoding.UTF8.GetString(message.Data)}");
 
             await consumer.AcknowledgeAsync(message.MessageId);
         }

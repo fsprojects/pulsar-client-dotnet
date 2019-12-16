@@ -8,23 +8,23 @@ open System.Timers
 open FSharp.UMX
 open pulsar.proto
 
-type GroupingTrackerMessage =
+type internal GroupingTrackerMessage =
     | IsDuplicate of (MessageId*AsyncReplyChannel<bool>)
     | AddAcknowledgment of (MessageId*AckType*AsyncReplyChannel<unit>)
     | FlushAndClean
     | Flush
     | Stop
 
-type LastCumulativeAck = MessageId
+type internal LastCumulativeAck = MessageId
 
-type IAcknowledgmentsGroupingTracker =
+type internal IAcknowledgmentsGroupingTracker =
     abstract member IsDuplicate: MessageId -> bool
     abstract member AddAcknowledgment: MessageId * AckType -> Async<unit>
     abstract member FlushAndClean: unit -> unit
     abstract member Flush: unit -> unit
     abstract member Close: unit -> unit
 
-type AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackGroupTime: TimeSpan,
+type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackGroupTime: TimeSpan,
                                     getState: unit -> ConnectionState,
                                     sendAckPayload: ClientCnx -> Payload -> Async<bool>) =
 

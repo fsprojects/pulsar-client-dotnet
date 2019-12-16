@@ -6,7 +6,7 @@ open System.Threading
 open Pulsar.Client.Api
 open FSharp.UMX
 
-type SinglePartitionMessageRouterImpl (partitionIndex: int, hashFun: string -> int) =
+type internal SinglePartitionMessageRouterImpl (partitionIndex: int, hashFun: string -> int) =
     interface IMessageRouter with
         member this.ChoosePartition (messageKey, numPartitions) =
             if String.IsNullOrEmpty(%messageKey) then
@@ -15,7 +15,7 @@ type SinglePartitionMessageRouterImpl (partitionIndex: int, hashFun: string -> i
                 // If the message has a key, it supersedes the single partition routing policy
                 signSafeMod (hashFun %messageKey) numPartitions
 
-type RoundRobinPartitionMessageRouterImpl (startPartitionIndex: int, isBatchingEnabled: bool, maxBatchingDelayMs: int, hashFun: string -> int) =
+type internal RoundRobinPartitionMessageRouterImpl (startPartitionIndex: int, isBatchingEnabled: bool, maxBatchingDelayMs: int, hashFun: string -> int) =
     let mutable partitionIndex = startPartitionIndex
     let maxBatchingDelayMs = Math.Max(1, maxBatchingDelayMs)
 

@@ -41,7 +41,6 @@ let tests =
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .SubscribeAsync() |> Async.AwaitTask
 
-
             let messages = generateMessages 100 producerName
 
             let producerTask =
@@ -105,7 +104,6 @@ let tests =
                     .ConsumerName(consumerName2)
                     .SubscribeAsync() |> Async.AwaitTask
 
-
             let messages1 = generateMessages 50 producerName1
             let messages2 = generateMessages 50 producerName2
             let allMessages =  [| yield! messages1; yield! messages2 |]
@@ -135,13 +133,12 @@ let tests =
             let resultStream = AsyncSeq.mergeAll([stream1;stream2])
             let enumerator = resultStream.GetEnumerator()
 
-
             let consumerTask =
                 Task.Run(fun () ->
                     task {
                         for i in [1..100] do
                             let! message = enumerator.MoveNext()
-                            let received = Encoding.UTF8.GetString(message.Value.Payload)
+                            let received = Encoding.UTF8.GetString(message.Value.Data)
                             Log.Debug("Some consumer received {1}", received)
                             if allMessages |> Array.contains received |> not then
                                 failwith <| sprintf "Received unexpected message '%s'" received

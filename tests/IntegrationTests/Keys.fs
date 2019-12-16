@@ -114,12 +114,12 @@ let tests =
                         let! msg1 = consumer1.ReceiveAsync()
                         let! msg2 = consumer1.ReceiveAsync()
                         let! msg3 = consumer1.ReceiveAsync()
-                        let prefix = (string msg1.MessageKey).Substring(0,6)
+                        let prefix = (string msg1.Key).Substring(0,6)
                         [msg1;msg2;msg3]
                             |> List.iteri
                             (fun i elem ->
-                                let strKey = string elem.MessageKey
-                                let message = Encoding.UTF8.GetString(elem.Payload)
+                                let strKey = string elem.Key
+                                let message = Encoding.UTF8.GetString(elem.Data)
                                 if (strKey = prefix && message.StartsWith(prefix) && message.EndsWith(i.ToString())) |> not then
                                     failwith <| sprintf "Incorrect key %s prefix %s consumer %s" strKey prefix consumerName1
                                 else
@@ -134,12 +134,12 @@ let tests =
                         let! msg1 = consumer2.ReceiveAsync()
                         let! msg2 = consumer2.ReceiveAsync()
                         let! msg3 = consumer2.ReceiveAsync()
-                        let prefix = (string msg1.MessageKey).Substring(0,6)
+                        let prefix = (string msg1.Key).Substring(0,6)
                         [msg1;msg2;msg3]
                             |> List.iteri
                             (fun i elem ->
-                                let strKey = string elem.MessageKey
-                                let message = Encoding.UTF8.GetString(elem.Payload)
+                                let strKey = string elem.Key
+                                let message = Encoding.UTF8.GetString(elem.Data)
                                 if (strKey = prefix && message.StartsWith(prefix) && message.EndsWith(i.ToString())) |> not then
                                     failwith <| sprintf "Incorrect key %s prefix %s consumer %s" strKey prefix consumerName2
                                 else
@@ -153,12 +153,12 @@ let tests =
             Log.Debug("Finished Messages with same key always go to the same consumer")
         }
 
-        // Should be run manually, should finish after https://github.com/apache/pulsar/issues/5384 is completed
+        // Should be run manually, first with commented consumer, then trigger compaction, then with commented producer
         ptestAsync "Compacting works as expected" {
 
             Log.Debug("Started Keys and properties are propertly passed")
             let client = getClient()
-            let topicName = "public/retention/topic-2" // + Guid.NewGuid().ToString("N")
+            let topicName = "public/retention/topic-compacted" // + Guid.NewGuid().ToString("N")
             let producerName = "propsTestProducer"
             let consumerName = "propsTestConsumer"
 
@@ -173,19 +173,28 @@ let tests =
             //    ConsumerBuilder(client)
             //        .Topic(topicName)
             //        .ConsumerName(consumerName)
-            //        .SubscriptionName("test-subscription")
+            //        .SubscriptionName(Guid.NewGuid().ToString("N"))
+            //        .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+            //        .ReadCompacted(true)
             //        .SubscribeAsync() |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
                     task {
                         do! produceMessagesWithSameKey producer 100 "test" producerName
+                        return ()
                     }:> Task)
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        //do! consumeMessagesWithProps consumer 100 consumerName
+                        //let! message = consumer.ReceiveAsync()
+                        //let received = Encoding.UTF8.GetString(message.Payload)
+                        //Log.Debug("{0} received {1}", consumerName, received)
+                        //do! consumer.AcknowledgeAsync(message.MessageId)
+                        //let expected = "Message #100"
+                        //if received.StartsWith(expected) |> not then
+                        //    failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
                         return ()
                     }:> Task)
 

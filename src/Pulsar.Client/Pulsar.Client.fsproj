@@ -5,11 +5,11 @@
     <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);CopyProjectReferencesToPackage</TargetsForTfmSpecificBuildOutput>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>0.9.1</Version>
+    <Version>0.10.0</Version>
     <Company>F# community</Company>
     <Description>.NET client for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Minor api improvements</PackageReleaseNotes>
+    <PackageReleaseNotes>Refining API (Payload -&gt; Data, MessageKey -&gt; Key)</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryType>GitHub</RepositoryType>
     <PackageTags>pulsar</PackageTags>

@@ -308,7 +308,7 @@ let tests =
                     task {
                         for i in lBorder..uBorder do
                             let! message = dlqConsumer.ReceiveAsync()
-                            let received = Encoding.UTF8.GetString(message.Payload)
+                            let received = Encoding.UTF8.GetString(message.Data)
                             do! dlqConsumer.AcknowledgeAsync(message.MessageId)
                             let expected = "Message #" + string i
                             if received.StartsWith(expected) |> not then

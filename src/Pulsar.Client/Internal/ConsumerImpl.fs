@@ -14,7 +14,7 @@ open pulsar.proto
 open System.Collections.Generic
 open System.Linq
 
-type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, subscriptionMode: SubscriptionMode, startMessageId: MessageId option, lookup: BinaryLookupService,
                            cleanup: ConsumerImpl -> unit) as this =
 
@@ -188,11 +188,11 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
             return deadMessageProcessed
         }
 
-    let receiveIndividualMessagesFromBatch (rawMessage: Message) =
+    let receiveIndividualMessagesFromBatch (rawMessage: RawMessage) (decompressedPayload: byte[]) =
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
         let mutable skippedMessages = 0
-        use stream = new MemoryStream(rawMessage.Payload)
+        use stream = new MemoryStream(decompressedPayload)
         use binaryReader = new BinaryReader(stream)
         for i in 0..batchSize-1 do
             Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
@@ -212,17 +212,16 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                     }
                 let message =
                     {
-                        rawMessage with
-                            MessageId = messageId
-                            Payload = singleMessagePayload
-                            Properties =
-                                if singleMessageMetadata.Properties.Count > 0 then
-                                    singleMessageMetadata.Properties
-                                    |> Seq.map (fun prop -> (prop.Key, prop.Value))
-                                    |> dict
-                                else
-                                    EmptyProps
-                            MessageKey = %singleMessageMetadata.PartitionKey
+                        MessageId = messageId
+                        Properties =
+                            if singleMessageMetadata.Properties.Count > 0 then
+                                singleMessageMetadata.Properties
+                                |> Seq.map (fun prop -> (prop.Key, prop.Value))
+                                |> dict
+                            else
+                                EmptyProps
+                        Key = singleMessageMetadata.PartitionKey
+                        Data = singleMessagePayload
                     }
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                     deadLettersProcessor.AddMessage messageId message
@@ -274,10 +273,10 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
             waitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
         Log.Logger.LogInformation("{0} stopped", prefix)
 
-    let decompress message =
-        let compressionCodec = message.Metadata.CompressionType |> CompressionCodec.create
-        let uncompressedPayload = compressionCodec.Decode message.Metadata.UncompressedMessageSize message.Payload
-        { message with Payload = uncompressedPayload }
+    let getDecompressPayload originalMessage =
+        let compressionCodec = originalMessage.Metadata.CompressionType |> CompressionCodec.create
+        let uncompressedPayload = compressionCodec.Decode originalMessage.Metadata.UncompressedMessageSize originalMessage.Payload
+        uncompressedPayload
 
     let consumerIsReconnectedToBroker() =
         Log.Logger.LogInformation("{0} subscribed to topic {1}", prefix, consumerConfig.Topic)
@@ -386,7 +385,12 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                 // We need to discard entries that were prior to startMessageId
                                 Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                             else
-                                let message = { rawMessage with MessageId = msgId } |> decompress
+                                let message = {
+                                    MessageId = msgId
+                                    Data = getDecompressPayload rawMessage
+                                    Key = %rawMessage.MessageKey
+                                    Properties = rawMessage.Properties
+                                }
 
                                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                                     deadLettersProcessor.AddMessage message.MessageId message
@@ -402,7 +406,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                         replyWithMessage waitingChannel <| incomingMessages.Dequeue()
                         elif rawMessage.Metadata.NumMessages > 0 then
                             // handle batch message enqueuing; uncompressed payload has all messages in batch
-                            receiveIndividualMessagesFromBatch (rawMessage |> decompress)
+                            receiveIndividualMessagesFromBatch rawMessage (getDecompressPayload rawMessage)
                             if hasWaitingChannel && incomingMessages.Count > 0 then
                                 let waitingChannel = waiters.Dequeue()
                                 replyWithMessage waitingChannel <| incomingMessages.Dequeue()
@@ -637,7 +641,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
 
     override this.GetHashCode () = int consumerId
 
-    member internal this.InitInternal() =
+    member this.InitInternal() =
         task {
             do connectionHandler.GrabCnx()
             return! subscribeTsc.Task

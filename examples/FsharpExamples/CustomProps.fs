@@ -37,7 +37,7 @@ let runCustomProps () =
         printfn "MessageId is: '%A'" messageId
 
         let! message = consumer.ReceiveAsync()
-        printfn "Received: %s key: %s prop1: %s" (message.Payload |> Encoding.UTF8.GetString) %message.MessageKey message.Properties.["1"]
+        printfn "Received: %s key: %s prop1: %s" (message.Data |> Encoding.UTF8.GetString) %message.Key message.Properties.["1"]
 
         do! consumer.AcknowledgeAsync(message.MessageId)
     }

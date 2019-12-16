@@ -12,14 +12,14 @@ open System.Threading
 open System.Timers
 open FSharp.Control
 
-type MultiTopicConnectionState =
+type internal MultiTopicConnectionState =
     | Uninitialized
     | Failed
     | Ready
     | Closing
     | Closed
 
-type MultiTopicConsumerMessage =
+type internal MultiTopicConsumerMessage =
     | Init
     | Receive of AsyncReplyChannel<Async<Message option>>
     | Acknowledge of AsyncReplyChannel<Task<unit>> * MessageId
@@ -31,12 +31,12 @@ type MultiTopicConsumerMessage =
     | HasReachedEndOfTheTopic of AsyncReplyChannel<bool>
     | TickTime
 
-type MultipleTopicsConsumerState = {
+type internal MultipleTopicsConsumerState = {
     Stream: AsyncSeq<Message>
     Enumerator: IAsyncEnumerator<Message>
 }
 
-type MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                                       numPartitions: int, lookup: BinaryLookupService, cleanup: ConsumerImpl -> unit) as this =
 
     let consumerId = Generators.getNextConsumerId()
