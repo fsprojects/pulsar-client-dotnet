@@ -41,7 +41,6 @@ let tests =
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .SubscribeAsync() |> Async.AwaitTask
 
-
             let messages = generateMessages 100 producerName
 
             let producerTask =
@@ -105,7 +104,6 @@ let tests =
                     .ConsumerName(consumerName2)
                     .SubscribeAsync() |> Async.AwaitTask
 
-
             let messages1 = generateMessages 50 producerName1
             let messages2 = generateMessages 50 producerName2
             let allMessages =  [| yield! messages1; yield! messages2 |]
@@ -134,7 +132,6 @@ let tests =
             let stream2 = getStream consumer2
             let resultStream = AsyncSeq.mergeAll([stream1;stream2])
             let enumerator = resultStream.GetEnumerator()
-
 
             let consumerTask =
                 Task.Run(fun () ->

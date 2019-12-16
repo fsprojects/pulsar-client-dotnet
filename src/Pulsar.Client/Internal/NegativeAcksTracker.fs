@@ -19,7 +19,7 @@ type internal NegativeAcksTracker (prefix: string, negativeAckRedeliveryDelay: T
     let prefix = prefix + " NegativeTracker"
 
     let mb = MailboxProcessor<NegativeAcksTrackerMessage>.Start(fun inbox ->
-        let rec loop (state: Dictionary<MessageId, DateTime>)  =
+        let rec loop (state: SortedDictionary<MessageId, DateTime>)  =
             async {
                 let! message = inbox.Receive()
                 match message with
@@ -56,7 +56,7 @@ type internal NegativeAcksTracker (prefix: string, negativeAckRedeliveryDelay: T
                     Log.Logger.LogDebug("{0} Stop", prefix)
                     state.Clear()
             }
-        loop (Dictionary<MessageId, DateTime>())
+        loop (SortedDictionary<MessageId, DateTime>())
     )
 
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))

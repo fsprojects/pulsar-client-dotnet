@@ -15,6 +15,7 @@
     <Compile Include="Keys.fs" />
     <Compile Include="Partitions.fs" />
     <Compile Include="Basic.fs" />
+    <Compile Include="DeadLetters.fs" />
     <Compile Include="Compression.fs" />
     <None Include="paket.references" />
     <Compile Include="Main.fs" />

@@ -60,7 +60,7 @@ module ConsumerBuilderTests =
                 let builder' = builder().SubscriptionName("subscription-name")
 
                 fun() -> builder'.SubscribeAsync() |> ignore
-                |> Expect.throwsWithMessage<ArgumentException> "Topic name must be set on the producer builder."
+                |> Expect.throwsWithMessage<ArgumentException> "Topic name must be set on the consumer builder."
             }
 
             test "SubscribeAsync throws an exception if SubscriptionName is blank" {
@@ -68,7 +68,7 @@ module ConsumerBuilderTests =
 
                 fun() -> builder'.SubscribeAsync() |> ignore
                 |> Expect.throwsWithMessage<ArgumentException>
-                    "Subscription name name must be set on the producer builder."
+                    "Subscription name must be set on the consumer builder."
             }
 
             test "AckTimeout throws if ackTimeout is less than minimal" {

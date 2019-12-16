@@ -1,6 +1,7 @@
 ﻿namespace Pulsar.Client.Api
 
 open Pulsar.Client.Common
+open Pulsar.Client.Internal
 open System
 open System.Security.Cryptography.X509Certificates
 
@@ -43,6 +44,7 @@ type ConsumerConfiguration =
         ReadCompacted: bool
         NegativeAckRedeliveryDelay: TimeSpan
         ResetIncludeHead: bool
+        DeadLettersProcessor : IDeadLettersProcessor
     }
     static member Default =
         {
@@ -60,6 +62,7 @@ type ConsumerConfiguration =
             ReadCompacted = false
             NegativeAckRedeliveryDelay = TimeSpan.FromMinutes(1.0)
             ResetIncludeHead = false
+            DeadLettersProcessor = DeadLettersProcessor.Disabled
         }
 
 type ProducerConfiguration =

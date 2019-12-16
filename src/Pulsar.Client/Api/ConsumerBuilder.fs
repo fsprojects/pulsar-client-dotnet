@@ -1,13 +1,16 @@
 ﻿namespace Pulsar.Client.Api
 
 open Pulsar.Client.Common
-open FSharp.UMX
+open Pulsar.Client.Internal
 open System
 
 type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguration) =
 
     [<Literal>]
     let MIN_ACK_TIMEOUT_MILLIS = 1000
+
+    [<Literal>]
+    let DEFAULT_ACK_TIMEOUT_MILLIS_FOR_DEAD_LETTER = 30000.0
 
     let verify(config : ConsumerConfiguration) =
         let checkValue check config =
@@ -18,11 +21,11 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
         |> checkValue
             (fun c ->
                 c.Topic
-                |> invalidArgIfDefault "Topic name must be set on the producer builder.")
+                |> invalidArgIfDefault "Topic name must be set on the consumer builder.")
         |> checkValue
             (fun c ->
                 c.SubscriptionName
-                |> invalidArgIfBlankString "Subscription name name must be set on the producer builder.")
+                |> invalidArgIfBlankString "Subscription name must be set on the consumer builder.")
         |> checkValue
             (fun c ->
                 invalidArgIfTrue (
@@ -100,6 +103,29 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
             client,
             { config with
                 NegativeAckRedeliveryDelay = negativeAckRedeliveryDelay  })
+
+    member __.DeadLettersPolicy (policy: DeadLettersPolicy) =
+
+        let ackTimeoutTickTime =
+            if config.AckTimeoutTickTime = TimeSpan.Zero
+            then TimeSpan.FromMilliseconds(DEFAULT_ACK_TIMEOUT_MILLIS_FOR_DEAD_LETTER)
+            else config.AckTimeoutTickTime
+
+        let getTopicName() = config.Topic.ToString()
+        let getSubscriptionName() = config.SubscriptionName
+        let createProducer deadLetterTopic =
+            ProducerBuilder(client)
+                .Topic(deadLetterTopic)
+                .EnableBatching(false) // dead letters are sent one by one anyway
+                .CreateAsync()
+        let deadLettersProcessor =
+            DeadLettersProcessor(policy, getTopicName, getSubscriptionName, createProducer) :> IDeadLettersProcessor
+
+        ConsumerBuilder(
+            client,
+            { config with
+                AckTimeoutTickTime = ackTimeoutTickTime
+                DeadLettersProcessor = deadLettersProcessor })
 
     member this.SubscribeAsync() =
         config

@@ -32,6 +32,8 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
     let mutable lastDequeuedMessage = MessageId.Earliest
     let mutable startMessageId = startMessageId
     let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
+    let deadLettersProcessor = consumerConfig.DeadLettersProcessor
+
     let connectionHandler =
         ConnectionHandler(prefix,
                           connectionPool,
@@ -105,6 +107,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
             do! acksGroupingTracker.AddAcknowledgment(messageId, ackType)
             // Consumer acknowledgment operation immediately succeeds. In any case, if we're not able to send ack to broker,
             // the messages will be re-delivered
+            deadLettersProcessor.RemoveMessage messageId
         }
 
     let markAckForBatchMessage (msgId: MessageId) ackType (batchDetails: BatchDetails) =
@@ -132,6 +135,19 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
             Log.Logger.LogDebug("{0} cannot ack message acktype {1}, cardinality {2}, length {3}",
                 prefix, ackType, outstandingAcks, batchSize)
             false
+
+    let trySendAcknowledge ackType messageId =
+        async {
+            match messageId.Type with
+            | Cumulative batchDetails when not (markAckForBatchMessage messageId ackType batchDetails) ->
+                // other messages in batch are still pending ack.
+                ()
+            | _ ->
+                do! sendAcknowledge messageId ackType
+                Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
+        }
+
+    let trySendIndividualAcknowledge = trySendAcknowledge AckType.Individual
 
     let isPriorEntryIndex idx =
         match startMessageId with
@@ -161,6 +177,17 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
         | Some startMsgId ->
             subscriptionMode = SubscriptionMode.NonDurable && startMsgId.LedgerId = msgId.LedgerId && startMsgId.EntryId = msgId.EntryId
 
+    let clearDeadLetters() = deadLettersProcessor.ClearMessages()
+
+    let getNewIndividualMsgIdWithPartition messageId =
+        { messageId with Type = Individual; Partition = partitionIndex; TopicName = %"" }
+
+    let processDeadLetters (messageId : MessageId) =
+        task {
+            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId trySendIndividualAcknowledge
+            return deadMessageProcessed
+        }
+
     let receiveIndividualMessagesFromBatch (rawMessage: RawMessage) (decompressedPayload: byte[]) =
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
@@ -178,11 +205,10 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
             else
                 let messageId =
                     {
-                        LedgerId = rawMessage.MessageId.LedgerId
-                        EntryId = rawMessage.MessageId.EntryId
-                        Partition = partitionIndex
-                        Type = Cumulative(%i, acker)
-                        TopicName = %""
+                        rawMessage.MessageId with
+                            Partition = partitionIndex
+                            Type = Cumulative(%i, acker)
+                            TopicName = %""
                     }
                 let message =
                     {
@@ -197,7 +223,10 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                         Key = singleMessageMetadata.PartitionKey
                         Data = singleMessagePayload
                     }
+                if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
+                    deadLettersProcessor.AddMessage messageId message
                 incomingMessages.Enqueue(message)
+
         if skippedMessages > 0 then
             increaseAvailablePermits skippedMessages
 
@@ -236,6 +265,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
     let stopConsumer () =
         unAckedMessageTracker.Close()
+        clearDeadLetters()
         negativeAcksTracker.Close()
         cleanup(this)
         while waiters.Count > 0 do
@@ -267,6 +297,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                         let requestId = Generators.getNextRequestId()
                         let isDurable = subscriptionMode = SubscriptionMode.Durable
                         startMessageId <- clearReceiverQueue()
+                        clearDeadLetters()
                         let msgIdData =
                             if isDurable then
                                 null
@@ -341,18 +372,18 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                 | ConsumerMessage.MessageReceived rawMessage ->
 
                     let hasWaitingChannel = waiters.Count > 0
-                    let msgId = { rawMessage.MessageId with Partition = partitionIndex }
+                    let msgId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
                     Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3}",
                         prefix, msgId, incomingMessages.Count, hasWaitingChannel)
 
                     if (acksGroupingTracker.IsDuplicate(msgId)) then
-                        Log.Logger.LogInformation("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
+                        Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
                         increaseAvailablePermits rawMessage.Metadata.NumMessages
                     else
                         if (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
                             if isNonDurableAndSameEntryAndLedger(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
                                 // We need to discard entries that were prior to startMessageId
-                                Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
+                                Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                             else
                                 let message = {
                                     MessageId = msgId
@@ -360,6 +391,10 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                                     Key = %rawMessage.MessageKey
                                     Properties = rawMessage.Properties
                                 }
+
+                                if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
+                                    deadLettersProcessor.AddMessage message.MessageId message
+
                                 if not hasWaitingChannel then
                                     incomingMessages.Enqueue(message)
                                 else
@@ -377,7 +412,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                                 replyWithMessage waitingChannel <| incomingMessages.Dequeue()
                         else
                             Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
-                        return! loop ()
+                    return! loop ()
 
                 | ConsumerMessage.Receive ch ->
 
@@ -394,13 +429,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                     Log.Logger.LogDebug("{0} Acknowledge", prefix)
                     match connectionHandler.ConnectionState with
                     | Ready _ ->
-                        match messageId.Type with
-                        | Cumulative batchDetails when not (markAckForBatchMessage messageId ackType batchDetails) ->
-                            // other messages in batch are still pending ack.
-                            ()
-                        | _ ->
-                            do! sendAcknowledge messageId ackType
-                            Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
+                        do! trySendAcknowledge ackType messageId
                         channel.Reply(true)
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
@@ -415,16 +444,24 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                         match connectionHandler.ConnectionState with
                         | Ready clientCnx ->
                             let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds);
-                            let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
-                            for batch in batches do
-                                let command = Commands.newRedeliverUnacknowledgedMessages consumerId (
-                                                    Some(batch |> Seq.map (fun msgId -> MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)))
-                                                )
-                                let! success = clientCnx.Send command
-                                if success then
-                                    Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
+                            let chunks = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
+                            for chunk in chunks do
+                                let nonDeadBatch = ResizeArray<MessageId>()
+                                for messageId in chunk do
+                                    let! isDead = processDeadLetters messageId |> Async.AwaitTask
+                                    if not isDead then
+                                        nonDeadBatch.Add messageId
+                                if nonDeadBatch.Count > 0 then
+                                    let command = Commands.newRedeliverUnacknowledgedMessages consumerId (
+                                                        Some(nonDeadBatch |> Seq.map (fun msgId -> MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)))
+                                                    )
+                                    let! success = clientCnx.Send command
+                                    if success then
+                                        Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
+                                    else
+                                        Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
                                 else
-                                    Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
+                                    Log.Logger.LogDebug("{0} All messages were dead", prefix)
                             if messagesFromQueue > 0 then
                                 increaseAvailablePermits messagesFromQueue
                         | _ ->
@@ -562,6 +599,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                     | Ready clientCnx ->
                         connectionHandler.Closing()
                         unAckedMessageTracker.Close()
+                        clearDeadLetters()
                         Log.Logger.LogInformation("{0} starting unsubscribe ", prefix)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newUnsubscribeConsumer consumerId requestId
