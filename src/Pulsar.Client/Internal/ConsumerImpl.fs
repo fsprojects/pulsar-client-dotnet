@@ -384,7 +384,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                         if (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
                             if isNonDurableAndSameEntryAndLedger(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
                                 // We need to discard entries that were prior to startMessageId
-                                Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
+                                Log.Logger.LogWarning("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                             else
                                 let message = { rawMessage with MessageId = msgId } |> decompress
 
@@ -408,7 +408,7 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                 replyWithMessage waitingChannel <| incomingMessages.Dequeue()
                         else
                             Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
-                        return! loop ()
+                    return! loop ()
 
                 | ConsumerMessage.Receive ch ->
 
@@ -447,14 +447,17 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                                     let! isDead = processDeadLetters messageId |> Async.AwaitTask
                                     if not isDead then
                                         nonDeadBatch.Add messageId
-                                let command = Commands.newRedeliverUnacknowledgedMessages consumerId (
-                                                    Some(nonDeadBatch |> Seq.map (fun msgId -> MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)))
-                                                )
-                                let! success = clientCnx.Send command
-                                if success then
-                                    Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
+                                if nonDeadBatch.Count > 0 then
+                                    let command = Commands.newRedeliverUnacknowledgedMessages consumerId (
+                                                        Some(nonDeadBatch |> Seq.map (fun msgId -> MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)))
+                                                    )
+                                    let! success = clientCnx.Send command
+                                    if success then
+                                        Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
+                                    else
+                                        Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
                                 else
-                                    Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
+                                    Log.Logger.LogDebug("{0} All messages were dead", prefix)
                             if messagesFromQueue > 0 then
                                 increaseAvailablePermits messagesFromQueue
                         | _ ->

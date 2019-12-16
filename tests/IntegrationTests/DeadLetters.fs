@@ -22,9 +22,6 @@ let tests =
         let newGuid = Guid.NewGuid().ToString("N")
         {|
             TopicName = sprintf "public/default/topic-%s" newGuid
-            ProducerName = sprintf "dlqProducer-%s" newGuid
-            ConsumerName = sprintf "negativeConsumer-%s" newGuid
-            DlqConsumerName = sprintf "dlqConsumer-%s" newGuid
             DeadLettersPolicy = DeadLettersPolicy(0, sprintf "public/default/topic-%s-DLQ" newGuid)
             SubscriptionName = "dlqSubscription"
             NumberOfMessages = 10
@@ -45,10 +42,13 @@ let tests =
             description |> logTestStart
 
             let config = getTestConfig()
+            let producerName = "configuredProducer"
+            let consumerName = "configuredConsumer"
+            let dlqConsumerName = "configuredDLQConsumer"
 
             let! producer =
                 createProducer()
-                    .ProducerName(config.ProducerName)
+                    .ProducerName(producerName)
                     .Topic(config.TopicName)
                     .EnableBatching(false)
                     .CreateAsync()
@@ -56,7 +56,7 @@ let tests =
 
             let! consumer =
                 createConsumer()
-                    .ConsumerName(config.ConsumerName)
+                    .ConsumerName(consumerName)
                     .Topic(config.TopicName)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
@@ -67,7 +67,7 @@ let tests =
 
             let! dlqConsumer =
                 createConsumer()
-                    .ConsumerName(config.DlqConsumerName)
+                    .ConsumerName(dlqConsumerName)
                     .Topic(config.DeadLettersPolicy.DeadLetterTopic)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
@@ -77,7 +77,7 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer config.NumberOfMessages config.ProducerName
+                        do! produceMessages producer config.NumberOfMessages producerName
                     }:> Task)
 
             let consumerTask =
@@ -89,7 +89,7 @@ let tests =
             let dlqConsumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages dlqConsumer config.NumberOfMessages config.DlqConsumerName
+                        do! consumeMessages dlqConsumer config.NumberOfMessages dlqConsumerName
                     }:> Task)
 
             let tasks =
@@ -111,10 +111,13 @@ let tests =
             description |> logTestStart
 
             let config = getTestConfig()
+            let producerName = "defaultProducer"
+            let consumerName = "defaultConsumer"
+            let dlqConsumerName = "defaultDLQConsumer"
 
             let! producer =
                 createProducer()
-                    .ProducerName(config.ProducerName)
+                    .ProducerName(producerName)
                     .Topic(config.TopicName)
                     .EnableBatching(false)
                     .CreateAsync()
@@ -122,7 +125,7 @@ let tests =
 
             let! consumer =
                 createConsumer()
-                    .ConsumerName(config.ConsumerName)
+                    .ConsumerName(consumerName)
                     .Topic(config.TopicName)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
@@ -133,7 +136,7 @@ let tests =
 
             let! dlqConsumer =
                 createConsumer()
-                    .ConsumerName(config.DlqConsumerName)
+                    .ConsumerName(dlqConsumerName)
                     .Topic(sprintf "%s-%s-DLQ" config.TopicName config.SubscriptionName)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
@@ -143,7 +146,7 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer config.NumberOfMessages config.ProducerName
+                        do! produceMessages producer config.NumberOfMessages producerName
                     }:> Task)
 
             let consumerTask =
@@ -155,7 +158,7 @@ let tests =
             let dlqConsumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages dlqConsumer config.NumberOfMessages config.DlqConsumerName
+                        do! consumeMessages dlqConsumer config.NumberOfMessages dlqConsumerName
                     }:> Task)
 
             let tasks =
@@ -177,10 +180,13 @@ let tests =
             description |> logTestStart
 
             let config = getTestConfig()
+            let producerName = "configuredBatchProducer"
+            let consumerName = "configuredBatchConsumer"
+            let dlqConsumerName = "configuredBatchDLQConsumer"
 
             let! producer =
                 createProducer()
-                    .ProducerName(config.ProducerName)
+                    .ProducerName(producerName)
                     .Topic(config.TopicName)
                     .BatchingMaxMessages(config.NumberOfMessages)
                     .CreateAsync()
@@ -188,7 +194,7 @@ let tests =
 
             let! consumer =
                 createConsumer()
-                    .ConsumerName(config.ConsumerName)
+                    .ConsumerName(consumerName)
                     .Topic(config.TopicName)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
@@ -199,7 +205,7 @@ let tests =
 
             let! dlqConsumer =
                 createConsumer()
-                    .ConsumerName(config.DlqConsumerName)
+                    .ConsumerName(dlqConsumerName)
                     .Topic(config.DeadLettersPolicy.DeadLetterTopic)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
@@ -209,7 +215,7 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! fastProduceMessages producer config.NumberOfMessages config.ProducerName
+                        do! fastProduceMessages producer config.NumberOfMessages producerName
                     }:> Task)
 
             let consumerTask =
@@ -221,7 +227,7 @@ let tests =
             let dlqConsumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages dlqConsumer config.NumberOfMessages config.DlqConsumerName
+                        do! consumeMessages dlqConsumer config.NumberOfMessages dlqConsumerName
                     }:> Task)
 
             let tasks =
@@ -243,13 +249,17 @@ let tests =
             description |> logTestStart
 
             let config = getTestConfig()
+            let producerName = "someBatchProducer"
+            let consumerName = "someBatchConsumer"
+            let dlqConsumerName = "someBatchDLQConsumer"
+
             let lBorder = 5
             let uBorder = 6
             let redeliveryCount = 1
 
             let! producer =
                 createProducer()
-                    .ProducerName(config.ProducerName)
+                    .ProducerName(producerName)
                     .Topic(config.TopicName)
                     .BatchingMaxMessages(config.NumberOfMessages)
                     .CreateAsync()
@@ -257,7 +267,7 @@ let tests =
 
             let! consumer =
                 createConsumer()
-                    .ConsumerName(config.ConsumerName)
+                    .ConsumerName(consumerName)
                     .Topic(config.TopicName)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
@@ -268,7 +278,7 @@ let tests =
 
             let! dlqConsumer =
                 createConsumer()
-                    .ConsumerName(config.DlqConsumerName)
+                    .ConsumerName(dlqConsumerName)
                     .Topic(config.DeadLettersPolicy.DeadLetterTopic)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
@@ -278,7 +288,7 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! fastProduceMessages producer config.NumberOfMessages config.ProducerName
+                        do! fastProduceMessages producer config.NumberOfMessages producerName
                     }:> Task)
 
             let consumerTask =
@@ -307,7 +317,7 @@ let tests =
                                     "Incorrect message expected %s received %s consumer %s"
                                     expected
                                     received
-                                    config.DlqConsumerName
+                                    dlqConsumerName
                     }:> Task)
 
             let tasks =
