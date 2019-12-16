@@ -378,13 +378,13 @@ type ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig:
                         prefix, msgId, incomingMessages.Count, hasWaitingChannel)
 
                     if (acksGroupingTracker.IsDuplicate(msgId)) then
-                        Log.Logger.LogInformation("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
+                        Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
                         increaseAvailablePermits rawMessage.Metadata.NumMessages
                     else
                         if (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
                             if isNonDurableAndSameEntryAndLedger(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
                                 // We need to discard entries that were prior to startMessageId
-                                Log.Logger.LogWarning("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
+                                Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                             else
                                 let message = { rawMessage with MessageId = msgId } |> decompress
 
