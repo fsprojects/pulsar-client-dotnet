@@ -11,7 +11,8 @@ open Pulsar.Client
 
 type CommandType = BaseCommand.Type
 
-Serializer.PrepareSerializer<BaseCommand>()
+[<Literal>]
+let DEFAULT_MAX_MESSAGE_SIZE = 5_242_880 //5 * 1024 * 1024
 
 let serializeSimpleCommand(command : BaseCommand) =
     fun (output: Stream) ->

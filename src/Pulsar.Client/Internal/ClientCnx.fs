@@ -70,6 +70,7 @@ type internal ClientCnx (config: PulsarClientConfiguration,
     let rejectedRequestResetTimeSec = 60
     let mutable numberOfRejectedRequests = 0
     let mutable isActive = true
+    let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
 
     let requestsMb = MailboxProcessor<RequestsOperation>.Start(fun inbox ->
         let rec loop () =
@@ -313,7 +314,10 @@ type internal ClientCnx (config: PulsarClientConfiguration,
     let handleCommand xcmd =
         match xcmd with
         | XCommandConnected cmd ->
-            Log.Logger.LogInformation("{0} Connected ProtocolVersion: {1} ServerVersion: {2}", prefix, cmd.ProtocolVersion, cmd.ServerVersion)
+            Log.Logger.LogInformation("{0} Connected ProtocolVersion: {1} ServerVersion: {2} MaxMessageSize: {3}",
+                prefix, cmd.ProtocolVersion, cmd.ServerVersion, cmd.MaxMessageSize)
+            if cmd.ShouldSerializeMaxMessageSize() then
+                maxMessageSize <- cmd.MaxMessageSize
             initialConnectionTsc.SetResult(this)
         | XCommandPartitionedTopicMetadataResponse cmd ->
             if (cmd.ShouldSerializeError()) then
@@ -427,6 +431,8 @@ type internal ClientCnx (config: PulsarClientConfiguration,
     member private this.SendMb with get(): MailboxProcessor<SocketMessage> = sendMb
 
     member private this.OperationsMb with get(): MailboxProcessor<CnxOperation> = operationsMb
+
+    member this.MaxMessageSize with get() = maxMessageSize
 
     member this.ClientCnxId with get() = clientCnxId
 

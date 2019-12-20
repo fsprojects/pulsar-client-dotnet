@@ -19,6 +19,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
 
     let prefix = sprintf "producer(%u, %s, %i)" %producerId producerConfig.ProducerName partitionIndex
     let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+    let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
 
     let pendingMessages = Queue<PendingMessage>()
 
@@ -137,13 +138,17 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
         let metadata = createMessageMetadata (MessageBuilder batchPayload) (Some batchSize)
         let sequenceId = %metadata.SequenceId
         let encodedBatchPayload = compressionCodec.Encode batchPayload
-        let payload = Commands.newSend producerId sequenceId batchSize metadata encodedBatchPayload
-        this.Mb.Post(SendMessage {
-            SequenceId = sequenceId
-            Payload = payload
-            Callback = BatchCallbacks batchCallbacks
-            CreatedAt = DateTime.Now
-        })
+        if (encodedBatchPayload.Length > maxMessageSize) then
+            batchCallbacks
+            |> Seq.iter (fun (_, tcs) -> tcs.SetException(InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize))
+        else
+            let payload = Commands.newSend producerId sequenceId batchSize metadata encodedBatchPayload
+            this.Mb.Post(SendMessage {
+                SequenceId = sequenceId
+                Payload = payload
+                Callback = BatchCallbacks batchCallbacks
+                CreatedAt = DateTime.Now
+            })
 
     let batchMessageAndSend() =
         let batchSize = batchMessageContainer.GetNumMessagesInBatch()
@@ -174,6 +179,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         Log.Logger.LogInformation("{0} starting register to topic {1}", prefix, producerConfig.Topic)
+                        maxMessageSize <- clientCnx.MaxMessageSize
                         clientCnx.AddProducer producerId this.Mb
                         let requestId = Generators.getNextRequestId()
                         try
@@ -261,10 +267,13 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
                     Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
                     let metadata = createMessageMetadata message None
                     let encodedMessage = compressionCodec.Encode message.Value
-                    let sequenceId = %metadata.SequenceId
-                    let payload = Commands.newSend producerId sequenceId 1 metadata encodedMessage
                     let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
-                    this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Callback = SingleCallback tcs; CreatedAt = DateTime.Now })
+                    if (encodedMessage.Length > maxMessageSize) then
+                        tcs.SetException(InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize)
+                    else
+                        let sequenceId = %metadata.SequenceId
+                        let payload = Commands.newSend producerId sequenceId 1 metadata encodedMessage
+                        this.Mb.Post(SendMessage { SequenceId = sequenceId; Payload = payload; Callback = SingleCallback tcs; CreatedAt = DateTime.Now })
                     channel.Reply(tcs)
                     return! loop ()
 

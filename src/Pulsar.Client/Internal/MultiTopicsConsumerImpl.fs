@@ -29,6 +29,7 @@ type internal MultiTopicConsumerMessage =
     | Close of AsyncReplyChannel<Task<unit>>
     | Unsubscribe of AsyncReplyChannel<Task<unit>>
     | HasReachedEndOfTheTopic of AsyncReplyChannel<bool>
+    | Seek of AsyncReplyChannel<Task> * uint64
     | TickTime
 
 type internal MultipleTopicsConsumerState = {
@@ -136,8 +137,8 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                     | Ready ->
                         consumers
                         |> Seq.map(fun consumer -> consumer.Value.RedeliverUnacknowledgedMessagesAsync())
+                        |> Seq.toArray
                         |> Task.WhenAll
-                        :> Task
                         |> channel.Reply
                     | _ ->
                         channel.Reply(Task.FromException(Exception(prefix + " invalid state: " + this.ConnectionState.ToString())))
@@ -187,6 +188,15 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
 
                     consumers
                     |> Seq.forall (fun kv -> kv.Value.HasReachedEndOfTopic)
+                    |> channel.Reply
+                    return! loop state
+
+                | Seek (channel, ts) ->
+
+                    consumers
+                    |> Seq.map (fun kv -> kv.Value.SeekAsync(ts) :> Task)
+                    |> Seq.toArray
+                    |> Task.WhenAll
                     |> channel.Reply
                     return! loop state
 
@@ -329,7 +339,10 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
             Task.FromException(exn "Seek operation not supported on multitopics consumer") :?> Task<unit>
 
         member this.SeekAsync (timestamp: uint64) =
-            Task.FromException(exn "Seek operation not supported on multitopics consumer") :?> Task<unit>
+            task {
+                let! result = mb.PostAndAsyncReply(fun channel -> Seek(channel, timestamp))
+                return! result
+            }
 
         member this.CloseAsync() =
             task {

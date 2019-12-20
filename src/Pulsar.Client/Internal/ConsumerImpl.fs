@@ -265,6 +265,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
     let stopConsumer () =
         unAckedMessageTracker.Close()
+        acksGroupingTracker.Close()
         clearDeadLetters()
         negativeAcksTracker.Close()
         cleanup(this)

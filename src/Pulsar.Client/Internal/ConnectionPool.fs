@@ -89,7 +89,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         task {
             let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
             let (LogicalAddress logicalAddress) = broker.LogicalAddress
-            let pipeOptions = PipeOptions(pauseWriterThreshold = 5_242_880L )
+            let pipeOptions = PipeOptions(pauseWriterThreshold = int64 Commands.DEFAULT_MAX_MESSAGE_SIZE )
             let! socket = getSocket physicalAddress
 
             let! connection =

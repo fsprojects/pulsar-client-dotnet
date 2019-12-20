@@ -22,7 +22,7 @@ open FSharp.UMX
 let tests =
 
 
-    testList "basic" [
+    testList "batching" [
 
         testAsync "Batch get sended if batch size exceeds" {
 
