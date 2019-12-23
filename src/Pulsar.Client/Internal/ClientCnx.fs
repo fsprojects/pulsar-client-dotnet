@@ -77,19 +77,29 @@ type internal ClientCnx (config: PulsarClientConfiguration,
             async {
                 match! inbox.Receive() with
                 | AddRequest (reqId, tsc) ->
+                    Log.Logger.LogDebug("{0} add request {1}", prefix, reqId)
                     requests.Add(reqId, tsc)
                     return! loop()
                 | CompleteRequest (reqId, result)  ->
-                    let tsc = requests.[reqId]
-                    tsc.SetResult result
-                    requests.Remove reqId |> ignore
+                    Log.Logger.LogDebug("{0} complete request {1}", prefix, reqId)
+                    match requests.TryGetValue(reqId) with
+                    | true, tsc ->
+                        tsc.SetResult result
+                        requests.Remove reqId |> ignore
+                    | _ ->
+                        Log.Logger.LogWarning("{0} complete non-existent request {1}, ignoring", prefix, reqId)
                     return! loop()
                 | FailRequest (reqId, ex)  ->
-                    let tsc = requests.[reqId]
-                    tsc.SetException ex
-                    requests.Remove reqId |> ignore
+                    Log.Logger.LogDebug("{0} fail request {1}", prefix, reqId)
+                    match requests.TryGetValue(reqId) with
+                    | true, tsc ->
+                        tsc.SetException ex
+                        requests.Remove reqId |> ignore
+                    | _ ->
+                        Log.Logger.LogWarning("{0} fail non-existent request {1}, ignoring", prefix, reqId)
                     return! loop()
                 | FailAllRequestsAndStop ->
+                    Log.Logger.LogDebug("{0} fail requests and stop", prefix)
                     requests |> Seq.iter (fun kv ->
                         kv.Value.SetException(ConnectException("Disconnected.")))
                     requests.Clear()
@@ -163,15 +173,12 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                     replyChannel.Reply(connected)
                     return! loop ()
                 | SocketMessageWithoutReply payload ->
-                    let! connected = sendSerializedPayload payload |> Async.AwaitTask
+                    let! _ = sendSerializedPayload payload |> Async.AwaitTask
                     return! loop ()
                 | SocketRequestMessageWithReply (reqId, payload, replyChannel) ->
                     let tsc = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
-                    let! connected = sendSerializedPayload payload |> Async.AwaitTask
-                    if connected then
-                        requestsMb.Post(AddRequest(reqId, tsc))
-                    else
-                        tsc.SetException(ConnectException("Disconnected on send"))
+                    requestsMb.Post(AddRequest(reqId, tsc))
+                    let! _ = sendSerializedPayload payload |> Async.AwaitTask
                     replyChannel.Reply(tsc.Task)
                     return! loop ()
                 | SocketMessage.Stop ->
