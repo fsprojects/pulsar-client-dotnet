@@ -131,6 +131,9 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
                 metadata.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
         if numMessagesInBatch.IsSome then
             metadata.NumMessagesInBatch <- numMessagesInBatch.Value
+
+        message.DeliverAt |> Option.iter (fun ts -> metadata.DeliverAtTime <- ts)
+
         metadata
 
     let sendOneBatch (batchPayload: byte[], batchCallbacks: BatchCallback[]) =
@@ -416,8 +419,8 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startSendTimeoutTimer()
 
-    member private this.SendMessage message =
-        if producerConfig.BatchingEnabled then
+    member private this.SendMessage (message : MessageBuilder) =
+        if producerConfig.BatchingEnabled && message.DeliverAt |> Option.isNone then
             mb.PostAndAsyncReply(fun channel -> StoreBatchItem (message, channel))
         else
             mb.PostAndAsyncReply(fun channel -> BeginSendMessage (message, channel))

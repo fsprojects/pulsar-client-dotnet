@@ -190,13 +190,13 @@ type Message =
 
 type MessageBuilder(value : byte[],
                     [<Optional; DefaultParameterValue(null:string)>] key : string,
-                    [<Optional; DefaultParameterValue(null:IDictionary<string, string>)>] properties : IDictionary<string, string>) =
-    let key: MessageKey =  if isNull key then %"" else %key
-    let properties = if isNull properties then EmptyProps else properties
+                    [<Optional; DefaultParameterValue(null:IDictionary<string, string>)>] properties : IDictionary<string, string>,
+                    [<Optional; DefaultParameterValue(0L:int64)>] deliverAt : int64) =
 
-    member this.Value = value
-    member this.Key = key
-    member this.Properties = properties
+    member val internal Value = value
+    member val internal Key : MessageKey = if isNull key then %"" else %key
+    member val internal Properties = if isNull properties then EmptyProps else properties
+    member val internal DeliverAt = if deliverAt > 0L then Some deliverAt else None
 
 type internal WriterStream = Stream
 type internal Payload = WriterStream -> Task

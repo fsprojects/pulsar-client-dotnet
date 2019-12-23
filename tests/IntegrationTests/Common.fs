@@ -72,7 +72,7 @@ let produceMessagesWithSameKey (producer: IProducer) number key producerName =
     task {
         for i in [1..number] do
             let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) )
-            let! _ = producer.SendAsync(MessageBuilder(payload, key))
+            let! _ = producer.SendAsync(MessageBuilder(payload, key = key))
             ()
     }
 
@@ -100,7 +100,7 @@ let fastProduceMessagesWithSameKey (producer: IProducer) number key producerName
     task {
         for i in [1..number] do
             let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) )
-            let! _ = producer.SendAndForgetAsync(MessageBuilder(payload, key))
+            let! _ = producer.SendAndForgetAsync(MessageBuilder(payload, key = key))
             ()
     }
 
