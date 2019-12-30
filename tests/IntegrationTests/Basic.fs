@@ -295,14 +295,15 @@ let tests =
 
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let interval = 2000L
+            let interval = 1000L
+            let producerName = "schedule-producer"
             let consumerName = "schedule-consumer"
             let sw = Stopwatch()
 
             let! producer =
                 ProducerBuilder(client)
-                    .Topic(topicName)
-                    .ProducerName("schedule-producer")
+                    .Topic(topicName).EnableBatching(false)
+                    .ProducerName(producerName)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
@@ -316,9 +317,11 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        let deliverAt = Nullable<int64>(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + interval)
+                        let now = DateTimeOffset.UtcNow;
+                        let deliverAt = now.AddMilliseconds(float interval)
+                        let timestamp = Nullable(deliverAt.ToUnixTimeMilliseconds())
                         let message = Encoding.UTF8.GetBytes(sprintf "Message was sent with interval '%i' milliseconds" interval)
-                        let messageBuilder = MessageBuilder(message, deliverAt = deliverAt)
+                        let messageBuilder = MessageBuilder(message, deliverAt = timestamp)
                         let! _ = producer.SendAsync(messageBuilder)
                         ()
                     }:> Task)

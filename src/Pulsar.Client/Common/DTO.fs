@@ -188,15 +188,25 @@ type Message =
         Properties: IDictionary<string, string>
     }
 
+/// <summary>
+///     Message builder that constructs a message to be published through a producer.
+/// </summary>
+/// <param name="value">The array of <see cref="System.Byte" /> posted message data.</param>
+/// <param name="properties">The dictionary with message properties.</param>
+/// <param name="deliverAt">The timestamp which points time when the message should be delivered to consumer.</param>
+/// <remarks>
+///     This <paramref name="deliverAt" /> timestamp must be expressed as unix time milliseconds.
+///     For example: <code>DateTimeOffset.UtcNow.AddSeconds(2.0).ToUnixTimeMilliseconds()</code>.
+/// </remarks>
 type MessageBuilder(value : byte[],
                     [<Optional; DefaultParameterValue(null:string)>] key : string,
                     [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] properties : IReadOnlyDictionary<string, string>,
                     [<Optional; DefaultParameterValue(Nullable<int64>():Nullable<int64>)>] deliverAt : Nullable<int64>) =
 
-    member val internal Value = value
-    member val internal Key : MessageKey = if isNull key then %"" else %key
-    member val internal Properties = if isNull properties then EmptyProps :> IReadOnlyDictionary<string, string> else properties
-    member val internal DeliverAt = deliverAt
+    member val Value = value
+    member val Key : MessageKey = if isNull key then %"" else %key
+    member val Properties = if isNull properties then EmptyProps :> IReadOnlyDictionary<string, string> else properties
+    member val DeliverAt = deliverAt
 
 type internal WriterStream = Stream
 type internal Payload = WriterStream -> Task
