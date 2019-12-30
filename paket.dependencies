@@ -18,7 +18,7 @@ nuget Snappy.Standard
 nuget ZstdNet
 
 group Tests
-  framework: netcoreapp2.2
+  framework: netcoreapp3.1
   source https://api.nuget.org/v3/index.json
   storage: none
 
@@ -33,7 +33,7 @@ group Tests
   nuget Microsoft.Extensions.DependencyInjection
 
 group Examples
-  framework: netcoreapp2.2
+  framework: netcoreapp3.1
   source https://api.nuget.org/v3/index.json
   storage: none
 
@@ -43,7 +43,7 @@ group Examples
 group Build
   source https://api.nuget.org/v3/index.json
   storage: none
-  framework: netstandard2.0
+  framework: netcoreapp3.1
 
   nuget Fake.Core.Target
   nuget Fake.IO.FileSystem

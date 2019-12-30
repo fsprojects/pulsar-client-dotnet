@@ -217,9 +217,9 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                             if singleMessageMetadata.Properties.Count > 0 then
                                 singleMessageMetadata.Properties
                                 |> Seq.map (fun prop -> (prop.Key, prop.Value))
-                                |> dict
+                                |> readOnlyDict
                             else
-                                EmptyProps :> IDictionary<string, string>
+                                EmptyProps
                         Key = singleMessageMetadata.PartitionKey
                         Data = singleMessagePayload
                     }

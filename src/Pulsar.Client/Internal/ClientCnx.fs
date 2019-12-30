@@ -313,9 +313,9 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                 if messageMetadata.Properties.Count > 0 then
                     messageMetadata.Properties
                     |> Seq.map (fun prop -> (prop.Key, prop.Value))
-                    |> dict
+                    |> readOnlyDict
                 else
-                    EmptyProps :> IDictionary<string, string>
+                    EmptyProps
         }
 
     let handleCommand xcmd =
