@@ -315,7 +315,7 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                     |> Seq.map (fun prop -> (prop.Key, prop.Value))
                     |> dict
                 else
-                    EmptyProps
+                    EmptyProps :> IDictionary<string, string>
         }
 
     let handleCommand xcmd =

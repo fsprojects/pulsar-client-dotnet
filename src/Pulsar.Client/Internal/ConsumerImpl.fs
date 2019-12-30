@@ -219,7 +219,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                                 |> Seq.map (fun prop -> (prop.Key, prop.Value))
                                 |> dict
                             else
-                                EmptyProps
+                                EmptyProps :> IDictionary<string, string>
                         Key = singleMessageMetadata.PartitionKey
                         Data = singleMessagePayload
                     }

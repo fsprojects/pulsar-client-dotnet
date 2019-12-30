@@ -8,6 +8,7 @@ open FSharp.UMX
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
+open System.Collections.ObjectModel
 
 type internal DeadLettersProcessor
     (policy: DeadLettersPolicy,
@@ -50,7 +51,7 @@ type internal DeadLettersProcessor
                 | true, message ->
                     Log.Logger.LogInformation("DeadLetter processing topic: {0}, messageId: {1}", topicName, messageId)
                     try
-                        let mb = MessageBuilder(message.Data, message.Key, message.Properties)
+                        let mb = MessageBuilder(message.Data, message.Key, ReadOnlyDictionary(message.Properties))
                         do! sendMessage mb
                         do! acknowledge messageId
                         return true
