@@ -191,12 +191,12 @@ type Message =
 type MessageBuilder(value : byte[],
                     [<Optional; DefaultParameterValue(null:string)>] key : string,
                     [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] properties : IReadOnlyDictionary<string, string>,
-                    [<Optional; DefaultParameterValue(0L:int64)>] deliverAt : int64) =
+                    [<Optional; DefaultParameterValue(Nullable<int64>():Nullable<int64>)>] deliverAt : Nullable<int64>) =
 
     member val internal Value = value
     member val internal Key : MessageKey = if isNull key then %"" else %key
     member val internal Properties = if isNull properties then EmptyProps :> IReadOnlyDictionary<string, string> else properties
-    member val internal DeliverAt = if deliverAt > 0L then Some deliverAt else None
+    member val internal DeliverAt = deliverAt
 
 type internal WriterStream = Stream
 type internal Payload = WriterStream -> Task

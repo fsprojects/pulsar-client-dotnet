@@ -131,8 +131,8 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
                 metadata.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
         if numMessagesInBatch.IsSome then
             metadata.NumMessagesInBatch <- numMessagesInBatch.Value
-
-        message.DeliverAt |> Option.iter (fun ts -> metadata.DeliverAtTime <- ts)
+        if message.DeliverAt.HasValue then
+            metadata.DeliverAtTime <- message.DeliverAt.Value
 
         metadata
 
@@ -420,7 +420,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
     do startSendTimeoutTimer()
 
     member private this.SendMessage (message : MessageBuilder) =
-        if producerConfig.BatchingEnabled && message.DeliverAt |> Option.isNone then
+        if producerConfig.BatchingEnabled && not message.DeliverAt.HasValue then
             mb.PostAndAsyncReply(fun channel -> StoreBatchItem (message, channel))
         else
             mb.PostAndAsyncReply(fun channel -> BeginSendMessage (message, channel))

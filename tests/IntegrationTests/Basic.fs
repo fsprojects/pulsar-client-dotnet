@@ -316,7 +316,7 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        let deliverAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + interval
+                        let deliverAt = Nullable<int64>(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + interval)
                         let message = Encoding.UTF8.GetBytes(sprintf "Message was sent with interval '%i' milliseconds" interval)
                         let messageBuilder = MessageBuilder(message, deliverAt = deliverAt)
                         let! _ = producer.SendAsync(messageBuilder)
