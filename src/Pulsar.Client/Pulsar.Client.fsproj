@@ -5,11 +5,11 @@
     <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);CopyProjectReferencesToPackage</TargetsForTfmSpecificBuildOutput>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>0.11.2</Version>
+    <Version>0.12.0</Version>
     <Company>F# community</Company>
     <Description>.NET client for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Fixed too fast response error</PackageReleaseNotes>
+    <PackageReleaseNotes>Delayed deliver support</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryType>GitHub</RepositoryType>
     <PackageTags>pulsar</PackageTags>
