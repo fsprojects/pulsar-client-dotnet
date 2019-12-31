@@ -289,8 +289,7 @@ let tests =
             Log.Debug("Finished 'Client, producer and consumer can't be accessed after close'")
         }
 
-        // broken in 2.4.2 on server
-        ptestAsync "Scheduled message should be delivered at requested time" {
+        testAsync "Scheduled message should be delivered at requested time" {
 
             Log.Debug("Started 'Scheduled message should be delivered at requested time'")
 
