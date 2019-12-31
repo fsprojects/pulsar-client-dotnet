@@ -5,11 +5,12 @@ open System.Net
 open System
 open Microsoft.IO
 open System.Runtime.ExceptionServices
+open System.Collections.Generic
 
 let internal MemoryStreamManager = RecyclableMemoryStreamManager()
-let MagicNumber = int16 0x0e01
-let RandomGenerator = Random()
-let EmptyProps = dict<string,string> []
+let internal MagicNumber = int16 0x0e01
+let internal RandomGenerator = Random()
+let internal EmptyProps: IReadOnlyDictionary<string, string> = readOnlyDict []
 
 // Converts
 

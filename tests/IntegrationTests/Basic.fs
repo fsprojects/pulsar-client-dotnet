@@ -1,6 +1,9 @@
 module Pulsar.Client.IntegrationTests.Basic
 
 open System
+open System.Threading
+open System.Diagnostics
+
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Api
@@ -11,8 +14,6 @@ open Pulsar.Client.Common
 open Serilog
 open Pulsar.Client.IntegrationTests
 open Pulsar.Client.IntegrationTests.Common
-open FSharp.UMX
-open System.Threading
 
 [<Tests>]
 let tests =
@@ -286,6 +287,67 @@ let tests =
             Expect.throwsT2<AlreadyClosedException> (fun () -> client.CloseAsync().Result |> ignore) |> ignore
 
             Log.Debug("Finished 'Client, producer and consumer can't be accessed after close'")
+        }
+
+        testAsync "Scheduled message should be delivered at requested time" {
+
+            Log.Debug("Started 'Scheduled message should be delivered at requested time'")
+
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let interval = 1000L
+            let producerName = "schedule-producer"
+            let consumerName = "schedule-consumer"
+            let sw = Stopwatch()
+
+            let! producer =
+                ProducerBuilder(client)
+                    .Topic(topicName).EnableBatching(false)
+                    .ProducerName(producerName)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("schedule-subscription")
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        let now = DateTimeOffset.UtcNow;
+                        let deliverAt = now.AddMilliseconds(float interval)
+                        let timestamp = Nullable(deliverAt.ToUnixTimeMilliseconds())
+                        let message = Encoding.UTF8.GetBytes(sprintf "Message was sent with interval '%i' milliseconds" interval)
+                        let messageBuilder = MessageBuilder(message, deliverAt = timestamp)
+                        let! _ = producer.SendAsync(messageBuilder)
+                        ()
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        let! message = consumer.ReceiveAsync()
+                        let received = Encoding.UTF8.GetString(message.Data)
+                        Log.Debug("{0} received {1}", consumerName, received)
+                        do! consumer.AcknowledgeAsync(message.MessageId)
+                        Log.Debug("{0} acknowledged {1}", consumerName, received)
+                    }:> Task)
+
+            sw.Start()
+
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+
+            sw.Stop()
+
+            let elapsed = sw.ElapsedMilliseconds
+
+            (elapsed >= interval && elapsed <= interval + 1000L)
+            |> Expect.isTrue (sprintf "Message deliverd in unexpected interval '%i'" elapsed)
+
+            Log.Debug("Finished 'Scheduled message should be delivered at requested time'")
         }
 
     ]

@@ -8,6 +8,7 @@ open FSharp.UMX
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
+open System.Collections.ObjectModel
 
 type internal DeadLettersProcessor
     (policy: DeadLettersPolicy,

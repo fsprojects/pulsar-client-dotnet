@@ -15,6 +15,7 @@ open Serilog.Sinks.SystemConsole.Themes
 open System.Collections.Generic
 open Pulsar.Client.IntegrationTests
 open FSharp.UMX
+open System.Collections.ObjectModel
 
 
 [<Literal>]
@@ -63,7 +64,7 @@ let produceMessagesWithProps (producer: IProducer) number producerName =
         for i in [1..number] do
             let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) )
             let key = i.ToString()
-            let props = dict [("prop1",key);("prop2",key)]
+            let props = readOnlyDict [("prop1",key);("prop2",key)]
             let! _ = producer.SendAsync(MessageBuilder(payload, key, props))
             ()
     }

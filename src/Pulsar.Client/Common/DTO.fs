@@ -177,7 +177,7 @@ type internal RawMessage =
         RedeliveryCount: uint32
         Payload: byte[]
         MessageKey: MessageKey
-        Properties: IDictionary<string, string>
+        Properties: IReadOnlyDictionary<string, string>
     }
 
 type Message =
@@ -185,18 +185,39 @@ type Message =
         MessageId: MessageId
         Data: byte[]
         Key: string
-        Properties: IDictionary<string, string>
+        Properties: IReadOnlyDictionary<string, string>
     }
 
-type MessageBuilder(value : byte[],
-                    [<Optional; DefaultParameterValue(null:string)>] key : string,
-                    [<Optional; DefaultParameterValue(null:IDictionary<string, string>)>] properties : IDictionary<string, string>) =
-    let key: MessageKey =  if isNull key then %"" else %key
-    let properties = if isNull properties then EmptyProps else properties
+/// <summary>
+///     Message builder that constructs a message to be published through a producer.
+/// </summary>
+type MessageBuilder =
+    val Value: byte[]
+    val Key: MessageKey
+    val Properties: IReadOnlyDictionary<string, string>
+    val DeliverAt: Nullable<int64>
 
-    member this.Value = value
-    member this.Key = key
-    member this.Properties = properties
+    /// <summary>
+    ///     Constructs <see cref="Pulsar.Client.Common.MessageBuilder" />
+    /// </summary>
+    /// <param name="value">Message data serialized to array of bytes.</param>
+    /// <param name="properties">The readonly dictionary with message properties.</param>
+    /// <param name="deliverAt">Unix timestamp in milliseconds after which message should be delivered to consumer(s).</param>
+    /// <remarks>
+    ///     This <paramref name="deliverAt" /> timestamp must be expressed as unix time milliseconds based on UTC.
+    ///     For example: <code>DateTimeOffset.UtcNow.AddSeconds(2.0).ToUnixTimeMilliseconds()</code>.
+    /// </remarks>
+    new (value : byte[],
+            [<Optional; DefaultParameterValue(null:string)>] key : string,
+            [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] properties : IReadOnlyDictionary<string, string>,
+            [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>] deliverAt : Nullable<int64>) =
+            {
+                Value = value
+                Key = if isNull key then %"" else %key
+                Properties = if isNull properties then EmptyProps else properties
+                DeliverAt = deliverAt
+            }
+
 
 type internal WriterStream = Stream
 type internal Payload = WriterStream -> Task
