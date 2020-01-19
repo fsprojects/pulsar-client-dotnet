@@ -6,3 +6,6 @@ bin/pulsar-admin topics create-partitioned-topic persistent://public/default/par
 
 // for TLS testing
 kubectl cp certs\ca.cert.pem pulsar/pulsar-broker-786d5756bf-tx5wd:/pulsar/conf/ca.cert.pem
+
+// for time sync
+ minikube ssh -- sudo date -u $((get-date).AddHours(-3).AddSeconds(7).ToString("MMddHHmmyyyy.ss"))

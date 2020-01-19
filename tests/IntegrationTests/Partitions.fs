@@ -63,7 +63,7 @@ let tests =
         }
 
         // make active after https://github.com/apache/pulsar/issues/5877 is resolved
-        ptestAsync "Two producers and two consumers with 2 partitions" {
+        testAsync "Two producers and two consumers with 2 partitions" {
 
             Log.Debug("Started Two producers and two consumers with 2 partitions")
             let client = getClient()

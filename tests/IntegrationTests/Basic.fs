@@ -295,7 +295,7 @@ let tests =
 
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let interval = 1000L
+            let interval = 2000L
             let producerName = "schedule-producer"
             let consumerName = "schedule-consumer"
             let sw = Stopwatch()
@@ -322,6 +322,7 @@ let tests =
                         let timestamp = Nullable(deliverAt.ToUnixTimeMilliseconds())
                         let message = Encoding.UTF8.GetBytes(sprintf "Message was sent with interval '%i' milliseconds" interval)
                         let messageBuilder = MessageBuilder(message, deliverAt = timestamp)
+                        sw.Start()
                         let! _ = producer.SendAsync(messageBuilder)
                         ()
                     }:> Task)
@@ -332,19 +333,16 @@ let tests =
                         let! message = consumer.ReceiveAsync()
                         let received = Encoding.UTF8.GetString(message.Data)
                         Log.Debug("{0} received {1}", consumerName, received)
+                        sw.Stop()
                         do! consumer.AcknowledgeAsync(message.MessageId)
                         Log.Debug("{0} acknowledged {1}", consumerName, received)
                     }:> Task)
 
-            sw.Start()
-
             do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
-
-            sw.Stop()
 
             let elapsed = sw.ElapsedMilliseconds
 
-            (elapsed >= interval && elapsed <= interval + 1000L)
+            (elapsed >= interval && elapsed <= interval + 2000L)
             |> Expect.isTrue (sprintf "Message deliverd in unexpected interval '%i'" elapsed)
 
             Log.Debug("Finished 'Scheduled message should be delivered at requested time'")
