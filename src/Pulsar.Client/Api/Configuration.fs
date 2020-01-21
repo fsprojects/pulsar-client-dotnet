@@ -7,7 +7,7 @@ open System.Security.Cryptography.X509Certificates
 
 type PulsarClientConfiguration =
     {
-        ServiceUrl: Uri
+        ServiceAddresses: Uri list
         OperationTimeout: TimeSpan
         MaxNumberOfRejectedRequestPerConnection: int
         UseTls: bool
@@ -18,7 +18,7 @@ type PulsarClientConfiguration =
     }
     static member Default =
         {
-            ServiceUrl = null
+            ServiceAddresses = List.empty<Uri>
             OperationTimeout = TimeSpan.FromMilliseconds(30000.0)
             MaxNumberOfRejectedRequestPerConnection = 50
             UseTls = false

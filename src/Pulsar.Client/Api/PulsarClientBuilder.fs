@@ -13,23 +13,16 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
         config
         |> checkValue
             (fun c ->
-                c.ServiceUrl
-                |> invalidArgIfDefault "Service Url needs to be specified on the PulsarClientBuilder object.")
+                c.ServiceAddresses
+                |> invalidArgIf (fun addresses -> addresses |> List.isEmpty) "Service Url needs to be specified on the PulsarClientBuilder object.")
 
     new() = PulsarClientBuilder(PulsarClientConfiguration.Default)
 
     member this.ServiceUrl (url: string) =
-
-        let uri =
-            url
-            |> invalidArgIfBlankString "ServiceUrl must not be blank."
-            |> Uri
-        let useTls = config.UseTls || url.StartsWith("pulsar+ssl")
-
-        PulsarClientBuilder
-            { config with
-                ServiceUrl = uri
-                UseTls = useTls }
+        match url |> ServiceUri.parse with
+        | (Result.Ok serviceUri) ->
+            PulsarClientBuilder { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls }
+        | (Result.Error message) -> invalidArg null message
 
     member this.MaxNumberOfRejectedRequestPerConnection num =
         PulsarClientBuilder
