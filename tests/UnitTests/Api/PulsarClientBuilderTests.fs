@@ -33,7 +33,7 @@ module PulsarClientBuilderTests =
                 |> Expect.throwsWithMessage<ArgumentException> "MaxNumberOfRejectedRequestPerConnection can't be negative"
             }
 
-            test "Build throws an exception if ServiceUrl is blank" {
+            test "Build throws an exception if ServiceUrl is empty" {
                 fun() -> builder().Build() |> ignore
                 |> Expect.throwsWithMessage<ArgumentException>
                     "Service Url needs to be specified on the PulsarClientBuilder object."

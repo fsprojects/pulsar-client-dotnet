@@ -12,10 +12,12 @@
     <Compile Include="Common\TopicNameTests.fs" />
     <Compile Include="Common\CommandTests.fs" />
     <Compile Include="Common\NamespaceNameTests.fs" />
+    <Compile Include="Api\ServiceUriTests.fs" />
     <Compile Include="Api\ConfigurationTests.fs" />
     <Compile Include="Api\ConsumerBuilderTests.fs" />
     <Compile Include="Api\ProducerBuilderTests.fs" />
     <Compile Include="Api\PulsarClientBuilderTests.fs" />
+    <Compile Include="Internal\EndPointResolverTests.fs" />
     <Compile Include="Internal\CompressionCodecTests.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTrackerTests.fs" />
     <Compile Include="Internal\UnAckedMessageTrackerTests.fs" />
