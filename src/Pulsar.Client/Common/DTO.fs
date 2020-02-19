@@ -334,6 +334,7 @@ type internal ConsumerMessage =
     | SeekAsync of SeekData * AsyncReplyChannel<Task>
     | SendFlowPermits of int
     | HasMessageAvailable of AsyncReplyChannel<Task<bool>>
+    | ActiveConsumerChanged of bool
     | Close of AsyncReplyChannel<Task>
     | Unsubscribe of AsyncReplyChannel<Task>
 

@@ -43,6 +43,7 @@ type internal PulsarCommand =
     | XCommandCloseProducer of CommandCloseProducer
     | XCommandCloseConsumer of CommandCloseConsumer
     | XCommandReachedEndOfTopic of CommandReachedEndOfTopic
+    | XCommandActiveConsumerChange of CommandActiveConsumerChange
     | XCommandError of CommandError
 
 type internal CommandParseError =
@@ -218,6 +219,8 @@ type internal ClientCnx (config: PulsarClientConfiguration,
             Ok (XCommandGetTopicsOfNamespaceResponse command.getTopicsOfNamespaceResponse)
         | BaseCommand.Type.GetLastMessageIdResponse ->
             Ok (XCommandGetLastMessageIdResponse command.getLastMessageIdResponse)
+        | BaseCommand.Type.ActiveConsumerChange ->
+            Ok (XCommandActiveConsumerChange command.ActiveConsumerChange)
         | BaseCommand.Type.Error ->
             Ok (XCommandError command.Error)
         | unknownType ->
@@ -391,6 +394,9 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                 Partition = cmd.LastMessageId.Partition
                 TopicName = %"" }
             handleSuccess %cmd.RequestId result
+        | XCommandActiveConsumerChange cmd ->
+            let consumerMb = consumers.[%cmd.ConsumerId]
+            consumerMb.Post (ActiveConsumerChanged cmd.IsActive)
         | XCommandError cmd ->
             Log.Logger.LogError("{0} CommandError Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
             handleError %cmd.RequestId cmd.Error cmd.Message

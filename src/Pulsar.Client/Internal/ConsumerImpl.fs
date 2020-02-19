@@ -567,6 +567,11 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                             channel.Reply(Task.FromException(NotConnectedException "Not connected to broker") :?> Task<bool>)
                             Log.Logger.LogError("{0} not connected, skipping HasMessageAvailable {1}", prefix)
                     return! loop ()
+                    
+                | ConsumerMessage.ActiveConsumerChanged isActive ->
+                    
+                    Log.Logger.LogInformation("{0} ActiveConsumerChanged isActive={1}", prefix, isActive)
+                    return! loop ()
 
                 | ConsumerMessage.Close channel ->
 
