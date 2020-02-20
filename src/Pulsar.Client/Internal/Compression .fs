@@ -59,5 +59,5 @@ module internal CompressionCodec =
         | CompressionType.LZ4 -> { Encode = encodeLZ4; Decode = decodeLZ4 }
         | CompressionType.Snappy -> { Encode = encodeSnappy; Decode = decodeSnappy }
         | CompressionType.ZStd -> { Encode = encodeZStd; Decode = decodeZStd }
-        | CompressionType.None -> { Encode = id; Decode = fun a b -> b }
+        | CompressionType.None -> { Encode = id; Decode = fun _ bytes -> bytes }
         | _ as unknown -> raise(NotSupportedException <| sprintf "Compression codec '%A' not supported." unknown)

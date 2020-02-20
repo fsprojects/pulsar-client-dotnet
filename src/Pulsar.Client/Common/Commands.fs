@@ -2,12 +2,15 @@
 
 open pulsar.proto
 open FSharp.UMX
+open System
 open ProtoBuf
 open System.IO
 open System.Net
 open Microsoft.Extensions.Logging
 open Pulsar.Client.Internal
 open Pulsar.Client
+open Pulsar.Client.Api
+open Pulsar.Client.Common
 
 type CommandType = BaseCommand.Type
 
@@ -170,7 +173,8 @@ let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) 
 
 let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumerId: ConsumerId) (requestId: RequestId)
     (consumerName: string) (subscriptionType: SubscriptionType) (subscriptionInitialPosition: SubscriptionInitialPosition)
-    (readCompacted: bool) (startMessageId: MessageIdData) (durable: bool) =
+    (readCompacted: bool) (startMessageId: MessageIdData) (durable: bool) (startMessageRollbackDuration: TimeSpan)
+    (createTopicIfDoesNotExist: bool) (keySharedPolicy: KeySharedPolicy option) =
     let subType =
         match subscriptionType with
         | SubscriptionType.Exclusive -> CommandSubscribe.SubType.Exclusive
@@ -178,16 +182,30 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
         | SubscriptionType.Failover -> CommandSubscribe.SubType.Failover
         | SubscriptionType.KeyShared -> CommandSubscribe.SubType.KeyShared
         | _ -> failwith "Unknown subscription type"
-
     let initialPosition =
         match subscriptionInitialPosition with
         | SubscriptionInitialPosition.Earliest -> CommandSubscribe.InitialPosition.Earliest
         | SubscriptionInitialPosition.Latest -> CommandSubscribe.InitialPosition.Latest
         | _ -> failwith "Unknown initialPosition type"
-
     let request = CommandSubscribe(Topic = %topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId,
                     RequestId = %requestId, ConsumerName =  consumerName, initialPosition = initialPosition, ReadCompacted = readCompacted,
-                    StartMessageId = startMessageId, Durable = durable)
+                    StartMessageId = startMessageId, Durable = durable, ForceTopicCreation = createTopicIfDoesNotExist)
+    match keySharedPolicy with
+    | Some keySharedPolicy ->
+        let meta = KeySharedMeta()
+        match keySharedPolicy with
+        | :? KeySharedPolicyAutoSplit ->
+            meta.keySharedMode <- KeySharedMode.AutoSplit            
+        | :? KeySharedPolicySticky as policy ->
+            meta.keySharedMode <- KeySharedMode.Sticky
+            for range in policy.Ranges do
+                meta.hashRanges.Add(IntRange(Start = range.Start, End = range.End))
+        | _ -> failwith "Unknown keySharedPolicy"
+        request.keySharedMeta <- meta
+    | None ->
+        ()
+    if startMessageRollbackDuration > TimeSpan.Zero then
+        request.StartMessageRollbackDurationSec <- (startMessageRollbackDuration.TotalSeconds |> uint64)
     let command = BaseCommand(``type`` = CommandType.Subscribe, Subscribe = request)
     command |> serializeSimpleCommand
 
@@ -214,9 +232,10 @@ let newCloseProducer (producerId: ProducerId) (requestId : RequestId) =
 let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<seq<MessageIdData>>) =
     let request = CommandRedeliverUnacknowledgedMessages(ConsumerId = %consumerId)
     match messageIds with
-    | Some ids -> ids |> Seq.iter (fun msgIdData -> request.MessageIds.Add(msgIdData))
-    | None -> ()
-
+    | Some ids ->
+        ids |> Seq.iter (fun msgIdData -> request.MessageIds.Add(msgIdData))
+    | None ->
+        ()
     let command = BaseCommand(``type`` = CommandType.RedeliverUnacknowledgedMessages, redeliverUnacknowledgedMessages = request)
     command |> serializeSimpleCommand
 

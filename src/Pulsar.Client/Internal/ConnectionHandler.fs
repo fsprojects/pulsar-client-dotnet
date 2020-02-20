@@ -3,7 +3,6 @@
 open Microsoft.Extensions.Logging
 open System.Threading
 open Pulsar.Client.Common
-open Pulsar.Client.Api
 
 type internal ConnectionHandlerMessage =
     | GrabCnx

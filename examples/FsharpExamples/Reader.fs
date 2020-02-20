@@ -8,7 +8,7 @@ open System.Text
 
 let runReader () =
 
-    let serviceUrl = "pulsar://my-pulsar-cluster:31002"
+    let serviceUrl = "pulsar://my-pulsar-cluster:30002"
 
     // retention should be set on topic so messages won't disappear
     let topicName = sprintf "public/retention/my-topic-%i" DateTime.Now.Ticks

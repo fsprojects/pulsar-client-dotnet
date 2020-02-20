@@ -10,7 +10,7 @@ open FSharp.UMX
 
 let runCustomProps () =
 
-    let serviceUrl = "pulsar://my-pulsar-cluster:31002"
+    let serviceUrl = "pulsar://my-pulsar-cluster:30002"
     let subscriptionName = "my-subscription"
     let topicName = sprintf "my-topic-%i" DateTime.Now.Ticks
 

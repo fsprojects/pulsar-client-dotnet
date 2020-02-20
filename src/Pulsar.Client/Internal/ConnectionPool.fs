@@ -46,12 +46,18 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         args.RemoteEndPoint <- endpoint
         Log.Logger.LogDebug("Socket connecting to {0}", endpoint)
 
-        if (socket.ConnectAsync(args) |> not) then
-            args.Complete()
         task {
-            let! _ = args
-            Log.Logger.LogDebug("Socket connected to {0}", endpoint)
-            return socket
+            try
+                if (socket.ConnectAsync(args) |> not) then
+                    args.Complete()
+                let! _ = args
+                Log.Logger.LogDebug("Socket connected to {0}", endpoint)
+                return socket
+            with
+            | ex ->
+                socket.Dispose()
+                Log.Logger.LogError(ex, "Socket connection failed to {0}", endpoint)
+                return reraize ex
         }
 
     let remoteCertificateValidationCallback (sender: obj) (cert: X509Certificate) (chain: X509Chain) (errors: SslPolicyErrors) =
@@ -130,6 +136,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             let! success = clientCnx.Send connectPayload
             if not success then
                 raise (ConnectionFailedOnSend "ConnectionPool connect")
+            Log.Logger.LogInformation("Connected to {0}", broker)
             return! initialConnectionTsc.Task
         }
 

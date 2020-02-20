@@ -1,8 +1,6 @@
 module Pulsar.Client.IntegrationTests.Common
 
 open System
-open Expecto
-open Expecto.Flip
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
@@ -12,14 +10,10 @@ open Serilog
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.DependencyInjection
 open Serilog.Sinks.SystemConsole.Themes
-open System.Collections.Generic
-open Pulsar.Client.IntegrationTests
-open FSharp.UMX
-open System.Collections.ObjectModel
 
 
 [<Literal>]
-let pulsarAddress = "pulsar://my-pulsar-cluster:31002"
+let pulsarAddress = "pulsar://my-pulsar-cluster:30002"
 
 let configureLogging() =
     Log.Logger <-
@@ -29,7 +23,7 @@ let configureLogging() =
             .Enrich.FromLogContext()
             .Enrich.WithThreadId()
             .CreateLogger()
-    let serviceCollection = new ServiceCollection()
+    let serviceCollection = ServiceCollection()
     let sp =
         serviceCollection
             .AddLogging(fun configure -> configure.AddSerilog(dispose = true) |> ignore)
@@ -154,7 +148,7 @@ let consumeMessagesWithProps (consumer: IConsumer) number consumerName =
 
 let consumeAndVerifyMessages (consumer: IConsumer) consumerName (expectedMessages : string[]) =
     task {
-        for i in [1..expectedMessages.Length] do
+        for _ in [1..expectedMessages.Length] do
             let! message = consumer.ReceiveAsync()
             let received = Encoding.UTF8.GetString(message.Data)
             Log.Debug("{0} received {1}", consumerName, received)

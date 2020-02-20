@@ -14,7 +14,7 @@ type AuthenticationDataProvider() =
         ""
 
     abstract member Authenticate: AuthData -> AuthData
-    default this.Authenticate(authData) =
+    default this.Authenticate authData =
         let bytes =
             if this.HasDataFromCommand() then this.GetCommandData() else ""
             |> Encoding.UTF8.GetBytes

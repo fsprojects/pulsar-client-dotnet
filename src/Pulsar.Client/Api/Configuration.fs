@@ -45,6 +45,8 @@ type ConsumerConfiguration =
         NegativeAckRedeliveryDelay: TimeSpan
         ResetIncludeHead: bool
         DeadLettersProcessor : IDeadLettersProcessor
+        KeySharedPolicy: KeySharedPolicy option
+        BatchReceivePolicy: BatchReceivePolicy
     }
     static member Default =
         {
@@ -63,6 +65,8 @@ type ConsumerConfiguration =
             NegativeAckRedeliveryDelay = TimeSpan.FromMinutes(1.0)
             ResetIncludeHead = false
             DeadLettersProcessor = DeadLettersProcessor.Disabled
+            KeySharedPolicy = None
+            BatchReceivePolicy = BatchReceivePolicy()
         }
 
 type ProducerConfiguration =
@@ -73,15 +77,19 @@ type ProducerConfiguration =
         MaxPendingMessages: int
         BatchingEnabled: bool
         BatchingMaxMessages: int
+        BatchingMaxBytes: int
         BatchingMaxPublishDelay: TimeSpan
+        BatchingPartitionSwitchFrequencyByPublishDelay: int
         BatchBuilder: BatchBuilder
         SendTimeout: TimeSpan
         CompressionType: CompressionType
         MessageRoutingMode: MessageRoutingMode
-        CustomMessageRouter: IMessageRouter
+        CustomMessageRouter: IMessageRouter option
         AutoUpdatePartitions: bool
         HashingScheme: HashingScheme
     }
+    member this.BatchingPartitionSwitchFrequencyIntervalMs =
+        this.BatchingPartitionSwitchFrequencyByPublishDelay * (int this.BatchingMaxPublishDelay.TotalMilliseconds)
     static member Default =
         {
             Topic = Unchecked.defaultof<TopicName>
@@ -90,12 +98,14 @@ type ProducerConfiguration =
             MaxPendingMessagesAcrossPartitions = 50000
             BatchingEnabled = true
             BatchingMaxMessages = 1000
+            BatchingMaxBytes = 128 * 1024 // 128KB
             BatchingMaxPublishDelay = TimeSpan.FromMilliseconds(1.0)
+            BatchingPartitionSwitchFrequencyByPublishDelay = 10
             BatchBuilder = BatchBuilder.Default
             SendTimeout = TimeSpan.FromMilliseconds(30000.0)
             CompressionType = CompressionType.None
             MessageRoutingMode = MessageRoutingMode.RoundRobinPartition
-            CustomMessageRouter = Unchecked.defaultof<IMessageRouter>
+            CustomMessageRouter = None
             AutoUpdatePartitions = true
             HashingScheme = HashingScheme.DotnetStringHash
         }
@@ -103,20 +113,22 @@ type ProducerConfiguration =
 type ReaderConfiguration =
     {
         Topic: TopicName
-        StartMessageId: MessageId
+        StartMessageId: MessageId option
         SubscriptionRolePrefix: string
         ReceiverQueueSize: int
         ReadCompacted: bool
         ReaderName: string
         ResetIncludeHead: bool
+        StartMessageFromRollbackDuration: TimeSpan
     }
     static member Default =
         {
             Topic = Unchecked.defaultof<TopicName>
-            StartMessageId = Unchecked.defaultof<MessageId>
+            StartMessageId = None
             SubscriptionRolePrefix = ""
             ReceiverQueueSize = 1000
             ReadCompacted = false
             ReaderName = ""
             ResetIncludeHead = false
+            StartMessageFromRollbackDuration = TimeSpan.Zero
         }

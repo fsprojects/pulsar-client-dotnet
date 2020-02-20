@@ -11,18 +11,19 @@ open Microsoft.Extensions.Logging
 open System.IO
 open ProtoBuf
 open pulsar.proto
-open System.Collections.Generic
 open System.Linq
+open System.Threading
 
 type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, subscriptionMode: SubscriptionMode, startMessageId: MessageId option, lookup: BinaryLookupService,
-                           cleanup: ConsumerImpl -> unit) as this =
+                           startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, cleanup: ConsumerImpl -> unit) as this =
 
     [<Literal>]
     let MAX_REDELIVER_UNACKNOWLEDGED = 1000
     let consumerId = Generators.getNextConsumerId()
-    let incomingMessages = new Queue<Message>()
-    let waiters = new Queue<AsyncReplyChannel<MessageOrException>>()
+    let incomingMessages = Queue<Message>()
+    let waiters = Queue<AsyncReplyChannel<ResultOrException<Message>>>()
+    let batchWaiters = Queue<CancellationTokenSource*AsyncReplyChannel<ResultOrException<Messages>>>()
     let subscribeTsc = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
     let prefix = sprintf "consumer(%u, %s, %i)" %consumerId consumerConfig.ConsumerName partitionIndex
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
@@ -31,6 +32,8 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
     let mutable lastMessageIdInBroker = MessageId.Earliest
     let mutable lastDequeuedMessage = MessageId.Earliest
     let mutable startMessageId = startMessageId
+    let initialStartMessageId = startMessageId
+    let mutable incomingMessagesSize = 0L
     let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
     let deadLettersProcessor = consumerConfig.DeadLettersProcessor
 
@@ -100,7 +103,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                 match messageId.Type with
                 | Individual ->
                     unAckedMessageTracker.Remove(messageId) |> ignore
-                | Cumulative batch ->
+                | Cumulative _ ->
                     unAckedMessageTracker.Remove(messageId) |> ignore
             | AckType.Cumulative ->
                 ()
@@ -188,6 +191,15 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
             return deadMessageProcessed
         }
 
+    let enqueueMessage msg =
+        incomingMessagesSize <- incomingMessagesSize + msg.Data.LongLength
+        incomingMessages.Enqueue(msg)
+
+    let dequeueMessage() =
+        let msg = incomingMessages.Dequeue()
+        incomingMessagesSize <- incomingMessagesSize - msg.Data.LongLength
+        msg
+    
     let receiveIndividualMessagesFromBatch (rawMessage: RawMessage) (decompressedPayload: byte[]) =
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
@@ -225,11 +237,19 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                     }
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                     deadLettersProcessor.AddMessage messageId message
-                incomingMessages.Enqueue(message)
+                enqueueMessage message
 
         if skippedMessages > 0 then
             increaseAvailablePermits skippedMessages
+    
 
+    let hasEnoughMessagesForBatchReceive() =
+        let batchReceivePolicy = consumerConfig.BatchReceivePolicy
+        if (batchReceivePolicy.MaxNumMessages <= 0 && batchReceivePolicy.MaxNumBytes <= 0L) then
+            false
+        else
+            (batchReceivePolicy.MaxNumMessages > 0 && incomingMessages.Count >= batchReceivePolicy.MaxNumMessages)
+                || (batchReceivePolicy.MaxNumBytes > 0L && incomingMessagesSize >= batchReceivePolicy.MaxNumBytes)
 
     /// Record the event that one message has been processed by the application.
     /// Periodically, it sends a Flow command to notify the broker that it can push more messages
@@ -239,6 +259,24 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
         if consumerConfig.AckTimeout <> TimeSpan.Zero then
             unAckedMessageTracker.Add msg.MessageId |> ignore
 
+    let replyWithBatch (cts: CancellationTokenSource option) (ch: AsyncReplyChannel<ResultOrException<Messages>>) =
+        cts |> Option.iter (fun cts ->
+            cts.Cancel()
+            cts.Dispose()
+        )
+        let messages = Messages(consumerConfig.BatchReceivePolicy.MaxNumMessages, consumerConfig.BatchReceivePolicy.MaxNumBytes)
+        let mutable shouldContinue = true
+        while shouldContinue && incomingMessages.Count > 0 do
+            let msgPeeked = incomingMessages.Peek()
+            if (messages.CanAdd(msgPeeked)) then
+                let msg = dequeueMessage()
+                messageProcessed msg
+                messages.Add(msg)
+            else
+                shouldContinue <- false
+        Log.Logger.LogDebug("{0} BatchFormed with size {1}", prefix, messages.Size)
+        ch.Reply(Result messages)
+    
     let removeExpiredMessagesFromQueue (msgIds: RedeliverSet) =
         if incomingMessages.Count > 0 then
             let peek = incomingMessages.Peek()
@@ -247,7 +285,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                 let mutable finish = false
                 let mutable messagesFromQueue = 0
                 while not finish && incomingMessages.Count > 0 do
-                    let message = incomingMessages.Dequeue()
+                    let message = dequeueMessage()
                     messagesFromQueue <- messagesFromQueue + 1
                     if msgIds.Contains(message.MessageId) |> not then
                         msgIds.Add(message.MessageId) |> ignore
@@ -259,9 +297,9 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
         else
             0
 
-    let replyWithMessage (channel: AsyncReplyChannel<MessageOrException>) message =
+    let replyWithMessage (channel: AsyncReplyChannel<ResultOrException<Message>>) message =
         messageProcessed message
-        channel.Reply (Message message)
+        channel.Reply (Result message)
 
     let stopConsumer () =
         unAckedMessageTracker.Close()
@@ -272,6 +310,11 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
         while waiters.Count > 0 do
             let waitingChannel = waiters.Dequeue()
             waitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
+        while batchWaiters.Count > 0 do
+            let cts, batchWaitingChannel = batchWaiters.Dequeue()
+            batchWaitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
+            cts.Cancel()
+            cts.Dispose()
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let getDecompressPayload originalMessage =
@@ -315,11 +358,18 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                                     | Cumulative (index, _) ->
                                         data.BatchIndex <- %index
                                     data
+                        // startMessageRollbackDurationInSec should be consider only once when consumer connects to first time
+                        let startMessageRollbackDuration =
+                            if startMessageRollbackDuration > TimeSpan.Zero && startMessageId = initialStartMessageId then
+                                startMessageRollbackDuration
+                            else
+                                TimeSpan.Zero
                         let payload =
                             Commands.newSubscribe
                                 consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName
                                 consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
                                 consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted msgIdData isDurable
+                                startMessageRollbackDuration createTopicIfDoesNotExist consumerConfig.KeySharedPolicy
                         try
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             response |> PulsarResponseType.GetEmpty
@@ -373,9 +423,10 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                 | ConsumerMessage.MessageReceived rawMessage ->
 
                     let hasWaitingChannel = waiters.Count > 0
+                    let hasWaitingBatchChannel = batchWaiters.Count > 0
                     let msgId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
-                    Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3}",
-                        prefix, msgId, incomingMessages.Count, hasWaitingChannel)
+                    Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
+                        prefix, msgId, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
 
                     if (acksGroupingTracker.IsDuplicate(msgId)) then
                         Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
@@ -396,21 +447,25 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                                     deadLettersProcessor.AddMessage message.MessageId message
 
-                                if not hasWaitingChannel then
-                                    incomingMessages.Enqueue(message)
-                                else
+                                if hasWaitingChannel then
                                     let waitingChannel = waiters.Dequeue()
                                     if (incomingMessages.Count = 0) then
                                         replyWithMessage waitingChannel message
                                     else
-                                        incomingMessages.Enqueue(message)
-                                        replyWithMessage waitingChannel <| incomingMessages.Dequeue()
+                                        enqueueMessage message
+                                        replyWithMessage waitingChannel <| dequeueMessage()                                    
+                                else
+                                    enqueueMessage message
+                                    if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                                        let cts, ch = batchWaiters.Dequeue()
+                                        replyWithBatch (Some cts) ch
+                                        
                         elif rawMessage.Metadata.NumMessages > 0 then
                             // handle batch message enqueuing; uncompressed payload has all messages in batch
                             receiveIndividualMessagesFromBatch rawMessage (getDecompressPayload rawMessage)
                             if hasWaitingChannel && incomingMessages.Count > 0 then
                                 let waitingChannel = waiters.Dequeue()
-                                replyWithMessage waitingChannel <| incomingMessages.Dequeue()
+                                replyWithMessage waitingChannel <| dequeueMessage()
                         else
                             Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
                     return! loop ()
@@ -419,22 +474,47 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
                     Log.Logger.LogDebug("{0} Receive", prefix)
                     if incomingMessages.Count > 0 then
-                        replyWithMessage ch <| incomingMessages.Dequeue()
+                        replyWithMessage ch <| dequeueMessage()
                     else
                         waiters.Enqueue(ch)
-                        Log.Logger.LogDebug("{0} GetMessage waiting", prefix)
+                        Log.Logger.LogDebug("{0} Receive waiting", prefix)
+                    return! loop ()
+                    
+                | ConsumerMessage.BatchReceive ch ->
+
+                    Log.Logger.LogDebug("{0} BatchReceive", prefix)
+                    if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
+                        replyWithBatch None ch
+                    else
+                        let ct = new CancellationTokenSource()
+                        batchWaiters.Enqueue(ct, ch)
+                        asyncCancellableDelay
+                            (int consumerConfig.BatchReceivePolicy.Timeout.TotalMilliseconds)
+                            (fun () -> this.Mb.Post(SendBatchByTimeout))
+                            ct.Token
+                        Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
+                    return! loop ()
+                    
+                | ConsumerMessage.SendBatchByTimeout ->
+                    
+                    Log.Logger.LogDebug("{0} SendBatchByTimeout", prefix)
+                    if batchWaiters.Count > 0 then
+                        let cts, ch = batchWaiters.Dequeue()
+                        replyWithBatch (Some cts) ch
                     return! loop ()
 
-                | ConsumerMessage.Acknowledge (messageId, ackType, channel) ->
+                | ConsumerMessage.Acknowledge (messageId, ackType) ->
 
-                    Log.Logger.LogDebug("{0} Acknowledge", prefix)
-                    match connectionHandler.ConnectionState with
-                    | Ready _ ->
-                        do! trySendAcknowledge ackType messageId
-                        channel.Reply(true)
-                    | _ ->
-                        Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
-                        channel.Reply(false)
+                    Log.Logger.LogDebug("{0} Acknowledge {1} {2}", prefix, messageId, ackType)
+                    do! trySendAcknowledge ackType messageId
+                    return! loop ()
+                    
+                | ConsumerMessage.NegativeAcknowledge messageId ->
+
+                    Log.Logger.LogDebug("{0} NegativeAcknowledge {1}", prefix, messageId)                    
+                    negativeAcksTracker.Add(messageId) |> ignore
+                    // Ensure the message is not redelivered for ack-timeout, since we did receive an "ack"
+                    unAckedMessageTracker.Remove(messageId) |> ignore
                     return! loop ()
 
                 | ConsumerMessage.RedeliverUnacknowledged (messageIds, channel) ->
@@ -560,8 +640,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                                 with
                                 | ex ->
                                     Log.Logger.LogError(ex, "{0} failed getLastMessageId", prefix)
-                                    reraize ex
-                                    return false // not executed, needed for typecheck
+                                    return reraize ex
                             } |> channel.Reply
                         | _ ->
                             channel.Reply(Task.FromException(NotConnectedException "Not connected to broker") :?> Task<bool>)
@@ -647,6 +726,8 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
     override this.GetHashCode () = int consumerId
 
+    
+    
     member this.InitInternal() =
         task {
             do connectionHandler.GrabCnx()
@@ -655,40 +736,59 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
     static member Init(consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                        partitionIndex: int, subscriptionMode: SubscriptionMode, startMessageId: MessageId option, lookup: BinaryLookupService,
-                       cleanup: ConsumerImpl -> unit) =
+                       createTopicIfDoesNotExist: bool, cleanup: ConsumerImpl -> unit) =
         task {
-            let consumer = ConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex, subscriptionMode, startMessageId, lookup, cleanup)
+            let consumer = ConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex, subscriptionMode,
+                                        startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist, cleanup)
             do! consumer.InitInternal()
-            return consumer :> IConsumer
+            return consumer
         }
 
+    member this.ReceiveFsharpAsync() =
+        async {
+            connectionHandler.CheckIfActive()
+            return! mb.PostAndAsyncReply(Receive)
+        }
+    
     interface IConsumer with
-
+        
         member this.ReceiveAsync() =
             task {
                 connectionHandler.CheckIfActive()
                 match! mb.PostAndAsyncReply(Receive) with
-                | Message msg ->
+                | Result msg ->
                     return msg
                 | Exn exn ->
-                    reraize exn
-                    return Unchecked.defaultof<Message>
+                    return reraize exn
+            }
+
+        member this.BatchReceiveAsync() =
+            task {
+                connectionHandler.CheckIfActive()
+                match! mb.PostAndAsyncReply(BatchReceive) with
+                | Result msgs ->
+                    return msgs
+                | Exn exn ->
+                    return reraize exn
             }
 
         member this.AcknowledgeAsync (msgId: MessageId) =
             task {
                 connectionHandler.CheckIfActive()
-                let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Individual, channel))
-                if not success then
-                    raise (ConnectionFailedOnSend "AcknowledgeAsync")
+                mb.Post(Acknowledge(msgId, AckType.Individual))
+            }
+            
+        member this.AcknowledgeAsync (msgs: Messages) =
+            task {
+                connectionHandler.CheckIfActive()
+                for msg in msgs do
+                    mb.Post(Acknowledge(msg.MessageId, AckType.Individual))
             }
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
             task {
                 connectionHandler.CheckIfActive()
-                let! success = mb.PostAndAsyncReply(fun channel -> Acknowledge (msgId, AckType.Cumulative, channel))
-                if not success then
-                    raise (ConnectionFailedOnSend "AcknowledgeCumulativeAsync")
+                mb.Post(Acknowledge(msgId, AckType.Cumulative))
             }
 
         member this.RedeliverUnacknowledgedMessagesAsync () =
@@ -732,11 +832,17 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
         member this.NegativeAcknowledge msgId =
             task {
-                negativeAcksTracker.Add(msgId) |> ignore
-                // Ensure the message is not redelivered for ack-timeout, since we did receive an "ack"
-                unAckedMessageTracker.Remove(msgId) |> ignore
+                connectionHandler.CheckIfActive()
+                mb.Post(NegativeAcknowledge(msgId))
             }
 
+        member this.NegativeAcknowledge (msgs: Messages)  =
+            task {
+                connectionHandler.CheckIfActive()
+                for msg in msgs do
+                    mb.Post(NegativeAcknowledge(msg.MessageId))
+            }
+        
         member this.ConsumerId = consumerId
 
         member this.Topic with get() = %consumerConfig.Topic.CompleteTopicName

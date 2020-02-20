@@ -11,7 +11,6 @@ open Microsoft.Extensions.Logging
 open System.Collections.Generic
 open System.Timers
 open System.IO
-open ProtoBuf
 
 type internal ProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) as this =
@@ -51,9 +50,9 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
     let batchMessageContainer =
         match producerConfig.BatchBuilder with
         | BatchBuilder.Default ->
-            DefaultBatchMessageContainer(prefix, producerConfig) :> IBatchMessageContainer
+            DefaultBatchMessageContainer(prefix, producerConfig) :> MessageContainer
         | BatchBuilder.KeyBased ->
-            KeyBasedBatchMessageContainer(prefix, producerConfig) :> IBatchMessageContainer
+            KeyBasedBatchMessageContainer(prefix, producerConfig) :> MessageContainer
         | _ -> failwith "Unknown BatchBuilder type"
 
     let failPendingMessage msg (ex: exn) =
@@ -64,7 +63,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
             |> Seq.iter (fun (_, tcs) -> tcs.SetException(ex))
 
     let failPendingBatchMessages (ex: exn) =
-        if batchMessageContainer.GetNumMessagesInBatch() > 0 then
+        if batchMessageContainer.NumMessagesInBatch > 0 then
             batchMessageContainer.Discard(ex)
 
     let failPendingMessages (ex: exn) =
@@ -153,8 +152,11 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
                 CreatedAt = DateTime.Now
             })
 
+    let canAddToCurrentBatch (msg: MessageBuilder) =
+        batchMessageContainer.HaveEnoughSpace(msg)
+
     let batchMessageAndSend() =
-        let batchSize = batchMessageContainer.GetNumMessagesInBatch()
+        let batchSize = batchMessageContainer.NumMessagesInBatch
         Log.Logger.LogDebug("{0} Batching the messages from the batch container with {1} messages", prefix, batchSize)
         if batchSize > 0 then
             if batchMessageContainer.IsMultiBatches then
@@ -163,6 +165,10 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
             else
                 batchMessageContainer.CreateOpSendMsg() |> sendOneBatch
         batchMessageContainer.Clear()
+
+    let updateMaxMessageSize messageSize =
+        maxMessageSize <- messageSize
+        batchMessageContainer.MaxMessageSize <- messageSize
 
     let stopProducer() =
         sendTimeoutTimer.Stop()
@@ -182,7 +188,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         Log.Logger.LogInformation("{0} starting register to topic {1}", prefix, producerConfig.Topic)
-                        maxMessageSize <- clientCnx.MaxMessageSize
+                        updateMaxMessageSize clientCnx.MaxMessageSize
                         clientCnx.AddProducer producerId this.Mb
                         let requestId = Generators.getNextRequestId()
                         try
@@ -209,13 +215,14 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
 
                             match ex with
                             | TopicTerminatedException reason ->
+                                Log.Logger.LogWarning("{0} is terminated. {1}", prefix, reason)
                                 connectionHandler.Terminate()
                                 failPendingMessages(ex)
                                 producerCreatedTsc.TrySetException(ex) |> ignore
                                 stopProducer()
                             | _ when producerCreatedTsc.Task.IsCompleted || (connectionHandler.IsRetriableError ex && DateTime.Now < createProducerTimeout) ->
                                 // Either we had already created the producer once (producerCreatedFuture.isDone()) or we are
-                                // still within the initial timeout budget and we are dealing with a retriable error
+                                // still within the initial timeout budget and we are dealing with a retryable error
                                 connectionHandler.ReconnectLater ex
                             | _ ->
                                 connectionHandler.Failed()
@@ -248,20 +255,16 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
                     Log.Logger.LogDebug("{0} StoreBatchItem", prefix)
                     let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
                     let batchItem = { Message = message; Tcs = tcs }
-                    if batchMessageContainer.HaveEnoughSpace(message) then
-                        // handle boundary cases where message being added would exceed
+                    if canAddToCurrentBatch(message) then
+                        // handle boundary cases where message being added would exceed 
                         // batch size and/or max message size
-                        batchMessageContainer.Add(batchItem)
-                        let containerSize = batchMessageContainer.GetCurrentBatchSize()
-                        let containerNumMessages = batchMessageContainer.GetNumMessagesInBatch()
-                        if containerNumMessages = producerConfig.BatchingMaxMessages
-                            || containerSize >= BatchHelpers.MAX_MESSAGE_BATCH_SIZE_BYTES   then
+                        if batchMessageContainer.Add(batchItem) then
                             Log.Logger.LogDebug("{0} Max batch container size exceeded", prefix)
                             batchMessageAndSend()
                     else
                        Log.Logger.LogDebug("{0} Closing out batch to accommodate large message with size {1}", prefix, batchItem.Message.Value.Length)
                        batchMessageAndSend()
-                       batchMessageContainer.Add(batchItem)
+                       batchMessageContainer.Add(batchItem) |> ignore
                     channel.Reply(tcs)
                     return! loop ()
 
@@ -419,8 +422,11 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startSendTimeoutTimer()
 
+    member private this.CanAddToBatch (message : MessageBuilder) =
+        producerConfig.BatchingEnabled && not message.DeliverAt.HasValue
+
     member private this.SendMessage (message : MessageBuilder) =
-        if producerConfig.BatchingEnabled && not message.DeliverAt.HasValue then
+        if this.CanAddToBatch(message) then
             mb.PostAndAsyncReply(fun channel -> StoreBatchItem (message, channel))
         else
             mb.PostAndAsyncReply(fun channel -> BeginSendMessage (message, channel))
@@ -441,7 +447,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
     static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                        partitionIndex: int, lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) =
         task {
-            let producer = new ProducerImpl(producerConfig, clientConfig, connectionPool, partitionIndex, lookup, cleanup)
+            let producer = ProducerImpl(producerConfig, clientConfig, connectionPool, partitionIndex, lookup, cleanup)
             do! producer.InitInternal()
             return producer :> IProducer
         }

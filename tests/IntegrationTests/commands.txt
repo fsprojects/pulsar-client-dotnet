@@ -3,6 +3,7 @@ bin/pulsar-admin namespaces create public/retention
 bin/pulsar-admin namespaces set-retention public/retention --time 3h --size 1G
 bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned --partitions 3
 bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned2 --partitions 2
+bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned3 --partitions 3
 
 // for TLS testing
 kubectl cp certs\ca.cert.pem pulsar/pulsar-broker-786d5756bf-tx5wd:/pulsar/conf/ca.cert.pem

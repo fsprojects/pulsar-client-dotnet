@@ -5,12 +5,10 @@ open Expecto.Flip
 open Pulsar.Client.Common
 open Pulsar.Client.Common.Commands
 open pulsar.proto
-open Pulsar.Client.Internal
 open FSharp.UMX
 open System
 open System.IO
 open ProtoBuf
-open System.Net
 open System.Threading.Tasks
 
 module CommandsTests =
@@ -149,10 +147,10 @@ module CommandsTests =
                 let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand
                         (newSubscribe topicName "test-subscription" consumerId requestId consumerName
-                            SubscriptionType.Exclusive SubscriptionInitialPosition.Earliest false null true)
+                            SubscriptionType.Exclusive SubscriptionInitialPosition.Earliest false null true TimeSpan.Zero true None)
 
-                totalSize |> Expect.equal "" 66
-                commandSize |> Expect.equal "" 62
+                totalSize |> Expect.equal "" 68
+                commandSize |> Expect.equal "" 64
                 command.``type``  |> Expect.equal "" CommandType.Subscribe
                 command.Subscribe.Topic |> Expect.equal "" %topicName
                 command.Subscribe.RequestId |> Expect.equal "" %requestId

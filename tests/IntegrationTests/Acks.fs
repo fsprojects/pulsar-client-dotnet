@@ -10,13 +10,9 @@ open System.Threading.Tasks
 open System.Threading
 open Pulsar.Client.Common
 open Serilog
-open Microsoft.Extensions.Logging
-open Microsoft.Extensions.DependencyInjection
-open Serilog.Sinks.SystemConsole.Themes
 open System.Collections.Generic
 open Pulsar.Client.IntegrationTests
 open Pulsar.Client.IntegrationTests.Common
-open FSharp.UMX
 
 [<Tests>]
 let tests =
@@ -175,7 +171,7 @@ let tests =
                                 do! consumer.AcknowledgeAsync(message.MessageId)
                         Expect.isEmpty "" hashSet1
                         do! Task.Delay(1100)
-                        for i in [91..100] do
+                        for _ in [91..100] do
                             let! message = consumer.ReceiveAsync()
                             let received = Encoding.UTF8.GetString(message.Data)
                             let receivedNumber = getMessageNumber received

@@ -9,7 +9,7 @@ namespace CsharpExamples
     {
         internal static async Task RunSimple()
         {
-            const string serviceUrl = "pulsar://my-pulsar-cluster:31002";
+            const string serviceUrl = "pulsar://my-pulsar-cluster:30002";
             const string subscriptionName = "my-subscription";
             var topicName = $"my-topic-{DateTime.Now.Ticks}";
 

@@ -23,7 +23,7 @@ type internal PartitionedConnectionState =
     | Closed
 
 type internal PartitionedProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                      numPartitions: int, lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) as this =
+                                      numPartitions: int, lookup: BinaryLookupService, cleanup: PartitionedProducerImpl -> unit) as this =
     let producerId = Generators.getNextProducerId()
     let prefix = sprintf "p/producer(%u, %s)" %producerId producerConfig.ProducerName
     let producers = ResizeArray<IProducer>(numPartitions)
@@ -47,15 +47,19 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
             RoundRobinPartitionMessageRouterImpl (
                 RandomGenerator.Next(0, numPartitions),
                 producerConfig.BatchingEnabled,
-                int producerConfig.BatchingMaxPublishDelay.TotalMilliseconds,
+                producerConfig.BatchingPartitionSwitchFrequencyIntervalMs,
                 hashingFunction) :> IMessageRouter
-        | MessageRoutingMode.CustomPartition ->
-            producerConfig.CustomMessageRouter
+        | MessageRoutingMode.CustomPartition when producerConfig.CustomMessageRouter.IsSome ->
+            producerConfig.CustomMessageRouter.Value
         | _ ->
             failwith "Unknown MessageRoutingMode"
-
+                
     let timer = new Timer(1000.0 * 60.0) // 1 minute
-
+                
+    let stopProducer() =
+        cleanup(this)
+        timer.Close()
+    
     let mb = MailboxProcessor<PartitionedProducerMessage>.Start(fun inbox ->
 
         let rec loop () =
@@ -84,6 +88,7 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
                         this.ConnectionState <- Ready
                         Log.Logger.LogInformation("{0} created", prefix)
                         producerCreatedTsc.SetResult()
+                        return! loop ()
                     with ex ->
                         Log.Logger.LogError(ex, "{0} could not create", prefix)
                         do! producerTasks
@@ -94,7 +99,8 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
                             |> Async.Ignore
                         this.ConnectionState <- Failed
                         producerCreatedTsc.SetException(ex)
-                    return! loop ()
+                        stopProducer()
+                    
                 | Close channel ->
 
                     match this.ConnectionState with
@@ -102,7 +108,6 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
                         channel.Reply(Task.FromResult())
                     | _ ->
                         this.ConnectionState <- Closing
-                        timer.Close()
                         let producersTasks = producers |> Seq.map(fun producer -> producer.CloseAsync())
                         task {
                             try
@@ -114,6 +119,7 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
                                 this.ConnectionState <- Failed
                                 return! loop ()
                         } |> channel.Reply
+                        stopProducer()
 
                 | TickTime  ->
 
@@ -205,9 +211,9 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
        }
 
     static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                        partitions: int, lookup: BinaryLookupService, cleanup: ProducerImpl -> unit) =
+                        partitions: int, lookup: BinaryLookupService, cleanup: PartitionedProducerImpl -> unit) =
         task {
-            let producer = new PartitionedProducerImpl(producerConfig, clientConfig, connectionPool, partitions, lookup, cleanup)
+            let producer = PartitionedProducerImpl(producerConfig, clientConfig, connectionPool, partitions, lookup, cleanup)
             do! producer.InitInternal()
             return producer :> IProducer
         }

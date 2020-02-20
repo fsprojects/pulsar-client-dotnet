@@ -35,11 +35,11 @@ type BatchMessageAcker(batchSize: int) =
     static member NullAcker =
         Unchecked.defaultof<BatchMessageAcker>
 
-    override this.Equals acker =  true
+    override this.Equals _ = true
 
     override this.GetHashCode () = 0
 
     override this.ToString() = "UnackedCount: " + unackedCount.ToString()
 
     interface System.IComparable with
-         member x.CompareTo yobj = 0
+         member x.CompareTo _ = 0

@@ -1,7 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
 open Pulsar.Client.Common
-open System
 
 type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 

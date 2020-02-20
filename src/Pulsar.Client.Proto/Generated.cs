@@ -116,6 +116,21 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
+    internal partial class IntRange : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"start", IsRequired = true)]
+        internal int Start { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"end", IsRequired = true)]
+        internal int End { get; set; }
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
     internal partial class EncryptionKeys : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
@@ -295,6 +310,39 @@ namespace pulsar.proto
         internal bool ShouldSerializeMarkerType() => __pbn__MarkerType != null;
         internal void ResetMarkerType() => __pbn__MarkerType = null;
         private int? __pbn__MarkerType;
+
+        [global::ProtoBuf.ProtoMember(22, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(23, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(24, Name = @"highest_sequence_id")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong HighestSequenceId
+        {
+            get { return __pbn__HighestSequenceId ?? 0; }
+            set { __pbn__HighestSequenceId = value; }
+        }
+        internal bool ShouldSerializeHighestSequenceId() => __pbn__HighestSequenceId != null;
+        internal void ResetHighestSequenceId() => __pbn__HighestSequenceId = null;
+        private ulong? __pbn__HighestSequenceId;
 
     }
 
@@ -608,6 +656,21 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
+    internal partial class KeySharedMeta : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, IsRequired = true)]
+        internal KeySharedMode keySharedMode { get; set; }
+
+        [global::ProtoBuf.ProtoMember(3)]
+        internal global::System.Collections.Generic.List<IntRange> hashRanges { get; } = new global::System.Collections.Generic.List<IntRange>();
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
     internal partial class CommandSubscribe : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
@@ -700,6 +763,31 @@ namespace pulsar.proto
         internal bool ShouldSerializeReplicateSubscriptionState() => __pbn__ReplicateSubscriptionState != null;
         internal void ResetReplicateSubscriptionState() => __pbn__ReplicateSubscriptionState = null;
         private bool? __pbn__ReplicateSubscriptionState;
+
+        [global::ProtoBuf.ProtoMember(15, Name = @"force_topic_creation")]
+        [global::System.ComponentModel.DefaultValue(true)]
+        internal bool ForceTopicCreation
+        {
+            get { return __pbn__ForceTopicCreation ?? true; }
+            set { __pbn__ForceTopicCreation = value; }
+        }
+        internal bool ShouldSerializeForceTopicCreation() => __pbn__ForceTopicCreation != null;
+        internal void ResetForceTopicCreation() => __pbn__ForceTopicCreation = null;
+        private bool? __pbn__ForceTopicCreation;
+
+        [global::ProtoBuf.ProtoMember(16, Name = @"start_message_rollback_duration_sec")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong StartMessageRollbackDurationSec
+        {
+            get { return __pbn__StartMessageRollbackDurationSec ?? 0; }
+            set { __pbn__StartMessageRollbackDurationSec = value; }
+        }
+        internal bool ShouldSerializeStartMessageRollbackDurationSec() => __pbn__StartMessageRollbackDurationSec != null;
+        internal void ResetStartMessageRollbackDurationSec() => __pbn__StartMessageRollbackDurationSec = null;
+        private ulong? __pbn__StartMessageRollbackDurationSec;
+
+        [global::ProtoBuf.ProtoMember(17)]
+        internal KeySharedMeta keySharedMeta { get; set; }
 
         [global::ProtoBuf.ProtoContract()]
         internal enum SubType
@@ -1030,6 +1118,28 @@ namespace pulsar.proto
         [global::ProtoBuf.ProtoMember(7, Name = @"schema")]
         internal Schema Schema { get; set; }
 
+        [global::ProtoBuf.ProtoMember(8, Name = @"epoch")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong Epoch
+        {
+            get { return __pbn__Epoch ?? 0; }
+            set { __pbn__Epoch = value; }
+        }
+        internal bool ShouldSerializeEpoch() => __pbn__Epoch != null;
+        internal void ResetEpoch() => __pbn__Epoch = null;
+        private ulong? __pbn__Epoch;
+
+        [global::ProtoBuf.ProtoMember(9, Name = @"user_provided_producer_name")]
+        [global::System.ComponentModel.DefaultValue(true)]
+        internal bool UserProvidedProducerName
+        {
+            get { return __pbn__UserProvidedProducerName ?? true; }
+            set { __pbn__UserProvidedProducerName = value; }
+        }
+        internal bool ShouldSerializeUserProvidedProducerName() => __pbn__UserProvidedProducerName != null;
+        internal void ResetUserProvidedProducerName() => __pbn__UserProvidedProducerName = null;
+        private bool? __pbn__UserProvidedProducerName;
+
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -1056,6 +1166,39 @@ namespace pulsar.proto
         internal void ResetNumMessages() => __pbn__NumMessages = null;
         private int? __pbn__NumMessages;
 
+        [global::ProtoBuf.ProtoMember(4, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(6, Name = @"highest_sequence_id")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong HighestSequenceId
+        {
+            get { return __pbn__HighestSequenceId ?? 0; }
+            set { __pbn__HighestSequenceId = value; }
+        }
+        internal bool ShouldSerializeHighestSequenceId() => __pbn__HighestSequenceId != null;
+        internal void ResetHighestSequenceId() => __pbn__HighestSequenceId = null;
+        private ulong? __pbn__HighestSequenceId;
+
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -1073,6 +1216,17 @@ namespace pulsar.proto
 
         [global::ProtoBuf.ProtoMember(3, Name = @"message_id")]
         internal MessageIdData MessageId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"highest_sequence_id")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong HighestSequenceId
+        {
+            get { return __pbn__HighestSequenceId ?? 0; }
+            set { __pbn__HighestSequenceId = value; }
+        }
+        internal bool ShouldSerializeHighestSequenceId() => __pbn__HighestSequenceId != null;
+        internal void ResetHighestSequenceId() => __pbn__HighestSequenceId = null;
+        private ulong? __pbn__HighestSequenceId;
 
     }
 
@@ -1153,6 +1307,28 @@ namespace pulsar.proto
         [global::ProtoBuf.ProtoMember(5, Name = @"properties")]
         internal global::System.Collections.Generic.List<KeyLongValue> Properties { get; } = new global::System.Collections.Generic.List<KeyLongValue>();
 
+        [global::ProtoBuf.ProtoMember(6, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(7, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
         [global::ProtoBuf.ProtoContract()]
         internal enum AckType
         {
@@ -1169,6 +1345,62 @@ namespace pulsar.proto
             BatchDeSerializeError = 3,
             DecryptionError = 4,
         }
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandAckResponse : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"consumer_id", IsRequired = true)]
+        internal ulong ConsumerId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"error")]
+        [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
+        internal ServerError Error
+        {
+            get { return __pbn__Error ?? ServerError.UnknownError; }
+            set { __pbn__Error = value; }
+        }
+        internal bool ShouldSerializeError() => __pbn__Error != null;
+        internal void ResetError() => __pbn__Error = null;
+        private ServerError? __pbn__Error;
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"message")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string Message
+        {
+            get { return __pbn__Message ?? ""; }
+            set { __pbn__Message = value; }
+        }
+        internal bool ShouldSerializeMessage() => __pbn__Message != null;
+        internal void ResetMessage() => __pbn__Message = null;
+        private string __pbn__Message;
 
     }
 
@@ -1725,6 +1957,676 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandGetOrCreateSchema : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"topic", IsRequired = true)]
+        internal string Topic { get; set; }
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"schema", IsRequired = true)]
+        internal Schema Schema { get; set; }
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandGetOrCreateSchemaResponse : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"error_code")]
+        [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
+        internal ServerError ErrorCode
+        {
+            get { return __pbn__ErrorCode ?? ServerError.UnknownError; }
+            set { __pbn__ErrorCode = value; }
+        }
+        internal bool ShouldSerializeErrorCode() => __pbn__ErrorCode != null;
+        internal void ResetErrorCode() => __pbn__ErrorCode = null;
+        private ServerError? __pbn__ErrorCode;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"error_message")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string ErrorMessage
+        {
+            get { return __pbn__ErrorMessage ?? ""; }
+            set { __pbn__ErrorMessage = value; }
+        }
+        internal bool ShouldSerializeErrorMessage() => __pbn__ErrorMessage != null;
+        internal void ResetErrorMessage() => __pbn__ErrorMessage = null;
+        private string __pbn__ErrorMessage;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"schema_version")]
+        internal byte[] SchemaVersion
+        {
+            get { return __pbn__SchemaVersion; }
+            set { __pbn__SchemaVersion = value; }
+        }
+        internal bool ShouldSerializeSchemaVersion() => __pbn__SchemaVersion != null;
+        internal void ResetSchemaVersion() => __pbn__SchemaVersion = null;
+        private byte[] __pbn__SchemaVersion;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandNewTxn : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txn_ttl_seconds")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnTtlSeconds
+        {
+            get { return __pbn__TxnTtlSeconds ?? 0; }
+            set { __pbn__TxnTtlSeconds = value; }
+        }
+        internal bool ShouldSerializeTxnTtlSeconds() => __pbn__TxnTtlSeconds != null;
+        internal void ResetTxnTtlSeconds() => __pbn__TxnTtlSeconds = null;
+        private ulong? __pbn__TxnTtlSeconds;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"tc_id")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TcId
+        {
+            get { return __pbn__TcId ?? 0; }
+            set { __pbn__TcId = value; }
+        }
+        internal bool ShouldSerializeTcId() => __pbn__TcId != null;
+        internal void ResetTcId() => __pbn__TcId = null;
+        private ulong? __pbn__TcId;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandNewTxnResponse : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"error")]
+        [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
+        internal ServerError Error
+        {
+            get { return __pbn__Error ?? ServerError.UnknownError; }
+            set { __pbn__Error = value; }
+        }
+        internal bool ShouldSerializeError() => __pbn__Error != null;
+        internal void ResetError() => __pbn__Error = null;
+        private ServerError? __pbn__Error;
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"message")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string Message
+        {
+            get { return __pbn__Message ?? ""; }
+            set { __pbn__Message = value; }
+        }
+        internal bool ShouldSerializeMessage() => __pbn__Message != null;
+        internal void ResetMessage() => __pbn__Message = null;
+        private string __pbn__Message;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandAddPartitionToTxn : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"partitions")]
+        internal global::System.Collections.Generic.List<string> Partitions { get; } = new global::System.Collections.Generic.List<string>();
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandAddPartitionToTxnResponse : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"error")]
+        [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
+        internal ServerError Error
+        {
+            get { return __pbn__Error ?? ServerError.UnknownError; }
+            set { __pbn__Error = value; }
+        }
+        internal bool ShouldSerializeError() => __pbn__Error != null;
+        internal void ResetError() => __pbn__Error = null;
+        private ServerError? __pbn__Error;
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"message")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string Message
+        {
+            get { return __pbn__Message ?? ""; }
+            set { __pbn__Message = value; }
+        }
+        internal bool ShouldSerializeMessage() => __pbn__Message != null;
+        internal void ResetMessage() => __pbn__Message = null;
+        private string __pbn__Message;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class Subscription : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"topic", IsRequired = true)]
+        internal string Topic { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, IsRequired = true)]
+        internal string subscription { get; set; }
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandAddSubscriptionToTxn : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"subscription")]
+        internal global::System.Collections.Generic.List<Subscription> Subscriptions { get; } = new global::System.Collections.Generic.List<Subscription>();
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandAddSubscriptionToTxnResponse : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"error")]
+        [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
+        internal ServerError Error
+        {
+            get { return __pbn__Error ?? ServerError.UnknownError; }
+            set { __pbn__Error = value; }
+        }
+        internal bool ShouldSerializeError() => __pbn__Error != null;
+        internal void ResetError() => __pbn__Error = null;
+        private ServerError? __pbn__Error;
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"message")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string Message
+        {
+            get { return __pbn__Message ?? ""; }
+            set { __pbn__Message = value; }
+        }
+        internal bool ShouldSerializeMessage() => __pbn__Message != null;
+        internal void ResetMessage() => __pbn__Message = null;
+        private string __pbn__Message;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandEndTxn : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"txn_action")]
+        [global::System.ComponentModel.DefaultValue(TxnAction.Commit)]
+        internal TxnAction TxnAction
+        {
+            get { return __pbn__TxnAction ?? TxnAction.Commit; }
+            set { __pbn__TxnAction = value; }
+        }
+        internal bool ShouldSerializeTxnAction() => __pbn__TxnAction != null;
+        internal void ResetTxnAction() => __pbn__TxnAction = null;
+        private TxnAction? __pbn__TxnAction;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandEndTxnResponse : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"error")]
+        [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
+        internal ServerError Error
+        {
+            get { return __pbn__Error ?? ServerError.UnknownError; }
+            set { __pbn__Error = value; }
+        }
+        internal bool ShouldSerializeError() => __pbn__Error != null;
+        internal void ResetError() => __pbn__Error = null;
+        private ServerError? __pbn__Error;
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"message")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string Message
+        {
+            get { return __pbn__Message ?? ""; }
+            set { __pbn__Message = value; }
+        }
+        internal bool ShouldSerializeMessage() => __pbn__Message != null;
+        internal void ResetMessage() => __pbn__Message = null;
+        private string __pbn__Message;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandEndTxnOnPartition : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"topic")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string Topic
+        {
+            get { return __pbn__Topic ?? ""; }
+            set { __pbn__Topic = value; }
+        }
+        internal bool ShouldSerializeTopic() => __pbn__Topic != null;
+        internal void ResetTopic() => __pbn__Topic = null;
+        private string __pbn__Topic;
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"txn_action")]
+        [global::System.ComponentModel.DefaultValue(TxnAction.Commit)]
+        internal TxnAction TxnAction
+        {
+            get { return __pbn__TxnAction ?? TxnAction.Commit; }
+            set { __pbn__TxnAction = value; }
+        }
+        internal bool ShouldSerializeTxnAction() => __pbn__TxnAction != null;
+        internal void ResetTxnAction() => __pbn__TxnAction = null;
+        private TxnAction? __pbn__TxnAction;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandEndTxnOnPartitionResponse : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"error")]
+        [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
+        internal ServerError Error
+        {
+            get { return __pbn__Error ?? ServerError.UnknownError; }
+            set { __pbn__Error = value; }
+        }
+        internal bool ShouldSerializeError() => __pbn__Error != null;
+        internal void ResetError() => __pbn__Error = null;
+        private ServerError? __pbn__Error;
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"message")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string Message
+        {
+            get { return __pbn__Message ?? ""; }
+            set { __pbn__Message = value; }
+        }
+        internal bool ShouldSerializeMessage() => __pbn__Message != null;
+        internal void ResetMessage() => __pbn__Message = null;
+        private string __pbn__Message;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandEndTxnOnSubscription : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"subscription")]
+        internal Subscription Subscription { get; set; }
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"txn_action")]
+        [global::System.ComponentModel.DefaultValue(TxnAction.Commit)]
+        internal TxnAction TxnAction
+        {
+            get { return __pbn__TxnAction ?? TxnAction.Commit; }
+            set { __pbn__TxnAction = value; }
+        }
+        internal bool ShouldSerializeTxnAction() => __pbn__TxnAction != null;
+        internal void ResetTxnAction() => __pbn__TxnAction = null;
+        private TxnAction? __pbn__TxnAction;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandEndTxnOnSubscriptionResponse : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"txnid_least_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidLeastBits
+        {
+            get { return __pbn__TxnidLeastBits ?? 0; }
+            set { __pbn__TxnidLeastBits = value; }
+        }
+        internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
+        internal void ResetTxnidLeastBits() => __pbn__TxnidLeastBits = null;
+        private ulong? __pbn__TxnidLeastBits;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"txnid_most_bits")]
+        [global::System.ComponentModel.DefaultValue(0)]
+        internal ulong TxnidMostBits
+        {
+            get { return __pbn__TxnidMostBits ?? 0; }
+            set { __pbn__TxnidMostBits = value; }
+        }
+        internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
+        internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
+        private ulong? __pbn__TxnidMostBits;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"error")]
+        [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
+        internal ServerError Error
+        {
+            get { return __pbn__Error ?? ServerError.UnknownError; }
+            set { __pbn__Error = value; }
+        }
+        internal bool ShouldSerializeError() => __pbn__Error != null;
+        internal void ResetError() => __pbn__Error = null;
+        private ServerError? __pbn__Error;
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"message")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string Message
+        {
+            get { return __pbn__Message ?? ""; }
+            set { __pbn__Message = value; }
+        }
+        internal bool ShouldSerializeMessage() => __pbn__Message != null;
+        internal void ResetMessage() => __pbn__Message = null;
+        private string __pbn__Message;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
     internal partial class BaseCommand : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
@@ -1842,6 +2744,51 @@ namespace pulsar.proto
         [global::ProtoBuf.ProtoMember(37)]
         internal CommandAuthResponse authResponse { get; set; }
 
+        [global::ProtoBuf.ProtoMember(38)]
+        internal CommandAckResponse ackResponse { get; set; }
+
+        [global::ProtoBuf.ProtoMember(39)]
+        internal CommandGetOrCreateSchema getOrCreateSchema { get; set; }
+
+        [global::ProtoBuf.ProtoMember(40)]
+        internal CommandGetOrCreateSchemaResponse getOrCreateSchemaResponse { get; set; }
+
+        [global::ProtoBuf.ProtoMember(50)]
+        internal CommandNewTxn newTxn { get; set; }
+
+        [global::ProtoBuf.ProtoMember(51)]
+        internal CommandNewTxnResponse newTxnResponse { get; set; }
+
+        [global::ProtoBuf.ProtoMember(52)]
+        internal CommandAddPartitionToTxn addPartitionToTxn { get; set; }
+
+        [global::ProtoBuf.ProtoMember(53)]
+        internal CommandAddPartitionToTxnResponse addPartitionToTxnResponse { get; set; }
+
+        [global::ProtoBuf.ProtoMember(54)]
+        internal CommandAddSubscriptionToTxn addSubscriptionToTxn { get; set; }
+
+        [global::ProtoBuf.ProtoMember(55)]
+        internal CommandAddSubscriptionToTxnResponse addSubscriptionToTxnResponse { get; set; }
+
+        [global::ProtoBuf.ProtoMember(56)]
+        internal CommandEndTxn endTxn { get; set; }
+
+        [global::ProtoBuf.ProtoMember(57)]
+        internal CommandEndTxnResponse endTxnResponse { get; set; }
+
+        [global::ProtoBuf.ProtoMember(58)]
+        internal CommandEndTxnOnPartition endTxnOnPartition { get; set; }
+
+        [global::ProtoBuf.ProtoMember(59)]
+        internal CommandEndTxnOnPartitionResponse endTxnOnPartitionResponse { get; set; }
+
+        [global::ProtoBuf.ProtoMember(60)]
+        internal CommandEndTxnOnSubscription endTxnOnSubscription { get; set; }
+
+        [global::ProtoBuf.ProtoMember(61)]
+        internal CommandEndTxnOnSubscriptionResponse endTxnOnSubscriptionResponse { get; set; }
+
         [global::ProtoBuf.ProtoContract()]
         internal enum Type
         {
@@ -1917,6 +2864,36 @@ namespace pulsar.proto
             AuthChallenge = 36,
             [global::ProtoBuf.ProtoEnum(Name = @"AUTH_RESPONSE")]
             AuthResponse = 37,
+            [global::ProtoBuf.ProtoEnum(Name = @"ACK_RESPONSE")]
+            AckResponse = 38,
+            [global::ProtoBuf.ProtoEnum(Name = @"GET_OR_CREATE_SCHEMA")]
+            GetOrCreateSchema = 39,
+            [global::ProtoBuf.ProtoEnum(Name = @"GET_OR_CREATE_SCHEMA_RESPONSE")]
+            GetOrCreateSchemaResponse = 40,
+            [global::ProtoBuf.ProtoEnum(Name = @"NEW_TXN")]
+            NewTxn = 50,
+            [global::ProtoBuf.ProtoEnum(Name = @"NEW_TXN_RESPONSE")]
+            NewTxnResponse = 51,
+            [global::ProtoBuf.ProtoEnum(Name = @"ADD_PARTITION_TO_TXN")]
+            AddPartitionToTxn = 52,
+            [global::ProtoBuf.ProtoEnum(Name = @"ADD_PARTITION_TO_TXN_RESPONSE")]
+            AddPartitionToTxnResponse = 53,
+            [global::ProtoBuf.ProtoEnum(Name = @"ADD_SUBSCRIPTION_TO_TXN")]
+            AddSubscriptionToTxn = 54,
+            [global::ProtoBuf.ProtoEnum(Name = @"ADD_SUBSCRIPTION_TO_TXN_RESPONSE")]
+            AddSubscriptionToTxnResponse = 55,
+            [global::ProtoBuf.ProtoEnum(Name = @"END_TXN")]
+            EndTxn = 56,
+            [global::ProtoBuf.ProtoEnum(Name = @"END_TXN_RESPONSE")]
+            EndTxnResponse = 57,
+            [global::ProtoBuf.ProtoEnum(Name = @"END_TXN_ON_PARTITION")]
+            EndTxnOnPartition = 58,
+            [global::ProtoBuf.ProtoEnum(Name = @"END_TXN_ON_PARTITION_RESPONSE")]
+            EndTxnOnPartitionResponse = 59,
+            [global::ProtoBuf.ProtoEnum(Name = @"END_TXN_ON_SUBSCRIPTION")]
+            EndTxnOnSubscription = 60,
+            [global::ProtoBuf.ProtoEnum(Name = @"END_TXN_ON_SUBSCRIPTION_RESPONSE")]
+            EndTxnOnSubscriptionResponse = 61,
         }
 
     }
@@ -1959,6 +2936,8 @@ namespace pulsar.proto
         InvalidTopicName = 17,
         IncompatibleSchema = 18,
         ConsumerAssignError = 19,
+        TransactionCoordinatorNotFound = 20,
+        InvalidTxnStatus = 21,
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -2002,6 +2981,26 @@ namespace pulsar.proto
         V13 = 13,
         [global::ProtoBuf.ProtoEnum(Name = @"v14")]
         V14 = 14,
+        [global::ProtoBuf.ProtoEnum(Name = @"v15")]
+        V15 = 15,
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal enum KeySharedMode
+    {
+        [global::ProtoBuf.ProtoEnum(Name = @"AUTO_SPLIT")]
+        AutoSplit = 0,
+        [global::ProtoBuf.ProtoEnum(Name = @"STICKY")]
+        Sticky = 1,
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal enum TxnAction
+    {
+        [global::ProtoBuf.ProtoEnum(Name = @"COMMIT")]
+        Commit = 0,
+        [global::ProtoBuf.ProtoEnum(Name = @"ABORT")]
+        Abort = 1,
     }
 
 }

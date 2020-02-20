@@ -53,28 +53,28 @@ module ServiceUriTests =
 
             test "Parse nows pulsar scheme" {
                 let address = "pulsar://host:6650"
-                let expected = new Uri("pulsar://bassmaster:controller87@host:6650")
+                let expected = Uri("pulsar://bassmaster:controller87@host:6650")
                 let actual = address |> ServiceUri.parse |> getAddresses |> List.head
                 Expect.equal actual expected "Parse should now pulsar scheme"
             }
 
             test "Parse nows secure pulsar scheme" {
                 let address = "pulsar+ssl://host:6650"
-                let expected = new Uri("pulsar://host:6650")
+                let expected = Uri("pulsar://host:6650")
                 let actual = address |> ServiceUri.parse |> getAddresses |> List.head
                 Expect.equal actual expected "Parse should now secure pulsar scheme"
             }
 
             test "Parse sets default port for pulsar scheme" {
                 let address = "pulsar://host"
-                let expected = new Uri("pulsar://host:6650")
+                let expected = Uri("pulsar://host:6650")
                 let actual = address |> ServiceUri.parse |> getAddresses |> List.head
                 Expect.equal actual expected "Parse should set default port for pulsar scheme"
             }
 
             test "Parse sets default port for secure pulsar scheme" {
                 let address = "pulsar+ssl://host"
-                let expected = new Uri("pulsar://host:6651")
+                let expected = Uri("pulsar://host:6651")
                 let actual = address |> ServiceUri.parse |> getAddresses |> List.head
                 Expect.equal actual expected "Parse should set default port for secure pulsar scheme"
             }
@@ -87,10 +87,10 @@ module ServiceUriTests =
                     |> List.map(fun s -> sprintf "pulsar+ssl://host-1%shost-2:789%shost-3%shost-4:4789" s s s)
 
                 let expected = [
-                    new Uri("pulsar://host-1:6651")
-                    new Uri("pulsar://host-2:789")
-                    new Uri("pulsar://host-3:6651")
-                    new Uri("pulsar://host-4:4789")
+                    Uri("pulsar://host-1:6651")
+                    Uri("pulsar://host-2:789")
+                    Uri("pulsar://host-3:6651")
+                    Uri("pulsar://host-4:4789")
                 ]
 
                 serviceUris |> List.iter (fun address ->
@@ -101,7 +101,7 @@ module ServiceUriTests =
 
             test "Parse drops user info" {
                 let address = "pulsar://user:password@host:6650"
-                let expected = new Uri("pulsar://host:6650")
+                let expected = Uri("pulsar://host:6650")
                 let actual = address |> ServiceUri.parse |> getAddresses |> List.head
                 Expect.equal actual.AbsoluteUri expected.AbsoluteUri "Parse should drop user info part"
             }

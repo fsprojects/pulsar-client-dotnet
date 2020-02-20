@@ -7,7 +7,7 @@ open CustomProps
 open ReaderApi
 
 [<EntryPoint>]
-let main argv =
+let main _ =
 
     let loggerFactory =
         LoggerFactory.Create(fun builder ->
@@ -15,11 +15,11 @@ let main argv =
                 .SetMinimumLevel(LogLevel.Information)
                 .AddConsole() |> ignore
         )
-    PulsarClient.Logger <- loggerFactory.CreateLogger("PulsarLogger")
+    PulsarClient.Logger <- loggerFactory.CreateLogger("PulsarLogger") 
 
     runSimple().Wait()
-    runCustomProps().Wait()
-    runReader().Wait()
+//    runCustomProps().Wait()
+//    runReader().Wait()
 
     printfn "Example ended. Press any key to exit"
     Console.ReadKey() |> ignore

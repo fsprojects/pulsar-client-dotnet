@@ -2,20 +2,11 @@ module Pulsar.Client.IntegrationTests.Flow
 
 open System
 open Expecto
-open Expecto.Flip
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
-open System.Text
 open System.Threading.Tasks
-open Pulsar.Client.Common
 open Serilog
-open Microsoft.Extensions.Logging
-open Microsoft.Extensions.DependencyInjection
-open Serilog.Sinks.SystemConsole.Themes
-open System.Collections.Generic
-open Pulsar.Client.IntegrationTests
 open Pulsar.Client.IntegrationTests.Common
-open FSharp.UMX
 
 [<Tests>]
 let tests =

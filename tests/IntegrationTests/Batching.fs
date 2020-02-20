@@ -1,21 +1,15 @@
 module Pulsar.Client.IntegrationTests.Batching
 
 open System
+open System.Diagnostics
 open Expecto
-open Expecto.Flip
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
-open System.Text
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open Serilog
-open Microsoft.Extensions.Logging
-open Microsoft.Extensions.DependencyInjection
-open Serilog.Sinks.SystemConsole.Themes
-open System.Collections.Generic
-open Pulsar.Client.IntegrationTests
 open Pulsar.Client.IntegrationTests.Common
-open FSharp.UMX
+open System.Text
 
 
 [<Tests>]
@@ -208,5 +202,76 @@ let tests =
             do! Task.WhenAll(producer1Task, producer2Task, consumerTask) |> Async.AwaitTask
 
             Log.Debug("Finished Keys and properties are propertly passed with key-based batching")
+        }
+        
+        testAsync "Batch recieve works with regular consumer"{
+            Log.Debug("Started Batch recieve works with regular consumer")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let producerName = "batchRecieveProducer"
+            let consumerName = "batchRecieveConsumer"
+            let numberOfMessages = 10
+            let batchTimeout = TimeSpan.FromSeconds(2.0)
+
+            let! producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(false)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("test-subscription")
+                    .BatchReceivePolicy(BatchReceivePolicy(8, -1L, batchTimeout))
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! produceMessages producer numberOfMessages producerName
+                    }:> Task)
+            
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        let sw = Stopwatch()
+                        sw.Start()
+                        let! messagesBatch = consumer.BatchReceiveAsync()
+                        let firstBatchTime = sw.Elapsed
+                        if firstBatchTime > TimeSpan.FromSeconds(0.5) then
+                                failwith <| sprintf "Too long to receive first batch consumer %s passed %f ms" consumerName firstBatchTime.TotalMilliseconds
+                        let mutable i = 1
+                        for message in messagesBatch do    
+                            let received = Encoding.UTF8.GetString(message.Data)                        
+                            Log.Debug("{0} received {1}", consumerName, received)
+                            do! consumer.AcknowledgeAsync(message.MessageId)
+                            Log.Debug("{0} acknowledged {1}", consumerName, received)
+                            let expected = "Message #" + string i
+                            if received.StartsWith(expected) |> not then
+                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
+                            i <- i + 1
+                        sw.Restart()
+                        let! messagesBatch2 = consumer.BatchReceiveAsync()
+                        let secondBatchTime = sw.Elapsed
+                        if secondBatchTime < batchTimeout then
+                                failwith <| sprintf "Too fast to get second batch consumer %s passed %f ms" consumerName secondBatchTime.TotalMilliseconds
+                        for message in messagesBatch2 do    
+                            let received = Encoding.UTF8.GetString(message.Data)                        
+                            Log.Debug("{0} received {1}", consumerName, received)
+                            do! consumer.AcknowledgeAsync(message.MessageId)
+                            Log.Debug("{0} acknowledged {1}", consumerName, received)
+                            let expected = "Message #" + string i
+                            if received.StartsWith(expected) |> not then
+                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
+                            i <- i + 1
+                                
+                    }:> Task)
+
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+
+            Log.Debug("Finished Batch recieve works with regular consumer")
         }
     ]

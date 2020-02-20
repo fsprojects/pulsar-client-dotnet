@@ -4,8 +4,6 @@
 // code or tables extracted from it, as desired without restriction.
 
 using System.IO;
-using System;
-using System.Security.Cryptography;
 
 
 namespace Pulsar.Client.Common

@@ -124,11 +124,11 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             then
                 let! consumer = MultiTopicsConsumerImpl.Init(consumerConfig, config, connectionPool, metadata.Partitions, lookupService, removeConsumer)
                 mb.Post(AddConsumer consumer)
-                return consumer
+                return consumer :> IConsumer
             else
-                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, -1, SubscriptionMode.Durable, None, lookupService, removeConsumer)
+                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, -1, SubscriptionMode.Durable, None, lookupService, true, removeConsumer)
                 mb.Post(AddConsumer consumer)
-                return consumer
+                return consumer :> IConsumer
         }
 
     member this.CreateProducerAsync (producerConfig: ProducerConfiguration) =

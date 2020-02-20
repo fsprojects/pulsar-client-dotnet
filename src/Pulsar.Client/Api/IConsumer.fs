@@ -5,10 +5,14 @@ open Pulsar.Client.Common
 
 type IConsumer =
 
-    /// Receive a single message, wait asynchronously if no message is ready. Should be only one awaiting thread per consumer.
+    /// Receive a single message, wait asynchronously if no message is ready.
     abstract member ReceiveAsync: unit -> Task<Message>
+    /// Retrieves messages when has enough messages or wait timeout and completes with received messages.
+    abstract member BatchReceiveAsync: unit -> Task<Messages>
     /// Asynchronously acknowledge the consumption of a single message
     abstract member AcknowledgeAsync: MessageId -> Task<unit>
+    /// Asynchronously acknowledge the consumption of Messages
+    abstract member AcknowledgeAsync: Messages -> Task<unit>
     /// Acknowledge the reception of all the messages in the stream up to (and including) the provided message.
     abstract member AcknowledgeCumulativeAsync: MessageId -> Task<unit>
     /// Redelivers all the unacknowledged messages
@@ -25,6 +29,8 @@ type IConsumer =
     abstract member SeekAsync: uint64 -> Task<unit>
     /// Acknowledge the failure to process a single message.
     abstract member NegativeAcknowledge: MessageId -> Task<unit>
+    /// Acknowledge the failure to process Messages
+    abstract member NegativeAcknowledge: Messages -> Task<unit>
     /// Internal client consumer id
     abstract member ConsumerId: ConsumerId
     /// Get a topic for the consumer

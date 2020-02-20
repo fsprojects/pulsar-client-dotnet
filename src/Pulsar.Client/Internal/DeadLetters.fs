@@ -4,11 +4,9 @@ open System
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System.Collections.Generic
-open FSharp.UMX
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
-open System.Collections.ObjectModel
 
 type internal DeadLettersProcessor
     (policy: DeadLettersPolicy,

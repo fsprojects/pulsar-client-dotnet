@@ -18,7 +18,7 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
         |> checkValue
             (fun c ->
                 c.MessageRoutingMode
-                |> invalidArgIf (fun mode -> mode = MessageRoutingMode.CustomPartition && isNull (box config.CustomMessageRouter)) "Valid router should be set with CustomPartition routing mode.")
+                |> invalidArgIf (fun mode -> mode = MessageRoutingMode.CustomPartition && Option.isNone config.CustomMessageRouter) "Valid router should be set with CustomPartition routing mode.")
 
     new(client: PulsarClient) = ProducerBuilder(client, ProducerConfiguration.Default)
 
@@ -28,7 +28,7 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
             { config with
                 Topic = topic
                     |> invalidArgIfBlankString "Topic must not be blank."
-                    |> TopicName })
+                    |> fun t -> TopicName(t.Trim()) })
 
     member this.ProducerName producerName =
         ProducerBuilder(
@@ -52,12 +52,12 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                     maxPendingMessagesAcrossPartitions
                     |> invalidArgIfNotGreaterThanZero "MaxPendingMessagesAcrossPartitions needs to be greater than 0." })
 
-    member __.EnableBatching enableBatching =
+    member this.EnableBatching enableBatching =
         ProducerBuilder(
             client,
             { config with BatchingEnabled = enableBatching })
 
-    member __.BatchingMaxMessages batchingMaxMessages =
+    member this.BatchingMaxMessages batchingMaxMessages =
         ProducerBuilder(
             client,
             { config with
@@ -65,7 +65,15 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                     batchingMaxMessages
                     |> invalidArgIfNotGreaterThanZero "BatchingMaxMessages needs to be greater than 0." })
 
-    member __.BatchingMaxPublishDelay batchingMaxPublishDelay =
+    member this.BatchingMaxBytes batchingMaxBytes =
+        ProducerBuilder(
+            client,
+            { config with
+                BatchingMaxBytes =
+                    batchingMaxBytes
+                    |> invalidArgIfNotGreaterThanZero "BatchingMaxBytes needs to be greater than 0." })
+
+    member this.BatchingMaxPublishDelay batchingMaxPublishDelay =
         ProducerBuilder(
             client,
             { config with
@@ -73,36 +81,45 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                     batchingMaxPublishDelay
                     |> invalidArgIf ((>=) TimeSpan.Zero) "BatchingMaxPublishDelay needs to be greater than 0." })
 
-    member __.BatchBuilder batchBuilder =
+    member this.RoundRobinRouterBatchingPartitionSwitchFrequency frequency =
+        ProducerBuilder(
+            client,
+            { config with
+                BatchingPartitionSwitchFrequencyByPublishDelay = frequency
+                |> invalidArgIf ((>) 1) "Configured value for partition switch frequency must be >= 1" })
+
+    member this.BatchBuilder batchBuilder =
         ProducerBuilder(
             client,
             { config with BatchBuilder = batchBuilder })
 
-    member __.SendTimeout sendTimeout =
+    member this.SendTimeout sendTimeout =
         ProducerBuilder(
             client,
             { config with
                 SendTimeout = sendTimeout })
 
-    member __.CompressionType compressionType =
+    member this.CompressionType compressionType =
         ProducerBuilder(
             client,
             { config with
                 CompressionType = compressionType })
 
-    member __.MessageRoutingMode messageRoutingMode =
+    member this.MessageRoutingMode messageRoutingMode =
         ProducerBuilder(
             client,
             { config with
                 MessageRoutingMode = messageRoutingMode })
 
-    member __.CustomMessageRouter customMessageRouter =
+    member this.CustomMessageRouter customMessageRouter =
         ProducerBuilder(
             client,
             { config with
-                CustomMessageRouter = customMessageRouter })
+                CustomMessageRouter = customMessageRouter
+                    |> invalidArgIfDefault "CustomMessageRouter can't be null"
+                    |> Some })
 
-    member __.HashingScheme hashingScheme =
+    member this.HashingScheme hashingScheme =
         ProducerBuilder(
             client,
             { config with
@@ -112,3 +129,6 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
         config
         |> verify
         |> client.CreateProducerAsync
+
+    override this.ToString() =
+        config.ToString()

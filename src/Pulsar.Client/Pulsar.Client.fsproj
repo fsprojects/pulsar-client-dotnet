@@ -33,6 +33,8 @@
     <Compile Include="Common\TopicName.fs" />
     <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\NamespaceName.fs" />
+    <Compile Include="Api\BatchReceivePolicy.fs" />
+    <Compile Include="Api\KeySharedPolicy.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\AuthenticationDataProvider.fs" />
     <Compile Include="Api\Authentication.fs" />

@@ -1,17 +1,15 @@
 module Pulsar.Client.IntegrationTests.Partitions
 
 open System
+open System.Diagnostics
 open Expecto
-open Expecto.Flip
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
 open System.Threading.Tasks
-open System.Threading
 open Pulsar.Client.Common
 open Serilog
 open Pulsar.Client.IntegrationTests.Common
-open FSharp.UMX
 open FSharp.Control
 
 [<Tests>]
@@ -137,7 +135,7 @@ let tests =
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        for i in [1..100] do
+                        for _ in [1..100] do
                             let! message = enumerator.MoveNext()
                             let received = Encoding.UTF8.GetString(message.Value.Data)
                             Log.Debug("Some consumer received {1}", received)
@@ -149,6 +147,81 @@ let tests =
             do! Async.Sleep(110) // wait for acks
 
             Log.Debug("Finished Two producers and two consumers with 2 partitions")
+        }
+        
+        testAsync "Batch read works with partitions" {
+
+            Log.Debug("Started Batch read works with partitions")
+            let client = getClient()
+            let topicName = "public/default/partitioned3"
+            let consumerName = "PartitionedConsumerBatchRead"
+            let producerName = "PartitionedProducerBatchRead"
+            let batchTimeout = TimeSpan.FromSeconds(2.0)
+            let numberOfMessages = 10
+            let batchSize = 8
+
+            let! producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(false)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .ConsumerName(consumerName)
+                    .BatchReceivePolicy(BatchReceivePolicy(batchSize, -1L, batchTimeout))
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let messages = generateMessages numberOfMessages producerName
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! producePredefinedMessages producer messages
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        let sw = Stopwatch()
+                        sw.Start()
+                        let! messagesBatch = consumer.BatchReceiveAsync()
+                        let firstBatchTime = sw.Elapsed
+                        if firstBatchTime > TimeSpan.FromSeconds(0.5) then
+                                failwith <| sprintf "Too long to receive first batch consumer %s passed %f ms" consumerName firstBatchTime.TotalMilliseconds
+                        if messagesBatch.Count <> batchSize then
+                            failwith <| sprintf "Wrong number of messages received %i consumer %s" messagesBatch.Count consumerName
+                        for message in messagesBatch do    
+                            let received = Encoding.UTF8.GetString(message.Data)                        
+                            Log.Debug("{0} received {1}", consumerName, received)
+                            if messages |> Array.contains received |> not then
+                                failwith <| sprintf "Incorrect message received %s consumer %s" received consumerName
+                        do! consumer.AcknowledgeAsync(messagesBatch)
+                        sw.Restart()
+                        let! messagesBatch2 = consumer.BatchReceiveAsync()
+                        let secondBatchTime = sw.Elapsed
+                        if secondBatchTime < batchTimeout then
+                                failwith <| sprintf "Too fast to get second batch consumer %s passed %f ms" consumerName secondBatchTime.TotalMilliseconds
+                        if messagesBatch2.Count <> (numberOfMessages - batchSize) then
+                            failwith <| sprintf "Wrong number of messages2 received %i consumer %s" messagesBatch2.Count consumerName
+                        for message in messagesBatch2 do    
+                            let received = Encoding.UTF8.GetString(message.Data)                        
+                            Log.Debug("{0} received {1}", consumerName, received)
+                            if messages |> Array.contains received |> not then
+                                failwith <| sprintf "Incorrect message received %s consumer %s" received consumerName
+                        do! consumer.AcknowledgeAsync(messagesBatch2)
+                            
+                        
+                    } :> Task)
+
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! Async.Sleep(110) // wait for acks
+
+            Log.Debug("Finished Batch read works with partitions")
+
         }
 
     ]

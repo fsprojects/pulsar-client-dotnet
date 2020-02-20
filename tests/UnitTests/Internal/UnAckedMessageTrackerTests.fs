@@ -6,13 +6,12 @@ open Expecto.Flip
 open Pulsar.Client.Internal
 open Pulsar.Client.Common
 open System
-open System.Threading
 open System.Threading.Tasks
 
 [<Tests>]
 let tests =
 
-    let emptyRedeliver msgId = ()
+    let emptyRedeliver _ = ()
 
     testList "UnAckedMessageTracker" [
 

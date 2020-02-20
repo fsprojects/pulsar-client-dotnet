@@ -9,7 +9,7 @@ namespace CsharpExamples
     {
         internal static async Task RunReader()
         {
-            const string serviceUrl = "pulsar://my-pulsar-cluster:31002";
+            const string serviceUrl = "pulsar://my-pulsar-cluster:30002";
 
             // retention should be set on topic so messages won't disappear
             var topicName = $"public/retention/my-topic-{DateTime.Now.Ticks}";

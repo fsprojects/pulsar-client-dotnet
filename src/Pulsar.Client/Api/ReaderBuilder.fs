@@ -21,20 +21,21 @@ type ReaderBuilder private (client: PulsarClient, config: ReaderConfiguration) =
 
     new(client: PulsarClient) = ReaderBuilder(client, ReaderConfiguration.Default)
 
-    member this.Topic (topic: string) =
+    member this.Topic topic =
         ReaderBuilder(
             client,
             { config with
                 Topic = topic
                     |> invalidArgIfBlankString "Topic must not be blank."
-                    |> TopicName })
+                    |> fun t -> TopicName(t.Trim()) })
 
-    member this.StartMessageId (messageId: MessageId) =
+    member this.StartMessageId messageId =
         ReaderBuilder(
             client,
             { config with
                 StartMessageId = messageId
-                    |> invalidArgIfDefault "Topic must not be blank." })
+                    |> invalidArgIfDefault "MessageId can't be null"
+                    |> Some })
 
     member this.StartMessageIdInclusive (startMessageIdInclusive: bool) =
         ReaderBuilder(
@@ -65,6 +66,12 @@ type ReaderBuilder private (client: PulsarClient, config: ReaderConfiguration) =
             client,
             { config with
                 ReceiverQueueSize = receiverQueueSize |> invalidArgIfNotGreaterThanZero "ReceiverQueueSize should be greater than 0."  })
+                
+    member this.StartMessageFromRollbackDuration rollbackDuration =
+        ReaderBuilder(
+            client,
+            { config with
+                StartMessageFromRollbackDuration = rollbackDuration })
 
     member this.CreateAsync() =
         config

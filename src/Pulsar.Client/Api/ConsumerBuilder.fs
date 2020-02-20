@@ -32,6 +32,11 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
                     c.ReadCompacted && (not c.Topic.IsPersistent ||
                         (c.SubscriptionType <> SubscriptionType.Exclusive && c.SubscriptionType <> SubscriptionType.Failover ))
                 ) "Read compacted can only be used with exclusive of failover persistent subscriptions")
+        |> checkValue
+            (fun c ->
+                invalidArgIfTrue (
+                    c.KeySharedPolicy.IsSome && c.SubscriptionType <> SubscriptionType.KeyShared
+                ) "KeySharedPolicy must be set with KeyShared subscription")
 
     new(client: PulsarClient) = ConsumerBuilder(client, ConsumerConfiguration.Default)
 
@@ -41,7 +46,7 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
             { config with
                 Topic = topic
                     |> invalidArgIfBlankString "Topic must not be blank."
-                    |> TopicName })
+                    |> fun t -> TopicName(t.Trim()) })
 
     member this.ConsumerName name =
         ConsumerBuilder(
@@ -104,7 +109,7 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
             { config with
                 NegativeAckRedeliveryDelay = negativeAckRedeliveryDelay  })
 
-    member __.DeadLettersPolicy (policy: DeadLettersPolicy) =
+    member this.DeadLettersPolicy (deadLettersPolicy: DeadLettersPolicy) =
 
         let ackTimeoutTickTime =
             if config.AckTimeoutTickTime = TimeSpan.Zero
@@ -119,13 +124,34 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
                 .EnableBatching(false) // dead letters are sent one by one anyway
                 .CreateAsync()
         let deadLettersProcessor =
-            DeadLettersProcessor(policy, getTopicName, getSubscriptionName, createProducer) :> IDeadLettersProcessor
+            DeadLettersProcessor(deadLettersPolicy, getTopicName, getSubscriptionName, createProducer) :> IDeadLettersProcessor
 
         ConsumerBuilder(
             client,
             { config with
                 AckTimeoutTickTime = ackTimeoutTickTime
                 DeadLettersProcessor = deadLettersProcessor })
+
+    member this.StartMessageIdInclusive () =
+        { config with
+            ResetIncludeHead = true }
+
+    member this.BatchReceivePolicy (batchReceivePolicy: BatchReceivePolicy) =
+        ConsumerBuilder(
+            client,
+            { config with
+                BatchReceivePolicy = batchReceivePolicy
+                    |> invalidArgIfDefault "BatchReceivePolicy can't be null"
+                    |> fun policy -> policy.Verify(); policy })
+
+    member this.KeySharedPolicy (keySharedPolicy: KeySharedPolicy) =
+        ConsumerBuilder(
+            client,
+            { config with
+                KeySharedPolicy = keySharedPolicy
+                    |> invalidArgIfDefault "KeySharedPolicy can't be null"
+                    |> fun policy -> keySharedPolicy.Validate(); policy
+                    |> Some })
 
     member this.SubscribeAsync() =
         config

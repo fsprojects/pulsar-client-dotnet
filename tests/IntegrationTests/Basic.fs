@@ -353,7 +353,7 @@ let tests =
 
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let interval = 2000L
+            let interval = 10000L
             let producerName = "schedule-producer"
             let consumerName = "schedule-consumer"
             let sw = Stopwatch()
@@ -400,8 +400,10 @@ let tests =
 
             let elapsed = sw.ElapsedMilliseconds
 
-            (elapsed >= interval && elapsed <= interval + 2000L)
-            |> Expect.isTrue (sprintf "Message deliverd in unexpected interval '%i'" elapsed)
+            interval - elapsed
+            |> Math.Abs
+            |> (>) 4000L
+            |> Expect.isTrue (sprintf "Message delivered in unexpected interval %i while should be %i" elapsed interval)
 
             Log.Debug("Finished 'Scheduled message should be delivered at requested time'")
         }

@@ -272,6 +272,7 @@ type internal ClientCnx (config: PulsarClientConfiguration,
         | ServerError.ProducerBlockedQuotaExceededException -> ProducerBlockedQuotaExceededException errorMsg
         | ServerError.TopicTerminatedError -> TopicTerminatedException errorMsg
         | ServerError.IncompatibleSchema -> IncompatibleSchemaException errorMsg
+        | ServerError.TopicNotFound -> TopicDoesNotExistException errorMsg
         | _ -> Exception errorMsg
 
     let handleError requestId error msg =

@@ -5,26 +5,26 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open System
 open Pulsar.Client.Internal
 
-type Reader private (config: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool, lookup: BinaryLookupService) =
+type Reader private (readerConfig: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool, lookup: BinaryLookupService) =
     let subscriptionName =
-        if String.IsNullOrEmpty config.SubscriptionRolePrefix then
+        if String.IsNullOrEmpty readerConfig.SubscriptionRolePrefix then
             "reader-" + Guid.NewGuid().ToString("N").Substring(22)
         else
-            config.SubscriptionRolePrefix + "-reader-" + Guid.NewGuid().ToString("N").Substring(22)
+            readerConfig.SubscriptionRolePrefix + "-reader-" + Guid.NewGuid().ToString("N").Substring(22)
 
     let consumerConfig = {
         ConsumerConfiguration.Default with
-            Topic = config.Topic
+            Topic = readerConfig.Topic
             SubscriptionName = subscriptionName
             SubscriptionType = SubscriptionType.Exclusive
-            ReceiverQueueSize = config.ReceiverQueueSize
-            ReadCompacted = config.ReadCompacted
-            ResetIncludeHead = config.ResetIncludeHead
-            ConsumerName = config.ReaderName }
+            ReceiverQueueSize = readerConfig.ReceiverQueueSize
+            ReadCompacted = readerConfig.ReadCompacted
+            ResetIncludeHead = readerConfig.ResetIncludeHead
+            ConsumerName = readerConfig.ReaderName }
 
     let consumer =
-        ConsumerImpl(consumerConfig, clientConfig, connectionPool, config.Topic.PartitionIndex, SubscriptionMode.NonDurable,
-                     Some config.StartMessageId, lookup, fun _ -> ())
+        ConsumerImpl(consumerConfig, clientConfig, connectionPool, readerConfig.Topic.PartitionIndex, SubscriptionMode.NonDurable,
+                     readerConfig.StartMessageId, lookup, readerConfig.StartMessageFromRollbackDuration, true, fun _ -> ())
 
     let castedConsumer = consumer :> IConsumer
 

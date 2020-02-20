@@ -2,16 +2,13 @@
 
 open System
 open Expecto
-open Expecto.Flip
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
 open System.Threading.Tasks
-open System.Threading
 open Pulsar.Client.Common
 open Serilog
 open Pulsar.Client.IntegrationTests.Common
-open FSharp.UMX
 open FSharp.Control
 
 [<Tests>]

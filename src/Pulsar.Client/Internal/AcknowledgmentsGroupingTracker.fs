@@ -5,8 +5,6 @@ open System
 open System.Collections.Generic
 open Microsoft.Extensions.Logging
 open System.Timers
-open FSharp.UMX
-open pulsar.proto
 
 type internal GroupingTrackerMessage =
     | IsDuplicate of (MessageId*AsyncReplyChannel<bool>)

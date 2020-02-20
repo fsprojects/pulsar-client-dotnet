@@ -49,8 +49,9 @@ let invalidArgIfLessThanZero =
 let invalidArgIfDefault msg =
     invalidArgIf (fun (arg) -> arg = Unchecked.defaultof<'a>) msg
 
-let reraize ex =
+let reraize<'a> ex =
     (ExceptionDispatchInfo.Capture ex).Throw()
+    Unchecked.defaultof<'a>
 
 // Mix
 
@@ -59,6 +60,12 @@ let asyncDelay delay work =
         do! Async.Sleep delay
         work()
     } |> Async.StartImmediate
+    
+let asyncCancellableDelay delay work ct =
+    Async.StartImmediate(async {
+        do! Async.Sleep delay
+        work()
+    }, ct)
 
 let signSafeMod dividend divisor =
     let modulo = dividend % divisor

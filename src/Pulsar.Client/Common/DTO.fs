@@ -172,7 +172,7 @@ type internal Metadata =
 
 type internal RawMessage =
     {
-        MessageId: MessageId
+        MessageId: MessageId    
         Metadata: Metadata
         RedeliveryCount: uint32
         Payload: byte[]
@@ -187,6 +187,41 @@ type Message =
         Key: string
         Properties: IReadOnlyDictionary<string, string>
     }
+
+type Messages internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
+
+    let mutable currentNumberOfMessages = 0
+    let mutable currentSizeOfMessages = 0L
+
+    let messageList = if maxNumberOfMessages > 0 then ResizeArray<Message>(maxNumberOfMessages) else ResizeArray<Message>()
+
+    
+    member this.Count with get() =
+        currentNumberOfMessages
+    member this.Size with get() =
+        currentSizeOfMessages
+
+    member internal this.IsFull with get() =
+        currentNumberOfMessages = maxNumberOfMessages
+        || currentSizeOfMessages = maxSizeOfMessages
+    
+    member internal this.CanAdd(message: Message) =
+        if (maxNumberOfMessages <= 0 && maxSizeOfMessages <= 0L) then
+            true
+        else
+            (maxNumberOfMessages > 0 && currentNumberOfMessages + 1 <= maxNumberOfMessages)
+                || (maxSizeOfMessages > 0L && currentSizeOfMessages + (int64 message.Data.Length) <= maxSizeOfMessages)
+
+    member internal this.Add(message: Message) =
+        currentNumberOfMessages <- currentNumberOfMessages + 1
+        currentSizeOfMessages <- currentSizeOfMessages + (int64 message.Data.Length)
+        messageList.Add(message)
+
+    interface IEnumerable<Message> with
+        member this.GetEnumerator() =
+            messageList.GetEnumerator() :> Collections.IEnumerator
+        member this.GetEnumerator() =
+            messageList.GetEnumerator() :> IEnumerator<Message>
 
 /// <summary>
 ///     Message builder that constructs a message to be published through a producer.
@@ -293,8 +328,8 @@ type internal PulsarResponseType =
         | Empty -> ()
         | _ -> failwith "Incorrect return type"
 
-type internal MessageOrException =
-    | Message of Message
+type internal ResultOrException<'T> =
+    | Result of 'T
     | Exn of exn
 
 type internal SeekData =
@@ -327,8 +362,11 @@ type internal ConsumerMessage =
     | ConnectionClosed of obj // ClientCnx
     | ReachedEndOfTheTopic
     | MessageReceived of RawMessage
-    | Receive of AsyncReplyChannel<MessageOrException>
-    | Acknowledge of MessageId * AckType * AsyncReplyChannel<bool>
+    | Receive of AsyncReplyChannel<ResultOrException<Message>>
+    | BatchReceive of AsyncReplyChannel<ResultOrException<Messages>>
+    | SendBatchByTimeout
+    | Acknowledge of MessageId * AckType
+    | NegativeAcknowledge of MessageId
     | RedeliverUnacknowledged of RedeliverSet * AsyncReplyChannel<unit>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
     | SeekAsync of SeekData * AsyncReplyChannel<Task>
@@ -374,6 +412,7 @@ exception ProducerBlockedQuotaExceededError of string
 exception ProducerBlockedQuotaExceededException of string
 exception ChecksumException of string
 exception CryptoExceptionof of string
+exception TopicDoesNotExistException of string
 
 // custom exception
 exception ConnectionFailedOnSend of string
