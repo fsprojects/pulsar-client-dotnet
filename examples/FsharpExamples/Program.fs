@@ -5,6 +5,7 @@ open Microsoft.Extensions.Logging
 open Simple
 open CustomProps
 open ReaderApi
+open RealWorld
 
 [<EntryPoint>]
 let main _ =
@@ -20,6 +21,7 @@ let main _ =
     runSimple().Wait()
     runCustomProps().Wait()
     runReader().Wait()
+    runRealWorld(PulsarClient.Logger).Wait()
 
     printfn "Example ended. Press any key to exit"
     Console.ReadKey() |> ignore

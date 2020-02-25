@@ -29,14 +29,7 @@ let runSimple () =
             ConsumerBuilder(client)
                 .Topic(topicName)
                 .SubscriptionName(subscriptionName)
-                .SubscriptionType(SubscriptionType.Failover)
-                .SubscribeAsync()
-
-        let! consumer2 =
-            ConsumerBuilder(client)
-                .Topic(topicName)
-                .SubscriptionName(subscriptionName)
-                .SubscriptionType(SubscriptionType.Failover)
+                .SubscriptionType(SubscriptionType.Exclusive)
                 .SubscribeAsync()
         
         let! messageId = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Sent from F# at '%A'" DateTime.Now))

@@ -994,7 +994,7 @@ NUGET
       System.Runtime.CompilerServices.Unsafe (>= 4.7)
     protobuf-net (2.4.4)
       System.ServiceModel.Primitives (>= 4.5.3)
-    Pulsar.Client (0.14)
+    Pulsar.Client (0.14.1)
       FSharp.Control.AsyncSeq (>= 2.0.23)
       FSharp.Core (>= 4.7)
       FSharp.UMX (>= 1.0)

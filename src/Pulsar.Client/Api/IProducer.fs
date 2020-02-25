@@ -6,13 +6,13 @@ open Pulsar.Client.Common
 type IProducer =
 
     /// Send message and await confirmation from broker
-    abstract member SendAsync: byte[] -> Task<MessageId>
+    abstract member SendAsync: message:byte[] -> Task<MessageId>
     /// Send message with keys and props
-    abstract member SendAsync: MessageBuilder -> Task<MessageId>
+    abstract member SendAsync: messageBuilder:MessageBuilder -> Task<MessageId>
     /// Complete as soon as message gets in client's internal message queue, don't wait for any confirmations
-    abstract member SendAndForgetAsync: byte[] -> Task<unit>
+    abstract member SendAndForgetAsync: message:byte[] -> Task<unit>
     /// Complete as soon as message gets in client's internal message queue, don't wait for any confirmations
-    abstract member SendAndForgetAsync: MessageBuilder -> Task<unit>
+    abstract member SendAndForgetAsync: messageBuilder:MessageBuilder -> Task<unit>
     /// Clean up resources
     abstract member CloseAsync: unit -> Task<unit>
     /// Internal client producer id

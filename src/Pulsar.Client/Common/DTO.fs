@@ -416,5 +416,6 @@ exception TopicDoesNotExistException of string
 
 // custom exception
 exception ConnectionFailedOnSend of string
+exception MaxMessageSizeChanged of int
 
 

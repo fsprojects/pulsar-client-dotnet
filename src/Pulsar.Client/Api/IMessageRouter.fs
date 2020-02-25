@@ -3,4 +3,4 @@
 open Pulsar.Client.Common
 
 type IMessageRouter =
-    abstract member ChoosePartition: MessageKey * int -> int
+    abstract member ChoosePartition: messageKey:MessageKey * numPartitions:int -> int

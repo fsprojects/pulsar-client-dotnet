@@ -407,5 +407,47 @@ let tests =
 
             Log.Debug("Finished 'Scheduled message should be delivered at requested time'")
         }
+        
+        // Before running this test set 'maxMessageSize' for broker and 'nettyMaxFrameSizeBytes' for bookkeeper 
+        ptestAsync "Send large message works fine" {
+
+            Log.Debug("Started Send large message works fine")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! producer =
+                ProducerBuilder(client)
+                    .Topic(topicName)
+                    .ProducerName("bigMessageProducer")
+                    .EnableBatching(false)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName("bigMessageConsumer")
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        let message = Array.create 10_400_000 1uy 
+                        let! _ = producer.SendAsync(message)
+                        ()
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        let! message = consumer.ReceiveAsync()
+                        if not (message.Data |> Array.forall (fun x -> x = 1uy)) then
+                            failwith "incorrect message received"
+                    }:> Task)
+
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+
+            Log.Debug("Finished Send large message works fine")
+        }
 
     ]

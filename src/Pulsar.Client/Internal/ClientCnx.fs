@@ -7,6 +7,7 @@ open Microsoft.Extensions.Logging
 open System.Threading.Tasks
 open pulsar.proto
 open System
+open System
 open FSharp.UMX
 open System.Buffers
 open System.IO
@@ -59,6 +60,7 @@ type internal SocketMessage =
 type internal ClientCnx (config: PulsarClientConfiguration,
                 broker: Broker,
                 connection: Connection,
+                maxMessageSize: int,
                 initialConnectionTsc: TaskCompletionSource<ClientCnx>,
                 unregisterClientCnx: Broker -> unit) as this =
 
@@ -71,8 +73,7 @@ type internal ClientCnx (config: PulsarClientConfiguration,
     let rejectedRequestResetTimeSec = 60
     let mutable numberOfRejectedRequests = 0
     let mutable isActive = true
-    let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
-
+    
     let requestsMb = MailboxProcessor<RequestsOperation>.Start(fun inbox ->
         let rec loop () =
             async {
@@ -327,9 +328,10 @@ type internal ClientCnx (config: PulsarClientConfiguration,
         | XCommandConnected cmd ->
             Log.Logger.LogInformation("{0} Connected ProtocolVersion: {1} ServerVersion: {2} MaxMessageSize: {3}",
                 prefix, cmd.ProtocolVersion, cmd.ServerVersion, cmd.MaxMessageSize)
-            if cmd.ShouldSerializeMaxMessageSize() then
-                maxMessageSize <- cmd.MaxMessageSize
-            initialConnectionTsc.SetResult(this)
+            if cmd.ShouldSerializeMaxMessageSize() && maxMessageSize <> cmd.MaxMessageSize then
+                initialConnectionTsc.SetException(MaxMessageSizeChanged cmd.MaxMessageSize)
+            else
+                initialConnectionTsc.SetResult(this)
         | XCommandPartitionedTopicMetadataResponse cmd ->
             if (cmd.ShouldSerializeError()) then
                 checkServerError cmd.Error cmd.Message

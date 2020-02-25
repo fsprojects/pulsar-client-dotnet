@@ -3,6 +3,7 @@
 open Microsoft.Extensions.Logging
 open System.Threading
 open Pulsar.Client.Common
+open System
 
 type internal ConnectionHandlerMessage =
     | GrabCnx
@@ -27,6 +28,7 @@ type internal ConnectionHandler( parentPrefix: string,
                         backoff: Backoff) as this =
 
     let mutable connectionState = Uninitialized
+    let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
     let prefix = parentPrefix + " ConnectionHandler"
 
     let isValidStateForReconnection() =
@@ -46,12 +48,17 @@ type internal ConnectionHandler( parentPrefix: string,
                     | _ ->
                         if isValidStateForReconnection() then
                             try
-                                Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic);
+                                Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic)
                                 let! broker = lookup.GetBroker(topic) |> Async.AwaitTask
-                                let! clientCnx = connectionPool.GetConnection broker |> Async.AwaitTask
+                                let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize) |> Async.AwaitTask
                                 this.ConnectionState <- Ready clientCnx
                                 connectionOpened()
                             with
+                            | :? AggregateException as ex when (ex.InnerException :? MaxMessageSizeChanged) ->
+                                let newSize = (ex.InnerException :?> MaxMessageSizeChanged).Data0
+                                Log.Logger.LogInformation("{0} MaxMessageSizeChanged to {1}", prefix, newSize)
+                                maxMessageSize <- newSize
+                                this.Mb.Post(GrabCnx)                                
                             | ex ->
                                 Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
                                 connectionFailed ex
