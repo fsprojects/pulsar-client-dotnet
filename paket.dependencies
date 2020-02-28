@@ -39,15 +39,3 @@ group Examples
 
   nuget Pulsar.Client
   nuget Microsoft.Extensions.Logging.Console
-
-group Build
-  source https://api.nuget.org/v3/index.json
-  storage: none
-  framework: netcoreapp3.1
-
-  nuget Fake.Core.Target
-  nuget Fake.IO.FileSystem
-  nuget Fake.DotNet.Cli
-
-  source https://dotnet.myget.org/F/roslyn-tools/api/v3/index.json
-  nuget RoslynTools.MSBuild prerelease

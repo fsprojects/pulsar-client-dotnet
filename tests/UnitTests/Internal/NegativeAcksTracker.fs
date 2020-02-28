@@ -13,6 +13,7 @@ let tests =
 
     testList "NegativeAcksTracker" [
 
+        //TODO this test is flaky in CI, probably because of non-deterministic await (async sleeps)
         testAsync "UnAckedMessageTracker redeliver all works" {
             let tsc = TaskCompletionSource<int>()
             let redeliver msgIds =
