@@ -17,13 +17,14 @@ type Reader private (readerConfig: ReaderConfiguration, clientConfig: PulsarClie
             Topic = readerConfig.Topic
             SubscriptionName = subscriptionName
             SubscriptionType = SubscriptionType.Exclusive
+            SubscriptionMode = SubscriptionMode.NonDurable
             ReceiverQueueSize = readerConfig.ReceiverQueueSize
             ReadCompacted = readerConfig.ReadCompacted
             ResetIncludeHead = readerConfig.ResetIncludeHead
             ConsumerName = readerConfig.ReaderName }
 
     let consumer =
-        ConsumerImpl(consumerConfig, clientConfig, connectionPool, readerConfig.Topic.PartitionIndex, SubscriptionMode.NonDurable,
+        ConsumerImpl(consumerConfig, clientConfig, connectionPool, readerConfig.Topic.PartitionIndex,
                      readerConfig.StartMessageId, lookup, readerConfig.StartMessageFromRollbackDuration, true, fun _ -> ())
 
     let castedConsumer = consumer :> IConsumer

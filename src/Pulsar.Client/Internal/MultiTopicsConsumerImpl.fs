@@ -129,7 +129,7 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                                                         Topic = partitionedTopic }
                             task {
                                 let! result =
-                                    ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, SubscriptionMode.Durable,
+                                    ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex,
                                                       None, lookup, true, fun _ -> ())
                                 return (partitionedTopic, result)
                             })
@@ -346,7 +346,7 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                                                                 Topic = partitionedTopic }
                                     task {
                                         let! result =
-                                            ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, SubscriptionMode.Durable,
+                                            ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex,
                                                               None, lookup, true, fun _ -> ())
                                         return (partitionedTopic, result)
                                     })

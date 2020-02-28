@@ -34,6 +34,7 @@ type ConsumerConfiguration =
         ConsumerName: string
         SubscriptionName: string
         SubscriptionType: SubscriptionType
+        SubscriptionMode: SubscriptionMode
         ReceiverQueueSize: int
         MaxTotalReceiverQueueSizeAcrossPartitions: int
         SubscriptionInitialPosition: SubscriptionInitialPosition
@@ -54,6 +55,7 @@ type ConsumerConfiguration =
             ConsumerName = ""
             SubscriptionName = ""
             SubscriptionType = SubscriptionType.Exclusive
+            SubscriptionMode = SubscriptionMode.Durable
             ReceiverQueueSize = 1000
             MaxTotalReceiverQueueSizeAcrossPartitions = 50000
             SubscriptionInitialPosition = SubscriptionInitialPosition.Latest

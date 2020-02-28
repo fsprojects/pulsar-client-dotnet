@@ -66,6 +66,12 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
             { config with
                 SubscriptionType = subscriptionType  })
 
+    member this.SubscriptionMode subscriptionMode =
+        ConsumerBuilder(
+            client,
+            { config with
+                SubscriptionMode = subscriptionMode  })
+    
     member this.ReceiverQueueSize receiverQueueSize =
         ConsumerBuilder(
             client,

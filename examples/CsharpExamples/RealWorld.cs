@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Pulsar.Client.Api;
 using Pulsar.Client.Common;
+#pragma warning disable 4014
 
 namespace CsharpExamples
 {

@@ -15,7 +15,7 @@ open System.Linq
 open System.Threading
 
 type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                           partitionIndex: int, subscriptionMode: SubscriptionMode, startMessageId: MessageId option, lookup: BinaryLookupService,
+                           partitionIndex: int, startMessageId: MessageId option, lookup: BinaryLookupService,
                            startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, cleanup: ConsumerImpl -> unit) as this =
 
     [<Literal>]
@@ -178,7 +178,9 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
         | None ->
             false
         | Some startMsgId ->
-            subscriptionMode = SubscriptionMode.NonDurable && startMsgId.LedgerId = msgId.LedgerId && startMsgId.EntryId = msgId.EntryId
+            consumerConfig.SubscriptionMode = SubscriptionMode.NonDurable
+                && startMsgId.LedgerId = msgId.LedgerId
+                && startMsgId.EntryId = msgId.EntryId
 
     let clearDeadLetters() = deadLettersProcessor.ClearMessages()
 
@@ -339,7 +341,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                         Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, consumerConfig.Topic)
                         clientCnx.AddConsumer consumerId this.Mb
                         let requestId = Generators.getNextRequestId()
-                        let isDurable = subscriptionMode = SubscriptionMode.Durable
+                        let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable
                         startMessageId <- clearReceiverQueue()
                         clearDeadLetters()
                         let msgIdData =
@@ -735,10 +737,10 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
         }
 
     static member Init(consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                       partitionIndex: int, subscriptionMode: SubscriptionMode, startMessageId: MessageId option, lookup: BinaryLookupService,
+                       partitionIndex: int, startMessageId: MessageId option, lookup: BinaryLookupService,
                        createTopicIfDoesNotExist: bool, cleanup: ConsumerImpl -> unit) =
         task {
-            let consumer = ConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex, subscriptionMode,
+            let consumer = ConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex,
                                         startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist, cleanup)
             do! consumer.InitInternal()
             return consumer

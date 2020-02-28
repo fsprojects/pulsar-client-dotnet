@@ -55,9 +55,9 @@ type internal TopicDomain =
     | Persistent
     | NonPersistent
 
-type internal SubscriptionMode =
-    | Durable
-    | NonDurable
+type SubscriptionMode =
+    | Durable = 0
+    | NonDurable = 1
 
 type internal AckType =
     | Individual
