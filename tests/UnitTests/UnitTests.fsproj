@@ -20,6 +20,7 @@
     <Compile Include="Internal\EndPointResolverTests.fs" />
     <Compile Include="Internal\CompressionCodecTests.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTrackerTests.fs" />
+    <Compile Include="Internal\ManualInvokeScheduler.fs" />
     <Compile Include="Internal\UnAckedMessageTrackerTests.fs" />
     <Compile Include="Internal\NegativeAcksTracker.fs" />
     <None Include="paket.references" />
