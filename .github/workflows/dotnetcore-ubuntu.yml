@@ -1,0 +1,37 @@
+name: .NET Core Ubuntu
+
+on: [pull_request, push]
+
+jobs:
+  build:
+  
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 3.1.100
+
+    - name: Install Paket tool locally
+      run: dotnet tool install paket --tool-path .paket
+      
+    - name: Paket Install
+      run: .paket/paket install
+    
+    - name: Dotnet Restore
+      run: dotnet restore
+    
+    - name: Dotnet Build Release
+      run: dotnet build -c Release --no-restore
+    
+    - name: Apt-get Install Snappy & ZSTD
+      run: |
+        sudo apt-get install -y libsnappy-dev
+        sudo apt-get install -y libzstd-dev
+    
+    - name: Run Unit Tests
+      run: |
+        cd tests/UnitTests
+        dotnet test -c Release --no-build

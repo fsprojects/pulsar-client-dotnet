@@ -11,7 +11,10 @@ type internal NegativeAcksTrackerMessage =
     | TickTime
     | Stop
 
-type internal NegativeAcksTracker (prefix: string, negativeAckRedeliveryDelay: TimeSpan, redeliverUnacknowledgedMessages: RedeliverSet -> unit) =
+type internal NegativeAcksTracker(prefix: string,
+                                  negativeAckRedeliveryDelay: TimeSpan,
+                                  redeliverUnacknowledgedMessages: RedeliverSet -> unit,
+                                  ?getTickScheduler: (unit -> unit) -> IDisposable) =
 
     let MIN_NACK_DELAY = TimeSpan.FromMilliseconds(100.0)
     let nackDelay = if negativeAckRedeliveryDelay > MIN_NACK_DELAY then negativeAckRedeliveryDelay else MIN_NACK_DELAY
@@ -59,16 +62,23 @@ type internal NegativeAcksTracker (prefix: string, negativeAckRedeliveryDelay: T
         loop (SortedDictionary<MessageId, DateTime>())
     )
 
+    let timer =
+        match getTickScheduler with
+        | None ->
+            let timer = new Timer(timerIntervalms)
+            timer.AutoReset <- true
+            timer.Elapsed.Add(fun _ -> mb.Post TickTime)
+            timer.Start() |> ignore
+            timer :> IDisposable
+        | Some getScheduler ->
+            getScheduler(fun _ -> mb.Post TickTime)
+    
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
-    let timer = new Timer(timerIntervalms)
-    do timer.AutoReset <- true
-    do timer.Elapsed.Add(fun _ -> mb.Post TickTime)
-    do timer.Start()
 
     member this.Add(msgId) =
         mb.PostAndReply (fun channel -> Add (msgId, channel))
 
     member this.Close() =
-        timer.Stop()
+        timer.Dispose()
         mb.Post Stop
 

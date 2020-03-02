@@ -1,5 +1,7 @@
 # pulsar-client-dotnet
 
+![.NET Core Windows](https://github.com/fsharplang-ru/pulsar-client-dotnet/workflows/.NET%20Core%20Windows/badge.svg)
+![.NET Core Ubuntu](https://github.com/fsharplang-ru/pulsar-client-dotnet/workflows/.NET%20Core%20Ubuntu/badge.svg)
 ### Contributions are most welcome!
 
 [Pulsar.Client nuget](https://www.nuget.org/packages/Pulsar.Client)
@@ -38,12 +40,42 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 
 ## Quick contributing guide
 
- - Fork and clone locally.
- - Build the solution with `build.cmd` or `build.sh`. (dotnet core sdk required) This will install required tools and then you can use any IDE to build solution
- - Make youre modifications
- - Run Unit tests
- - If changes are made in Client logic, run Integration tests. Before runnint do the following.
+#### Common steps before building
+
+ - Fork and clone locally
+ - Install Paket dotnet tool:
+   * Globally `dotnet tool install paket -g`
+   * Locally `dotnet tool install paket --tool-path .paket`
+ - Install packages: `paket install` or `.paket/paket install` (if installed locally)
+ - Restore packages: `dotnet restore`
+ 
+#### MacOS steps before building:
+
+ - Install Snappy: `brew install snappy`
+ - Install Libzstd: `brew install zstd`
+ 
+#### Ubuntu steps before building:
+ 
+ - Install Snappy: `sudo apt-get install -y libsnappy-dev`
+ - Install Libzstd: `sudo apt-get install -y libzstd-dev`
+ 
+#### Building and Testing
+
+ - Build the solution: `dotnet build` (dotnet core sdk required) This will install required tools and then you can use any IDE to build solution
+ - Make your modifications
+ - Run unit tests: `cd tests/UnitTests` && `dotnet test` 
+ - (Optional) If changes are made in Client logic, run Integration tests. Before running do the following
+    1. Install pulsar cluster:
+        * MacOS guide:
+        * `brew tap streamlio/homebrew-formulae`
+        * `brew install streamlio/homebrew-formulae/heron`
+        * `brew install streamlio/homebrew-formulae/pulsar`
+        * `brew install streamlio/homebrew-formulae/bookkeeper`
+        * `brew services start heron`
+        * `brew services start pulsar`
+        * `brew services start bookkeeper`
+    1. Run commands in `/tests/IntegrationTests/commands.txt`
     1. Change `pulsarAddress` in Common.fs to point your pulsar cluster
-    2. Ensure `public/default` namespace with default settings
-    3. Ensure `public/retention` namespace with time or storage size retention configured
- - Send a Pull Request.
+    1. Ensure `public/default` namespace with default settings
+    1. Ensure `public/retention` namespace with time or storage size retention configured
+ - Send a Pull Request

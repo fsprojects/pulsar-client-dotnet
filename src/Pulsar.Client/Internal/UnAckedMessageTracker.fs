@@ -21,7 +21,11 @@ type internal IUnAckedMessageTracker =
     abstract member RemoveMessagesTill: MessageId -> int
     abstract member Close: unit -> unit
 
-type internal UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDuration: TimeSpan, redeliverUnacknowledgedMessages: RedeliverSet -> unit) =
+type internal UnAckedMessageTracker(prefix: string,
+                                    ackTimeout: TimeSpan,
+                                    tickDuration: TimeSpan,
+                                    redeliverUnacknowledgedMessages: RedeliverSet -> unit,
+                                    ?getTickScheduler: (unit -> unit) -> IDisposable) =
 
     let messageIdPartitionMap = SortedDictionary<MessageId, RedeliverSet>()
     let timePartitions = Queue<RedeliverSet>()
@@ -104,12 +108,19 @@ type internal UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDu
         loop (RedeliverSet())
     )
 
+    let timer =
+        fillTimePartions()
+        match getTickScheduler with
+        | None ->
+            let timer = new Timer(tickDuration.TotalMilliseconds)
+            timer.AutoReset <- true
+            timer.Elapsed.Add(fun _ -> mb.Post TickTime)
+            timer.Start() |> ignore
+            timer :> IDisposable
+        | Some getScheduler ->
+            getScheduler(fun _ -> mb.Post TickTime)
+    
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
-    let timer = new Timer(tickDuration.TotalMilliseconds)
-    do fillTimePartions()
-    do timer.AutoReset <- true
-    do timer.Elapsed.Add(fun _ -> mb.Post TickTime)
-    do timer.Start()
 
     interface IUnAckedMessageTracker with
         member this.Clear() =
@@ -121,7 +132,7 @@ type internal UnAckedMessageTracker(prefix: string, ackTimeout: TimeSpan, tickDu
         member this.RemoveMessagesTill(msgId) =
             mb.PostAndReply (fun channel -> TrackerMessage.RemoveMessagesTill (msgId, channel))
         member this.Close() =
-            timer.Stop()
+            timer.Dispose()
             mb.Post Stop
 
 
