@@ -1,4 +1,4 @@
-name: NetCore CI Ubuntu
+name: .NET Core Ubuntu
 
 on: [pull_request, push]
 

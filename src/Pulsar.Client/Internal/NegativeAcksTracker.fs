@@ -14,7 +14,7 @@ type internal NegativeAcksTrackerMessage =
 type internal NegativeAcksTracker(prefix: string,
                                   negativeAckRedeliveryDelay: TimeSpan,
                                   redeliverUnacknowledgedMessages: RedeliverSet -> unit,
-                                  ?maybeScheduler: (unit -> unit) -> IDisposable) =
+                                  ?getTickScheduler: (unit -> unit) -> IDisposable) =
 
     let MIN_NACK_DELAY = TimeSpan.FromMilliseconds(100.0)
     let nackDelay = if negativeAckRedeliveryDelay > MIN_NACK_DELAY then negativeAckRedeliveryDelay else MIN_NACK_DELAY
@@ -63,7 +63,7 @@ type internal NegativeAcksTracker(prefix: string,
     )
 
     let timer =
-        match maybeScheduler with
+        match getTickScheduler with
         | None ->
             let timer = new Timer(timerIntervalms)
             timer.AutoReset <- true

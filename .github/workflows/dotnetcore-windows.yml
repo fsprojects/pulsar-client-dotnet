@@ -1,4 +1,4 @@
-name: NetCore CI Windows
+name: .NET Core Windows
 
 on: [pull_request, push]
 

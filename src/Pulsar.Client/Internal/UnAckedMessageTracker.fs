@@ -25,7 +25,7 @@ type internal UnAckedMessageTracker(prefix: string,
                                     ackTimeout: TimeSpan,
                                     tickDuration: TimeSpan,
                                     redeliverUnacknowledgedMessages: RedeliverSet -> unit,
-                                    ?maybeScheduler: (unit -> unit) -> IDisposable) =
+                                    ?getTickScheduler: (unit -> unit) -> IDisposable) =
 
     let messageIdPartitionMap = SortedDictionary<MessageId, RedeliverSet>()
     let timePartitions = Queue<RedeliverSet>()
@@ -110,7 +110,7 @@ type internal UnAckedMessageTracker(prefix: string,
 
     let timer =
         fillTimePartions()
-        match maybeScheduler with
+        match getTickScheduler with
         | None ->
             let timer = new Timer(tickDuration.TotalMilliseconds)
             timer.AutoReset <- true

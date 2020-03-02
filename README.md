@@ -1,5 +1,7 @@
 # pulsar-client-dotnet
 
+![.NET Core Windows](https://github.com/fsharplang-ru/pulsar-client-dotnet/workflows/.NET%20Core%20Windows/badge.svg)
+![.NET Core Ubuntu](https://github.com/fsharplang-ru/pulsar-client-dotnet/workflows/.NET%20Core%20Ubuntu/badge.svg)
 ### Contributions are most welcome!
 
 [Pulsar.Client nuget](https://www.nuget.org/packages/Pulsar.Client)

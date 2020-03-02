@@ -15,7 +15,6 @@ let tests =
 
     testList "NegativeAcksTracker" [
 
-        //TODO this test is flaky in CI, probably because of non-deterministic await (async sleeps)
         testAsync "UnAckedMessageTracker redeliver all works" {
             
             let scheduler = new ManualInvokeScheduler()
@@ -37,7 +36,7 @@ let tests =
             tracker.Add msgId2 |> Expect.isTrue ""
             tracker.Add msgId3 |> Expect.isTrue ""
             
-            do! Async.Sleep(150) //waiting for expiration to happen
+            do! Async.Sleep(105) //waiting for expiration to happen
             scheduler.Tick()     //ticking timer
             
             let! redelivered = tsc.Task |> Async.AwaitTask
@@ -52,11 +51,10 @@ let tests =
                 scheduler.Callback <- onTick
                 scheduler :> IDisposable
             
-            let tcs1 = TaskCompletionSource<int>()
-            let tcs2 = TaskCompletionSource<int>()
+            let mutable tcs = TaskCompletionSource<int>()
             let redeliver msgIds =
                 let length = msgIds |> Seq.length
-                (tcs1.TrySetResult length || tcs2.TrySetResult length) |> ignore
+                tcs.TrySetResult length |> ignore
 
             let tracker = NegativeAcksTracker("", TimeSpan.FromMilliseconds(100.0), redeliver, getScheduler)
             let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %"" }
@@ -64,17 +62,21 @@ let tests =
             let msgId3 = { msgId1 with EntryId = %3L }
             
             tracker.Add msgId1 |> Expect.isTrue ""
-            do! Async.Sleep(150) //waiting for expiration to happen
+            do! Async.Sleep(35)  //waiting for step expiration to happen
             scheduler.Tick()     //ticking timer
             
             tracker.Add msgId2 |> Expect.isTrue ""
             tracker.Add msgId3 |> Expect.isTrue ""
-            do! Async.Sleep(150) //waiting for expiration
+            do! Async.Sleep(70)  //waiting for double step expiration
             scheduler.Tick()     //ticking timer
             
-            let! redelivered1 = tcs1.Task |> Async.AwaitTask
+            let! redelivered1 = tcs.Task |> Async.AwaitTask
             redelivered1 |> Expect.equal "" 1
-            let! redelivered2 = tcs2.Task |> Async.AwaitTask
+            
+            tcs <- TaskCompletionSource<int>()
+            do! Async.Sleep(35)  //waiting for one more stop expiration to happen
+            scheduler.Tick()     //ticking timer
+            let! redelivered2 = tcs.Task |> Async.AwaitTask
             redelivered2 |> Expect.equal "" 2
             tracker.Close()
         }
