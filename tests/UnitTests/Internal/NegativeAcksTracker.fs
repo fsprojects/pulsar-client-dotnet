@@ -52,10 +52,11 @@ let tests =
                 scheduler.Callback <- onTick
                 scheduler :> IDisposable
             
-            let queue = ConcurrentQueue<int>()
+            let tcs1 = TaskCompletionSource<int>()
+            let tcs2 = TaskCompletionSource<int>()
             let redeliver msgIds =
                 let length = msgIds |> Seq.length
-                queue.Enqueue length
+                (tcs1.TrySetResult length || tcs2.TrySetResult length) |> ignore
 
             let tracker = NegativeAcksTracker("", TimeSpan.FromMilliseconds(100.0), redeliver, getScheduler)
             let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %"" }
@@ -71,10 +72,10 @@ let tests =
             do! Async.Sleep(150) //waiting for expiration
             scheduler.Tick()     //ticking timer
             
-            let (_, redelivered) = queue.TryDequeue()
-            redelivered |> Expect.equal "" 1
-            let (_, redelivered) = queue.TryDequeue()
-            redelivered |> Expect.equal "" 2
+            let! redelivered1 = tcs1.Task |> Async.AwaitTask
+            redelivered1 |> Expect.equal "" 1
+            let! redelivered2 = tcs2.Task |> Async.AwaitTask
+            redelivered2 |> Expect.equal "" 2
             tracker.Close()
         }
     ]
