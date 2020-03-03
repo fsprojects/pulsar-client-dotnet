@@ -326,7 +326,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
                         | BatchCallbacks tcss ->
                             tcss
                             |> Array.iter (fun (msgId, tcs) ->
-                                tcs.SetResult({ msgId with LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex }))
+                                tcs.SetResult({ LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Cumulative msgId; TopicName = %"" }))
                     return! loop ()
 
                 | ProducerMessage.RecoverChecksumError sequenceId ->

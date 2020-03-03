@@ -264,9 +264,10 @@ type internal Connection =
     }
 type internal RedeliverSet = HashSet<MessageId>
 
-type internal BatchCallback = MessageId * TaskCompletionSource<MessageId>
-type internal PendingCallback =
-    | SingleCallback of TaskCompletionSource<MessageId>
+type internal SingleCallback = TaskCompletionSource<MessageId>
+type internal BatchCallback = BatchDetails * TaskCompletionSource<MessageId>
+type internal PendingCallback = 
+    | SingleCallback of SingleCallback
     | BatchCallbacks of BatchCallback[]
 
 type internal PendingMessage =
