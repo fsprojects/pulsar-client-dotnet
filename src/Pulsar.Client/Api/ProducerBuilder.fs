@@ -117,12 +117,17 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
             HashingScheme = hashingScheme }
         |> this.With
 
+    member this.InitialSequenceId initialSequenceId =
+        { config with
+                InitialSequenceId = initialSequenceId }
+        |> this.With
+
     member this.Intercept ([<ParamArray>] interceptors: IProducerInterceptor array) =
         if interceptors.Length = 0 then this
         else
             ProducerInterceptors(Array.append producerInterceptors.Interceptors interceptors)
             |> this.With
-    
+
     member this.CreateAsync() =
         config
         |> verify

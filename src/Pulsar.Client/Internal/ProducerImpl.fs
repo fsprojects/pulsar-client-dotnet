@@ -24,6 +24,14 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
 
     let compressionCodec = CompressionCodec.create producerConfig.CompressionType
 
+    let lastSequenceId = producerConfig.InitialSequenceId |> Option.defaultValue -1L
+
+    let mutable lastSequenceIdPublished = lastSequenceId
+
+    let lastSequenceIdPushed = lastSequenceId
+
+    let mutable messageIdGenerator = lastSequenceId + 1L
+
     let protoCompressionType =
         match producerConfig.CompressionType with
             | CompressionType.None -> pulsar.proto.CompressionType.None
@@ -117,9 +125,15 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
         }
 
     let createMessageMetadata (message : MessageBuilder) (numMessagesInBatch: int option) =
+
+        let sequenceId =
+            if message.SequenceId.HasValue then
+                message.SequenceId.Value
+            else System.Threading.Interlocked.Exchange(&messageIdGenerator, messageIdGenerator + 1L) |> uint64
+
         let metadata =
             MessageMetadata (
-                SequenceId = %Generators.getNextSequenceId(),
+                SequenceId = sequenceId,
                 PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() |> uint64),
                 ProducerName = producerConfig.ProducerName,
                 UncompressedSize = (message.Value.Length |> uint32)
@@ -203,10 +217,18 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
                             let payload = Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName producerId requestId
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             let success = response |> PulsarResponseType.GetProducerSuccess
+
                             Log.Logger.LogInformation("{0} registered with name {1}", prefix, success.GeneratedProducerName)
+
                             connectionHandler.ResetBackoff()
+
+                            if messageIdGenerator = 0L && producerConfig.InitialSequenceId |> Option.isNone then
+                                lastSequenceIdPublished <- success.LastSequenceId
+                                messageIdGenerator <- success.LastSequenceId + 1L
+
                             if producerConfig.BatchingEnabled then
                                 startSendBatchTimer()
+
                             resendMessages()
                         with
                         | ex ->
@@ -264,7 +286,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
                     let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
                     let batchItem = { Message = message; Tcs = tcs }
                     if canAddToCurrentBatch(message) then
-                        // handle boundary cases where message being added would exceed 
+                        // handle boundary cases where message being added would exceed
                         // batch size and/or max message size
                         if batchMessageContainer.Add(batchItem) then
                             Log.Logger.LogDebug("{0} Max batch container size exceeded", prefix)
@@ -282,7 +304,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
                     let metadata = createMessageMetadata message None
                     let encodedMessage = compressionCodec.Encode message.Value
                     let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
-                        
+
                     if (encodedMessage.Length > maxMessageSize) then
                         let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
                         interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
@@ -440,7 +462,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
         producerConfig.BatchingEnabled && not message.DeliverAt.HasValue
 
     member private this.SendMessage (message : MessageBuilder) =
-        let interceptMsg = interceptors.BeforeSend(this, message)            
+        let interceptMsg = interceptors.BeforeSend(this, message)
         if this.CanAddToBatch(interceptMsg) then
             mb.PostAndAsyncReply(fun channel -> StoreBatchItem (interceptMsg, channel))
         else
@@ -511,3 +533,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
         member this.ProducerId = producerId
 
         member this.Topic = %producerConfig.Topic.CompleteTopicName
+
+        member this.LastSequenceId = lastSequenceId
+
+        member this.Name = producerConfig.ProducerName

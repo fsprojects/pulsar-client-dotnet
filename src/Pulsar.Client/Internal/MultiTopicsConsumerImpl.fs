@@ -542,3 +542,5 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
         member this.ConsumerId = consumerId
 
         member this.Topic = %consumerConfig.Topic.CompleteTopicName
+
+        member this.Name = consumerConfig.ConsumerName

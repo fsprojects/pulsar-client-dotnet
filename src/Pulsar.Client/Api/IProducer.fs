@@ -19,3 +19,13 @@ type IProducer =
     abstract member ProducerId: ProducerId
     /// Get the topic which producer is publishing to
     abstract member Topic: string
+
+    /// The last sequence id that was published by this producer.
+    /// This represent either the automatically assigned
+    /// or custom sequence id that was published and acknowledged by the broker.
+    /// After recreating a producer with the same producer name, this will return the last message that was
+    /// published in the previous producer session, or -1 if there no message was ever published.
+    abstract member LastSequenceId : int64
+
+    /// Get the producer name
+    abstract member Name: string

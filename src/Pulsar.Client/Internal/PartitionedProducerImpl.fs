@@ -53,13 +53,13 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
             producerConfig.CustomMessageRouter.Value
         | _ ->
             failwith "Unknown MessageRoutingMode"
-                
+
     let timer = new Timer(1000.0 * 60.0) // 1 minute
-                
+
     let stopProducer() =
         cleanup(this)
         timer.Close()
-    
+
     let mb = MailboxProcessor<PartitionedProducerMessage>.Start(fun inbox ->
 
         let rec loop () =
@@ -100,7 +100,7 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
                         this.ConnectionState <- Failed
                         producerCreatedTsc.SetException(ex)
                         stopProducer()
-                    
+
                 | Close channel ->
 
                     match this.ConnectionState with
@@ -257,3 +257,7 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
         member this.ProducerId = producerId
 
         member this.Topic = %producerConfig.Topic.CompleteTopicName
+
+        member this.LastSequenceId = 0L
+
+        member this.Name = producerConfig.ProducerName

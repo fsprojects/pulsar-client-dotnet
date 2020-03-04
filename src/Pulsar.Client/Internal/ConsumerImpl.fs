@@ -321,6 +321,7 @@ type internal ConsumerImpl (consumerConfig: ConsumerConfiguration, clientConfig:
                                 EmptyProps
                         Key = singleMessageMetadata.PartitionKey
                         Data = singleMessagePayload
+                        SequenceId = singleMessageMetadata.SequenceId
                     }
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                     deadLettersProcessor.AddMessage messageId message
@@ -530,6 +531,7 @@ type internal ConsumerImpl (consumerConfig: ConsumerConfiguration, clientConfig:
                                     Data = getDecompressPayload rawMessage
                                     Key = %rawMessage.MessageKey
                                     Properties = rawMessage.Properties
+                                    SequenceId = rawMessage.Metadata.SequenceId
                                 }
 
                                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
@@ -929,6 +931,8 @@ type internal ConsumerImpl (consumerConfig: ConsumerConfiguration, clientConfig:
         member this.ConsumerId = consumerId
 
         member this.Topic with get() = %consumerConfig.Topic.CompleteTopicName
+
+        member this.Name = consumerConfig.ConsumerName
 
 
 

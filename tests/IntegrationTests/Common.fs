@@ -111,6 +111,16 @@ let produceMessagesWithSameKey (producer: IProducer) number key producerName =
             ()
     }
 
+let produceMessagesWithSequenceId (producer: IProducer) number getSequenceId =
+    task {
+        for i in [1..number] do
+            let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producer.Name (DateTime.Now.ToLongTimeString()) )
+            let sequenceId = Nullable<uint64>(getSequenceId i)
+            let builder = MessageBuilder(payload, sequenceId = sequenceId)
+            let! _ = producer.SendAsync(builder)
+            ()
+    }
+
 let generateMessages number producerName =
     [|
         for i in [1..number] do
@@ -184,6 +194,16 @@ let consumeMessagesWithProps (consumer: IConsumer) number consumerName =
                 && message.Properties.["prop1"] = i.ToString()
                 && message.Properties.["prop2"] = i.ToString()) |> not then
                 failwith <| sprintf "Incorrect properties %s" consumerName
+    }
+
+let consumeMessagesWithSequenceId (consumer: IConsumer) number getExpectedSequenceId =
+    task {
+        for i in [1..number] do
+            let expectedSequenceId = getExpectedSequenceId i
+            let! message = consumer.ReceiveAsync()
+            do! consumer.AcknowledgeAsync(message.MessageId)
+            if message.SequenceId <> expectedSequenceId then
+                failwith <| sprintf "Incorrect sequenceId. Expected '%i' but '%i'" expectedSequenceId message.SequenceId
     }
 
 let consumeAndVerifyMessages (consumer: IConsumer) consumerName (expectedMessages : string[]) =

@@ -21,6 +21,7 @@ type internal PartitionedTopicMetadata =
 type internal ProducerSuccess =
     {
         GeneratedProducerName: string
+        LastSequenceId: int64
     }
 
 type internal LookupTopicResult =
@@ -165,6 +166,7 @@ type internal Metadata =
         HasNumMessagesInBatch: bool
         CompressionType: CompressionType
         UncompressedMessageSize: int32
+        SequenceId: uint64
     }
 
 type internal RawMessage =
@@ -183,6 +185,7 @@ type Message =
         Data: byte[]
         Key: string
         Properties: IReadOnlyDictionary<string, string>
+        SequenceId: uint64
     }
 
 type Messages internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
@@ -228,6 +231,7 @@ type MessageBuilder =
     val Key: MessageKey
     val Properties: IReadOnlyDictionary<string, string>
     val DeliverAt: Nullable<int64>
+    val SequenceId: Nullable<uint64>
 
     /// <summary>
     ///     Constructs <see cref="Pulsar.Client.Common.MessageBuilder" />
@@ -235,6 +239,15 @@ type MessageBuilder =
     /// <param name="value">Message data serialized to array of bytes.</param>
     /// <param name="properties">The readonly dictionary with message properties.</param>
     /// <param name="deliverAt">Unix timestamp in milliseconds after which message should be delivered to consumer(s).</param>
+    /// <param name="sequenceId">
+    ///     Specify a custom sequence id for the message being published.
+    ///     The sequence id can be used for deduplication purposes and it needs to follow these rules:
+    ///         - <c>sequenceId >= 0</c>
+    ///         - Sequence id for a message needs to be greater than sequence id for earlier messages:
+    ///             <c>sequenceId(N+1) > sequenceId(N)</c>
+    ///         - It's not necessary for sequence ids to be consecutive. There can be holes between messages. Eg. the
+    ///             <c>sequenceId</c> could represent an offset or a cumulative size.
+    /// </param>
     /// <remarks>
     ///     This <paramref name="deliverAt" /> timestamp must be expressed as unix time milliseconds based on UTC.
     ///     For example: <code>DateTimeOffset.UtcNow.AddSeconds(2.0).ToUnixTimeMilliseconds()</code>.
@@ -242,12 +255,14 @@ type MessageBuilder =
     new (value : byte[],
             [<Optional; DefaultParameterValue(null:string)>] key : string,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] properties : IReadOnlyDictionary<string, string>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>] deliverAt : Nullable<int64>) =
+            [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>] deliverAt : Nullable<int64>,
+            [<Optional; DefaultParameterValue(Nullable():Nullable<uint64>)>] sequenceId : Nullable<uint64>) =
             {
                 Value = value
                 Key = if isNull key then %"" else %key
                 Properties = if isNull properties then EmptyProps else properties
                 DeliverAt = deliverAt
+                SequenceId = sequenceId
             }
         
 type internal WriterStream = Stream

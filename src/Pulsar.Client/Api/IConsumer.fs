@@ -37,3 +37,5 @@ type IConsumer =
     abstract member ConsumerId: ConsumerId
     /// Get a topic for the consumer
     abstract member Topic: string
+    /// Get the consumer name
+    abstract member Name: string
