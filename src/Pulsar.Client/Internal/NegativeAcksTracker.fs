@@ -42,9 +42,9 @@ type internal NegativeAcksTracker(prefix: string,
 
                     if state.Count > 0 then
                         let result = HashSet<MessageId>()
-                        for item in state do
-                            if item.Value < DateTime.Now then
-                                result.Add(item.Key) |> ignore
+                        for KeyValue(messageId, expirationDate) in state do
+                            if expirationDate < DateTime.Now then
+                                result.Add(messageId) |> ignore
                         if result.Count > 0 then
                             for itemToRemove in result do
                                 state.Remove(itemToRemove) |> ignore
