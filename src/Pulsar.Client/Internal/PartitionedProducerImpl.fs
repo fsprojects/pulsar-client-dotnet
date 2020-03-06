@@ -23,7 +23,7 @@ type internal PartitionedConnectionState =
     | Closed
 
 type internal PartitionedProducerImpl private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                      numPartitions: int, lookup: BinaryLookupService, cleanup: PartitionedProducerImpl -> unit) as this =
+                                      numPartitions: int, lookup: BinaryLookupService, interceptors: ProducerInterceptors, cleanup: PartitionedProducerImpl -> unit) as this =
     let producerId = Generators.getNextProducerId()
     let prefix = sprintf "p/producer(%u, %s)" %producerId producerConfig.ProducerName
     let producers = ResizeArray<IProducer>(numPartitions)
@@ -73,7 +73,7 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
                             let partititonedConfig = { producerConfig with
                                                         MaxPendingMessages = maxPendingMessages
                                                         Topic = partitionedTopic }
-                            ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup, fun _ -> ()))
+                            ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup, interceptors, fun _ -> ()))
                     // we mark success if all the partitions are created
                     // successfully, else we throw an exception
                     // due to any
@@ -141,7 +141,7 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
                                     let partititonedConfig = { producerConfig with
                                                                 MaxPendingMessages = maxPendingMessages
                                                                 Topic = partitionedTopic }
-                                    ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup, fun _ -> ()))
+                                    ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup, interceptors, fun _ -> ()))
                             try
                                 let! producerResults =
                                     producerTasks
@@ -211,9 +211,9 @@ type internal PartitionedProducerImpl private (producerConfig: ProducerConfigura
        }
 
     static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                        partitions: int, lookup: BinaryLookupService, cleanup: PartitionedProducerImpl -> unit) =
+                        partitions: int, lookup: BinaryLookupService, interceptors:ProducerInterceptors, cleanup: PartitionedProducerImpl -> unit) =
         task {
-            let producer = PartitionedProducerImpl(producerConfig, clientConfig, connectionPool, partitions, lookup, cleanup)
+            let producer = PartitionedProducerImpl(producerConfig, clientConfig, connectionPool, partitions, lookup, interceptors, cleanup)
             do! producer.InitInternal()
             return producer :> IProducer
         }

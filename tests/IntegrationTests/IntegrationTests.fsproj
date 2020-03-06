@@ -17,6 +17,7 @@
     <Compile Include="Basic.fs" />
     <Compile Include="DeadLetters.fs" />
     <Compile Include="Compression.fs" />
+    <Compile Include="Interceptors.fs" />
     <None Include="paket.references" />
     <Compile Include="Main.fs" />
   </ItemGroup>

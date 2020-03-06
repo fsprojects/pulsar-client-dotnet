@@ -252,8 +252,7 @@ type MessageBuilder =
                 Properties = if isNull properties then EmptyProps else properties
                 DeliverAt = deliverAt
             }
-
-
+        
 type internal WriterStream = Stream
 type internal Payload = WriterStream -> Task
 type internal Connection =
@@ -264,8 +263,8 @@ type internal Connection =
     }
 type internal RedeliverSet = HashSet<MessageId>
 
-type internal SingleCallback = TaskCompletionSource<MessageId>
-type internal BatchCallback = BatchDetails * TaskCompletionSource<MessageId>
+type internal SingleCallback = MessageBuilder * TaskCompletionSource<MessageId>
+type internal BatchCallback = BatchDetails * MessageBuilder * TaskCompletionSource<MessageId>
 type internal PendingCallback = 
     | SingleCallback of SingleCallback
     | BatchCallbacks of BatchCallback[]

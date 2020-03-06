@@ -25,7 +25,7 @@ type Reader private (readerConfig: ReaderConfiguration, clientConfig: PulsarClie
 
     let consumer =
         ConsumerImpl(consumerConfig, clientConfig, connectionPool, readerConfig.Topic.PartitionIndex,
-                     readerConfig.StartMessageId, lookup, readerConfig.StartMessageFromRollbackDuration, true, fun _ -> ())
+                     readerConfig.StartMessageId, lookup, readerConfig.StartMessageFromRollbackDuration, true, ConsumerInterceptors.Empty, fun _ -> ())
 
     let castedConsumer = consumer :> IConsumer
 

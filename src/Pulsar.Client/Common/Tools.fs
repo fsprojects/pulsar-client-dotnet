@@ -53,6 +53,7 @@ let reraize<'a> ex =
     (ExceptionDispatchInfo.Capture ex).Throw()
     Unchecked.defaultof<'a>
 
+let throwIfNotNull (exn:Exception) = if not(isNull exn) then raise exn 
 // Mix
 
 let asyncDelay delay work =
