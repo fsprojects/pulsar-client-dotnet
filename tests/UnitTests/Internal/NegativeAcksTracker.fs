@@ -36,7 +36,7 @@ let tests =
             tracker.Add msgId2 |> Expect.isTrue ""
             tracker.Add msgId3 |> Expect.isTrue ""
             
-            do! Async.Sleep(105) //waiting for expiration to happen
+            do! Async.Sleep(120) //waiting for expiration to happen
             scheduler.Tick()     //ticking timer
             
             let! redelivered = tsc.Task |> Async.AwaitTask
