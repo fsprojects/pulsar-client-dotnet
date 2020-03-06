@@ -4,7 +4,7 @@ open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open System
 
-type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguration) =
+type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguration, consumerInterceptors: ConsumerInterceptors) =
 
     [<Literal>]
     let MIN_ACK_TIMEOUT_MILLIS = 1000
@@ -38,82 +38,76 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
                     c.KeySharedPolicy.IsSome && c.SubscriptionType <> SubscriptionType.KeyShared
                 ) "KeySharedPolicy must be set with KeyShared subscription")
 
-    new(client: PulsarClient) = ConsumerBuilder(client, ConsumerConfiguration.Default)
+    new(client: PulsarClient) = ConsumerBuilder(client, ConsumerConfiguration.Default, ConsumerInterceptors.Empty)
 
+    member private this.With(newConfig: ConsumerConfiguration) =
+        ConsumerBuilder(client, newConfig, consumerInterceptors)
+
+    member private this.With(newInterceptors: ConsumerInterceptors) =
+        ConsumerBuilder(client, config, newInterceptors)
+    
     member this.Topic topic =
-        ConsumerBuilder(
-            client,
-            { config with
-                Topic = topic
-                    |> invalidArgIfBlankString "Topic must not be blank."
-                    |> fun t -> TopicName(t.Trim()) })
+        { config with
+            Topic = topic
+                |> invalidArgIfBlankString "Topic must not be blank."
+                |> fun t -> TopicName(t.Trim()) }
+        |> this.With
 
     member this.ConsumerName name =
-        ConsumerBuilder(
-            client,
-            { config with
-                ConsumerName = name |> invalidArgIfBlankString "Consumer name must not be blank." })
+        { config with
+            ConsumerName = name |> invalidArgIfBlankString "Consumer name must not be blank." }
+        |> this.With
 
     member this.SubscriptionName subscriptionName =
-        ConsumerBuilder(
-            client,
-            { config with
-                SubscriptionName = subscriptionName |> invalidArgIfBlankString "Subscription name must not be blank." })
+        { config with
+            SubscriptionName = subscriptionName |> invalidArgIfBlankString "Subscription name must not be blank." }
+        |> this.With        
 
     member this.SubscriptionType subscriptionType =
-        ConsumerBuilder(
-            client,
-            { config with
-                SubscriptionType = subscriptionType  })
+        { config with
+            SubscriptionType = subscriptionType  }
+        |> this.With
 
     member this.SubscriptionMode subscriptionMode =
-        ConsumerBuilder(
-            client,
-            { config with
-                SubscriptionMode = subscriptionMode  })
+        { config with
+            SubscriptionMode = subscriptionMode  }
+        |> this.With
     
     member this.ReceiverQueueSize receiverQueueSize =
-        ConsumerBuilder(
-            client,
-            { config with
-                ReceiverQueueSize = receiverQueueSize |> invalidArgIfNotGreaterThanZero "ReceiverQueueSize should be greater than 0."  })
+        { config with
+            ReceiverQueueSize = receiverQueueSize |> invalidArgIfNotGreaterThanZero "ReceiverQueueSize should be greater than 0."  }
+        |> this.With
 
     member this.SubscriptionInitialPosition subscriptionInitialPosition =
-        ConsumerBuilder(
-            client,
-            { config with
-                SubscriptionInitialPosition = subscriptionInitialPosition  })
+        { config with
+            SubscriptionInitialPosition = subscriptionInitialPosition  }
+        |> this.With
 
     member this.AckTimeout ackTimeout =
-        ConsumerBuilder(
-            client,
-            { config with
-                AckTimeout = ackTimeout |> invalidArgIf (fun arg ->
-                   arg <> TimeSpan.Zero && arg < TimeSpan.FromMilliseconds(float MIN_ACK_TIMEOUT_MILLIS)) (sprintf "Ack timeout should be greater than %i ms" MIN_ACK_TIMEOUT_MILLIS)  })
+        { config with
+            AckTimeout = ackTimeout |> invalidArgIf (fun arg ->
+               arg <> TimeSpan.Zero && arg < TimeSpan.FromMilliseconds(float MIN_ACK_TIMEOUT_MILLIS)) (sprintf "Ack timeout should be greater than %i ms" MIN_ACK_TIMEOUT_MILLIS)  }
+        |> this.With
 
     member this.AckTimeoutTickTime ackTimeoutTickTime =
-        ConsumerBuilder(
-            client,
-            { config with
-                AckTimeoutTickTime = ackTimeoutTickTime  })
+        { config with
+            AckTimeoutTickTime = ackTimeoutTickTime  }
+        |> this.With
 
     member this.AcknowledgementsGroupTime ackGroupTime =
-        ConsumerBuilder(
-            client,
-            { config with
-                AcknowledgementsGroupTime = ackGroupTime  })
+        { config with
+            AcknowledgementsGroupTime = ackGroupTime  }
+        |> this.With
 
     member this.ReadCompacted readCompacted =
-        ConsumerBuilder(
-            client,
-            { config with
-                ReadCompacted = readCompacted  })
+        { config with
+            ReadCompacted = readCompacted  }
+        |> this.With
 
     member this.NegativeAckRedeliveryDelay negativeAckRedeliveryDelay =
-        ConsumerBuilder(
-            client,
-            { config with
-                NegativeAckRedeliveryDelay = negativeAckRedeliveryDelay  })
+        { config with
+            NegativeAckRedeliveryDelay = negativeAckRedeliveryDelay  }
+        |> this.With
 
     member this.DeadLettersPolicy (deadLettersPolicy: DeadLettersPolicy) =
 
@@ -132,34 +126,38 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
         let deadLettersProcessor =
             DeadLettersProcessor(deadLettersPolicy, getTopicName, getSubscriptionName, createProducer) :> IDeadLettersProcessor
 
-        ConsumerBuilder(
-            client,
-            { config with
-                AckTimeoutTickTime = ackTimeoutTickTime
-                DeadLettersProcessor = deadLettersProcessor })
+        { config with
+            AckTimeoutTickTime = ackTimeoutTickTime
+            DeadLettersProcessor = deadLettersProcessor }
+        |> this.With
 
     member this.StartMessageIdInclusive () =
         { config with
             ResetIncludeHead = true }
+        |> this.With
 
     member this.BatchReceivePolicy (batchReceivePolicy: BatchReceivePolicy) =
-        ConsumerBuilder(
-            client,
-            { config with
-                BatchReceivePolicy = batchReceivePolicy
-                    |> invalidArgIfDefault "BatchReceivePolicy can't be null"
-                    |> fun policy -> policy.Verify(); policy })
+        { config with
+            BatchReceivePolicy = batchReceivePolicy
+                |> invalidArgIfDefault "BatchReceivePolicy can't be null"
+                |> fun policy -> policy.Verify(); policy }
+        |> this.With
 
     member this.KeySharedPolicy (keySharedPolicy: KeySharedPolicy) =
-        ConsumerBuilder(
-            client,
-            { config with
-                KeySharedPolicy = keySharedPolicy
-                    |> invalidArgIfDefault "KeySharedPolicy can't be null"
-                    |> fun policy -> keySharedPolicy.Validate(); policy
-                    |> Some })
+        { config with
+            KeySharedPolicy = keySharedPolicy
+                |> invalidArgIfDefault "KeySharedPolicy can't be null"
+                |> fun policy -> keySharedPolicy.Validate(); policy
+                |> Some }
+        |> this.With
 
+    member this.Intercept ([<ParamArray>] interceptors: IConsumerInterceptor array) =
+        if interceptors.Length = 0 then this
+        else
+            ConsumerInterceptors(Array.append consumerInterceptors.Interceptors interceptors)
+            |> this.With
+    
     member this.SubscribeAsync() =
         config
         |> verify
-        |> client.SubscribeAsync
+        |> client.SubscribeAsync consumerInterceptors

@@ -100,9 +100,10 @@ type MessageId =
             }
         member internal this.PrevBatchMessageId
             with get() =
-                {
-                    this with EntryId = this.EntryId - %1L
-                }
+                match this.Type with
+                | Individual -> { this with EntryId = this.EntryId - %1L }
+                | Cumulative _ ->
+                    { this with EntryId = this.EntryId - %1L; Type = Cumulative(%0, BatchMessageAcker(0)) }
         member this.ToByteArray() =
             let data = MessageIdData(ledgerId = uint64 %this.LedgerId, entryId = uint64 %this.EntryId)
             if this.Partition >= 0 then
@@ -252,8 +253,7 @@ type MessageBuilder =
                 Properties = if isNull properties then EmptyProps else properties
                 DeliverAt = deliverAt
             }
-
-
+        
 type internal WriterStream = Stream
 type internal Payload = WriterStream -> Task
 type internal Connection =
@@ -264,8 +264,8 @@ type internal Connection =
     }
 type internal RedeliverSet = HashSet<MessageId>
 
-type internal SingleCallback = TaskCompletionSource<MessageId>
-type internal BatchCallback = BatchDetails * TaskCompletionSource<MessageId>
+type internal SingleCallback = MessageBuilder * TaskCompletionSource<MessageId>
+type internal BatchCallback = BatchDetails * MessageBuilder * TaskCompletionSource<MessageId>
 type internal PendingCallback = 
     | SingleCallback of SingleCallback
     | BatchCallbacks of BatchCallback[]

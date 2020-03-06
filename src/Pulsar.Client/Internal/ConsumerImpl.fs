@@ -14,9 +14,9 @@ open pulsar.proto
 open System.Linq
 open System.Threading
 
-type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+type internal ConsumerImpl (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, startMessageId: MessageId option, lookup: BinaryLookupService,
-                           startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, cleanup: ConsumerImpl -> unit) as this =
+                           startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, interceptors: ConsumerInterceptors, cleanup: ConsumerImpl -> unit) as this =
 
     [<Literal>]
     let MAX_REDELIVER_UNACKNOWLEDGED = 1000
@@ -151,17 +151,25 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
             do! this.Mb.PostAndAsyncReply(fun channel -> RedeliverUnacknowledged (messages, channel))
         } |> Async.StartImmediate
 
+    let unAckedMessageRedeliver messages =
+        interceptors.OnAckTimeoutSend(this, messages)
+        redeliverMessages messages        
+
+    let negativeAcksRedeliver messages =
+        interceptors.OnNegativeAcksSend(this, messages)
+        redeliverMessages messages        
+    
     let unAckedMessageTracker =
         if consumerConfig.AckTimeout > TimeSpan.Zero then
             if consumerConfig.AckTimeoutTickTime > TimeSpan.Zero then
                 let tickDuration = if consumerConfig.AckTimeout > consumerConfig.AckTimeoutTickTime then consumerConfig.AckTimeoutTickTime else consumerConfig.AckTimeout
-                UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, tickDuration, redeliverMessages) :> IUnAckedMessageTracker
+                UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, tickDuration, unAckedMessageRedeliver) :> IUnAckedMessageTracker
             else
-                UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, consumerConfig.AckTimeout, redeliverMessages) :> IUnAckedMessageTracker
+                UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, consumerConfig.AckTimeout, unAckedMessageRedeliver) :> IUnAckedMessageTracker
         else
             UnAckedMessageTracker.UNACKED_MESSAGE_TRACKER_DISABLED
 
-    let negativeAcksTracker = NegativeAcksTracker(prefix, consumerConfig.NegativeAckRedeliveryDelay, redeliverMessages)
+    let negativeAcksTracker = NegativeAcksTracker(prefix, consumerConfig.NegativeAckRedeliveryDelay, negativeAcksRedeliver)
 
     let getConnectionState() = connectionHandler.ConnectionState
     let sendAckPayload (cnx: ClientCnx) payload = cnx.Send payload
@@ -181,8 +189,9 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                     unAckedMessageTracker.Remove(messageId) |> ignore
                 | Cumulative _ ->
                     unAckedMessageTracker.Remove(messageId) |> ignore
+                interceptors.OnAcknowledge(this, messageId, null)
             | AckType.Cumulative ->
-                ()
+                interceptors.OnAcknowledgeCumulative(this, messageId, null)
             do! acksGroupingTracker.AddAcknowledgment(messageId, ackType)
             // Consumer acknowledgment operation immediately succeeds. In any case, if we're not able to send ack to broker,
             // the messages will be re-delivered
@@ -205,12 +214,14 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
             true
         else
             match ackType with
-            | AckType.Cumulative when not batchAcker.PrevBatchCumulativelyAcked ->
-                sendAcknowledge msgId.PrevBatchMessageId ackType |> Async.StartImmediate
-                Log.Logger.LogDebug("{0} update PrevBatchCumulativelyAcked", prefix)
-                batchAcker.PrevBatchCumulativelyAcked <- true
-            | _ ->
-                ()
+            | AckType.Cumulative ->
+                if not batchAcker.PrevBatchCumulativelyAcked then
+                    sendAcknowledge msgId.PrevBatchMessageId ackType |> Async.StartImmediate
+                    Log.Logger.LogDebug("{0} update PrevBatchCumulativelyAcked", prefix)
+                    batchAcker.PrevBatchCumulativelyAcked <- true
+                interceptors.OnAcknowledgeCumulative(this, msgId, null)
+            | AckType.Individual ->
+                interceptors.OnAcknowledge(this, msgId, null)
             Log.Logger.LogDebug("{0} cannot ack message acktype {1}, cardinality {2}, length {3}",
                 prefix, ackType, outstandingAcks, batchSize)
             false
@@ -348,7 +359,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
             if (messages.CanAdd(msgPeeked)) then
                 let msg = dequeueMessage()
                 messageProcessed msg
-                messages.Add(msg)
+                messages.Add(interceptors.BeforeConsume(this, msg))
             else
                 shouldContinue <- false
         Log.Logger.LogDebug("{0} BatchFormed with size {1}", prefix, messages.Size)
@@ -376,7 +387,8 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
     let replyWithMessage (channel: AsyncReplyChannel<ResultOrException<Message>>) message =
         messageProcessed message
-        channel.Reply (Result message)
+        let interceptMsg = interceptors.BeforeConsume(this, message)
+        channel.Reply (Result interceptMsg)
 
     let stopConsumer () =
         unAckedMessageTracker.Close()
@@ -780,7 +792,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
     member this.HasMessageAvailableAsync() =
         task {
-            connectionHandler.CheckIfActive()
+            connectionHandler.CheckIfActive() |> throwIfNotNull
             let! result = mb.PostAndAsyncReply(fun channel -> HasMessageAvailable channel)
             return! result
         }
@@ -803,17 +815,17 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
     static member Init(consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                        partitionIndex: int, startMessageId: MessageId option, lookup: BinaryLookupService,
-                       createTopicIfDoesNotExist: bool, cleanup: ConsumerImpl -> unit) =
+                       createTopicIfDoesNotExist: bool, interceptors: ConsumerInterceptors, cleanup: ConsumerImpl -> unit) =
         task {
             let consumer = ConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex,
-                                        startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist, cleanup)
+                                        startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist, interceptors, cleanup)
             do! consumer.InitInternal()
             return consumer
         }
 
     member this.ReceiveFsharpAsync() =
         async {
-            connectionHandler.CheckIfActive()
+            connectionHandler.CheckIfActive() |> throwIfNotNull
             return! mb.PostAndAsyncReply(Receive)
         }
     
@@ -821,50 +833,63 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
         
         member this.ReceiveAsync() =
             task {
-                connectionHandler.CheckIfActive()
+                connectionHandler.CheckIfActive() |> throwIfNotNull
                 return! wrapPostAndReply <| mb.PostAndAsyncReply(Receive)
             }
 
         member this.BatchReceiveAsync() =
             task {
-                connectionHandler.CheckIfActive()
+                connectionHandler.CheckIfActive() |> throwIfNotNull
                 return! wrapPostAndReply <| mb.PostAndAsyncReply(BatchReceive)
             }
 
         member this.AcknowledgeAsync (msgId: MessageId) =
             task {
-                connectionHandler.CheckIfActive()
+                let exn = connectionHandler.CheckIfActive()
+                if not (isNull exn) then 
+                    interceptors.OnAcknowledge(this, msgId, exn)
+                    raise exn
+                
                 mb.Post(Acknowledge(msgId, AckType.Individual))
             }
             
         member this.AcknowledgeAsync (msgs: Messages) =
             task {
-                connectionHandler.CheckIfActive()
+                let exn = connectionHandler.CheckIfActive()
+                if not (isNull exn) then 
+                    for msg in msgs do
+                        interceptors.OnAcknowledge(this, msg.MessageId, exn)
+                    raise exn
+
                 for msg in msgs do
                     mb.Post(Acknowledge(msg.MessageId, AckType.Individual))
             }
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
             task {
-                connectionHandler.CheckIfActive()
+                let exn = connectionHandler.CheckIfActive()
+                if not (isNull exn) then 
+                    interceptors.OnAcknowledgeCumulative(this, msgId, exn)
+                    raise exn
+
                 mb.Post(Acknowledge(msgId, AckType.Cumulative))
             }
 
         member this.RedeliverUnacknowledgedMessagesAsync () =
             task {
-                connectionHandler.CheckIfActive()
+                connectionHandler.CheckIfActive() |> throwIfNotNull
                 do! mb.PostAndAsyncReply(RedeliverAllUnacknowledged)
             }
 
         member this.SeekAsync (messageId: MessageId) =
             task {
-                connectionHandler.CheckIfActive()
+                connectionHandler.CheckIfActive() |> throwIfNotNull
                 return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (MessageId messageId, channel))
             }
 
         member this.SeekAsync (timestamp: uint64) =
             task {
-                connectionHandler.CheckIfActive()
+                connectionHandler.CheckIfActive() |> throwIfNotNull
                 return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (Timestamp timestamp, channel))
             }
             
@@ -873,6 +898,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
         member this.CloseAsync() =
             task {
+                interceptors.Close()
                 match connectionHandler.ConnectionState with
                 | Closing | Closed ->
                     return ()
@@ -882,7 +908,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
         member this.UnsubscribeAsync() =
             task {
-                connectionHandler.CheckIfActive()
+                connectionHandler.CheckIfActive() |> throwIfNotNull
                 return! wrapPostAndReply <| mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
             }
 
@@ -890,13 +916,13 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
         member this.NegativeAcknowledge msgId =
             task {
-                connectionHandler.CheckIfActive()
+                connectionHandler.CheckIfActive() |> throwIfNotNull
                 mb.Post(NegativeAcknowledge(msgId))
             }
 
         member this.NegativeAcknowledge (msgs: Messages)  =
             task {
-                connectionHandler.CheckIfActive()
+                connectionHandler.CheckIfActive() |> throwIfNotNull 
                 for msg in msgs do
                     mb.Post(NegativeAcknowledge(msg.MessageId))
             }

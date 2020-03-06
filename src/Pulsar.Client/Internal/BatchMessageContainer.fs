@@ -27,7 +27,7 @@ module internal BatchHelpers =
                         smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
                 Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
                 messageWriter.Write(message.Value)
-                (BatchDetails(%index, BatchMessageAcker.NullAcker), batchItem.Tcs))
+                (BatchDetails(%index, BatchMessageAcker.NullAcker), message, batchItem.Tcs))
             |> Seq.toArray
         let batchPayload = messageStream.ToArray()
         (batchPayload, batchCallbacks)
