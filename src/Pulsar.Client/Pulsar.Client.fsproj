@@ -18,7 +18,7 @@
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
     <PackageVersion>0.15.0</PackageVersion>
-    <DebugType>full</DebugType>
+    <DebugType>portable</DebugType>
   </PropertyGroup>
   <PropertyGroup>
     <!-- Optional: Declare that the Repository URL can be published to NuSpec -->
