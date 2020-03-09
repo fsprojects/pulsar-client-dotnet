@@ -9,6 +9,7 @@ type internal ConnectionHandlerMessage =
     | GrabCnx
     | ReconnectLater of exn
     | ConnectionClosed of ClientCnx
+    | Close
 
 type internal ConnectionState =
     | Ready of ClientCnx
@@ -42,6 +43,7 @@ type internal ConnectionHandler( parentPrefix: string,
                 let! msg = inbox.Receive()
                 match msg with
                 | GrabCnx ->
+                    
                     match this.ConnectionState with
                     | Ready _ ->
                         Log.Logger.LogWarning("{0} Client cnx already set for topic {1}, ignoring reconnection request", prefix, topic);
@@ -66,7 +68,10 @@ type internal ConnectionHandler( parentPrefix: string,
                                     this.Mb.Post(ReconnectLater ex)
                         else
                             Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                    return! loop ()
+                            
                 | ReconnectLater ex ->
+                    
                     if isValidStateForReconnection() then
                         let delay = backoff.Next()
                         Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
@@ -75,7 +80,10 @@ type internal ConnectionHandler( parentPrefix: string,
                         asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
                     else
                         Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                    return! loop ()
+                        
                 | ConnectionClosed clientCnx ->
+                    
                     match this.ConnectionState with
                     | Ready cnx when cnx <> clientCnx ->
                         Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
@@ -88,7 +96,10 @@ type internal ConnectionHandler( parentPrefix: string,
                             asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
                         else
                             Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
-                return! loop ()
+                    return! loop ()
+                    
+                | Close ->
+                    ()
             }
         loop  ()
     )
@@ -139,3 +150,6 @@ type internal ConnectionHandler( parentPrefix: string,
         | Closing | Closed ->  raise <| AlreadyClosedException(prefix + "already closed")
         | Terminated ->  raise <| AlreadyClosedException(prefix + " topic was terminated")
         | Failed | Uninitialized ->  raise <| NotConnectedException(prefix + " not connected")
+        
+    member this.Close() =
+        mb.Post(Close)

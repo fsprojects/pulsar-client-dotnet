@@ -173,6 +173,7 @@ type internal ProducerImpl private (producerConfig: ProducerConfiguration, clien
     let stopProducer() =
         sendTimeoutTimer.Stop()
         batchTimer.Stop()
+        connectionHandler.Close()
         cleanup(this)
         Log.Logger.LogInformation("{0} stopped", prefix)
 

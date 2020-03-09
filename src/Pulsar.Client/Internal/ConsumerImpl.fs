@@ -58,10 +58,21 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
             this.Mb.Post(ConsumerMessage.SendFlowPermits avalablePermits)
             avalablePermits <- 0
 
+    /// Clear the internal receiver queue and returns the message id of what was the 1st message in the queue that was not seen by the application
     let clearReceiverQueue() =
         if incomingMessages.Count > 0 then
-            let lastMessage = incomingMessages.Last()
-            Some lastMessage.MessageId
+            let nextMessageInQueue = incomingMessages.Dequeue().MessageId
+            incomingMessagesSize <- 0L
+            incomingMessages.Clear()
+            let previousMessage =
+                match nextMessageInQueue.Type with
+                | Cumulative (index, acker) ->
+                    // Get on the previous message within the current batch
+                    { nextMessageInQueue with Type = Cumulative(index - %1, acker) }
+                | Individual ->
+                    // Get on previous message in previous entry
+                    { nextMessageInQueue with EntryId = nextMessageInQueue.EntryId - %1L }
+            Some previousMessage
         else if lastDequeuedMessage <> MessageId.Earliest then
             // If the queue was empty we need to restart from the message just after the last one that has been dequeued
             // in the past
@@ -308,6 +319,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
         acksGroupingTracker.Close()
         clearDeadLetters()
         negativeAcksTracker.Close()
+        connectionHandler.Close()
         cleanup(this)
         while waiters.Count > 0 do
             let waitingChannel = waiters.Dequeue()
