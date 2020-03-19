@@ -29,14 +29,25 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable hasReachedEndOfTopic = false
     let mutable avalablePermits = 0
-    let mutable lastMessageIdInBroker = MessageId.Earliest
-    let mutable lastDequeuedMessage = MessageId.Earliest
     let mutable startMessageId = startMessageId
+    let mutable lastMessageIdInBroker = MessageId.Earliest
+    let mutable lastDequeuedMessage = startMessageId |> Option.defaultValue MessageId.Earliest
+    let mutable duringSeek = None
     let initialStartMessageId = startMessageId
     let mutable incomingMessagesSize = 0L
     let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
     let deadLettersProcessor = consumerConfig.DeadLettersProcessor
+    let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable
 
+    let wrapPostAndReply (mbAsyncReply: Async<ResultOrException<'T>>) =
+        async {
+            match! mbAsyncReply with
+            | Result msg ->
+                return msg
+            | Exn exn ->
+                return reraize exn
+        }
+    
     let connectionHandler =
         ConnectionHandler(prefix,
                           connectionPool,
@@ -60,27 +71,81 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
 
     /// Clear the internal receiver queue and returns the message id of what was the 1st message in the queue that was not seen by the application
     let clearReceiverQueue() =
-        if incomingMessages.Count > 0 then
-            let nextMessageInQueue = incomingMessages.Dequeue().MessageId
-            incomingMessagesSize <- 0L
-            incomingMessages.Clear()
-            let previousMessage =
-                match nextMessageInQueue.Type with
-                | Cumulative (index, acker) ->
-                    // Get on the previous message within the current batch
-                    { nextMessageInQueue with Type = Cumulative(index - %1, acker) }
-                | Individual ->
-                    // Get on previous message in previous entry
-                    { nextMessageInQueue with EntryId = nextMessageInQueue.EntryId - %1L }
-            Some previousMessage
-        else if lastDequeuedMessage <> MessageId.Earliest then
-            // If the queue was empty we need to restart from the message just after the last one that has been dequeued
-            // in the past
-            Some lastDequeuedMessage
-        else
-            // No message was received or dequeued by this consumer. Next message would still be the startMessageId
-            startMessageId
-
+        let nextMsg =
+            if incomingMessages.Count > 0 then
+                let nextMessageInQueue = incomingMessages.Dequeue().MessageId
+                incomingMessagesSize <- 0L
+                incomingMessages.Clear()
+                Some nextMessageInQueue
+            else
+                None
+        match duringSeek with
+        | Some _ as seekMsgId  ->
+            duringSeek <- None
+            seekMsgId
+        | None when isDurable ->
+            None
+        | _  ->        
+            match nextMsg with
+            | Some nextMessageInQueue ->                
+                let previousMessage =
+                    match nextMessageInQueue.Type with
+                    | Cumulative (index, acker) ->
+                        // Get on the previous message within the current batch
+                        { nextMessageInQueue with Type = Cumulative(index - %1, acker) }
+                    | Individual ->
+                        // Get on previous message in previous entry
+                        { nextMessageInQueue with EntryId = nextMessageInQueue.EntryId - %1L }
+                Some previousMessage
+            | None ->
+                if lastDequeuedMessage <> MessageId.Earliest then
+                    // If the queue was empty we need to restart from the message just after the last one that has been dequeued
+                    // in the past
+                    Some lastDequeuedMessage
+                else
+                    // No message was received or dequeued by this consumer. Next message would still be the startMessageId
+                    startMessageId
+    
+    let getLastMessageIdAsync() =
+        
+        let rec internalGetLastMessageIdAsync(backoff: Backoff, remainingTimeMs: int) =
+            async {
+                match connectionHandler.ConnectionState with
+                | Ready clientCnx ->                    
+                    let requestId = Generators.getNextRequestId()
+                    let payload = Commands.newGetLastMessageId consumerId requestId
+                    try
+                        let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                        let lastMessageId = response |> PulsarResponseType.GetLastMessageId
+                        return lastMessageId
+                    with
+                    | ex ->
+                        Log.Logger.LogError(ex, "{0} failed getLastMessageId", prefix)
+                        return reraize ex
+                | _ ->
+                    let nextDelay = Math.Min(backoff.Next(), remainingTimeMs)
+                    if nextDelay <= 0 then
+                        return
+                            "Couldn't get the last message id withing configured timeout"
+                            |> TimeoutException
+                            |> raise
+                    else
+                        Log.Logger.LogWarning("Could not get connection while GetLastMessageId -- Will try again in {0} ms", nextDelay)    
+                        do! Async.Sleep nextDelay                    
+                        return! internalGetLastMessageIdAsync(backoff, remainingTimeMs - nextDelay)
+            }
+        
+        match connectionHandler.ConnectionState with
+        | Closing | Closed ->
+            "Consumer is already closed"
+            |> AlreadyClosedException
+            |> Task.FromException<MessageId>
+        | _ ->
+            let backoff = Backoff { BackoffConfig.Default with
+                                        Initial = TimeSpan.FromMilliseconds(100.0)
+                                        Max = (clientConfig.OperationTimeout + clientConfig.OperationTimeout)}
+            internalGetLastMessageIdAsync(backoff, int clientConfig.OperationTimeout.TotalMilliseconds) |> Async.StartAsTask
+    
     let redeliverMessages messages =
         async {
             do! this.Mb.PostAndAsyncReply(fun channel -> RedeliverUnacknowledged (messages, channel))
@@ -184,13 +249,12 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                 else
                     idx <= batchIndex
 
-    let isNonDurableAndSameEntryAndLedger (msgId: MessageId) =
+    let isSameEntry (msgId: MessageId) =
         match startMessageId with
         | None ->
             false
         | Some startMsgId ->
-            consumerConfig.SubscriptionMode = SubscriptionMode.NonDurable
-                && startMsgId.LedgerId = msgId.LedgerId
+                startMsgId.LedgerId = msgId.LedgerId
                 && startMsgId.EntryId = msgId.EntryId
 
     let clearDeadLetters() = deadLettersProcessor.ClearMessages()
@@ -224,7 +288,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
             let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
             let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
 
-            if isNonDurableAndSameEntryAndLedger(rawMessage.MessageId) && isPriorBatchIndex(%i) then
+            if isSameEntry(rawMessage.MessageId) && isPriorBatchIndex(%i) then
                 Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1} in batch", prefix, startMessageId)
                 skippedMessages <- skippedMessages + 1
             else
@@ -353,7 +417,6 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                         Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, consumerConfig.Topic)
                         clientCnx.AddConsumer consumerId this.Mb
                         let requestId = Generators.getNextRequestId()
-                        let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable
                         startMessageId <- clearReceiverQueue()
                         clearDeadLetters()
                         let msgIdData =
@@ -447,7 +510,7 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                         increaseAvailablePermits rawMessage.Metadata.NumMessages
                     else
                         if (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
-                            if isNonDurableAndSameEntryAndLedger(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
+                            if isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
                                 // We need to discard entries that were prior to startMessageId
                                 Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                             else
@@ -594,26 +657,28 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
                         let requestId = Generators.getNextRequestId()
-                        Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData);
-                        task {
-                            try
-                                let (payload, lastMessage) =
-                                    match seekData with
-                                    | Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
-                                    | MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
-                                let! response = clientCnx.SendAndWaitForReply requestId payload
-                                response |> PulsarResponseType.GetEmpty
-                                lastDequeuedMessage <- lastMessage
-                                acksGroupingTracker.FlushAndClean()
-                                incomingMessages.Clear()
-                                Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
-                            with
-                            | ex ->
-                                Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
-                                reraize ex
-                        } |> channel.Reply
+                        Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData)
+                        try
+                            let (payload, lastMessage) =
+                                match seekData with
+                                | Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
+                                | MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
+                            let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                            response |> PulsarResponseType.GetEmpty
+                            
+                            duringSeek <- Some lastMessage
+                            lastDequeuedMessage <- MessageId.Earliest
+                            
+                            acksGroupingTracker.FlushAndClean()
+                            incomingMessages.Clear()
+                            Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
+                            channel.Reply <| Result()
+                        with
+                        | ex ->
+                            Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
+                            channel.Reply <| Exn ex
                     | _ ->
-                        channel.Reply(Task.FromException(NotConnectedException "Not connected to broker"))
+                        channel.Reply <| Exn(NotConnectedException "Not connected to broker")
                         Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
                     return! loop ()
 
@@ -638,29 +703,16 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                 | ConsumerMessage.HasMessageAvailable channel ->
 
                     Log.Logger.LogDebug("{0} HasMessageAvailable", prefix)
-                    if hasMoreMessages lastMessageIdInBroker lastDequeuedMessage then
+                    if hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessage then
                         channel.Reply(Task.FromResult(true))
                     else
-                        match connectionHandler.ConnectionState with
-                        | Ready clientCnx ->
-                            let requestId = Generators.getNextRequestId()
-                            let payload = Commands.newGetLastMessageId consumerId requestId
-                            task {
-                                try
-                                    let! response = clientCnx.SendAndWaitForReply requestId payload
-                                    let lastMessageId = response |> PulsarResponseType.GetLastMessageId
-                                    lastMessageIdInBroker <- lastMessageId
-                                    return hasMoreMessages lastMessageIdInBroker lastDequeuedMessage
-                                with
-                                | ex ->
-                                    Log.Logger.LogError(ex, "{0} failed getLastMessageId", prefix)
-                                    return reraize ex
-                            } |> channel.Reply
-                        | _ ->
-                            channel.Reply(Task.FromException(NotConnectedException "Not connected to broker") :?> Task<bool>)
-                            Log.Logger.LogError("{0} not connected, skipping HasMessageAvailable {1}", prefix)
+                        task {
+                            let! messageId = getLastMessageIdAsync()
+                            this.LastMessageIdInBroker <- messageId // Concurrent update - handle wisely
+                            return hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessage                                
+                        } |> channel.Reply
                     return! loop ()
-                    
+                                    
                 | ConsumerMessage.ActiveConsumerChanged isActive ->
                     
                     Log.Logger.LogInformation("{0} ActiveConsumerChanged isActive={1}", prefix, isActive)
@@ -674,23 +726,22 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                         Log.Logger.LogInformation("{0} starting close", prefix)
                         let requestId = Generators.getNextRequestId()
                         let payload = Commands.newCloseConsumer consumerId requestId
-                        task {
-                            try
-                                let! response = clientCnx.SendAndWaitForReply requestId payload
-                                response |> PulsarResponseType.GetEmpty
-                                clientCnx.RemoveConsumer(consumerId)
-                                connectionHandler.Closed()
-                                stopConsumer()
-                            with
-                            | ex ->
-                                Log.Logger.LogError(ex, "{0} failed to close", prefix)
-                                reraize ex
-                        } |> channel.Reply
+                        try
+                            let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                            response |> PulsarResponseType.GetEmpty
+                            clientCnx.RemoveConsumer(consumerId)
+                            connectionHandler.Closed()
+                            stopConsumer()
+                            channel.Reply <| Result()
+                        with
+                        | ex ->
+                            Log.Logger.LogError(ex, "{0} failed to close", prefix)
+                            channel.Reply <| Exn ex
                     | _ ->
                         Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
                         connectionHandler.Closed()
                         stopConsumer()
-                        channel.Reply(Task.FromResult())
+                        channel.Reply <| Result()
 
                 | ConsumerMessage.Unsubscribe channel ->
 
@@ -701,22 +752,21 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                         clearDeadLetters()
                         Log.Logger.LogInformation("{0} starting unsubscribe ", prefix)
                         let requestId = Generators.getNextRequestId()
-                        let payload = Commands.newUnsubscribeConsumer consumerId requestId
-                        task {
-                            try
-                                let! response = clientCnx.SendAndWaitForReply requestId payload
-                                response |> PulsarResponseType.GetEmpty
-                                clientCnx.RemoveConsumer(consumerId)
-                                connectionHandler.Closed()
-                                stopConsumer()
-                            with
-                            | ex ->
-                                Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
-                                reraize ex
-                        } |> channel.Reply
+                        let payload = Commands.newUnsubscribeConsumer consumerId requestId                       
+                        try
+                            let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                            response |> PulsarResponseType.GetEmpty
+                            clientCnx.RemoveConsumer(consumerId)
+                            connectionHandler.Closed()
+                            stopConsumer()
+                            channel.Reply <| Result()
+                        with
+                        | ex ->
+                            Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
+                            channel.Reply <| Exn ex
                     | _ ->
                         Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
-                        channel.Reply(Task.FromException(Exception("Not connected to broker")))
+                        channel.Reply <| Exn(NotConnectedException "Not connected to broker")
                         return! loop ()
 
             }
@@ -735,11 +785,14 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
             return! result
         }
 
+    member this.LastMessageIdInBroker
+        with get() = Volatile.Read(&lastMessageIdInBroker)
+        and private set(value) = Volatile.Write(&lastMessageIdInBroker, value)
+    
     override this.Equals consumer =
         consumerId = (consumer :?> IConsumer).ConsumerId
 
     override this.GetHashCode () = int consumerId
-
     
     
     member this.InitInternal() =
@@ -769,21 +822,13 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
         member this.ReceiveAsync() =
             task {
                 connectionHandler.CheckIfActive()
-                match! mb.PostAndAsyncReply(Receive) with
-                | Result msg ->
-                    return msg
-                | Exn exn ->
-                    return reraize exn
+                return! wrapPostAndReply <| mb.PostAndAsyncReply(Receive)
             }
 
         member this.BatchReceiveAsync() =
             task {
                 connectionHandler.CheckIfActive()
-                match! mb.PostAndAsyncReply(BatchReceive) with
-                | Result msgs ->
-                    return msgs
-                | Exn exn ->
-                    return reraize exn
+                return! wrapPostAndReply <| mb.PostAndAsyncReply(BatchReceive)
             }
 
         member this.AcknowledgeAsync (msgId: MessageId) =
@@ -814,16 +859,17 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
         member this.SeekAsync (messageId: MessageId) =
             task {
                 connectionHandler.CheckIfActive()
-                let! result = mb.PostAndAsyncReply(fun channel -> SeekAsync (MessageId messageId, channel))
-                return! result
+                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (MessageId messageId, channel))
             }
 
         member this.SeekAsync (timestamp: uint64) =
             task {
                 connectionHandler.CheckIfActive()
-                let! result = mb.PostAndAsyncReply(fun channel -> SeekAsync (Timestamp timestamp, channel))
-                return! result
+                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (Timestamp timestamp, channel))
             }
+            
+        member this.GetLastMessageIdAsync () =
+            getLastMessageIdAsync()
 
         member this.CloseAsync() =
             task {
@@ -831,15 +877,13 @@ type internal ConsumerImpl internal (consumerConfig: ConsumerConfiguration, clie
                 | Closing | Closed ->
                     return ()
                 | _ ->
-                    let! result = mb.PostAndAsyncReply(ConsumerMessage.Close)
-                    return! result
+                    return! wrapPostAndReply <| mb.PostAndAsyncReply(ConsumerMessage.Close)
             }
 
         member this.UnsubscribeAsync() =
             task {
                 connectionHandler.CheckIfActive()
-                let! result = mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
-                return! result
+                return! wrapPostAndReply <| mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
             }
 
         member this.HasReachedEndOfTopic with get() = hasReachedEndOfTopic

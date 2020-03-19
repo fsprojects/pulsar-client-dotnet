@@ -65,7 +65,8 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
         task {
             let backoff = Backoff { BackoffConfig.Default with
                                         Initial = TimeSpan.FromMilliseconds(100.0)
-                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout) }
+                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
+                                        Max = TimeSpan.FromMinutes(1.0) }
             let! result = this.GetTopicsUnderNamespace(resolveEndPoint(), ns, backoff, int config.OperationTimeout.TotalMilliseconds, mode)
             return result
         }

@@ -370,12 +370,12 @@ type internal ConsumerMessage =
     | NegativeAcknowledge of MessageId
     | RedeliverUnacknowledged of RedeliverSet * AsyncReplyChannel<unit>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
-    | SeekAsync of SeekData * AsyncReplyChannel<Task>
+    | SeekAsync of SeekData * AsyncReplyChannel<ResultOrException<unit>>
     | SendFlowPermits of int
     | HasMessageAvailable of AsyncReplyChannel<Task<bool>>
     | ActiveConsumerChanged of bool
-    | Close of AsyncReplyChannel<Task>
-    | Unsubscribe of AsyncReplyChannel<Task>
+    | Close of AsyncReplyChannel<ResultOrException<unit>>
+    | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
 
 type MessageRoutingMode =
     | SinglePartition = 0

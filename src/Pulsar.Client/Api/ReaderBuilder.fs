@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
+open System
 open Pulsar.Client.Common
 
 type ReaderBuilder private (client: PulsarClient, config: ReaderConfiguration) =
@@ -16,8 +17,14 @@ type ReaderBuilder private (client: PulsarClient, config: ReaderConfiguration) =
                 |> invalidArgIfDefault "Topic name must be set on the reader builder.")
         |> checkValue
             (fun c ->
-                c.StartMessageId
-                |> invalidArgIfDefault "StartMessageId name name must be set on the reader builder.")
+                if c.StartMessageId.IsSome && c.StartMessageFromRollbackDuration > TimeSpan.Zero
+                    || c.StartMessageId.IsNone && c.StartMessageFromRollbackDuration = TimeSpan.Zero then                
+                    failwith "Start message id or start message from roll back must be specified but they cannot be specified at the same time"
+                elif c.StartMessageFromRollbackDuration > TimeSpan.Zero then
+                    { config with
+                        StartMessageId = Some MessageId.Earliest }
+                else
+                    c)
 
     new(client: PulsarClient) = ReaderBuilder(client, ReaderConfiguration.Default)
 

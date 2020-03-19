@@ -500,13 +500,16 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
             }
 
         member this.SeekAsync (_: MessageId) =
-            Task.FromException(exn "Seek operation not supported on multitopics consumer") :?> Task<unit>
+            Task.FromException<unit>(exn "Seek operation not supported on multitopics consumer")
 
         member this.SeekAsync (timestamp: uint64) =
             task {
                 let! result = mb.PostAndAsyncReply(fun channel -> Seek(channel, timestamp))
                 return! result
             }
+            
+        member this.GetLastMessageIdAsync () =
+            Task.FromException<MessageId>(exn "GetLastMessageId operation not supported on multitopics consumer")
 
         member this.CloseAsync() =
             task {

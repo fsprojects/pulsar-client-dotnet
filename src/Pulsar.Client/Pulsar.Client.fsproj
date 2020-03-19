@@ -33,15 +33,16 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0" PrivateAssets="All"/>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0" PrivateAssets="All" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <None Include="paket.references" />
     <Compile Include="Common\UMX.fs" />
+    <Compile Include="Common\Tools.fs" />
     <Compile Include="Internal\Log.fs" />
     <Compile Include="Internal\BatchMessageAcker.fs" />
-    <Compile Include="Common\Tools.fs" />
+    <Compile Include="Internal\Backoff.fs" />
     <Compile Include="Common\TopicName.fs" />
     <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\NamespaceName.fs" />
@@ -60,7 +61,6 @@
     <Compile Include="Auth\AuthenticationToken.fs" />
     <Compile Include="Auth\DefaultImplementation.fs" />
     <Compile Include="Internal\BatchMessageContainer.fs" />
-    <Compile Include="Internal\Backoff.fs" />
     <Compile Include="Internal\Routing.fs" />
     <Compile Include="Internal\UnAckedMessageTracker.fs" />
     <Compile Include="Internal\NegativeAcksTracker.fs" />

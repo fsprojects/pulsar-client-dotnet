@@ -90,7 +90,7 @@ type internal ConnectionHandler( parentPrefix: string,
                     | _ ->
                         if isValidStateForReconnection() then
                             let delay = backoff.Next()
-                            Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {2}ms ",
+                            Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {3}ms ",
                                 prefix, topic, this.ConnectionState, delay)
                             this.ConnectionState <- Connecting
                             asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))

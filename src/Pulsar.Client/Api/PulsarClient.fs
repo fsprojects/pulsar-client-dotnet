@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
+open System
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
@@ -41,12 +42,6 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         match this.ClientState with
         | Active ->  ()
         | _ ->  raise <| AlreadyClosedException("Client already closed. State: " + this.ClientState.ToString())
-
-    let getPartitionedTopicMetadata topicName =
-        task {
-            checkIfActive()
-            return! lookupService.GetPartitionedTopicMetadata topicName
-        }
 
     let mb = MailboxProcessor<PulsarClientMessage>.Start(fun inbox ->
 
@@ -113,12 +108,38 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             let! t = mb.PostAndAsyncReply(Close)
             return! t
         }
+        
+    member private this.GetPartitionedTopicMetadata(topicName, backoff: Backoff, remainingTimeMs) =
+        async {
+            try
+                return! lookupService.GetPartitionedTopicMetadata topicName |> Async.AwaitTask
+            with ex ->
+                let delay = Math.Min(backoff.Next(), remainingTimeMs)
+                // skip retry scheduler when set lookup throttle in client or server side which will lead to `TooManyRequestsException`
+                let isLookupThrottling = (ex :?> AggregateException).InnerExceptions |> Seq.exists (fun e -> e :? TooManyRequestsException)
+                if delay <= 0 || isLookupThrottling then
+                    reraize ex
+                Log.Logger.LogWarning(ex, "Could not get connection while getPartitionedTopicMetadata -- Will try again in {0} ms", delay)
+                do! Async.Sleep delay
+                return! this.GetPartitionedTopicMetadata(topicName, backoff, remainingTimeMs - delay)
+        }
+        
+    member private this.GetPartitionedTopicMetadata(topicName) =
+        task {
+            checkIfActive()
+            let backoff = Backoff { BackoffConfig.Default with
+                                        Initial = TimeSpan.FromMilliseconds(100.0)
+                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
+                                        Max = TimeSpan.FromMinutes(1.0) }
+            return! this.GetPartitionedTopicMetadata(topicName, backoff, int config.OperationTimeout.TotalMilliseconds)
+        }
+    
 
     member private this.SingleTopicSubscribeAsync (consumerConfig: ConsumerConfiguration) =
         task {
             checkIfActive()
             Log.Logger.LogDebug("SingleTopicSubscribeAsync started")
-            let! metadata = getPartitionedTopicMetadata consumerConfig.Topic.CompleteTopicName
+            let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic.CompleteTopicName
             let removeConsumer = fun consumer -> mb.Post(RemoveConsumer consumer)
             if (metadata.Partitions > 0)
             then
@@ -135,7 +156,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         task {
             checkIfActive()
             Log.Logger.LogDebug("CreateProducerAsync started")
-            let! metadata = getPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
+            let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
             let removeProducer = fun producer -> mb.Post(RemoveProducer producer)
             if (metadata.Partitions > 0) then
                 let! producer = PartitionedProducerImpl.Init(producerConfig, config, connectionPool, metadata.Partitions, lookupService, removeProducer)
@@ -151,7 +172,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         task {
             checkIfActive()
             Log.Logger.LogDebug("CreateReaderAsync started")
-            let! metadata = getPartitionedTopicMetadata readerConfig.Topic.CompleteTopicName
+            let! metadata = this.GetPartitionedTopicMetadata readerConfig.Topic.CompleteTopicName
             if (metadata.Partitions > 0)
             then
                 return failwith "Topic reader cannot be created on a partitioned topic"
