@@ -210,7 +210,6 @@ let tests =
                             let! message = consumer.ReceiveAsync()
                             messageIds.Add message.MessageId
                             
-                        do! consumer.AcknowledgeCumulativeAsync messageIds.[numberOfMessages - 3]
                         do! consumer.AcknowledgeCumulativeAsync messageIds.[numberOfMessages - 2]
                         do! consumer.AcknowledgeCumulativeAsync messageIds.[numberOfMessages - 1]
                     }:> Task)
@@ -218,34 +217,27 @@ let tests =
             do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
             
             do! Async.Sleep 200
-            let prevMsgAck = consumerInterceptor.AckCumulativeMessageIds.[0]
-            let firstAck = consumerInterceptor.AckCumulativeMessageIds.[1]
-            let secondAck = consumerInterceptor.AckCumulativeMessageIds.[2]
-            let thirdAck = consumerInterceptor.AckCumulativeMessageIds.[3]
+            let prevMsgId = consumerInterceptor.AckCumulativeMessageIds.[0]
+            let firstId = consumerInterceptor.AckCumulativeMessageIds.[1]
+            let secondId = consumerInterceptor.AckCumulativeMessageIds.[2]
             
-            match prevMsgAck.Type with
-            | Cumulative (indx, batchMsgAcker) ->
-                if not (indx = %0 && batchMsgAcker.GetOutstandingAcks() = 0 && batchMsgAcker.GetBatchSize() = 0 && prevMsgAck.EntryId = %1L) then
+            match prevMsgId.Type with
+            | Cumulative _ -> failwith "MessageIdType should be Individual"
+            | Individual ->
+                if not (prevMsgId.EntryId = %1L) then
                     failwith "No interceptor for prevMsgAck"
-            | _ -> failwith "Ack type should be Cumulative"
 
-            match firstAck.Type with
+            match firstId.Type with
             | Cumulative (indx, _) ->
-                if not (indx = %0 && firstAck.EntryId = %2L) then
+                if not (indx = %1 && firstId.EntryId = %2L) then
                     failwith "No interceptor for firstAck"
-            | _ -> failwith "Ack type should be Cumulative"
+            | _ -> failwith "MessageIdType should be Cumulative"
 
-            match secondAck.Type with
+            match secondId.Type with
             | Cumulative (indx, _) ->
-                if not (indx = %1 && secondAck.EntryId = %2L) then
+                if not (indx = %2 && secondId.EntryId = %2L) then
                     failwith "No interceptor for secondAck"
-            | _ -> failwith "Ack type should be Cumulative"
-
-            match thirdAck.Type with
-            | Cumulative (indx, _) ->
-                if not (indx = %2 && thirdAck.EntryId = %2L) then
-                    failwith "No interceptor for thirdAck"
-            | _ -> failwith "Ack type should be Cumulative"
+            | _ -> failwith "MessageIdType should be Cumulative"
         }
         testAsync "Check OnNegativeAcksSend" {
 
