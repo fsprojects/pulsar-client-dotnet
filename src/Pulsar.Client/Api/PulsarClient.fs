@@ -96,10 +96,10 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         with get () = Log.Logger
         and set (value) = Log.Logger <- value
 
-    member this.SubscribeAsync consumerConfig =
+    member internal this.SubscribeAsync interceptors consumerConfig =
         task {
             checkIfActive()
-            return! this.SingleTopicSubscribeAsync consumerConfig
+            return! this.SingleTopicSubscribeAsync interceptors consumerConfig
         }
 
     member this.CloseAsync() =
@@ -135,7 +135,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         }
     
 
-    member private this.SingleTopicSubscribeAsync (consumerConfig: ConsumerConfiguration) =
+    member private this.SingleTopicSubscribeAsync (interceptors: ConsumerInterceptors) (consumerConfig: ConsumerConfiguration) =
         task {
             checkIfActive()
             Log.Logger.LogDebug("SingleTopicSubscribeAsync started")
@@ -143,27 +143,27 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             let removeConsumer = fun consumer -> mb.Post(RemoveConsumer consumer)
             if (metadata.Partitions > 0)
             then
-                let! consumer = MultiTopicsConsumerImpl.Init(consumerConfig, config, connectionPool, metadata.Partitions, lookupService, removeConsumer)
+                let! consumer = MultiTopicsConsumerImpl.Init(consumerConfig, config, connectionPool, metadata.Partitions, lookupService, interceptors, removeConsumer)
                 mb.Post(AddConsumer consumer)
                 return consumer :> IConsumer
             else
-                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, -1, None, lookupService, true, removeConsumer)
+                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, -1, None, lookupService, true, interceptors, removeConsumer)
                 mb.Post(AddConsumer consumer)
                 return consumer :> IConsumer
         }
 
-    member this.CreateProducerAsync (producerConfig: ProducerConfiguration) =
+    member internal this.CreateProducerAsync (interceptors: ProducerInterceptors) (producerConfig: ProducerConfiguration) =
         task {
             checkIfActive()
             Log.Logger.LogDebug("CreateProducerAsync started")
             let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
             let removeProducer = fun producer -> mb.Post(RemoveProducer producer)
             if (metadata.Partitions > 0) then
-                let! producer = PartitionedProducerImpl.Init(producerConfig, config, connectionPool, metadata.Partitions, lookupService, removeProducer)
+                let! producer = PartitionedProducerImpl.Init(producerConfig, config, connectionPool, metadata.Partitions, lookupService, interceptors, removeProducer)
                 mb.Post(AddProducer producer)
                 return producer
             else
-                let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, -1, lookupService, removeProducer)
+                let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, -1, lookupService, interceptors, removeProducer)
                 mb.Post(AddProducer producer)
                 return producer
         }

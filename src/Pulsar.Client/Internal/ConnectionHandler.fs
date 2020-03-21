@@ -146,10 +146,10 @@ type internal ConnectionHandler( parentPrefix: string,
 
     member this.CheckIfActive() =
         match this.ConnectionState with
-        | Ready _ | Connecting -> ()
-        | Closing | Closed ->  raise <| AlreadyClosedException(prefix + "already closed")
-        | Terminated ->  raise <| AlreadyClosedException(prefix + " topic was terminated")
-        | Failed | Uninitialized ->  raise <| NotConnectedException(prefix + " not connected")
+        | Ready _ | Connecting -> null
+        | Closing | Closed -> AlreadyClosedException(prefix + "already closed")
+        | Terminated -> AlreadyClosedException(prefix + " topic was terminated")
+        | Failed | Uninitialized -> NotConnectedException(prefix + " not connected")
         
     member this.Close() =
         mb.Post(Close)

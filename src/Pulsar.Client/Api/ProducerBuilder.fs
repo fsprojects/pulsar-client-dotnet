@@ -1,9 +1,10 @@
 ﻿namespace Pulsar.Client.Api
 
 open Pulsar.Client.Common
+open Pulsar.Client.Internal
 open System
 
-type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguration) =
+type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguration, producerInterceptors: ProducerInterceptors) =
 
     let verify(config : ProducerConfiguration) =
         let checkValue check config =
@@ -20,115 +21,112 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                 c.MessageRoutingMode
                 |> invalidArgIf (fun mode -> mode = MessageRoutingMode.CustomPartition && Option.isNone config.CustomMessageRouter) "Valid router should be set with CustomPartition routing mode.")
 
-    new(client: PulsarClient) = ProducerBuilder(client, ProducerConfiguration.Default)
+    new(client: PulsarClient) = ProducerBuilder(client, ProducerConfiguration.Default, ProducerInterceptors.Empty)
+
+    member private this.With(newConfig: ProducerConfiguration) =
+        ProducerBuilder(client, newConfig, producerInterceptors)
+
+    member private this.With(newInterceptors: ProducerInterceptors) =
+        ProducerBuilder(client, config, newInterceptors)
 
     member this.Topic topic =
-        ProducerBuilder(
-            client,
-            { config with
-                Topic = topic
-                    |> invalidArgIfBlankString "Topic must not be blank."
-                    |> fun t -> TopicName(t.Trim()) })
+        { config with
+            Topic = topic
+                |> invalidArgIfBlankString "Topic must not be blank."
+                |> fun t -> TopicName(t.Trim()) }
+        |> this.With
 
     member this.ProducerName producerName =
-        ProducerBuilder(
-            client,
-            { config with
-                ProducerName = producerName |> invalidArgIfBlankString "ProducerName must not be blank." })
+        { config with
+            ProducerName = producerName |> invalidArgIfBlankString "ProducerName must not be blank." }
+        |> this.With
 
     member this.MaxPendingMessages maxPendingMessages =
-        ProducerBuilder(
-            client,
-            { config with
-                MaxPendingMessages =
-                    maxPendingMessages
-                    |> invalidArgIfNotGreaterThanZero "MaxPendingMessages needs to be greater than 0." })
+        { config with
+            MaxPendingMessages =
+                maxPendingMessages
+                |> invalidArgIfNotGreaterThanZero "MaxPendingMessages needs to be greater than 0." }
+        |> this.With
 
     member this.MaxPendingMessagesAcrossPartitions maxPendingMessagesAcrossPartitions =
-        ProducerBuilder(
-            client,
-            { config with
-                MaxPendingMessagesAcrossPartitions =
-                    maxPendingMessagesAcrossPartitions
-                    |> invalidArgIfNotGreaterThanZero "MaxPendingMessagesAcrossPartitions needs to be greater than 0." })
+        { config with
+            MaxPendingMessagesAcrossPartitions =
+                maxPendingMessagesAcrossPartitions
+                |> invalidArgIfNotGreaterThanZero "MaxPendingMessagesAcrossPartitions needs to be greater than 0." }
+        |> this.With
 
     member this.EnableBatching enableBatching =
-        ProducerBuilder(
-            client,
-            { config with BatchingEnabled = enableBatching })
+        { config with BatchingEnabled = enableBatching }
+        |> this.With
 
     member this.BatchingMaxMessages batchingMaxMessages =
-        ProducerBuilder(
-            client,
-            { config with
-                BatchingMaxMessages =
-                    batchingMaxMessages
-                    |> invalidArgIfNotGreaterThanZero "BatchingMaxMessages needs to be greater than 0." })
+        { config with
+            BatchingMaxMessages =
+                batchingMaxMessages
+                |> invalidArgIfNotGreaterThanZero "BatchingMaxMessages needs to be greater than 0." }
+        |> this.With
 
     member this.BatchingMaxBytes batchingMaxBytes =
-        ProducerBuilder(
-            client,
-            { config with
-                BatchingMaxBytes =
-                    batchingMaxBytes
-                    |> invalidArgIfNotGreaterThanZero "BatchingMaxBytes needs to be greater than 0." })
+        { config with
+            BatchingMaxBytes =
+                batchingMaxBytes
+                |> invalidArgIfNotGreaterThanZero "BatchingMaxBytes needs to be greater than 0." }
+        |> this.With
 
     member this.BatchingMaxPublishDelay batchingMaxPublishDelay =
-        ProducerBuilder(
-            client,
-            { config with
-                BatchingMaxPublishDelay =
-                    batchingMaxPublishDelay
-                    |> invalidArgIf ((>=) TimeSpan.Zero) "BatchingMaxPublishDelay needs to be greater than 0." })
+        { config with
+            BatchingMaxPublishDelay =
+                batchingMaxPublishDelay
+                |> invalidArgIf ((>=) TimeSpan.Zero) "BatchingMaxPublishDelay needs to be greater than 0." }
+        |> this.With
 
     member this.RoundRobinRouterBatchingPartitionSwitchFrequency frequency =
-        ProducerBuilder(
-            client,
-            { config with
-                BatchingPartitionSwitchFrequencyByPublishDelay = frequency
-                |> invalidArgIf ((>) 1) "Configured value for partition switch frequency must be >= 1" })
+        { config with
+            BatchingPartitionSwitchFrequencyByPublishDelay = frequency
+            |> invalidArgIf ((>) 1) "Configured value for partition switch frequency must be >= 1" }
+        |> this.With
 
     member this.BatchBuilder batchBuilder =
-        ProducerBuilder(
-            client,
-            { config with BatchBuilder = batchBuilder })
+        { config with BatchBuilder = batchBuilder }
+        |> this.With
 
     member this.SendTimeout sendTimeout =
-        ProducerBuilder(
-            client,
-            { config with
-                SendTimeout = sendTimeout })
+        { config with
+            SendTimeout = sendTimeout }
+        |> this.With
 
     member this.CompressionType compressionType =
-        ProducerBuilder(
-            client,
-            { config with
-                CompressionType = compressionType })
+        { config with
+            CompressionType = compressionType }
+        |> this.With
 
     member this.MessageRoutingMode messageRoutingMode =
-        ProducerBuilder(
-            client,
-            { config with
-                MessageRoutingMode = messageRoutingMode })
+        { config with
+            MessageRoutingMode = messageRoutingMode }
+        |> this.With
 
     member this.CustomMessageRouter customMessageRouter =
-        ProducerBuilder(
-            client,
-            { config with
-                CustomMessageRouter = customMessageRouter
-                    |> invalidArgIfDefault "CustomMessageRouter can't be null"
-                    |> Some })
+        { config with
+            CustomMessageRouter = customMessageRouter
+                |> invalidArgIfDefault "CustomMessageRouter can't be null"
+                |> Some }
+        |> this.With
 
     member this.HashingScheme hashingScheme =
-        ProducerBuilder(
-            client,
-            { config with
-                HashingScheme = hashingScheme })
+        { config with
+            HashingScheme = hashingScheme }
+        |> this.With
 
+    member this.Intercept ([<ParamArray>] interceptors: IProducerInterceptor array) =
+        if interceptors.Length = 0 then this
+        else
+            ProducerInterceptors(Array.append producerInterceptors.Interceptors interceptors)
+            |> this.With
+    
     member this.CreateAsync() =
         config
         |> verify
-        |> client.CreateProducerAsync
+        |> client.CreateProducerAsync producerInterceptors
 
     override this.ToString() =
         config.ToString()

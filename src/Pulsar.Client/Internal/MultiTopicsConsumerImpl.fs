@@ -49,7 +49,7 @@ type internal MultipleTopicsConsumerState = {
 }
 
 type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                      numPartitions: int, lookup: BinaryLookupService, cleanup: MultiTopicsConsumerImpl -> unit) as this =
+                                      numPartitions: int, lookup: BinaryLookupService, interceptors: ConsumerInterceptors, cleanup: MultiTopicsConsumerImpl -> unit) as this =
 
     let consumerId = Generators.getNextConsumerId()
     let prefix = sprintf "mt/consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
@@ -130,7 +130,7 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                             task {
                                 let! result =
                                     ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex,
-                                                      None, lookup, true, fun _ -> ())
+                                                      None, lookup, true, interceptors, fun _ -> ())
                                 return (partitionedTopic, result)
                             })
                     try
@@ -347,7 +347,7 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                                     task {
                                         let! result =
                                             ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex,
-                                                              None, lookup, true, fun _ -> ())
+                                                              None, lookup, true, interceptors, fun _ -> ())
                                         return (partitionedTopic, result)
                                     })
                             try
@@ -422,9 +422,9 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
     // create consumer for a single topic with already known partitions.
     // first create a consumer with no topic, then do subscription for already know partitionedTopic.
     static member Init(consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                            numPartitions: int, lookup: BinaryLookupService, cleanup: MultiTopicsConsumerImpl -> unit) =
+                                            numPartitions: int, lookup: BinaryLookupService, interceptors: ConsumerInterceptors, cleanup: MultiTopicsConsumerImpl -> unit) =
         task {
-            let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool, numPartitions, lookup, cleanup)
+            let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool, numPartitions, lookup, interceptors, cleanup)
             do! consumer.InitInternal()
             return consumer
         }
