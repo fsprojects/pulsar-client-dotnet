@@ -35,7 +35,7 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 - [X] Negative Acknowledge
 - [X] Delayed Delivery Messages
 - [X] Dead Letter Policy
-- [ ] Interceptors
+- [X] Interceptors
 
 
 ## Quick contributing guide
