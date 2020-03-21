@@ -99,11 +99,7 @@ type MessageId =
                 TopicName = %""
             }
         member internal this.PrevBatchMessageId
-            with get() =
-                match this.Type with
-                | Individual -> { this with EntryId = this.EntryId - %1L }
-                | Cumulative _ ->
-                    { this with EntryId = this.EntryId - %1L; Type = Cumulative(%0, BatchMessageAcker(0)) }
+            with get() = { this with EntryId = this.EntryId - %1L; Type = Individual }
         member this.ToByteArray() =
             let data = MessageIdData(ledgerId = uint64 %this.LedgerId, entryId = uint64 %this.EntryId)
             if this.Partition >= 0 then
