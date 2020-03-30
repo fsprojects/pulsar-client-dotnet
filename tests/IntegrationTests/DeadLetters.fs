@@ -262,6 +262,7 @@ let tests =
                     .ProducerName(producerName)
                     .Topic(config.TopicName)
                     .BatchingMaxMessages(config.NumberOfMessages)
+                    .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(100.0))
                     .CreateAsync()
                     |> Async.AwaitTask
 

@@ -46,7 +46,7 @@ let tests =
                 .SubscribeAsync() |> Async.AwaitTask
 
         let sendMessages = if enableBatching then fastProduceMessages else produceMessages
-        let messagesCount = 100
+        let messagesCount = 10
 
         let producerTask =
             Task.Run(fun () ->

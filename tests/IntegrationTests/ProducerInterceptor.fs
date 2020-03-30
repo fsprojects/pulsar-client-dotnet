@@ -68,21 +68,24 @@ let tests =
             let numberOfMessages = 10
             let messageIds = ResizeArray<MessageId>()
             let prodInterceptor = ProducerInterceptorSendAck()
+            let interceptName = "OnClose"
+            
             let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
+                    .ProducerName(interceptName)
                     .Intercept(prodInterceptor)
                     .CreateAsync() |> Async.AwaitTask
             
             let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
-                    .ConsumerName("concurrent")
+                    .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
 
             let messages =
-                generateMessages numberOfMessages "concurrent"
+                generateMessages numberOfMessages interceptName
                 |> Seq.map Encoding.UTF8.GetBytes |> Seq.map MessageBuilder
 
             let producerTask =
@@ -111,22 +114,25 @@ let tests =
             let numberOfMessages = 10
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let prodInterceptor = ProducerInterceptorEligible()
-            
-            let! consumer =
-                ConsumerBuilder(client)
-                    .Topic(topicName)
-                    .ConsumerName("concurrent")
-                    .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+            let interceptName = "Eligible"
+
             let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
+                    .ProducerName(interceptName)
                     .Intercept(prodInterceptor)
                     .CreateAsync() |> Async.AwaitTask
+           
+            let! consumer =
+                ConsumerBuilder(client)
+                    .Topic(topicName)
+                    .ConsumerName(interceptName)
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() |> Async.AwaitTask
 
             let eligibleMessages =
                 let property = dict ["Eligible", "true"] |> Dictionary
-                generateMessages numberOfMessages "Eligible"
+                generateMessages numberOfMessages interceptName
                 |> Seq.map(fun msg -> MessageBuilder(Encoding.UTF8.GetBytes(msg), properties = property))
 
             let noEligibleMessages =
@@ -167,10 +173,12 @@ let tests =
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
+            let interceptName = "BeforeSend"
             
             let prodInterceptor = ProducerInterceptorBefore()
             let! producer =
                 ProducerBuilder(client)
+                    .ProducerName(interceptName)
                     .EnableBatching(false)
                     .Topic(topicName)
                     .Intercept(prodInterceptor)
@@ -179,14 +187,14 @@ let tests =
             let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
-                    .ConsumerName("concurrent")
+                    .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        let messages = generateMessages numberOfMessages "concurrent"
+                        let messages = generateMessages numberOfMessages interceptName
                         for msg in messages do
                             let! _ = producer.SendAsync(Encoding.UTF8.GetBytes(msg))
                             ()
@@ -211,21 +219,24 @@ let tests =
             let numberOfMessages = 10
             let messageIds = ResizeArray<MessageId>()
             let prodInterceptor = ProducerInterceptorSendAck()
+            let interceptName = "OnSendAcknowledgement"
+            
             let! producer =
                 ProducerBuilder(client)
                     .Topic(topicName)
+                    .ProducerName(interceptName)
                     .Intercept(prodInterceptor)
                     .CreateAsync() |> Async.AwaitTask
             
             let! consumer =
                 ConsumerBuilder(client)
                     .Topic(topicName)
-                    .ConsumerName("concurrent")
+                    .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
 
             let messages =
-                generateMessages numberOfMessages "concurrent"
+                generateMessages numberOfMessages interceptName
                 |> Seq.map Encoding.UTF8.GetBytes |> Seq.map MessageBuilder
 
             let producerTask =

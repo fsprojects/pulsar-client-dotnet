@@ -256,7 +256,7 @@ let tests =
                         sw.Restart()
                         let! messagesBatch2 = consumer.BatchReceiveAsync()
                         let secondBatchTime = sw.Elapsed
-                        if secondBatchTime < batchTimeout then
+                        if secondBatchTime < (batchTimeout - TimeSpan.FromMilliseconds(15.0)) then
                                 failwith <| sprintf "Too fast to get second batch consumer %s passed %f ms" consumerName secondBatchTime.TotalMilliseconds
                         for message in messagesBatch2 do    
                             let received = Encoding.UTF8.GetString(message.Data)                        
