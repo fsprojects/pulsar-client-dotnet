@@ -7,7 +7,6 @@ open Microsoft.Extensions.Logging
 open System.Threading.Tasks
 open pulsar.proto
 open System
-open System
 open FSharp.UMX
 open System.Buffers
 open System.IO

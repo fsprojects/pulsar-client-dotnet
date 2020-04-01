@@ -61,7 +61,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                 return reraize ex
         }
 
-    let remoteCertificateValidationCallback (sender: obj) (cert: X509Certificate) (_: X509Chain) (errors: SslPolicyErrors) =
+    let remoteCertificateValidationCallback (_: obj) (cert: X509Certificate) (_: X509Chain) (errors: SslPolicyErrors) =
         let CheckRemoteCertWithTrustCertificate() =
             if isNull config.TlsTrustCertificate then
                 false
@@ -91,11 +91,11 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                             Log.Logger.LogError("Root certificate status {0} no equal UntrustedRoot", status)
                             false
                     else
-                        let statusList = seq[ for s in chain.ChainStatus -> string s.Status ] |> String.concat "; "
+                        let statusList =  chain.ChainStatus |> Seq.map string |> String.concat "; "
                         Log.Logger.LogError("Root certificate status count > 1, status: {0}", statusList)
                         false
                 else
-                    let statusList = seq[ for s in chain.ChainStatus -> string s.Status ] |> String.concat "; "
+                    let statusList = chain.ChainStatus |> Seq.map string |> String.concat "; "
                     Log.Logger.LogError("Builds an X.509 chain faild, status: {0}", statusList)
                     false
                         

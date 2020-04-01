@@ -5,7 +5,6 @@ open System
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Common
-open Pulsar.Client.Api
 open System.Text
 open System.Security.Cryptography.X509Certificates
 

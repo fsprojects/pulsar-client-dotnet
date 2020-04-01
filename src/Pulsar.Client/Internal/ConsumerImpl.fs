@@ -11,7 +11,6 @@ open Microsoft.Extensions.Logging
 open System.IO
 open ProtoBuf
 open pulsar.proto
-open System.Linq
 open System.Threading
 
 type internal ConsumerImpl (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
