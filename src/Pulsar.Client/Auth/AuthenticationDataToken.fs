@@ -2,7 +2,7 @@
 
 open Pulsar.Client.Api
 
-type AuthenticationDataToken (supplier: unit -> string) =
+type internal AuthenticationDataToken (supplier: unit -> string) =
     inherit AuthenticationDataProvider()
 
     override this.HasDataFromCommand() =

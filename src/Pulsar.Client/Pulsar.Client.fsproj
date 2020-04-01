@@ -62,7 +62,9 @@
     <Compile Include="Internal\ProducerInterceptors.fs" />
     <Compile Include="Api\Configuration.fs" />
     <Compile Include="Auth\AuthenticationDataToken.fs" />
+    <Compile Include="Auth\AuthenticationDataTls.fs" />
     <Compile Include="Auth\AuthenticationToken.fs" />
+    <Compile Include="Auth\AuthenticationTls.fs" />
     <Compile Include="Auth\DefaultImplementation.fs" />
     <Compile Include="Internal\BatchMessageContainer.fs" />
     <Compile Include="Internal\Routing.fs" />
