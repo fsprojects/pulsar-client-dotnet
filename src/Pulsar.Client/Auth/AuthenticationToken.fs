@@ -2,7 +2,7 @@
 
 open Pulsar.Client.Api
 
-type AuthenticationToken (supplier: unit -> string) =
+type internal AuthenticationToken (supplier: unit -> string) =
     inherit Authentication()
 
     new(token: string) =
