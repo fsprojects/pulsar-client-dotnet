@@ -185,7 +185,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         if t.IsFaulted then            
             Log.Logger.LogInformation("Removing faulted task to {0}", broker)
             connections.TryRemove(broker.LogicalAddress) |> ignore
-            this.GetConnection(broker, maxMessageSize)
+            t
         else
             t        
             

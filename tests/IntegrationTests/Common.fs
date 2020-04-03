@@ -31,10 +31,6 @@ let configureLogging() =
     let logger = sp.GetService<ILogger<PulsarClient>>()
     PulsarClient.Logger <- logger
 
-
-
-configureLogging()
-
 let commonClient =
     PulsarClientBuilder()
         .ServiceUrl(pulsarAddress)
