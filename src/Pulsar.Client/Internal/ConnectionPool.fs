@@ -141,7 +141,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                         Log.Logger.LogDebug("Configuring ssl for {0}", physicalAddress)
                         let sslStream = new SslStream(new NetworkStream(socket), false, RemoteCertificateValidationCallback(remoteCertificateValidationCallback))
                         let clientCertificates = config.Authentication.GetAuthData(physicalAddress.Host).GetTlsCertificates()
-                        do! sslStream.AuthenticateAsClientAsync(physicalAddress.Host, clientCertificates, SslProtocols.None, false)
+                        do! sslStream.AuthenticateAsClientAsync(physicalAddress.Host, clientCertificates, config.TlsProtocols, false)
                         
                         let pipeConnection = StreamConnection.GetDuplex(sslStream, pipeOptions)
                         let writerStream = StreamConnection.GetWriter(pipeConnection.Output)

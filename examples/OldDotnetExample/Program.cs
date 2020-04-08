@@ -18,6 +18,7 @@ namespace OldDotnetExample
             PulsarClient.Logger = loggerFactory.CreateLogger("PulsarLogger");
 
             await Simple.RunSimple();
+            //await TlsAuthentication.RunTlsAuthentication();
 
             PulsarClient.Logger.LogInformation("Example ended. Press any key to exit");
             Console.ReadKey();

@@ -3,6 +3,7 @@
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open System
+open System.Security.Authentication
 open System.Security.Cryptography.X509Certificates
 
 type PulsarClientConfiguration =
@@ -15,6 +16,7 @@ type PulsarClientConfiguration =
         TlsAllowInsecureConnection: bool
         TlsTrustCertificate: X509Certificate2
         Authentication: Authentication
+        TlsProtocols: SslProtocols
     }
     static member Default =
         {
@@ -26,6 +28,7 @@ type PulsarClientConfiguration =
             TlsAllowInsecureConnection = false
             TlsTrustCertificate = null
             Authentication = Authentication.AuthenticationDisabled
+            TlsProtocols = SslProtocols.None
         }
 
 type ConsumerConfiguration =
