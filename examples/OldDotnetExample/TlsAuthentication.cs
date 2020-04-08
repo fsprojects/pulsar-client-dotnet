@@ -20,7 +20,7 @@ namespace OldDotnetExample
             var client = new PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
                 .EnableTls(true)
-                .TlsProtocols(SslProtocols.Tls12 | SslProtocols.Tls11)  // for .NET Framework 4.6 (and .NET Framework 4.5 with the latest security patches installed)
+                .TlsProtocols(SslProtocols.Tls12 | SslProtocols.Tls11)  // for .NET Framework 4.6.*
                 .TlsTrustCertificate(ca)
                 .Authentication(userTls)
                 .Build();

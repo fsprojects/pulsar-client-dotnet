@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>0.18.1</Version>
+    <Version>0.18.2</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Infinite reconnection on package mismatch fixed</PackageReleaseNotes>
+    <PackageReleaseNotes>Tls protocols exposed (required for 4.6.* dotnet)</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
-    <PackageVersion>0.18.1</PackageVersion>
+    <PackageVersion>0.18.2</PackageVersion>
     <DebugType>portable</DebugType>
   </PropertyGroup>
   <PropertyGroup>
