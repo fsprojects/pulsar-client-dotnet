@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>0.18.2</Version>
+    <Version>0.18.3</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Tls protocols exposed (required for 4.6.* dotnet)</PackageReleaseNotes>
+    <PackageReleaseNotes>Fix for maxMessageSize when connecting directly to broker</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
-    <PackageVersion>0.18.2</PackageVersion>
+    <PackageVersion>0.18.3</PackageVersion>
     <DebugType>portable</DebugType>
   </PropertyGroup>
   <PropertyGroup>

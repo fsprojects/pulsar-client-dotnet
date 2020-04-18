@@ -127,8 +127,9 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             Log.Logger.LogError("Unknown ssl error: {0}", error)
             false
 
-    let connect (broker: Broker, maxMessageSize: int) =
-        Log.Logger.LogInformation("Connecting to {0}", broker)
+    let connect (broker: Broker, maxMessageSize: int, brokerless: bool) =
+        Log.Logger.LogInformation("Connecting to {0} with maxMessageSize: {1}, brokerless: {2}",
+                                  broker, maxMessageSize, brokerless)
         task {
             let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
             let (LogicalAddress logicalAddress) = broker.LogicalAddress
@@ -165,7 +166,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             let initialConnectionTsc = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
             let unregisterClientCnx (broker: Broker) =
                 connections.TryRemove(broker.LogicalAddress) |> ignore
-            let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, initialConnectionTsc, unregisterClientCnx)
+            let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, brokerless, initialConnectionTsc, unregisterClientCnx)
             let proxyToBroker = if physicalAddress = logicalAddress then None else Some logicalAddress
             let authenticationDataProvider = config.Authentication.GetAuthData(physicalAddress.Host);
             let authData = authenticationDataProvider.Authenticate({ Bytes = AuthData.INIT_AUTH_DATA })
@@ -179,9 +180,9 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             return! initialConnectionTsc.Task
         }
 
-    member this.GetConnection (broker: Broker, maxMessageSize: int) =
+    member this.GetConnection (broker: Broker, maxMessageSize: int, brokerless: bool) =
         let t = connections.GetOrAdd(broker.LogicalAddress, fun(address) ->
-                lazy connect(broker, maxMessageSize)).Value
+                lazy connect(broker, maxMessageSize, brokerless)).Value
         if t.IsFaulted then            
             Log.Logger.LogInformation("Removing faulted task to {0}", broker)
             connections.TryRemove(broker.LogicalAddress) |> ignore
@@ -190,7 +191,8 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             t        
             
     member this.GetBrokerlessConnection (address: DnsEndPoint) =
-        this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address }, Commands.DEFAULT_MAX_MESSAGE_SIZE)
+        this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address },
+                           Commands.DEFAULT_MAX_MESSAGE_SIZE, true)
 
     member this.Close() =
         connections

@@ -52,7 +52,7 @@ type internal ConnectionHandler( parentPrefix: string,
                             try
                                 Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic)
                                 let! broker = lookup.GetBroker(topic) |> Async.AwaitTask
-                                let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize) |> Async.AwaitTask
+                                let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize, false) |> Async.AwaitTask
                                 this.ConnectionState <- Ready clientCnx
                                 connectionOpened()
                             with
