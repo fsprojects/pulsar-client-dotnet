@@ -408,11 +408,13 @@ let tests =
             Log.Debug("Finished 'Scheduled message should be delivered at requested time'")
         }
         
+#if !NOTLS
         // Before running this test set 'maxMessageSize' for broker and 'nettyMaxFrameSizeBytes' for bookkeeper 
-        ptestAsync "Send large message works fine" {
+        testAsync "Send large message works fine" {
 
             Log.Debug("Started Send large message works fine")
-            let client = getClient()
+            let client = getSslAdminClient()
+
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
             let! producer =
@@ -449,5 +451,5 @@ let tests =
 
             Log.Debug("Finished Send large message works fine")
         }
-
+#endif
     ]

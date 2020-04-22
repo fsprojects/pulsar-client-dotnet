@@ -13,7 +13,19 @@ open Serilog.Sinks.SystemConsole.Themes
 
 
 [<Literal>]
-let pulsarAddress = "pulsar://my-pulsar-cluster:30002"
+let pulsarAddress = "pulsar://127.0.0.1:6650"
+
+#if !NOTLS
+[<Literal>]
+let pulsarSslAddress = "pulsar+ssl://127.0.0.1:6651"
+
+// ssl folder copied by from https://github.com/apache/pulsar/tree/master/tests/docker-images/latest-version-image/ssl
+// generate pfx file from pem, leave the password blank
+// openssl pkcs12 -in admin.cert.pem -inkey admin.key-pk8.pem -export -out admin.pfx
+let ca = new Security.Cryptography.X509Certificates.X509Certificate2(@"../ssl/ca.cert.pem")
+let sslAdmin = AuthenticationFactory.tls(@"../ssl/admin.pfx")
+let sslUser1 = AuthenticationFactory.tls(@"../ssl/user1.pfx")
+#endif
 
 let configureLogging() =
     Log.Logger <-
@@ -37,6 +49,38 @@ let commonClient =
         .Build()
 
 let getClient() = commonClient
+
+#if !NOTLS
+let sslClient =
+    PulsarClientBuilder()
+        .ServiceUrl(pulsarSslAddress)
+        .EnableTls(true)
+        .TlsTrustCertificate(ca)
+        .Build()
+
+let sslAdminClient =
+    PulsarClientBuilder()
+        .ServiceUrl(pulsarSslAddress)
+        .EnableTls(true)
+        .TlsTrustCertificate(ca)
+        .Authentication(sslAdmin)
+        .Build()
+
+let sslUser1Client =
+    PulsarClientBuilder()
+        .ServiceUrl(pulsarSslAddress)
+        .EnableTls(true)
+        .TlsTrustCertificate(ca)
+        .Authentication(sslUser1)
+        .Build()
+        
+let getSslClient() = sslClient
+
+let getSslAdminClient() = sslAdminClient
+
+let getSslUser1Client() = sslUser1Client
+#endif
+
 let getNewClient() =
     PulsarClientBuilder()
         .ServiceUrl(pulsarAddress)
