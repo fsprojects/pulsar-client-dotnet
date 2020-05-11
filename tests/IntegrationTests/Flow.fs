@@ -2,7 +2,6 @@ module Pulsar.Client.IntegrationTests.Flow
 
 open System
 open Expecto
-open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
 open Serilog
@@ -20,12 +19,12 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .ReceiverQueueSize(10)
@@ -55,13 +54,13 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .ReceiverQueueSize(10)

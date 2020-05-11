@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Auth
+namespace Pulsar.Client.Auth
 
 open System.IO
 open System.Security.Cryptography.X509Certificates

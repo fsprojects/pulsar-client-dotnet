@@ -11,6 +11,7 @@ open Microsoft.Extensions.Logging
 open System.Threading
 open System.Timers
 open FSharp.Control
+open Pulsar.Client.Schema
 
 type internal MultiTopicConnectionState =
     | Uninitialized
@@ -19,56 +20,57 @@ type internal MultiTopicConnectionState =
     | Closing
     | Closed
 
-type internal BatchAddResponse =
+type internal BatchAddResponse<'T> =
     | Expired
-    | BatchReady of Messages
+    | BatchReady of Messages<'T>
     | Success
 
-type internal MultiTopicConsumerMessage =
+type internal MultiTopicConsumerMessage<'T> =
     | Init
-    | Receive of AsyncReplyChannel<Async<ResultOrException<Message> option>>
-    | BatchReceive of AsyncReplyChannel<Async<ResultOrException<Messages>>> * CancellationToken 
+    | Receive of AsyncReplyChannel<Async<ResultOrException<Message<'T>> option>>
+    | BatchReceive of AsyncReplyChannel<Async<ResultOrException<Messages<'T>>>> * CancellationToken 
     | BatchReceiveCompleted
-    | BatchTimeout of AsyncReplyChannel<ResultOrException<Messages>> * CancellationToken
-    | AddBatchMessage of AsyncReplyChannel<BatchAddResponse> * ResultOrException<Message> * CancellationToken
+    | BatchTimeout of AsyncReplyChannel<ResultOrException<Messages<'T>>> * CancellationToken
+    | AddBatchMessage of AsyncReplyChannel<BatchAddResponse<'T>> * ResultOrException<Message<'T>> * CancellationToken
     | Acknowledge of AsyncReplyChannel<Task<unit>> * MessageId
     | NegativeAcknowledge of AsyncReplyChannel<Task<unit>> * MessageId
     | AcknowledgeCumulative of AsyncReplyChannel<Task<unit>> * MessageId
     | RedeliverUnacknowledgedMessages of AsyncReplyChannel<Task>
-    | Close of AsyncReplyChannel<Task<unit>>
-    | Unsubscribe of AsyncReplyChannel<Task<unit>>
+    | Close of AsyncReplyChannel<ResultOrException<unit>>
+    | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
     | HasReachedEndOfTheTopic of AsyncReplyChannel<bool>
     | Seek of AsyncReplyChannel<Task> * uint64
     | TickTime
 
 
 
-type internal MultipleTopicsConsumerState = {
-    Stream: AsyncSeq<ResultOrException<Message>>
-    Enumerator: IAsyncEnumerator<ResultOrException<Message>>
+type internal MultipleTopicsConsumerState<'T> = {
+    Stream: AsyncSeq<ResultOrException<Message<'T>>>
+    Enumerator: IAsyncEnumerator<ResultOrException<Message<'T>>>
 }
 
-type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                      numPartitions: int, lookup: BinaryLookupService, interceptors: ConsumerInterceptors, cleanup: MultiTopicsConsumerImpl -> unit) as this =
+type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                                      numPartitions: int, lookup: BinaryLookupService, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
+                                      interceptors: ConsumerInterceptors<'T>, cleanup: MultiTopicsConsumerImpl<'T> -> unit) as this =
 
     let consumerId = Generators.getNextConsumerId()
     let prefix = sprintf "mt/consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
-    let consumers = Dictionary<CompleteTopicName,IConsumer>(numPartitions)
+    let consumers = Dictionary<CompleteTopicName,IConsumer<'T>>(numPartitions)
     let consumerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let receiverQueueSize = Math.Min(consumerConfig.ReceiverQueueSize, consumerConfig.MaxTotalReceiverQueueSizeAcrossPartitions / numPartitions)
     let mutable connectionState = MultiTopicConnectionState.Uninitialized
     let mutable numPartitions = numPartitions
     let mutable currentBatch = Messages(consumerConfig.BatchReceivePolicy.MaxNumMessages, consumerConfig.BatchReceivePolicy.MaxNumBytes)
-    let batchWaiters = Queue<CancellationToken*AsyncReplyChannel<Async<ResultOrException<Messages>>>>()
-    let mutable unhandleMessage: ResultOrException<Message> option = None
+    let batchWaiters = Queue<CancellationToken*AsyncReplyChannel<Async<ResultOrException<Messages<'T>>>>>()
+    let mutable unhandleMessage: ResultOrException<Message<'T>> option = None
     
     let alreadyCancelledExn = Exn <| Exception "Batch already cancelled"
     let noMoreMessagesExn = Exn <| Exception "No more messages available"
 
     let timer = new Timer(1000.0 * 60.0) // 1 minute
     
-    let getStream (topic: CompleteTopicName) (consumer: ConsumerImpl) =
-        let consumerImp = consumer :> IConsumer
+    let getStream (topic: CompleteTopicName) (consumer: ConsumerImpl<'T>) =
+        let consumerImp = consumer :> IConsumer<'T>
         asyncSeq {
             while not consumerImp.HasReachedEndOfTopic do
                 let! message = consumer.ReceiveFsharpAsync()
@@ -112,7 +114,7 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
         this.Mb.Post(BatchReceiveCompleted)
         batch
     
-    let mb = MailboxProcessor<MultiTopicConsumerMessage>.Start(fun inbox ->
+    let mb = MailboxProcessor<MultiTopicConsumerMessage<'T>>.Start(fun inbox ->
 
         let rec loop state =
             async {
@@ -130,7 +132,7 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                             task {
                                 let! result =
                                     ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex,
-                                                      None, lookup, true, interceptors, fun _ -> ())
+                                                      None, lookup, true, schema, schemaProvider, interceptors, fun _ -> ())
                                 return (partitionedTopic, result)
                             })
                     try
@@ -155,7 +157,7 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                             |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
                             |> Seq.map (fun t ->
                                 let (_, consumer) = t.Result
-                                (consumer :> IConsumer).CloseAsync())
+                                (consumer :> IConsumer<'T>).DisposeAsync().AsTask())
                             |> Task.WhenAll
                             |> Async.AwaitTask
                             |> Async.Ignore
@@ -271,40 +273,43 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                     Log.Logger.LogDebug("{0} Close", prefix)
                     match this.ConnectionState with
                     | Closing | Closed ->
-                        channel.Reply(Task.FromResult())
+                        channel.Reply <| Result()
                     | _ ->
                         this.ConnectionState <- Closing
-                        let consumerTasks = consumers |> Seq.map(fun kv -> kv.Value.CloseAsync())
-                        task {
-                            try
-                                let! _ = Task.WhenAll consumerTasks
-                                this.ConnectionState <- Closed
-                                Log.Logger.LogInformation("{0} closed", prefix)
-                            with ex ->
-                                Log.Logger.LogError(ex, "{0} could not close", prefix)
-                                this.ConnectionState <- Failed
-                        } |> channel.Reply
-                        stopConsumer()
+                        let consumerTasks = consumers |> Seq.map(fun kv -> kv.Value.DisposeAsync().AsTask())
+                        try
+                            let! _ = Task.WhenAll consumerTasks |> Async.AwaitTask
+                            this.ConnectionState <- Closed
+                            Log.Logger.LogInformation("{0} closed", prefix)
+                            stopConsumer()
+                            channel.Reply <| Result()
+                        with ex ->
+                            Log.Logger.LogError(ex, "{0} could not close", prefix)
+                            this.ConnectionState <- Failed
+                            channel.Reply <| Exn ex
+                            return! loop state
+                        
 
                 | Unsubscribe channel ->
 
                     Log.Logger.LogDebug("{0} Unsubscribe", prefix)
                     match this.ConnectionState with
                     | Closing | Closed ->
-                        channel.Reply(Task.FromResult())
+                        channel.Reply <| Result()
                     | _ ->
                         this.ConnectionState <- Closing
                         let consumerTasks = consumers |> Seq.map(fun kv -> kv.Value.UnsubscribeAsync())
-                        task {
-                            try
-                                let! _ = Task.WhenAll consumerTasks
-                                this.ConnectionState <- Closed
-                                Log.Logger.LogInformation("{0} unsubscribed", prefix)
-                            with ex ->
-                                Log.Logger.LogError(ex, "{0} could not unsubscribe", prefix)
-                                this.ConnectionState <- Failed        
-                        } |> channel.Reply
-                        stopConsumer()
+                        try
+                            let! _ = Task.WhenAll consumerTasks |> Async.AwaitTask
+                            this.ConnectionState <- Closed
+                            Log.Logger.LogInformation("{0} unsubscribed", prefix)    
+                            stopConsumer()
+                            channel.Reply <| Result()
+                        with ex ->
+                            Log.Logger.LogError(ex, "{0} could not unsubscribe", prefix)
+                            this.ConnectionState <- Failed    
+                            channel.Reply <| Exn ex
+                            return! loop state
 
                 | HasReachedEndOfTheTopic channel ->
 
@@ -347,7 +352,7 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                                     task {
                                         let! result =
                                             ConsumerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex,
-                                                              None, lookup, true, interceptors, fun _ -> ())
+                                                              None, lookup, true, schema, schemaProvider, interceptors, fun _ -> ())
                                         return (partitionedTopic, result)
                                     })
                             try
@@ -371,7 +376,7 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                                     |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
                                     |> Seq.map (fun t ->
                                        let (_, consumer) = t.Result
-                                       (consumer :> IConsumer).CloseAsync())
+                                       (consumer :> IConsumer<'T>).DisposeAsync().AsTask())
                                     |> Task.WhenAll
                                     |> Async.AwaitTask
                                     |> Async.Ignore
@@ -400,12 +405,12 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
 
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
 
-    member private this.Mb with get(): MailboxProcessor<MultiTopicConsumerMessage> = mb
+    member private this.Mb with get(): MailboxProcessor<MultiTopicConsumerMessage<'T>> = mb
 
     member this.ConsumerId with get() = consumerId
 
     override this.Equals consumer =
-        consumerId = (consumer :?> ConsumerImpl).ConsumerId
+        consumerId = (consumer :?> ConsumerImpl<'T>).ConsumerId
 
     override this.GetHashCode () = int consumerId
 
@@ -421,15 +426,17 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
 
     // create consumer for a single topic with already known partitions.
     // first create a consumer with no topic, then do subscription for already know partitionedTopic.
-    static member Init(consumerConfig: ConsumerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                            numPartitions: int, lookup: BinaryLookupService, interceptors: ConsumerInterceptors, cleanup: MultiTopicsConsumerImpl -> unit) =
+    static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                                            numPartitions: int, lookup: BinaryLookupService, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
+                                            interceptors: ConsumerInterceptors<'T>, cleanup: MultiTopicsConsumerImpl<'T> -> unit) =
         task {
-            let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool, numPartitions, lookup, interceptors, cleanup)
+            let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool, numPartitions, lookup,
+                                                   schema, schemaProvider, interceptors, cleanup)
             do! consumer.InitInternal()
             return consumer
         }
 
-    interface IConsumer with
+    interface IConsumer<'T> with
 
         member this.ReceiveAsync() =
             task {
@@ -480,7 +487,7 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                 return! t
             }
             
-        member this.AcknowledgeAsync (msgs: Messages) =
+        member this.AcknowledgeAsync (msgs: Messages<'T>) =
             task {
                 for msg in msgs do
                     let! t = mb.PostAndAsyncReply(fun channel -> Acknowledge(channel, msg.MessageId))
@@ -511,16 +518,12 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
         member this.GetLastMessageIdAsync () =
             Task.FromException<MessageId>(exn "GetLastMessageId operation not supported on multitopics consumer")
 
-        member this.CloseAsync() =
-            task {
-                let! result = mb.PostAndAsyncReply(Close)
-                return! result
-            }
-
         member this.UnsubscribeAsync() =
             task {
                 let! result = mb.PostAndAsyncReply(Unsubscribe)
-                return! result
+                match result with
+                | Result () -> ()
+                | Exn ex -> reraize ex
             }
 
         member this.HasReachedEndOfTopic with get() =
@@ -532,7 +535,7 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
                 return! result
             }
             
-        member this.NegativeAcknowledge (msgs: Messages) =
+        member this.NegativeAcknowledge (msgs: Messages<'T>) =
             task {
                 for msg in msgs do
                     let! t = mb.PostAndAsyncReply(fun channel -> NegativeAcknowledge(channel, msg.MessageId))
@@ -542,3 +545,17 @@ type internal MultiTopicsConsumerImpl private (consumerConfig: ConsumerConfigura
         member this.ConsumerId = consumerId
 
         member this.Topic = %consumerConfig.Topic.CompleteTopicName
+
+    interface IAsyncDisposable with
+        
+        member this.DisposeAsync() =
+            task {
+                match this.ConnectionState with
+                | Closing | Closed ->
+                    return ()
+                | _ ->
+                    let! result = mb.PostAndAsyncReply(Close)
+                    match result with
+                    | Result () -> ()
+                    | Exn ex -> reraize ex
+            } |> ValueTask

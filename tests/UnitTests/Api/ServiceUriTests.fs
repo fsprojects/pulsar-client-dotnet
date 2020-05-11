@@ -3,7 +3,7 @@
 open System
 
 open Expecto
-open Pulsar.Client.Api
+open Pulsar.Client.Common
 open Pulsar.Client.UnitTests
 
 module ServiceUriTests =
@@ -28,25 +28,25 @@ module ServiceUriTests =
         testList "ServiceUriTests" [
 
             test "Parse returns Error for null input" {
-                let expected = Error "ServiceUrl must not be blank."
+                let expected = Result.Error "ServiceUrl must not be blank."
                 let actual = ServiceUri.parse(null)
                 Expect.equal actual expected "Parse should return Error for null input"
             }
 
             test "Parse returns Error for empty input" {
-                let expected = Error "ServiceUrl must not be blank."
+                let expected = Result.Error "ServiceUrl must not be blank."
                 let actual = ServiceUri.parse("")
                 Expect.equal actual expected "Parse should return Error for empty input"
             }
 
             test "Parse returns Error for whitespace input" {
-                let expected = Error "ServiceUrl must not be blank."
+                let expected = Result.Error "ServiceUrl must not be blank."
                 let actual = ServiceUri.parse("  ")
                 Expect.equal actual expected "Parse should return Error for whitespace input"
             }
 
             test "Parse returns Error for unrecognized input" {
-                let expected = Error "Supplied string 'pulsar+zzz://host.com' describe an un-representable ServiceUri."
+                let expected = Result.Error "Supplied string 'pulsar+zzz://host.com' describe an un-representable ServiceUri."
                 let actual = ServiceUri.parse("pulsar+zzz://host.com")
                 Expect.equal actual expected "Parse should return Error for unrecognized input"
             }

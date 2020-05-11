@@ -11,7 +11,7 @@ namespace CsharpExamples
 {
     internal class RealWorld
     {
-        internal static async Task SendMessage(IProducer producer, ILogger logger, byte[] message)
+        internal static async Task SendMessage(IProducer<byte[]> producer, ILogger logger, byte[] message)
         {
             try
             {
@@ -24,7 +24,7 @@ namespace CsharpExamples
             }
         }
         
-        internal static async Task ProcessMessages(IConsumer consumer, ILogger logger, Func<Message, Task> f,
+        internal static async Task ProcessMessages(IConsumer<byte[]> consumer, ILogger logger, Func<Message<byte[]>, Task> f,
             CancellationToken ct)
         {
             try
@@ -68,12 +68,12 @@ namespace CsharpExamples
                 .ServiceUrl(serviceUrl)
                 .Build();
 
-            var producer = await new ProducerBuilder(client)
+            var producer = await client.NewProducer()
                 .Topic(topicName)
                 .EnableBatching(false)
                 .CreateAsync();
 
-            var consumer = await new ConsumerBuilder(client)
+            var consumer = await client.NewConsumer()
                 .Topic(topicName)
                 .SubscriptionName(subscriptionName)
                 .SubscribeAsync();
@@ -93,8 +93,8 @@ namespace CsharpExamples
             
             cts.Dispose();
             await Task.Delay(200);// wait for pending acknowledgments to complete
-            await consumer.CloseAsync();
-            await producer.CloseAsync();
+            await consumer.DisposeAsync();
+            await producer.DisposeAsync();
             await client.CloseAsync();
         }
     }

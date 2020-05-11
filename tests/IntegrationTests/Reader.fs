@@ -14,11 +14,11 @@ open FSharp.Control
 [<Tests>]
 let tests =
 
-    let readerLoopRead (reader: Reader) =
+    let readerLoopRead (reader: IReader<byte[]>) =
         task {
             let! hasSomeMessages = reader.HasMessageAvailableAsync()
             let mutable continueLooping = hasSomeMessages
-            let resizeArray = ResizeArray<Message>()
+            let resizeArray = ResizeArray<Message<byte[]>>()
             while continueLooping do
                 let! msg = reader.ReadNextAsync()
                 let received = Encoding.UTF8.GetString(msg.Data)
@@ -39,7 +39,7 @@ let tests =
             let readerName = "basicReader"
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(batching)
@@ -48,7 +48,7 @@ let tests =
             do! produceMessages producer numberOfMessages producerName
 
             let! reader =
-                ReaderBuilder(client)
+                client.NewReader()
                     .Topic(topicName)
                     .ReaderName(readerName)
                     .StartMessageId(MessageId.Earliest)
@@ -73,27 +73,27 @@ let tests =
             let readerName = "producerIdReader"
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(batching)
                     .CreateAsync()
 
             do! produceMessages producer numberOfMessages producerName
-            do! producer.CloseAsync()
+            do! producer.DisposeAsync()
 
             let! reader =
-                ReaderBuilder(client)
+                client.NewReader()
                     .Topic(topicName)
                     .ReaderName(readerName + "1")
                     .StartMessageId(MessageId.Earliest)
                     .CreateAsync()
             let! result = readerLoopRead reader
             Expect.equal "" numberOfMessages result.Count
-            do! reader.CloseAsync()
+            do! reader.DisposeAsync()
 
             let! reader2 =
-                ReaderBuilder(client)
+                client.NewReader()
                     .Topic(topicName)
                     .ReaderName(readerName + "2")
                     .StartMessageId(result.[0].MessageId)
@@ -102,7 +102,7 @@ let tests =
             Expect.equal "" (numberOfMessages-1) result2.Count
 
             let! reader3 =
-                ReaderBuilder(client)
+                client.NewReader()
                     .Topic(topicName)
                     .ReaderName(readerName + "3")
                     .StartMessageId(result.[0].MessageId)
@@ -111,8 +111,8 @@ let tests =
             let! result3 = readerLoopRead reader3
             Expect.equal "" numberOfMessages result3.Count
 
-            do! reader2.CloseAsync()
-            do! reader3.CloseAsync()
+            do! reader2.DisposeAsync()
+            do! reader3.DisposeAsync()
 
             Log.Debug("Finished Muliple readers non-batching configuration works fine batching: " + batching.ToString())
         }
@@ -127,7 +127,7 @@ let tests =
             let readerName = "producerIdReader"
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(batching)
@@ -137,10 +137,10 @@ let tests =
             Log.Debug("msgId1 is {0}", msgId1)
             let! msgId2 = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #2 Sent from %s on %s" producerName (DateTime.Now.ToLongTimeString()) ))
             Log.Debug("msgId2 is {0}", msgId2)
-            do! producer.CloseAsync()
+            do! producer.DisposeAsync()
 
             let! reader =
-                ReaderBuilder(client)
+                client.NewReader()
                     .Topic(topicName)
                     .ReaderName(readerName)
                     .StartMessageId(msgId1)
@@ -148,7 +148,7 @@ let tests =
 
             let! result = readerLoopRead reader
             Expect.equal "" 1 result.Count
-            do! reader.CloseAsync()
+            do! reader.DisposeAsync()
 
             Log.Debug("Finished Check reading from producer messageId. Batching: " + batching.ToString())
         }

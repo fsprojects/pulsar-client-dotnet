@@ -6,7 +6,6 @@ open System.Diagnostics
 
 open Expecto
 open Expecto.Flip
-open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
 open System.Threading.Tasks
@@ -27,13 +26,13 @@ let tests =
             let numberOfMessages = 100
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName("concurrent")
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("concurrent")
                     .SubscriptionName("test-subscription")
@@ -63,7 +62,7 @@ let tests =
             let topicName = "public/retention/topic-" + Guid.NewGuid().ToString("N")
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .ProducerName("sequential")
                     .Topic(topicName)
                     .CreateAsync() |> Async.AwaitTask
@@ -71,7 +70,7 @@ let tests =
             do! produceMessages producer 100 "sequential" |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("sequential")
                     .SubscriptionName("test-subscription")
@@ -91,27 +90,27 @@ let tests =
             let messagesNumber = 100
 
             let! consumer1 =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName2)
                     .ConsumerName("consumer1")
                     .SubscriptionName("my-subscriptionx")
                     .SubscribeAsync() |> Async.AwaitTask
 
             let! consumer2 =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName1)
                     .ConsumerName("consumer2")
                     .SubscriptionName("my-subscriptiony")
                     .SubscribeAsync() |> Async.AwaitTask
 
             let! producer1 =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName1)
                     .ProducerName("producer1")
                     .CreateAsync() |> Async.AwaitTask
 
             let! producer2 =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName2)
                     .ProducerName("producer2")
                     .CreateAsync() |> Async.AwaitTask
@@ -155,13 +154,13 @@ let tests =
             let consumerName = "concurrentConsumer"
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
@@ -186,7 +185,7 @@ let tests =
                             do! consumer.AcknowledgeAsync(message.MessageId)
                             Log.Debug("{0}-{1} acknowledged {2}", consumerName, i, received)
                             if Interlocked.Increment(&processedCount) = (numberOfMessages*3) then
-                                do! consumer.CloseAsync()
+                                do! consumer.DisposeAsync()
                     } :> Task
             let consumerTasks =
                 [| 1..3 |]
@@ -213,13 +212,13 @@ let tests =
             let numberOfMessages = 100
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
@@ -255,13 +254,13 @@ let tests =
             let numberOfMessages = 100
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer1 =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName1)
                     .SubscriptionName("test-subscription")
@@ -269,7 +268,7 @@ let tests =
                     .SubscribeAsync() |> Async.AwaitTask
                     
             let! consumer2 =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName2)
                     .SubscriptionName("test-subscription")
@@ -289,7 +288,7 @@ let tests =
                     task {
                         do! consumeMessages consumer1 (numberOfMessages/2) consumerName1
                         do! Task.Delay(100)
-                        do! consumer1.CloseAsync()
+                        do! consumer1.DisposeAsync()
                     }:> Task)
             let consumer2Task =
                 Task.Run(fun () ->
@@ -310,34 +309,34 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
             let! consumer1 =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("ClosingConsumer")
                     .SubscriptionName("closing1-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
 
             let! consumer2 =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("ClosingConsumer")
                     .SubscriptionName("closing2-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
 
             let! producer1 =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName("ClosingProducer1")
                     .CreateAsync() |> Async.AwaitTask
 
             let! producer2 =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName("ClosingProducer2")
                     .CreateAsync() |> Async.AwaitTask
 
-            do! consumer1.CloseAsync() |> Async.AwaitTask
+            do! consumer1.DisposeAsync().AsTask() |> Async.AwaitTask
             Expect.throwsT2<AlreadyClosedException> (fun () -> consumer1.ReceiveAsync().Result |> ignore) |> ignore
-            do! producer1.CloseAsync() |> Async.AwaitTask
+            do! producer1.DisposeAsync().AsTask() |> Async.AwaitTask
             Expect.throwsT2<AlreadyClosedException> (fun () -> producer1.SendAndForgetAsync([||]).Result |> ignore) |> ignore
             do! client.CloseAsync() |> Async.AwaitTask
             Expect.throwsT2<AlreadyClosedException> (fun () -> consumer2.UnsubscribeAsync().Result |> ignore) |> ignore
@@ -359,13 +358,13 @@ let tests =
             let sw = Stopwatch()
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName).EnableBatching(false)
                     .ProducerName(producerName)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("schedule-subscription")
@@ -379,9 +378,8 @@ let tests =
                         let deliverAt = now.AddMilliseconds(float interval)
                         let timestamp = Nullable(deliverAt.ToUnixTimeMilliseconds())
                         let message = Encoding.UTF8.GetBytes(sprintf "Message was sent with interval '%i' milliseconds" interval)
-                        let messageBuilder = MessageBuilder(message, deliverAt = timestamp)
                         sw.Start()
-                        let! _ = producer.SendAsync(messageBuilder)
+                        let! _ = producer.NewMessage(message, deliverAt = timestamp) |> producer.SendAsync
                         ()
                     }:> Task)
 
@@ -418,14 +416,14 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName("bigMessageProducer")
                     .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("bigMessageConsumer")
                     .SubscriptionName("test-subscription")

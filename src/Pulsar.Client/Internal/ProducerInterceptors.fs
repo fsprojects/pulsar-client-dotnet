@@ -5,11 +5,11 @@ open Microsoft.Extensions.Logging
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
-type internal ProducerInterceptors(interceptors: IProducerInterceptor array) =
+type internal ProducerInterceptors<'T>(interceptors: IProducerInterceptor<'T> array) =
      member this.Interceptors = interceptors
-     static member Empty with get() = ProducerInterceptors([||])
+     static member Empty with get() = ProducerInterceptors<'T>([||])
      
-     member this.BeforeSend (producer: IProducer, message: MessageBuilder) =
+     member this.BeforeSend (producer: IProducer<'T>, message: MessageBuilder<'T>) =
           let mutable interceptorMessage = message         
           for interceptor in interceptors do
                if interceptor.Eligible message then
@@ -19,7 +19,7 @@ type internal ProducerInterceptors(interceptors: IProducerInterceptor array) =
                          Log.Logger.LogWarning("Error executing interceptor beforeSend callback topic: {0}", producer.Topic, e)
           interceptorMessage
         
-     member this.OnSendAcknowledgement (producer: IProducer, message: MessageBuilder, msgId: MessageId, exn: Exception) =
+     member this.OnSendAcknowledgement (producer: IProducer<'T>, message: MessageBuilder<'T>, msgId: MessageId, exn: Exception) =
           for interceptor in interceptors do
                if interceptor.Eligible message then
                     try

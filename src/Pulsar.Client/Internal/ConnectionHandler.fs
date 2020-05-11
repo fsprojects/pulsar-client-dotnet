@@ -24,12 +24,13 @@ type internal ConnectionHandler( parentPrefix: string,
                         connectionPool: ConnectionPool,
                         lookup: BinaryLookupService,
                         topic: CompleteTopicName,
-                        connectionOpened: unit -> unit,
+                        connectionOpened: uint64 -> unit,
                         connectionFailed: exn -> unit,
                         backoff: Backoff) as this =
 
     let mutable connectionState = Uninitialized
     let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
+    let mutable epoch = 0UL
     let prefix = parentPrefix + " ConnectionHandler"
 
     let isValidStateForReconnection() =
@@ -54,7 +55,7 @@ type internal ConnectionHandler( parentPrefix: string,
                                 let! broker = lookup.GetBroker(topic) |> Async.AwaitTask
                                 let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize, false) |> Async.AwaitTask
                                 this.ConnectionState <- Ready clientCnx
-                                connectionOpened()
+                                connectionOpened epoch
                             with
                             | :? AggregateException as ex when (ex.InnerException :? MaxMessageSizeChanged) ->
                                 let newSize = (ex.InnerException :?> MaxMessageSizeChanged).Data0
@@ -77,6 +78,7 @@ type internal ConnectionHandler( parentPrefix: string,
                         Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
                             prefix, topic, this.ConnectionState, delay)
                         this.ConnectionState <- Connecting
+                        epoch <- epoch + 1UL
                         asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
                     else
                         Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
@@ -93,6 +95,7 @@ type internal ConnectionHandler( parentPrefix: string,
                             Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {3}ms ",
                                 prefix, topic, this.ConnectionState, delay)
                             this.ConnectionState <- Connecting
+                            epoch <- epoch + 1UL
                             asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
                         else
                             Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
@@ -101,7 +104,7 @@ type internal ConnectionHandler( parentPrefix: string,
                 | Close ->
                     ()
             }
-        loop  ()
+        loop ()
     )
 
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} ConnectionHandler mailbox failure", prefix))

@@ -2,8 +2,11 @@
 
 open Expecto
 open Pulsar.Client.IntegrationTests
+open Serilog
 
 [<EntryPoint>]
 let main argv =
     Common.configureLogging()
-    Tests.runTestsInAssembly defaultConfig argv
+    let result = Tests.runTestsInAssembly defaultConfig argv
+    Log.CloseAndFlush() |> ignore
+    result

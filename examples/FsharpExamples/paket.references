@@ -1,4 +1,3 @@
 group Examples
 FSharp.Core
 Microsoft.Extensions.Logging.Console
-Pulsar.Client

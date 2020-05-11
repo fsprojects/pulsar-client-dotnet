@@ -31,8 +31,10 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <WarningLevel>3</WarningLevel>
     <WarningsAsErrors>0025</WarningsAsErrors>
+    <DebugType>portable</DebugType>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Avro\Avro.main.csproj" />
     <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" PrivateAssets="all" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0" PrivateAssets="All" />
   </ItemGroup>
@@ -46,14 +48,17 @@
     <Compile Include="Internal\Backoff.fs" />
     <Compile Include="Common\TopicName.fs" />
     <Compile Include="Common\DTO.fs" />
+    <Compile Include="Common\ServiceUri.fs" />
     <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Api\BatchReceivePolicy.fs" />
     <Compile Include="Api\KeySharedPolicy.fs" />
+    <Compile Include="Api\ISchema.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\AuthenticationDataProvider.fs" />
     <Compile Include="Api\Authentication.fs" />
     <Compile Include="Api\IMessageRouter.fs" />
     <Compile Include="Api\IConsumer.fs" />
+    <Compile Include="Api\IReader.fs" />
     <Compile Include="Api\IProducer.fs" />
     <Compile Include="Api\DeadLetters.fs" />
     <Compile Include="Api\IConsumerInterceptor.fs" />
@@ -67,6 +72,25 @@
     <Compile Include="Auth\AuthenticationToken.fs" />
     <Compile Include="Auth\AuthenticationTls.fs" />
     <Compile Include="Auth\DefaultImplementation.fs" />
+    <Compile Include="Schema\MultiVersionSchemaInfoProvider.fs" />
+    <Compile Include="Schema\BytesSchema.fs" />
+    <Compile Include="Schema\BooleanSchema.fs" />
+    <Compile Include="Schema\DateSchema.fs" />
+    <Compile Include="Schema\TimeSchema.fs" />
+    <Compile Include="Schema\TimestampSchema.fs" />
+    <Compile Include="Schema\DoubleSchema.fs" />
+    <Compile Include="Schema\FloatSchema.fs" />
+    <Compile Include="Schema\ByteSchema.fs" />
+    <Compile Include="Schema\ShortSchema.fs" />
+    <Compile Include="Schema\IntSchema.fs" />
+    <Compile Include="Schema\LongSchema.fs" />
+    <Compile Include="Schema\StringSchema.fs" />
+    <Compile Include="Schema\JsonSchema.fs" />
+    <Compile Include="Schema\KeyValueSchema.fs" />
+    <Compile Include="Schema\ProtobufSchema.fs" />
+    <Compile Include="Schema\AvroSchema.fs" />
+    <Compile Include="Schema\AutoProduceBytesSchema.fs" />
+    <Compile Include="Schema\AutoConsumeSchema.fs" />
     <Compile Include="Internal\BatchMessageContainer.fs" />
     <Compile Include="Internal\Routing.fs" />
     <Compile Include="Internal\UnAckedMessageTracker.fs" />
@@ -81,15 +105,15 @@
     <Compile Include="Internal\Compression .fs" />
     <Compile Include="Internal\ProducerImpl.fs" />
     <Compile Include="Internal\ConsumerImpl.fs" />
+    <Compile Include="Internal\ReaderImpl.fs" />
     <Compile Include="Internal\MultiTopicsConsumerImpl.fs" />
     <Compile Include="Internal\PartitionedProducerImpl.fs" />
+    <Compile Include="Api\Schema.fs" />
     <Compile Include="Api\AuthenticationFactory.fs" />
-    <Compile Include="Api\Reader.fs" />
-    <Compile Include="Api\PulsarClient.fs" />
     <Compile Include="Api\ProducerBuilder.fs" />
     <Compile Include="Api\ConsumerBuilder.fs" />
     <Compile Include="Api\ReaderBuilder.fs" />
-    <Compile Include="Api\ServiceUri.fs" />
+    <Compile Include="Api\PulsarClient.fs" />
     <Compile Include="Api\PulsarClientBuilder.fs" />
   </ItemGroup>
   <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="ResolveReferences">

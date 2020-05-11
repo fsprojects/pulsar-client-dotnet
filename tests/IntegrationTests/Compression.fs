@@ -2,7 +2,6 @@ module Pulsar.Client.IntegrationTests.Compression
 
 open System
 open Expecto
-open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
 open Serilog
@@ -31,7 +30,7 @@ let tests =
         let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
         let! producer =
-            ProducerBuilder(client)
+            client.NewProducer()
                 .Topic(topicName)
                 .ProducerName("compression-single")
                 .EnableBatching(enableBatching)
@@ -39,7 +38,7 @@ let tests =
                 .CreateAsync() |> Async.AwaitTask
 
         let! consumer =
-            ConsumerBuilder(client)
+            client.NewConsumer()
                 .Topic(topicName)
                 .ConsumerName("compression-single")
                 .SubscriptionName("test-subscription")

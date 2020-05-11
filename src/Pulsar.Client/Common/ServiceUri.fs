@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Api
+﻿namespace Pulsar.Client.Common
 
 open System.Text.RegularExpressions
 open System
@@ -42,12 +42,12 @@ module internal ServiceUri =
     let parse str =
 
         if String.IsNullOrWhiteSpace(str) then
-            Error "ServiceUrl must not be blank."
+            Result.Error "ServiceUrl must not be blank."
         else
             let m = regex.Match(str)
 
             if m = Match.Empty then
-                Error(sprintf "Supplied string '%s' describe an un-representable ServiceUri." str)
+                Result.Error (sprintf "Supplied string '%s' describe an un-representable ServiceUri." str)
             else
                 let scheme = m |> getGroupValue schemeGroup
                 let services = m |> getGroupCaptureValues servicesGroup

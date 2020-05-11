@@ -1,9 +1,10 @@
 ﻿namespace Pulsar.Client.Api
 
 open System
+open System.Threading.Tasks
 open Pulsar.Client.Common
 
-type ReaderBuilder private (client: PulsarClient, config: ReaderConfiguration) =
+type ReaderBuilder<'T> private (createReaderAsync, config: ReaderConfiguration, schema: ISchema<'T>) =
 
     let verify(config : ReaderConfiguration) =
         let checkValue check config =
@@ -26,62 +27,55 @@ type ReaderBuilder private (client: PulsarClient, config: ReaderConfiguration) =
                 else
                     c)
 
-    new(client: PulsarClient) = ReaderBuilder(client, ReaderConfiguration.Default)
+    internal new(createReaderAsync, schema) = ReaderBuilder(createReaderAsync, ReaderConfiguration.Default, schema)
+    
+    member private this.With(newConfig) =
+        ReaderBuilder(createReaderAsync, newConfig, schema)
 
-    member this.Topic topic =
-        ReaderBuilder(
-            client,
-            { config with
-                Topic = topic
-                    |> invalidArgIfBlankString "Topic must not be blank."
-                    |> fun t -> TopicName(t.Trim()) })
+    member this.Topic topic =        
+        { config with
+            Topic = topic
+                |> invalidArgIfBlankString "Topic must not be blank."
+                |> fun t -> TopicName(t.Trim()) }
+        |> this.With
 
-    member this.StartMessageId messageId =
-        ReaderBuilder(
-            client,
-            { config with
-                StartMessageId = messageId
-                    |> invalidArgIfDefault "MessageId can't be null"
-                    |> Some })
+    member this.StartMessageId messageId =        
+        { config with
+            StartMessageId = messageId
+                |> invalidArgIfDefault "MessageId can't be null"
+                |> Some }
+        |> this.With
 
-    member this.StartMessageIdInclusive (startMessageIdInclusive: bool) =
-        ReaderBuilder(
-            client,
-            { config with
-                ResetIncludeHead = startMessageIdInclusive })
+    member this.StartMessageIdInclusive (startMessageIdInclusive: bool) =        
+        { config with
+            ResetIncludeHead = startMessageIdInclusive }
+        |> this.With
 
     member this.ReadCompacted readCompacted =
-        ReaderBuilder(
-            client,
-            { config with
-                ReadCompacted = readCompacted })
+        { config with
+            ReadCompacted = readCompacted }
+        |> this.With
 
-    member this.SubscriptionRolePrefix subscriptionRolePrefix =
-        ReaderBuilder(
-            client,
-            { config with
-                SubscriptionRolePrefix = subscriptionRolePrefix })
+    member this.SubscriptionRolePrefix subscriptionRolePrefix =    
+        { config with
+            SubscriptionRolePrefix = subscriptionRolePrefix }
+        |> this.With
 
     member this.ReaderName readerName =
-        ReaderBuilder(
-            client,
-            { config with
-                ReaderName = readerName |> invalidArgIfBlankString "ReaderName must not be blank." })
+        { config with
+            ReaderName = readerName |> invalidArgIfBlankString "ReaderName must not be blank." }
+        |> this.With
 
     member this.ReceiverQueueSize receiverQueueSize =
-        ReaderBuilder(
-            client,
-            { config with
-                ReceiverQueueSize = receiverQueueSize |> invalidArgIfNotGreaterThanZero "ReceiverQueueSize should be greater than 0."  })
+        { config with
+            ReceiverQueueSize = receiverQueueSize |> invalidArgIfNotGreaterThanZero "ReceiverQueueSize should be greater than 0."  }
+        |> this.With
                 
     member this.StartMessageFromRollbackDuration rollbackDuration =
-        ReaderBuilder(
-            client,
-            { config with
-                StartMessageFromRollbackDuration = rollbackDuration })
+        { config with
+            StartMessageFromRollbackDuration = rollbackDuration }
+        |> this.With
 
-    member this.CreateAsync() =
-        config
-        |> verify
-        |> client.CreateReaderAsync
+    member this.CreateAsync(): Task<IReader<'T>> =
+        createReaderAsync(verify config, schema)
 

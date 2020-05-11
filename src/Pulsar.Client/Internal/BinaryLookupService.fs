@@ -87,3 +87,21 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 do! Async.Sleep delay
                 return! this.GetTopicsUnderNamespace(endpoint, ns, backoff, remainingTimeMs - delay, mode)
         }
+        
+    member this.GetSchema(topicName: CompleteTopicName, schemaVersion: SchemaVersion) =
+        this.GetSchema(resolveEndPoint(), topicName, Some schemaVersion)
+        
+    member this.GetSchema(topicName: CompleteTopicName) =
+        this.GetSchema(resolveEndPoint(), topicName, None)
+        
+    member private this.GetSchema(endpoint: DnsEndPoint, topicName: CompleteTopicName, schemaVersion: SchemaVersion option) =
+        task {
+            let! clientCnx = connectionPool.GetBrokerlessConnection endpoint
+            let requestId = Generators.getNextRequestId()
+            let payload = Commands.newGetSchema topicName requestId schemaVersion
+            let! response = clientCnx.SendAndWaitForReply requestId payload
+            let schema = PulsarResponseType.GetTopicSchema response
+            if schema.IsNone then
+                Log.Logger.LogWarning("No schema found for topic {0} version {1}", topicName, schemaVersion)
+            return schema
+        }

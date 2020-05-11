@@ -31,7 +31,7 @@ type PulsarClientConfiguration =
             TlsProtocols = SslProtocols.None
         }
 
-type ConsumerConfiguration =
+type ConsumerConfiguration<'T> =
     {
         Topic: TopicName
         ConsumerName: string
@@ -48,7 +48,7 @@ type ConsumerConfiguration =
         ReadCompacted: bool
         NegativeAckRedeliveryDelay: TimeSpan
         ResetIncludeHead: bool
-        DeadLettersProcessor : IDeadLettersProcessor
+        DeadLettersProcessor : IDeadLettersProcessor<'T>
         KeySharedPolicy: KeySharedPolicy option
         BatchReceivePolicy: BatchReceivePolicy
     }
@@ -69,7 +69,7 @@ type ConsumerConfiguration =
             ReadCompacted = false
             NegativeAckRedeliveryDelay = TimeSpan.FromMinutes(1.0)
             ResetIncludeHead = false
-            DeadLettersProcessor = DeadLettersProcessor.Disabled
+            DeadLettersProcessor = DeadLettersProcessor<'T>.Disabled
             KeySharedPolicy = None
             BatchReceivePolicy = BatchReceivePolicy()
         }

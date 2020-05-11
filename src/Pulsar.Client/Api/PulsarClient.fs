@@ -8,17 +8,19 @@ open System.Collections.Generic
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open System.Threading
+open Pulsar.Client.Schema
 
-type PulsarClientState =
+type internal PulsarClientState =
     | Active
     | Closing
     | Closed
 
-type PulsarClientMessage =
-    | RemoveProducer of IProducer
-    | RemoveConsumer of IConsumer
-    | AddProducer of IProducer
-    | AddConsumer of IConsumer
+type internal PulsarClientMessage =
+    | RemoveProducer of IAsyncDisposable // IProducer
+    | RemoveConsumer of IAsyncDisposable // IConsumer
+    | AddProducer of IAsyncDisposable // IProducer
+    | AddConsumer of IAsyncDisposable // IConsumer
+    | GetSchemaProvider of AsyncReplyChannel<MultiVersionSchemaInfoProvider> * CompleteTopicName
     | Close of AsyncReplyChannel<Task>
     | Stop
 
@@ -26,9 +28,12 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
 
     let connectionPool = ConnectionPool(config)
     let lookupService = BinaryLookupService(config, connectionPool)
-    let producers = HashSet<IProducer>()
-    let consumers = HashSet<IConsumer>()
+    let producers = HashSet<IAsyncDisposable>()
+    let consumers = HashSet<IAsyncDisposable>()
+    let schemaProviders = Dictionary<CompleteTopicName, MultiVersionSchemaInfoProvider>() 
     let mutable clientState = Active
+    let autoProduceStubType =  typeof<AutoProduceBytesSchemaStub>
+    let autoConsumeStubType =  typeof<AutoConsumeSchemaStub>
 
     let tryStopMailbox() =
         match this.ClientState with
@@ -63,16 +68,27 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                 | AddConsumer consumer ->
                     consumers.Add consumer |> ignore
                     return! loop ()
+                | GetSchemaProvider (channel, topicName) ->
+                    match schemaProviders.TryGetValue(topicName) with
+                    | true, provider -> channel.Reply(provider)
+                    | false, _ ->
+                        let provider = 
+                           MultiVersionSchemaInfoProvider(fun schemaVersion ->
+                               lookupService.GetSchema(topicName, schemaVersion))
+                        schemaProviders.Add(topicName, provider)
+                        channel.Reply(provider)
+                    return! loop()                    
                 | Close channel ->
                     match this.ClientState with
                     | Active ->
                         Log.Logger.LogInformation("Client closing. URL: {0}", config.ServiceAddresses)
                         this.ClientState <- Closing
-                        let producersTasks = producers |> Seq.map (fun producer -> producer.CloseAsync())
-                        let consumerTasks = consumers |> Seq.map (fun consumer -> consumer.CloseAsync())
+                        let producersTasks = producers |> Seq.map (fun producer -> task { return! producer.DisposeAsync() } )
+                        let consumerTasks = consumers |> Seq.map (fun consumer -> task { return! consumer.DisposeAsync() })
                         task {
                             try
                                 let! _ = Task.WhenAll (seq { yield! producersTasks; yield! consumerTasks })
+                                schemaProviders |> Seq.iter (fun (KeyValue (_, provider)) -> provider.Close())
                                 tryStopMailbox()
                             with ex ->
                                 Log.Logger.LogError(ex, "Couldn't stop client")
@@ -96,10 +112,10 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         with get () = Log.Logger
         and set (value) = Log.Logger <- value
 
-    member internal this.SubscribeAsync interceptors consumerConfig =
+    member internal this.SubscribeAsync(consumerConfig, schema, interceptors) =
         task {
             checkIfActive()
-            return! this.SingleTopicSubscribeAsync interceptors consumerConfig
+            return! this.SingleTopicSubscribeAsync(consumerConfig, schema, interceptors)
         }
 
     member this.CloseAsync() =
@@ -134,50 +150,82 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             return! this.GetPartitionedTopicMetadata(topicName, backoff, int config.OperationTimeout.TotalMilliseconds)
         }
     
+    member private this.PreProcessSchemaBeforeSubscribe(schema: ISchema<'T>, topicName) =
+        task {
+            if schema.SupportSchemaVersioning then
+                let! provider = mb.PostAndAsyncReply(fun (channel) -> GetSchemaProvider(channel, topicName))
+                return Some provider
+            else
+                return None
+        }
 
-    member private this.SingleTopicSubscribeAsync (interceptors: ConsumerInterceptors) (consumerConfig: ConsumerConfiguration) =
+    member private this.SingleTopicSubscribeAsync (consumerConfig: ConsumerConfiguration<'T>, schema: ISchema<'T>, interceptors: ConsumerInterceptors<'T>) =
         task {
             checkIfActive()
             Log.Logger.LogDebug("SingleTopicSubscribeAsync started")
+            let! schemaProvider = this.PreProcessSchemaBeforeSubscribe(schema, consumerConfig.Topic.CompleteTopicName)
             let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic.CompleteTopicName
+            let mutable activeSchema = schema
+            if schema.GetType() = autoConsumeStubType then
+                match! lookupService.GetSchema(consumerConfig.Topic.CompleteTopicName) with
+                | Some schemaData ->
+                    let autoSchema = Schema.GetAutoConsumeSchema schemaData |> box
+                    activeSchema <- autoSchema |> unbox
+                | None ->
+                    ()          
             let removeConsumer = fun consumer -> mb.Post(RemoveConsumer consumer)
             if (metadata.Partitions > 0)
             then
-                let! consumer = MultiTopicsConsumerImpl.Init(consumerConfig, config, connectionPool, metadata.Partitions, lookupService, interceptors, removeConsumer)
+                let! consumer = MultiTopicsConsumerImpl.Init(consumerConfig, config, connectionPool, metadata.Partitions,
+                                                             lookupService, activeSchema, schemaProvider, interceptors, removeConsumer)
                 mb.Post(AddConsumer consumer)
-                return consumer :> IConsumer
+                return consumer :> IConsumer<'T>
             else
-                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, -1, None, lookupService, true, interceptors, removeConsumer)
+                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, -1, None, lookupService, true,
+                                                  activeSchema, schemaProvider, interceptors, removeConsumer)
                 mb.Post(AddConsumer consumer)
-                return consumer :> IConsumer
+                return consumer :> IConsumer<'T>
         }
 
-    member internal this.CreateProducerAsync (interceptors: ProducerInterceptors) (producerConfig: ProducerConfiguration) =
+    member internal this.CreateProducerAsync<'T> (producerConfig: ProducerConfiguration, schema: ISchema<'T>, interceptors: ProducerInterceptors<'T>) =
         task {
             checkIfActive()
             Log.Logger.LogDebug("CreateProducerAsync started")
             let! metadata = this.GetPartitionedTopicMetadata producerConfig.Topic.CompleteTopicName
+            let mutable activeSchema = schema
+            if schema.GetType() = autoProduceStubType then
+                match! lookupService.GetSchema(producerConfig.Topic.CompleteTopicName) with
+                | Some schemaInfo ->
+                    let validate = Schema.GetValidateFunction schemaInfo
+                    let autoProduceSchema = AutoProduceBytesSchema(schemaInfo.SchemaInfo.Name, schemaInfo.SchemaInfo.Type, schemaInfo.SchemaInfo.Schema, validate) |> box
+                    activeSchema <- autoProduceSchema |> unbox
+                | None ->
+                    ()                    
             let removeProducer = fun producer -> mb.Post(RemoveProducer producer)
             if (metadata.Partitions > 0) then
-                let! producer = PartitionedProducerImpl.Init(producerConfig, config, connectionPool, metadata.Partitions, lookupService, interceptors, removeProducer)
+                let! producer = PartitionedProducerImpl.Init(producerConfig, config, connectionPool, metadata.Partitions,
+                                                             lookupService, activeSchema, interceptors, removeProducer)
                 mb.Post(AddProducer producer)
-                return producer
+                return producer :> IProducer<'T>
             else
-                let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, -1, lookupService, interceptors, removeProducer)
+                let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, -1, lookupService,
+                                                  activeSchema, interceptors, removeProducer)
                 mb.Post(AddProducer producer)
-                return producer
+                return producer :> IProducer<'T>
         }
 
-    member this.CreateReaderAsync (readerConfig: ReaderConfiguration) =
+    member internal this.CreateReaderAsync<'T> (readerConfig: ReaderConfiguration, schema: ISchema<'T>) =
         task {
             checkIfActive()
             Log.Logger.LogDebug("CreateReaderAsync started")
             let! metadata = this.GetPartitionedTopicMetadata readerConfig.Topic.CompleteTopicName
+            let! schemaProvider = this.PreProcessSchemaBeforeSubscribe(schema, readerConfig.Topic.CompleteTopicName)
             if (metadata.Partitions > 0)
             then
                 return failwith "Topic reader cannot be created on a partitioned topic"
             else
-                let! reader = Reader.Init(readerConfig, config, connectionPool, lookupService)
+                let! reader = ReaderImpl.Init(readerConfig, config, connectionPool, schema, schemaProvider, lookupService)
+                mb.Post(AddConsumer reader)
                 return reader
         }
 
@@ -186,3 +234,18 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
     member private this.ClientState
         with get() = Volatile.Read(&clientState)
         and set(value) = Volatile.Write(&clientState, value)
+        
+    member this.NewProducer() =
+        ProducerBuilder(this.CreateProducerAsync, Schema.BYTES())
+        
+    member this.NewProducer(schema) =
+        ProducerBuilder(this.CreateProducerAsync, schema)
+        
+    member this.NewConsumer() =
+        ConsumerBuilder(this.SubscribeAsync, this.CreateProducerAsync, Schema.BYTES())
+    member this.NewConsumer(schema) =
+        ConsumerBuilder(this.SubscribeAsync, this.CreateProducerAsync, schema)    
+    member this.NewReader() =
+        ReaderBuilder(this.CreateReaderAsync, Schema.BYTES())
+    member this.NewReader(schema) =
+        ReaderBuilder(this.CreateReaderAsync, schema)
