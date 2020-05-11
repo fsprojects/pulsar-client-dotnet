@@ -19,6 +19,8 @@
     <Compile Include="Compression.fs" />
     <Compile Include="ProducerInterceptor.fs" />
     <Compile Include="ConsumerInterceptor.fs" />
+    <Compile Include="Tls.fs" />
+    <Compile Include="Schema.fs" />
     <None Include="paket.references" />
     <Compile Include="Main.fs" />
   </ItemGroup>

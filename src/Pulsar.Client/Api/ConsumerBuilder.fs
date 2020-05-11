@@ -3,8 +3,9 @@
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open System
+open System.Threading.Tasks
 
-type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguration, consumerInterceptors: ConsumerInterceptors) =
+type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, config: ConsumerConfiguration<'T>, consumerInterceptors: ConsumerInterceptors<'T>, schema: ISchema<'T>) =
 
     [<Literal>]
     let MIN_ACK_TIMEOUT_MILLIS = 1000
@@ -12,7 +13,7 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
     [<Literal>]
     let DEFAULT_ACK_TIMEOUT_MILLIS_FOR_DEAD_LETTER = 30000.0
 
-    let verify(config : ConsumerConfiguration) =
+    let verify(config : ConsumerConfiguration<'T>) =
         let checkValue check config =
             check config |> ignore
             config
@@ -38,13 +39,13 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
                     c.KeySharedPolicy.IsSome && c.SubscriptionType <> SubscriptionType.KeyShared
                 ) "KeySharedPolicy must be set with KeyShared subscription")
 
-    new(client: PulsarClient) = ConsumerBuilder(client, ConsumerConfiguration.Default, ConsumerInterceptors.Empty)
+    internal new(createConsumerAsync, сreateProducerAsync, schema) = ConsumerBuilder(createConsumerAsync, сreateProducerAsync, ConsumerConfiguration.Default, ConsumerInterceptors.Empty, schema)
 
-    member private this.With(newConfig: ConsumerConfiguration) =
-        ConsumerBuilder(client, newConfig, consumerInterceptors)
+    member private this.With(newConfig: ConsumerConfiguration<'T>) =
+        ConsumerBuilder(createConsumerAsync, createProducerAsync, newConfig, consumerInterceptors, schema)
 
-    member private this.With(newInterceptors: ConsumerInterceptors) =
-        ConsumerBuilder(client, config, newInterceptors)
+    member private this.With(newInterceptors: ConsumerInterceptors<'T>) =
+        ConsumerBuilder(createConsumerAsync, createProducerAsync, config, newInterceptors, schema)
     
     member this.Topic topic =
         { config with
@@ -110,7 +111,6 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
         |> this.With
 
     member this.DeadLettersPolicy (deadLettersPolicy: DeadLettersPolicy) =
-
         let ackTimeoutTickTime =
             if config.AckTimeoutTickTime = TimeSpan.Zero
             then TimeSpan.FromMilliseconds(DEFAULT_ACK_TIMEOUT_MILLIS_FOR_DEAD_LETTER)
@@ -119,12 +119,12 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
         let getTopicName() = config.Topic.ToString()
         let getSubscriptionName() = config.SubscriptionName
         let createProducer deadLetterTopic =
-            ProducerBuilder(client)
+            ProducerBuilder(createProducerAsync, schema)
                 .Topic(deadLetterTopic)
                 .EnableBatching(false) // dead letters are sent one by one anyway
                 .CreateAsync()
         let deadLettersProcessor =
-            DeadLettersProcessor(deadLettersPolicy, getTopicName, getSubscriptionName, createProducer) :> IDeadLettersProcessor
+            DeadLettersProcessor(deadLettersPolicy, getTopicName, getSubscriptionName, createProducer) :> IDeadLettersProcessor<'T>
 
         { config with
             AckTimeoutTickTime = ackTimeoutTickTime
@@ -151,13 +151,11 @@ type ConsumerBuilder private (client: PulsarClient, config: ConsumerConfiguratio
                 |> Some }
         |> this.With
 
-    member this.Intercept ([<ParamArray>] interceptors: IConsumerInterceptor array) =
+    member this.Intercept ([<ParamArray>] interceptors: IConsumerInterceptor<'T> array) =
         if interceptors.Length = 0 then this
         else
             ConsumerInterceptors(Array.append consumerInterceptors.Interceptors interceptors)
             |> this.With
     
-    member this.SubscribeAsync() =
-        config
-        |> verify
-        |> client.SubscribeAsync consumerInterceptors
+    member this.SubscribeAsync(): Task<IConsumer<'T>> =
+        createConsumerAsync(verify config, schema, consumerInterceptors)

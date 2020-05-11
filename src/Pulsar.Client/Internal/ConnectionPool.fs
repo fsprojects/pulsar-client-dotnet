@@ -60,7 +60,44 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                 return reraize ex
         }
 
-    let remoteCertificateValidationCallback (sender: obj) (cert: X509Certificate) (chain: X509Chain) (errors: SslPolicyErrors) =
+    let remoteCertificateValidationCallback (_: obj) (cert: X509Certificate) (_: X509Chain) (errors: SslPolicyErrors) =
+        let CheckRemoteCertWithTrustCertificate() =
+            if isNull config.TlsTrustCertificate then
+                false
+            else
+                let chain = new X509Chain()
+                chain.ChainPolicy.VerificationFlags <-
+                    X509VerificationFlags.AllowUnknownCertificateAuthority +
+                    X509VerificationFlags.IgnoreEndRevocationUnknown +
+                    X509VerificationFlags.IgnoreCertificateAuthorityRevocationUnknown +
+                    X509VerificationFlags.IgnoreRootRevocationUnknown
+                chain.ChainPolicy.RevocationMode <- X509RevocationMode.NoCheck
+                let ca = config.TlsTrustCertificate
+                chain.ChainPolicy.ExtraStore.Add ca |> ignore
+                use cert2 = new X509Certificate2(cert)
+                if chain.Build(cert2) then
+                    let lastChainElm = chain.ChainElements.[chain.ChainElements.Count - 1]
+                    if lastChainElm.ChainElementStatus.Length = 1 then
+                        let status = lastChainElm.ChainElementStatus.[0].Status
+                        if status = X509ChainStatusFlags.UntrustedRoot then
+                            if System.Linq.Enumerable.SequenceEqual(lastChainElm.Certificate.RawData, ca.RawData) then
+                                Log.Logger.LogDebug("Used TlsTrustCertificate")
+                                true
+                            else
+                                Log.Logger.LogError("TlsTrustCertificate no equal with root certificate")
+                                false
+                        else
+                            Log.Logger.LogError("Root certificate status {0} no equal UntrustedRoot", status)
+                            false
+                    else
+                        let statusList =  chain.ChainStatus |> Seq.map string |> String.concat "; "
+                        Log.Logger.LogError("Root certificate status count > 1, status: {0}", statusList)
+                        false
+                else
+                    let statusList = chain.ChainStatus |> Seq.map string |> String.concat "; "
+                    Log.Logger.LogError("Builds an X.509 chain faild, status: {0}", statusList)
+                    false
+                        
         match errors with
         | SslPolicyErrors.None ->
             Log.Logger.LogDebug("No certificate errors")
@@ -74,24 +111,24 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             log("RemoteCertificateNameMismatch")
             result
         | SslPolicyErrors.RemoteCertificateChainErrors ->
-            let result =
-                config.TlsAllowInsecureConnection
-                ||
-                if isNull config.TlsTrustCertificate then
-                    false
-                else
-                    chain.ChainPolicy.ExtraStore.Add(config.TlsTrustCertificate) |> ignore
-                    use cert2 = new X509Certificate2(cert)
-                    chain.Build(cert2)
+            let result = config.TlsAllowInsecureConnection || CheckRemoteCertWithTrustCertificate()
             let log = if result then Log.Logger.LogWarning else Log.Logger.LogError
             log("RemoteCertificateChainErrors")
+            result
+        | error when error = SslPolicyErrors.RemoteCertificateChainErrors + SslPolicyErrors.RemoteCertificateNameMismatch ->
+            let result =
+                not config.TlsHostnameVerificationEnable &&
+                (config.TlsAllowInsecureConnection || CheckRemoteCertWithTrustCertificate())
+            let log = if result then Log.Logger.LogWarning else Log.Logger.LogError
+            log("RemoteCertificateChainErrors + RemoteCertificateNameMismatch")
             result
         | error ->
             Log.Logger.LogError("Unknown ssl error: {0}", error)
             false
 
-    let connect (broker: Broker, maxMessageSize: int) =
-        Log.Logger.LogInformation("Connecting to {0}", broker)
+    let connect (broker: Broker, maxMessageSize: int, brokerless: bool) =
+        Log.Logger.LogInformation("Connecting to {0} with maxMessageSize: {1}, brokerless: {2}",
+                                  broker, maxMessageSize, brokerless)
         task {
             let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
             let (LogicalAddress logicalAddress) = broker.LogicalAddress
@@ -103,7 +140,9 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                     if config.UseTls then
                         Log.Logger.LogDebug("Configuring ssl for {0}", physicalAddress)
                         let sslStream = new SslStream(new NetworkStream(socket), false, RemoteCertificateValidationCallback(remoteCertificateValidationCallback))
-                        do! sslStream.AuthenticateAsClientAsync(physicalAddress.Host)
+                        let clientCertificates = config.Authentication.GetAuthData(physicalAddress.Host).GetTlsCertificates()
+                        do! sslStream.AuthenticateAsClientAsync(physicalAddress.Host, clientCertificates, config.TlsProtocols, false)
+                        
                         let pipeConnection = StreamConnection.GetDuplex(sslStream, pipeOptions)
                         let writerStream = StreamConnection.GetWriter(pipeConnection.Output)
                         return
@@ -126,7 +165,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             let initialConnectionTsc = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
             let unregisterClientCnx (broker: Broker) =
                 connections.TryRemove(broker.LogicalAddress) |> ignore
-            let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, initialConnectionTsc, unregisterClientCnx)
+            let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, brokerless, initialConnectionTsc, unregisterClientCnx)
             let proxyToBroker = if physicalAddress = logicalAddress then None else Some logicalAddress
             let authenticationDataProvider = config.Authentication.GetAuthData(physicalAddress.Host);
             let authData = authenticationDataProvider.Authenticate({ Bytes = AuthData.INIT_AUTH_DATA })
@@ -140,18 +179,19 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             return! initialConnectionTsc.Task
         }
 
-    member this.GetConnection (broker: Broker, maxMessageSize: int) =
+    member this.GetConnection (broker: Broker, maxMessageSize: int, brokerless: bool) =
         let t = connections.GetOrAdd(broker.LogicalAddress, fun(address) ->
-                lazy connect(broker, maxMessageSize)).Value
+                lazy connect(broker, maxMessageSize, brokerless)).Value
         if t.IsFaulted then            
             Log.Logger.LogInformation("Removing faulted task to {0}", broker)
             connections.TryRemove(broker.LogicalAddress) |> ignore
-            this.GetConnection(broker, maxMessageSize)
+            t
         else
             t        
             
     member this.GetBrokerlessConnection (address: DnsEndPoint) =
-        this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address }, Commands.DEFAULT_MAX_MESSAGE_SIZE)
+        this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address },
+                           Commands.DEFAULT_MAX_MESSAGE_SIZE, true)
 
     member this.Close() =
         connections

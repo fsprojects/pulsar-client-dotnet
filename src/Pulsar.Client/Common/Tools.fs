@@ -19,8 +19,16 @@ let inline int32ToBigEndian(num : Int32) =
 
 let inline int32FromBigEndian(num : Int32) =
     IPAddress.NetworkToHostOrder(num)
-
+    
+let inline int16ToBigEndian(num : Int16) =
+    IPAddress.HostToNetworkOrder(num)
 let inline int16FromBigEndian(num : Int16) =
+    IPAddress.NetworkToHostOrder(num)
+
+let inline int64ToBigEndian(num : Int64) =
+    IPAddress.HostToNetworkOrder(num)
+
+let inline int64FromBigEndian(num : Int64) =
     IPAddress.NetworkToHostOrder(num)
 
 // Exception helper
@@ -53,7 +61,19 @@ let reraize<'a> ex =
     (ExceptionDispatchInfo.Capture ex).Throw()
     Unchecked.defaultof<'a>
 
-let throwIfNotNull (exn:Exception) = if not(isNull exn) then raise exn 
+let throwIfNotNull (exn:Exception) = if not(isNull exn) then raise exn
+
+// DateTime conversions
+
+let UTC_EPOCH = DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+let convertToMsTimestamp dateTime =
+    let elapsed = dateTime - UTC_EPOCH
+    elapsed.TotalMilliseconds |> int64
+
+let convertToDateTime (msTimestamp: int64) =
+    let ms = msTimestamp |> float
+    UTC_EPOCH.AddMilliseconds ms
+
 // Mix
 
 let asyncDelay delay work =

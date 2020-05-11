@@ -2,7 +2,6 @@
 
 open System
 open Expecto
-open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
 open System.Threading.Tasks
@@ -25,14 +24,14 @@ let tests =
             let consumerName = "propsTestConsumer"
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
@@ -65,14 +64,14 @@ let tests =
             let producerName = "PartitionedProducer"
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer1 =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.KeyShared)
@@ -81,7 +80,7 @@ let tests =
                     .SubscribeAsync() |> Async.AwaitTask
 
             let! consumer2 =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.KeyShared)
@@ -95,7 +94,7 @@ let tests =
                         let firstKey = "111111"
                         let secondKey = "444444"
                         let getMessageBuilder key i =
-                            MessageBuilder(Encoding.UTF8.GetBytes(key + "Hello" + i), key)
+                            producer.NewMessage(Encoding.UTF8.GetBytes(key + "Hello" + i), key)
                         let! _ = producer.SendAsync(getMessageBuilder firstKey "0")
                         let! _ = producer.SendAsync(getMessageBuilder secondKey "0")
                         let! _ = producer.SendAsync(getMessageBuilder firstKey "1")
@@ -160,7 +159,7 @@ let tests =
             let consumerName = "propsTestConsumer"
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)

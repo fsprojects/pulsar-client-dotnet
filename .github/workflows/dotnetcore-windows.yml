@@ -29,4 +29,4 @@ jobs:
     - name: Run Unit Tests
       run: |
         cd tests/UnitTests
-        dotnet test -c Release --no-build
+        dotnet run -c Release --no-build

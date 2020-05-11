@@ -8,20 +8,20 @@ open FSharp.UMX
 
 type internal SinglePartitionMessageRouterImpl (partitionIndex: int, hashFun: string -> int) =
     interface IMessageRouter with
-        member this.ChoosePartition (messageKey, numPartitions) =
-            if String.IsNullOrEmpty(%messageKey) then
+        member this.ChoosePartition (partitionKey, numPartitions) =
+            if String.IsNullOrEmpty(%partitionKey) then
                 partitionIndex
             else
                 // If the message has a key, it supersedes the single partition routing policy
-                signSafeMod (hashFun %messageKey) numPartitions
+                signSafeMod (hashFun %partitionKey) numPartitions
 
 type internal RoundRobinPartitionMessageRouterImpl (startPartitionIndex: int, isBatchingEnabled: bool, partitionSwitchMs: int, hashFun: string -> int) =
     let mutable partitionIndex = startPartitionIndex
     let partitionSwitchMs = Math.Max(1, partitionSwitchMs)
 
     interface IMessageRouter with
-        member this.ChoosePartition (messageKey, numPartitions) =
-            if String.IsNullOrEmpty(%messageKey) then
+        member this.ChoosePartition (partitionKey, numPartitions) =
+            if String.IsNullOrEmpty(%partitionKey) then
                 if isBatchingEnabled
                 then
                     let currentMs = DateTime.Now.Millisecond
@@ -30,4 +30,4 @@ type internal RoundRobinPartitionMessageRouterImpl (startPartitionIndex: int, is
                     signSafeMod (Interlocked.Increment(&partitionIndex)) numPartitions
             else
                 // If the message has a key, it supersedes the single partition routing policy
-                signSafeMod (hashFun %messageKey) numPartitions
+                signSafeMod (hashFun %partitionKey) numPartitions

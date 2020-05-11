@@ -7,7 +7,6 @@ open Pulsar.Client.Internal
 open Pulsar.Client.UnitTests.Internal
 open Pulsar.Client.Common
 open System
-open System.Collections.Concurrent
 open System.Threading.Tasks
 
 [<Tests>]

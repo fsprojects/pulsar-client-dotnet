@@ -23,6 +23,7 @@
     <Compile Include="Internal\ManualInvokeScheduler.fs" />
     <Compile Include="Internal\UnAckedMessageTrackerTests.fs" />
     <Compile Include="Internal\NegativeAcksTracker.fs" />
+    <Compile Include="Internal\SchemaTests.fs" />
     <None Include="paket.references" />
     <Compile Include="Tests.fs" />
     <Compile Include="Main.fs" />

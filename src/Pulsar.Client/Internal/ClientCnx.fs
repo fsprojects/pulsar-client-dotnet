@@ -7,7 +7,6 @@ open Microsoft.Extensions.Logging
 open System.Threading.Tasks
 open pulsar.proto
 open System
-open System
 open FSharp.UMX
 open System.Buffers
 open System.IO
@@ -15,25 +14,40 @@ open ProtoBuf
 open System.Threading
 open Pulsar.Client.Api
 
-type internal RequestsOperation =
+type internal ProducerOperations =
+    {
+        AckReceived: SendReceipt -> unit
+        TopicTerminatedError: unit -> unit
+        RecoverChecksumError: SequenceId -> unit
+        ConnectionClosed: ClientCnx -> unit
+    }    
+and internal ConsumerOperations =
+    {
+        MessageReceived: RawMessage * ClientCnx -> unit
+        ReachedEndOfTheTopic: unit -> unit
+        ActiveConsumerChanged: bool -> unit
+        ConnectionClosed: ClientCnx -> unit
+    }
+    
+and internal RequestsOperation =
     | AddRequest of RequestId * TaskCompletionSource<PulsarResponseType>
     | CompleteRequest of RequestId * PulsarResponseType
     | FailRequest of RequestId * exn
     | FailAllRequestsAndStop
-
-type internal CnxOperation =
-    | AddProducer of ProducerId * MailboxProcessor<ProducerMessage>
-    | AddConsumer of ConsumerId * MailboxProcessor<ConsumerMessage>
+    
+and internal CnxOperation =
+    | AddProducer of ProducerId * ProducerOperations
+    | AddConsumer of ConsumerId * ConsumerOperations
     | RemoveConsumer of ConsumerId
     | RemoveProducer of ProducerId
     | ChannelInactive
     | Stop
-
-type internal PulsarCommand =
+    
+and internal PulsarCommand =
     | XCommandConnected of CommandConnected
     | XCommandPartitionedTopicMetadataResponse of CommandPartitionedTopicMetadataResponse
     | XCommandSendReceipt of CommandSendReceipt
-    | XCommandMessage of (CommandMessage * MessageMetadata * byte[] )
+    | XCommandMessage of (CommandMessage * MessageMetadata * byte[] * bool )
     | XCommandPing of CommandPing
     | XCommandLookupTopicResponse of CommandLookupTopicResponse
     | XCommandProducerSuccess of CommandProducerSuccess
@@ -45,27 +59,30 @@ type internal PulsarCommand =
     | XCommandCloseConsumer of CommandCloseConsumer
     | XCommandReachedEndOfTopic of CommandReachedEndOfTopic
     | XCommandActiveConsumerChange of CommandActiveConsumerChange
+    | XCommandGetSchemaResponse of CommandGetSchemaResponse
     | XCommandError of CommandError
 
-type internal CommandParseError =
+and internal CommandParseError =
     | IncompleteCommand
+    | CorruptedCommand of exn
     | UnknownCommandType of BaseCommand.Type
 
-type internal SocketMessage =
+and internal SocketMessage =
     | SocketMessageWithReply of Payload * AsyncReplyChannel<bool>
     | SocketMessageWithoutReply of Payload
     | SocketRequestMessageWithReply of RequestId * Payload * AsyncReplyChannel<Task<PulsarResponseType>>
     | Stop
 
-type internal ClientCnx (config: PulsarClientConfiguration,
+and internal ClientCnx (config: PulsarClientConfiguration,
                 broker: Broker,
                 connection: Connection,
                 maxMessageSize: int,
+                brokerless: bool,
                 initialConnectionTsc: TaskCompletionSource<ClientCnx>,
                 unregisterClientCnx: Broker -> unit) as this =
 
-    let consumers = Dictionary<ConsumerId, MailboxProcessor<ConsumerMessage>>()
-    let producers = Dictionary<ProducerId, MailboxProcessor<ProducerMessage>>()
+    let consumers = Dictionary<ConsumerId, ConsumerOperations>()
+    let producers = Dictionary<ProducerId, ProducerOperations>()
     let requests = Dictionary<RequestId, TaskCompletionSource<PulsarResponseType>>()
     let clientCnxId = Generators.getNextClientCnxId()
     let prefix = sprintf "clientCnx(%i, %A)" %clientCnxId broker.LogicalAddress
@@ -118,13 +135,13 @@ type internal ClientCnx (config: PulsarClientConfiguration,
         let rec loop () =
             async {
                 match! inbox.Receive() with
-                | AddProducer (producerId, mb) ->
+                | AddProducer (producerId, producerOperation) ->
                     Log.Logger.LogDebug("{0} adding producer {1}", prefix, producerId)
-                    producers.Add(producerId, mb)
+                    producers.Add(producerId, producerOperation)
                     return! loop()
-                | AddConsumer (consumerId, mb) ->
+                | AddConsumer (consumerId, consumerOperation) ->
                     Log.Logger.LogDebug("{0} adding consumer {1}", prefix, consumerId)
-                    consumers.Add(consumerId, mb)
+                    consumers.Add(consumerId, consumerOperation)
                     return! loop()
                 | RemoveConsumer consumerId ->
                     Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
@@ -144,10 +161,10 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                         isActive <- false
                         unregisterClientCnx(broker)
                         requestsMb.Post(FailAllRequestsAndStop)
-                        consumers |> Seq.iter(fun kv ->
-                            kv.Value.Post(ConsumerMessage.ConnectionClosed this))
-                        producers |> Seq.iter(fun kv ->
-                            kv.Value.Post(ProducerMessage.ConnectionClosed this))
+                        consumers |> Seq.iter(fun (KeyValue(_,consumerOperation)) ->
+                            consumerOperation.ConnectionClosed(this))
+                        producers |> Seq.iter(fun (KeyValue(_,producerOperation)) ->
+                            producerOperation.ConnectionClosed(this))
                     return! loop()
                 | CnxOperation.Stop ->
                     Log.Logger.LogDebug("{0} operationsMb stopped", prefix)
@@ -189,7 +206,22 @@ type internal ClientCnx (config: PulsarClientConfiguration,
         loop ()
     )
 
-    let wrapCommand readMessage (command: BaseCommand) =
+    let readMessage (reader: BinaryReader) (stream: MemoryStream) frameLength =
+        reader.ReadInt16() |> int16FromBigEndian |> invalidArgIf ((<>) MagicNumber) "Invalid magicNumber" |> ignore
+        let messageCheckSum  = reader.ReadInt32() |> int32FromBigEndian
+        let metadataPointer = stream.Position
+        let metadata = Serializer.DeserializeWithLengthPrefix<MessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
+        let payloadPointer = stream.Position
+        let metadataLength = payloadPointer - metadataPointer |> int
+        let payloadLength = frameLength - (int payloadPointer)
+        let payload = reader.ReadBytes(payloadLength)
+        stream.Seek(metadataPointer, SeekOrigin.Begin) |> ignore
+        let calculatedCheckSum = CRC32C.Get(0u, stream, metadataLength + payloadLength) |> int32
+        if (messageCheckSum <> calculatedCheckSum) then
+            Log.Logger.LogError("{0} Invalid checksum. Received: {1} Calculated: {2}", prefix, messageCheckSum, calculatedCheckSum)
+        (metadata, payload, messageCheckSum = calculatedCheckSum)
+    
+    let readCommand (command: BaseCommand) reader stream frameLength =
         match command.``type`` with
         | BaseCommand.Type.Connected ->
             Ok (XCommandConnected command.Connected)
@@ -198,8 +230,8 @@ type internal ClientCnx (config: PulsarClientConfiguration,
         | BaseCommand.Type.SendReceipt ->
             Ok (XCommandSendReceipt command.SendReceipt)
         | BaseCommand.Type.Message ->
-           let metadata,payload = readMessage()
-           Ok (XCommandMessage (command.Message, metadata, payload))
+            let (metadata,payload,checksumValid) = readMessage reader stream frameLength
+            Ok (XCommandMessage (command.Message, metadata, payload, checksumValid))
         | BaseCommand.Type.LookupResponse ->
             Ok (XCommandLookupTopicResponse command.lookupTopicResponse)
         | BaseCommand.Type.Ping ->
@@ -222,11 +254,13 @@ type internal ClientCnx (config: PulsarClientConfiguration,
             Ok (XCommandGetLastMessageIdResponse command.getLastMessageIdResponse)
         | BaseCommand.Type.ActiveConsumerChange ->
             Ok (XCommandActiveConsumerChange command.ActiveConsumerChange)
+        | BaseCommand.Type.GetSchemaResponse ->
+            Ok (XCommandGetSchemaResponse command.getSchemaResponse)
         | BaseCommand.Type.Error ->
             Ok (XCommandError command.Error)
         | unknownType ->
             Result.Error (UnknownCommandType unknownType)
-
+    
     let tryParse (buffer: ReadOnlySequence<byte>) =
         let array = buffer.ToArray()
         if (array.Length >= 8) then
@@ -234,27 +268,20 @@ type internal ClientCnx (config: PulsarClientConfiguration,
             use reader = new BinaryReader(stream)
             let totalength = reader.ReadInt32() |> int32FromBigEndian
             let frameLength = totalength + 4
-            if (array.Length >= frameLength) then
-                let readMessage() =
-                    reader.ReadInt16() |> int16FromBigEndian |> invalidArgIf ((<>) MagicNumber) "Invalid magicNumber" |> ignore
-                    let messageCheckSum  = reader.ReadInt32() |> int32FromBigEndian
-                    let metadataPointer = stream.Position
-                    let metadata = Serializer.DeserializeWithLengthPrefix<MessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
-                    let payloadPointer = stream.Position
-                    let metadataLength = payloadPointer - metadataPointer |> int
-                    let payloadLength = frameLength - (int payloadPointer)
-                    let payload = reader.ReadBytes(payloadLength)
-                    stream.Seek(metadataPointer, SeekOrigin.Begin) |> ignore
-                    CRC32C.Get(0u, stream, metadataLength + payloadLength) |> int32 |> invalidArgIf ((<>) messageCheckSum) "Invalid checksum" |> ignore
-                    metadata, payload
+            if (array.Length >= frameLength) then                
                 let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
                 Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
                 let consumed = int64 frameLength |> buffer.GetPosition
-                wrapCommand readMessage command, consumed
+                try
+                    let wrappedCommand = readCommand command reader stream frameLength
+                    wrappedCommand, consumed
+                with ex ->
+                    Result.Error (CorruptedCommand ex), consumed
             else
                 Result.Error IncompleteCommand, SequencePosition()
         else
             Result.Error IncompleteCommand, SequencePosition()
+        
 
     let handleSuccess requestId result =
         requestsMb.Post(CompleteRequest(requestId, result))
@@ -294,7 +321,10 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                         rejectedRequests, rejectedRequestResetTimeSec);
                 this.Close()
 
-    let getMessageReceived (cmd: CommandMessage) (messageMetadata: MessageMetadata) payload =
+    let getOptionalSchemaVersion =
+        Option.ofObj >> Option.map SchemaVersion
+    
+    let getMessageReceived (cmd: CommandMessage) (messageMetadata: MessageMetadata) payload checkSumValid =
         let mapCompressionType = function
             | pulsar.proto.CompressionType.None -> Pulsar.Client.Common.CompressionType.None
             | pulsar.proto.CompressionType.Lz4 -> Pulsar.Client.Common.CompressionType.LZ4
@@ -307,13 +337,17 @@ type internal ClientCnx (config: PulsarClientConfiguration,
             HasNumMessagesInBatch = messageMetadata.ShouldSerializeNumMessagesInBatch()
             CompressionType = messageMetadata.Compression |> mapCompressionType
             UncompressedMessageSize = messageMetadata.UncompressedSize |> int32
-        }
-        MessageReceived {
+            SchemaVersion = getOptionalSchemaVersion messageMetadata.SchemaVersion
+        } 
+            
+        {
             MessageId = { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); Type = Individual; Partition = -1; TopicName = %"" }
             RedeliveryCount = cmd.RedeliveryCount
             Metadata = medadata
             Payload = payload
-            MessageKey = %messageMetadata.PartitionKey
+            MessageKey = messageMetadata.PartitionKey
+            IsKeyBase64Encoded = messageMetadata.PartitionKeyB64Encoded
+            CheckSumValid = checkSumValid
             Properties =
                 if messageMetadata.Properties.Count > 0 then
                     messageMetadata.Properties
@@ -326,9 +360,9 @@ type internal ClientCnx (config: PulsarClientConfiguration,
     let handleCommand xcmd =
         match xcmd with
         | XCommandConnected cmd ->
-            Log.Logger.LogInformation("{0} Connected ProtocolVersion: {1} ServerVersion: {2} MaxMessageSize: {3}",
-                prefix, cmd.ProtocolVersion, cmd.ServerVersion, cmd.MaxMessageSize)
-            if cmd.ShouldSerializeMaxMessageSize() && maxMessageSize <> cmd.MaxMessageSize then
+            Log.Logger.LogInformation("{0} Connected ProtocolVersion: {1} ServerVersion: {2} MaxMessageSize: {3} Brokerless: {4}",
+                prefix, cmd.ProtocolVersion, cmd.ServerVersion, cmd.MaxMessageSize, brokerless)
+            if cmd.ShouldSerializeMaxMessageSize() && (not brokerless) && maxMessageSize <> cmd.MaxMessageSize then
                 initialConnectionTsc.SetException(MaxMessageSizeChanged cmd.MaxMessageSize)
             else
                 initialConnectionTsc.SetResult(this)
@@ -340,26 +374,26 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                 let result = PartitionedTopicMetadata { Partitions = int cmd.Partitions }
                 handleSuccess %cmd.RequestId result
         | XCommandSendReceipt cmd ->
-            let producerMb = producers.[%cmd.ProducerId]
-            producerMb.Post(AckReceived { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); SequenceId = %cmd.SequenceId })
+            let producerOperations = producers.[%cmd.ProducerId]
+            producerOperations.AckReceived { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); SequenceId = %cmd.SequenceId }
         | XCommandSendError cmd ->
             Log.Logger.LogWarning("{0} Received send error from server: {1} : {2}", prefix, cmd.Error, cmd.Message)
-            let producerMb = producers.[%cmd.ProducerId]
+            let producerOperations = producers.[%cmd.ProducerId]
             match cmd.Error with
             | ServerError.ChecksumError ->
-                producerMb.Post(RecoverChecksumError %cmd.SequenceId)
+                producerOperations.RecoverChecksumError %cmd.SequenceId
             | ServerError.TopicTerminatedError ->
-                producerMb.Post(Terminated)
+                producerOperations.TopicTerminatedError()
             | _ ->
                 // By default, for transient error, let the reconnection logic
                 // to take place and re-establish the produce again
                 this.Close()
         | XCommandPing _ ->
             Commands.newPong() |> SocketMessageWithoutReply |> sendMb.Post
-        | XCommandMessage (cmd, metadata, payload) ->
-            let consumerMb = consumers.[%cmd.ConsumerId]
-            let msgReceived = getMessageReceived cmd metadata payload
-            consumerMb.Post(msgReceived)
+        | XCommandMessage (cmd, metadata, payload, checkSumValid) ->
+            let consumerOperations = consumers.[%cmd.ConsumerId]
+            let msgReceived = getMessageReceived cmd metadata payload checkSumValid
+            consumerOperations.MessageReceived(msgReceived, this)
         | XCommandLookupTopicResponse cmd ->
             if (cmd.ShouldSerializeError()) then
                 checkServerError cmd.Error cmd.Message
@@ -372,20 +406,23 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                     Proxy = cmd.ProxyThroughServiceUrl
                     Authoritative = cmd.Authoritative }
                 handleSuccess %cmd.RequestId result
-        | XCommandProducerSuccess cmd ->
-            let result = ProducerSuccess { GeneratedProducerName = cmd.ProducerName }
+        | XCommandProducerSuccess cmd ->            
+            let result = ProducerSuccess {
+                GeneratedProducerName = cmd.ProducerName
+                SchemaVersion = getOptionalSchemaVersion cmd.SchemaVersion
+            }
             handleSuccess %cmd.RequestId result
         | XCommandSuccess cmd ->
             handleSuccess %cmd.RequestId Empty
         | XCommandCloseProducer cmd ->
-            let producerMb = producers.[%cmd.ProducerId]
-            producerMb.Post (ProducerMessage.ConnectionClosed this)
+            let producerOperations = producers.[%cmd.ProducerId]
+            producerOperations.ConnectionClosed(this)
         | XCommandCloseConsumer cmd ->
-            let consumerMb = consumers.[%cmd.ConsumerId]
-            consumerMb.Post (ConsumerMessage.ConnectionClosed this)
+            let consumerOperations = consumers.[%cmd.ConsumerId]
+            consumerOperations.ConnectionClosed(this)
         | XCommandReachedEndOfTopic cmd ->
-            let consumerMb = consumers.[%cmd.ConsumerId]
-            consumerMb.Post ReachedEndOfTheTopic
+            let consumerOperations = consumers.[%cmd.ConsumerId]
+            consumerOperations.ReachedEndOfTheTopic()
         | XCommandGetTopicsOfNamespaceResponse cmd ->
             let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
             handleSuccess %cmd.RequestId result
@@ -398,8 +435,22 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                 TopicName = %"" }
             handleSuccess %cmd.RequestId result
         | XCommandActiveConsumerChange cmd ->
-            let consumerMb = consumers.[%cmd.ConsumerId]
-            consumerMb.Post (ActiveConsumerChanged cmd.IsActive)
+            let consumerOperations = consumers.[%cmd.ConsumerId]
+            consumerOperations.ActiveConsumerChanged(cmd.IsActive)
+        | XCommandGetSchemaResponse cmd ->
+            if (cmd.ShouldSerializeErrorCode()) then
+                if cmd.ErrorCode = ServerError.TopicNotFound then
+                    let result = TopicSchema None
+                    handleSuccess %cmd.RequestId result
+                else
+                    checkServerError cmd.ErrorCode cmd.ErrorMessage
+                    handleError %cmd.RequestId cmd.ErrorCode cmd.ErrorMessage
+            else            
+                let result = TopicSchema ({
+                    SchemaInfo = getSchemaInfo cmd.Schema
+                    SchemaVersion = getOptionalSchemaVersion cmd.SchemaVersion
+                } |> Some)
+                handleSuccess %cmd.RequestId result
         | XCommandError cmd ->
             Log.Logger.LogError("{0} CommandError Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
             handleError %cmd.RequestId cmd.Error cmd.Message
@@ -422,14 +473,18 @@ type internal ClientCnx (config: PulsarClientConfiguration,
                         continueLooping <- false
                     else
                         match tryParse buffer with
-                        | Result.Ok (xcmd), consumed ->
+                        | Result.Ok xcmd, consumed ->
                             handleCommand xcmd
                             reader.AdvanceTo consumed
                         | Result.Error IncompleteCommand, _ ->
-                            Log.Logger.LogDebug("{0} IncompleteCommand received", prefix)
+                            Log.Logger.LogDebug("IncompleteCommand received", prefix)
                             reader.AdvanceTo(buffer.Start, buffer.End)
-                        | Result.Error (UnknownCommandType unknownType), _ ->
-                            failwithf "Unknown command type %A" unknownType
+                        | Result.Error (CorruptedCommand ex), consumed ->
+                            Log.Logger.LogError(ex, "{0} Ignoring corrupted command.", prefix)
+                            reader.AdvanceTo consumed
+                        | Result.Error (UnknownCommandType unknownType), consumed ->
+                            Log.Logger.LogError("{0} UnknownCommandType {1}, ignoring message", prefix, unknownType)
+                            reader.AdvanceTo consumed
             with ex ->
                 if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
                     Log.Logger.LogWarning("{0} New connection was aborted", prefix)
@@ -467,11 +522,11 @@ type internal ClientCnx (config: PulsarClientConfiguration,
     member this.RemoveProducer (consumerId: ProducerId) =
         operationsMb.Post(RemoveProducer(consumerId))
 
-    member this.AddProducer (producerId: ProducerId) (producerMb: MailboxProcessor<ProducerMessage>) =
-        operationsMb.Post(AddProducer (producerId, producerMb))
+    member this.AddProducer (producerId: ProducerId, producerOperations: ProducerOperations) =
+        operationsMb.Post(AddProducer (producerId, producerOperations))
 
-    member this.AddConsumer (consumerId: ConsumerId) (consumerMb: MailboxProcessor<ConsumerMessage>) =
-        operationsMb.Post(AddConsumer (consumerId, consumerMb))
+    member this.AddConsumer (consumerId: ConsumerId, consumerOperations: ConsumerOperations) =
+        operationsMb.Post(AddConsumer (consumerId, consumerOperations))
 
     member this.Close() =
         connection.Dispose()

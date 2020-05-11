@@ -10,7 +10,11 @@
     <Compile Include="Reader.fs" />
     <Compile Include="Simple.fs" />
     <Compile Include="RealWorld.fs" />
+    <Compile Include="TlsAuthentication.fs" />
     <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Pulsar.Client\Pulsar.Client.fsproj" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>

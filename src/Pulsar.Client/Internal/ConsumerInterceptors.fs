@@ -5,11 +5,11 @@ open Microsoft.Extensions.Logging
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
-type internal ConsumerInterceptors(interceptors: IConsumerInterceptor array) =
+type internal ConsumerInterceptors<'T>(interceptors: IConsumerInterceptor<'T> array) =
      member this.Interceptors = interceptors
-     static member Empty with get() = ConsumerInterceptors([||])
+     static member Empty with get() = ConsumerInterceptors<'T>([||])
      
-     member this.BeforeConsume (consumer: IConsumer, msg: Message) =
+     member this.BeforeConsume (consumer: IConsumer<'T>, msg: Message<'T>) =
           let mutable interceptorMessage = msg         
           for interceptor in interceptors do
                try
@@ -18,21 +18,21 @@ type internal ConsumerInterceptors(interceptors: IConsumerInterceptor array) =
                     Log.Logger.LogWarning("Error executing interceptor beforeConsume callback topic: {0} consumerId: {1}", consumer.Topic, consumer.ConsumerId, e)
           interceptorMessage
         
-     member this.OnAcknowledge (consumer: IConsumer, msgId: MessageId, exn: Exception) =
+     member this.OnAcknowledge (consumer: IConsumer<'T>, msgId: MessageId, exn: Exception) =
           for interceptor in interceptors do
                try
                     interceptor.OnAcknowledge(consumer, msgId, exn)
                with e ->
                     Log.Logger.LogWarning("Error executing interceptor OnAcknowledge callback", e);
                     
-     member this.OnAcknowledgeCumulative (consumer: IConsumer, msgId: MessageId, exn: Exception)=
+     member this.OnAcknowledgeCumulative (consumer: IConsumer<'T>, msgId: MessageId, exn: Exception)=
           for interceptor in interceptors do
                try
                     interceptor.OnAcknowledgeCumulative(consumer, msgId, exn)
                with e ->
                     Log.Logger.LogWarning("Error executing interceptor OnAcknowledgeCumulative callback", e);
 
-     member this.OnNegativeAcksSend (consumer: IConsumer, msgIdSet: MessageId seq) =
+     member this.OnNegativeAcksSend (consumer: IConsumer<'T>, msgIdSet: MessageId seq) =
           for msgId in msgIdSet do
                for interceptor in interceptors do
                     try
@@ -40,7 +40,7 @@ type internal ConsumerInterceptors(interceptors: IConsumerInterceptor array) =
                     with e ->
                          Log.Logger.LogWarning("Error executing interceptor OnNegativeAcksSend callback", e);
           
-     member this.OnAckTimeoutSend (consumer: IConsumer, msgIdSet: MessageId seq)  =
+     member this.OnAckTimeoutSend (consumer: IConsumer<'T>, msgIdSet: MessageId seq)  =
           for msgId in msgIdSet do
                for interceptor in interceptors do
                     try

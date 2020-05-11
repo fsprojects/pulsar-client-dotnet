@@ -21,19 +21,31 @@ let runSimple () =
     task {
 
         let! producer =
-            ProducerBuilder(client)
+            client.NewProducer()
                 .Topic(topicName)
                 .CreateAsync()
 
         let! consumer =
-            ConsumerBuilder(client)
+            client.NewConsumer()
                 .Topic(topicName)
                 .SubscriptionName(subscriptionName)
                 .SubscriptionType(SubscriptionType.Exclusive)
                 .SubscribeAsync()
         
-        let! messageId = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Sent from F# at '%A'" DateTime.Now))
-        printfn "MessageId is: '%A'" messageId
+        
+        let! result =
+            if true then
+                task {
+                    let! messageId = producer.SendAsync([||])
+                    return messageId
+                }
+            else
+                task {
+                    return MessageId.Earliest
+                }
+                
+                
+        printfn "MessageId is: '%A'" result
 
         let! message = consumer.ReceiveAsync()
         printfn "Received: %A" (message.Data |> Encoding.UTF8.GetString)

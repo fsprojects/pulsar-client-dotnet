@@ -27,14 +27,14 @@ let tests =
             let messagesNumber = 100
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("batch consumer")
                     .SubscriptionName("batch-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName("batch producer")
                     .EnableBatching(true)
@@ -58,14 +58,14 @@ let tests =
             let messagesNumber = 5
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("batch consumer")
                     .SubscriptionName("batch-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName("batch producer")
                     .EnableBatching(true)
@@ -92,14 +92,14 @@ let tests =
             let messagesNumber = 100
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("batch consumer")
                     .SubscriptionName("batch-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName("batch producer")
                     .EnableBatching(true)
@@ -125,14 +125,14 @@ let tests =
             let consumerName = "propsTestConsumer"
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(true)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
@@ -165,7 +165,7 @@ let tests =
             let numberOfMessages = 10
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(true)
@@ -174,7 +174,7 @@ let tests =
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
@@ -214,14 +214,14 @@ let tests =
             let batchTimeout = TimeSpan.FromSeconds(2.0)
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
@@ -256,7 +256,7 @@ let tests =
                         sw.Restart()
                         let! messagesBatch2 = consumer.BatchReceiveAsync()
                         let secondBatchTime = sw.Elapsed
-                        if secondBatchTime < batchTimeout then
+                        if secondBatchTime < (batchTimeout - TimeSpan.FromMilliseconds(15.0)) then
                                 failwith <| sprintf "Too fast to get second batch consumer %s passed %f ms" consumerName secondBatchTime.TotalMilliseconds
                         for message in messagesBatch2 do    
                             let received = Encoding.UTF8.GetString(message.Data)                        

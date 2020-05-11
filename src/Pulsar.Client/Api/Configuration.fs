@@ -3,6 +3,7 @@
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open System
+open System.Security.Authentication
 open System.Security.Cryptography.X509Certificates
 
 type PulsarClientConfiguration =
@@ -15,6 +16,7 @@ type PulsarClientConfiguration =
         TlsAllowInsecureConnection: bool
         TlsTrustCertificate: X509Certificate2
         Authentication: Authentication
+        TlsProtocols: SslProtocols
     }
     static member Default =
         {
@@ -26,9 +28,10 @@ type PulsarClientConfiguration =
             TlsAllowInsecureConnection = false
             TlsTrustCertificate = null
             Authentication = Authentication.AuthenticationDisabled
+            TlsProtocols = SslProtocols.None
         }
 
-type ConsumerConfiguration =
+type ConsumerConfiguration<'T> =
     {
         Topic: TopicName
         ConsumerName: string
@@ -45,7 +48,7 @@ type ConsumerConfiguration =
         ReadCompacted: bool
         NegativeAckRedeliveryDelay: TimeSpan
         ResetIncludeHead: bool
-        DeadLettersProcessor : IDeadLettersProcessor
+        DeadLettersProcessor : IDeadLettersProcessor<'T>
         KeySharedPolicy: KeySharedPolicy option
         BatchReceivePolicy: BatchReceivePolicy
     }
@@ -66,7 +69,7 @@ type ConsumerConfiguration =
             ReadCompacted = false
             NegativeAckRedeliveryDelay = TimeSpan.FromMinutes(1.0)
             ResetIncludeHead = false
-            DeadLettersProcessor = DeadLettersProcessor.Disabled
+            DeadLettersProcessor = DeadLettersProcessor<'T>.Disabled
             KeySharedPolicy = None
             BatchReceivePolicy = BatchReceivePolicy()
         }

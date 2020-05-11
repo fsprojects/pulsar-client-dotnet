@@ -2,6 +2,6 @@
 
     open System.Runtime.CompilerServices
 
-    [<InternalsVisibleToAttribute("UnitTests")>]
+    [<InternalsVisibleTo("UnitTests")>]
 
     do()

@@ -2,7 +2,6 @@
 using System.Text;
 using System.Threading.Tasks;
 using Pulsar.Client.Api;
-using Pulsar.Client.Common;
 using System.Collections.Generic;
 
 namespace CsharpExamples
@@ -19,17 +18,18 @@ namespace CsharpExamples
                 .ServiceUrl(serviceUrl)
                 .Build();
 
-            var producer = await new ProducerBuilder(client)
+            var producer = await client.NewProducer()
                 .Topic(topicName)
                 .CreateAsync();
 
-            var consumer = await new ConsumerBuilder(client)
+            var consumer = await client.NewConsumer()
                 .Topic(topicName)
                 .SubscriptionName(subscriptionName)
                 .SubscribeAsync();
 
             var payload = Encoding.UTF8.GetBytes($"Sent from C# at '{DateTime.Now}'");
-            var messageId = await producer.SendAsync(new MessageBuilder(payload, "C#", new Dictionary<string, string> { ["1"] = "one" }));
+            var msg = producer.NewMessage(payload, "C#", new Dictionary<string, string> { ["1"] = "one" });
+            var messageId = await producer.SendAsync(msg);
             Console.WriteLine($"MessageId is: '{messageId}'");
 
             var message = await consumer.ReceiveAsync();
