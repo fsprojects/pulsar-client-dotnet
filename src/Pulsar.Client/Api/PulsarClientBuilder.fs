@@ -1,9 +1,13 @@
 ﻿namespace Pulsar.Client.Api
 
+open System
 open Pulsar.Client.Common
 
 type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 
+    [<Literal>]
+    let MIN_STATS_INTERVAL_SECONDS = 1
+    
     let verify(config : PulsarClientConfiguration) =
         let checkValue check config =
             check config |> ignore
@@ -57,6 +61,12 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
         PulsarClientBuilder
             { config with
                 TlsProtocols = protocol }
+
+    member this.StatsInterval interval =
+        PulsarClientBuilder
+            { config with
+                StatsInterval = interval |> invalidArgIf (fun arg ->
+                arg <> TimeSpan.Zero && arg < TimeSpan.FromSeconds(float MIN_STATS_INTERVAL_SECONDS)) (sprintf "Stats interval should be greater than %i s" MIN_STATS_INTERVAL_SECONDS) }
 
     member this.Build() =
         config

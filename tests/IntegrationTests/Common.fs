@@ -87,6 +87,12 @@ let getNewClient() =
         .ServiceUrl(pulsarAddress)
         .Build()
 
+let getStatsClient() =
+    PulsarClientBuilder()
+        .ServiceUrl(pulsarAddress)
+        .StatsInterval(TimeSpan.FromSeconds 1.0)
+        .Build()
+
 let produceMessages (producer: IProducer<byte[]>) number producerName =
     task {
         for i in [1..number] do

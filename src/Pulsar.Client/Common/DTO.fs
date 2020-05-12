@@ -413,4 +413,71 @@ type HashingScheme =
     | DotnetStringHash = 0
     | Murmur3_32Hash = 1
 
+type ProducerStats = {
+    /// Number of messages published in the last interval
+    NumMsgsSent: int64
+    /// Number of bytes sent in the last interval
+    NumBytesSent: int64
+    /// Number of failed send operations in the last interval    
+    NumSendFailed: int64
+    /// Number of send acknowledges received by broker in the last interval
+    NumAcksReceived: int64
+    /// Messages send rate in the last interval
+    SendMsgsRate: float
+    /// Bytes send rate in the last interval
+    SendBytesRate: float
+    /// Minimum send latency in milliseconds for the last interval
+    SendLatencyMin: float
+    /// Maximum send latency in milliseconds for the last interval
+    SendLatencyMax: float
+    /// Average send latency in milliseconds for the last interval
+    SendLatencyAverage: float
+    /// Total number of messages published by this producer
+    TotalMsgsSent: int64
+    /// Total number of bytes sent by this producer
+    TotalBytesSent: int64
+    /// Total number of failed send operations
+    TotalSendFailed: int64
+    /// Total number of send acknowledges received by broker
+    TotalAcksReceived: int64
+    /// Last interval duration in milliseconds
+    IntervalDuration: float
+    /// The number of messages waiting at the end of the last interval
+    PendingMsgs: int
+}
+
+type ConsumerStats = {
+    /// Number of messages received in the last interval
+    NumMsgsReceived: int64
+    /// Number of bytes received in the last interval
+    NumBytesReceived: int64
+    /// Number of message receive failed in the last interval
+    NumReceiveFailed: int64
+    /// Number of message batch receive failed in the last interval
+    NumBatchReceiveFailed: int64
+    /// Number of message acknowledgments sent in the last interval
+    NumAcksSent: int64
+    /// Number of message acknowledgments failed in the last interval
+    NumAcksFailed: int64
+    /// Total number of messages received by this consumer
+    TotalMsgsReceived: int64
+    /// Total number of bytes received by this consumer
+    TotalBytesReceived: int64
+    /// Total number of messages receive failures
+    TotalReceiveFailed: int64
+    /// Total number of messages batch receive failures
+    TotalBatchReceiveFailed: int64
+    /// Total number of message acknowledgments sent by this consumer
+    TotalAcksSent: int64
+    /// Total number of message acknowledgments failures on this consumer
+    TotalAcksFailed: int64
+    /// Rate of bytes per second received in the last interval
+    ReceivedMsgsRate: float
+    /// Rate of bytes per second received in the last interval
+    ReceivedBytesRate: float
+    /// Last interval duration in milliseconds
+    IntervalDuration: float
+    /// The number of prefetched messages at the end of the last interval
+    IncomingMsgs: int
+}
 

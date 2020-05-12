@@ -22,6 +22,8 @@ type IProducer<'T> =
     abstract member ProducerId: ProducerId
     /// Get the topic which producer is publishing to
     abstract member Topic: string    
+    /// Get statistics for the producer.
+    abstract member GetStatsAsync: unit -> Task<ProducerStats>
     /// <summary>
     ///     Constructs <see cref="Pulsar.Client.Common.MessageBuilder" />
     /// </summary>

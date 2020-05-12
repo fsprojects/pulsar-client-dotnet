@@ -18,6 +18,7 @@ type internal PartitionedProducerMessage =
     | LastSequenceId of AsyncReplyChannel<SequenceId>
     | Close of AsyncReplyChannel<ResultOrException<unit>>
     | TickTime
+    | GetStats of AsyncReplyChannel<ProducerStats>
 
 type internal PartitionedConnectionState =
     | Uninitialized
@@ -192,6 +193,43 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     | _ ->
                         ()
                     return! loop ()
+                    
+                | GetStats channel ->
+                    
+                    let! stats =
+                        producers
+                        |> Seq.map(fun p -> p.GetStatsAsync())
+                        |> Task.WhenAll
+                        |> Async.AwaitTask
+                    stats
+                    |> Seq.reduce(fun acc stats ->
+                        {
+                            NumMsgsSent = acc.NumMsgsSent + stats.NumMsgsSent 
+                            NumBytesSent = acc.NumBytesSent + stats.NumBytesSent 
+                            NumSendFailed = acc.NumSendFailed + stats.NumSendFailed 
+                            NumAcksReceived = acc.NumAcksReceived + stats.NumAcksReceived 
+                            SendMsgsRate = acc.SendMsgsRate + stats.SendMsgsRate 
+                            SendBytesRate = acc.SendBytesRate + stats.SendBytesRate
+                            SendLatencyMin =
+                                if acc.SendLatencyMin > stats.SendLatencyMin then
+                                    stats.SendLatencyMin
+                                else
+                                    acc.SendLatencyMin
+                            SendLatencyMax =
+                                if acc.SendLatencyMax < stats.SendLatencyMax then
+                                    stats.SendLatencyMax
+                                else
+                                    acc.SendLatencyMax
+                            SendLatencyAverage = Double.NaN
+                            TotalMsgsSent = acc.TotalMsgsSent + stats.TotalMsgsSent 
+                            TotalBytesSent = acc.TotalBytesSent + stats.TotalBytesSent 
+                            TotalSendFailed = acc.TotalSendFailed + stats.TotalSendFailed 
+                            TotalAcksReceived = acc.TotalAcksReceived + stats.TotalAcksReceived
+                            IntervalDuration = max acc.IntervalDuration stats.IntervalDuration
+                            PendingMsgs = acc.PendingMsgs + stats.PendingMsgs
+                        })
+                    |> channel.Reply
+                    return! loop ()
 
             }
 
@@ -294,6 +332,8 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         member this.LastSequenceId = mb.PostAndReply(LastSequenceId)
 
         member this.Name = producerConfig.ProducerName
+
+        member this.GetStatsAsync() = mb.PostAndAsyncReply(GetStats) |> Async.StartAsTask
         
     interface IAsyncDisposable with        
         member this.DisposeAsync() =

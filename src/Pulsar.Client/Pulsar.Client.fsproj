@@ -68,6 +68,8 @@
     <Compile Include="Internal\DeadLetters.fs" />
     <Compile Include="Internal\ConsumerInterceptors.fs" />
     <Compile Include="Internal\ProducerInterceptors.fs" />
+    <Compile Include="Internal\ProducerStatsImpl.fs" />
+    <Compile Include="Internal\ConsumerStatsImpl.fs" />
     <Compile Include="Api\Configuration.fs" />
     <Compile Include="Auth\AuthenticationDataToken.fs" />
     <Compile Include="Auth\AuthenticationDataTls.fs" />

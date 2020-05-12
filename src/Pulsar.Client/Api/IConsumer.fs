@@ -39,3 +39,5 @@ type IConsumer<'T> =
     abstract member Topic: string
     /// Get the consumer name
     abstract member Name: string
+    /// Get statistics for the consumer.
+    abstract member GetStatsAsync: unit -> Task<ConsumerStats>

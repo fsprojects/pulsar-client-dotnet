@@ -41,6 +41,7 @@ type internal MultiTopicConsumerMessage<'T> =
     | HasReachedEndOfTheTopic of AsyncReplyChannel<bool>
     | Seek of AsyncReplyChannel<Task> * uint64
     | TickTime
+    | GetStats of AsyncReplyChannel<ConsumerStats>
 
 
 
@@ -69,6 +70,12 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
 
     let timer = new Timer(1000.0 * 60.0) // 1 minute
     
+    let stats =
+        if clientConfig.StatsInterval = TimeSpan.Zero then
+            ConsumerStatsImpl.CONSUMER_STATS_DISABLED
+        else
+            ConsumerStatsImpl(prefix) :> IConsumerStatsRecorder
+            
     let getStream (topic: CompleteTopicName) (consumer: ConsumerImpl<'T>) =
         let consumerImp = consumer :> IConsumer<'T>
         asyncSeq {
@@ -391,6 +398,37 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         ()
                         return! loop state
 
+                | GetStats channel ->
+                    
+                    Log.Logger.LogDebug("{0} GetStats", prefix)
+                    let! stats =
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, consumer)) -> consumer.GetStatsAsync())
+                        |> Task.WhenAll
+                        |> Async.AwaitTask
+                    stats
+                    |> Seq.reduce(fun acc stats ->
+                        {
+                            NumMsgsReceived = acc.NumMsgsReceived + stats.NumMsgsReceived
+                            NumBytesReceived = acc.NumBytesReceived + stats.NumBytesReceived
+                            NumReceiveFailed = acc.NumReceiveFailed + stats.NumReceiveFailed
+                            NumBatchReceiveFailed = acc.NumBatchReceiveFailed + stats.NumBatchReceiveFailed
+                            NumAcksSent = acc.NumAcksSent + stats.NumAcksSent
+                            NumAcksFailed = acc.NumAcksFailed + stats.NumAcksFailed
+                            
+                            TotalMsgsReceived = acc.TotalMsgsReceived + stats.TotalMsgsReceived
+                            TotalBytesReceived = acc.TotalBytesReceived + stats.TotalBytesReceived
+                            TotalReceiveFailed = acc.TotalReceiveFailed + stats.TotalReceiveFailed
+                            TotalBatchReceiveFailed = acc.TotalBatchReceiveFailed + stats.TotalBatchReceiveFailed
+                            TotalAcksSent = acc.TotalAcksSent + stats.TotalAcksSent
+                            TotalAcksFailed = acc.TotalAcksFailed + stats.TotalAcksFailed
+                            
+                            ReceivedMsgsRate = acc.ReceivedMsgsRate + stats.ReceivedMsgsRate
+                            ReceivedBytesRate = acc.ReceivedBytesRate + stats.ReceivedBytesRate
+                            IntervalDuration = max acc.IntervalDuration stats.IntervalDuration
+                            IncomingMsgs = acc.IncomingMsgs + stats.IncomingMsgs
+                        })
+                    |> channel.Reply
             }
 
         loop { Stream = AsyncSeq.empty; Enumerator = AsyncSeq.empty.GetEnumerator() }
@@ -478,6 +516,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 | Ok msgs ->
                     return msgs
                 | Error exn ->
+                    stats.IncrementNumBatchReceiveFailed()
                     return reraize exn
             }
 
@@ -548,6 +587,8 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
 
         member this.Name = consumerConfig.ConsumerName
 
+        member this.GetStatsAsync() = mb.PostAndAsyncReply(GetStats) |> Async.StartAsTask
+        
     interface IAsyncDisposable with
         
         member this.DisposeAsync() =

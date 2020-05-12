@@ -10,6 +10,7 @@ type PulsarClientConfiguration =
     {
         ServiceAddresses: Uri list
         OperationTimeout: TimeSpan
+        StatsInterval: TimeSpan
         MaxNumberOfRejectedRequestPerConnection: int
         UseTls: bool
         TlsHostnameVerificationEnable: bool
@@ -22,6 +23,7 @@ type PulsarClientConfiguration =
         {
             ServiceAddresses = List.empty<Uri>
             OperationTimeout = TimeSpan.FromMilliseconds(30000.0)
+            StatsInterval = TimeSpan.Zero
             MaxNumberOfRejectedRequestPerConnection = 50
             UseTls = false
             TlsHostnameVerificationEnable = false

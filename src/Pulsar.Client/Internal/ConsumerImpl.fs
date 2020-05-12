@@ -13,6 +13,7 @@ open ProtoBuf
 open Pulsar.Client.Schema
 open pulsar.proto
 open System.Threading
+open System.Timers
     
 type internal ParseResult<'T> =
     | ParseOk of struct(byte[]*'T)
@@ -37,6 +38,8 @@ type internal ConsumerMessage<'T> =
     | ActiveConsumerChanged of bool
     | Close of AsyncReplyChannel<ResultOrException<unit>>
     | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
+    | StatTick
+    | GetStats of AsyncReplyChannel<ConsumerStats>
 
 type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, startMessageId: MessageId option, lookup: BinaryLookupService,
@@ -63,7 +66,21 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mutable incomingMessagesSize = 0L
     let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
     let deadLettersProcessor = consumerConfig.DeadLettersProcessor
-    let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable    
+    let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable
+    let stats =
+        if clientConfig.StatsInterval = TimeSpan.Zero then
+            ConsumerStatsImpl.CONSUMER_STATS_DISABLED
+        else
+            ConsumerStatsImpl(prefix) :> IConsumerStatsRecorder
+    
+    let statTimer = new Timer()
+    let startStatTimer () =
+        if clientConfig.StatsInterval <> TimeSpan.Zero then
+            statTimer.Interval <- clientConfig.StatsInterval.TotalMilliseconds
+            statTimer.AutoReset <- true
+            statTimer.Elapsed.Add(fun _ -> this.Mb.Post(StatTick))
+            statTimer.Start()
+    
     let keyValueProcessor = KeyValueProcessor.GetInstance schema
 
     let wrapPostAndReply (mbAsyncReply: Async<ResultOrException<'A>>) =
@@ -216,11 +233,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 match messageId.Type with
                 | Individual ->
                     unAckedMessageTracker.Remove(messageId) |> ignore
-                | Cumulative _ ->
+                    stats.IncrementNumAcksSent(1)
+                | Cumulative (_, batch) ->
                     unAckedMessageTracker.Remove(messageId) |> ignore
+                    stats.IncrementNumAcksSent(batch.GetBatchSize())
                 interceptors.OnAcknowledge(this, messageId, null)
             | AckType.Cumulative ->
                 interceptors.OnAcknowledgeCumulative(this, messageId, null)
+                let count = unAckedMessageTracker.RemoveMessagesTill(messageId)
+                stats.IncrementNumAcksSent(count)
             do! acksGroupingTracker.AddAcknowledgment(messageId, ackType)
             // Consumer acknowledgment operation immediately succeeds. In any case, if we're not able to send ack to broker,
             // the messages will be re-delivered
@@ -386,6 +407,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let messageProcessed (msg: Message<'T>) =
         lastDequeuedMessageId <- msg.MessageId
         increaseAvailablePermits 1
+        stats.UpdateNumMsgsReceived(msg.Data.Length)
         if consumerConfig.AckTimeout <> TimeSpan.Zero then
             unAckedMessageTracker.Add msg.MessageId |> ignore
 
@@ -439,6 +461,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         negativeAcksTracker.Close()
         connectionHandler.Close()      
         interceptors.Close()
+        statTimer.Stop()
         cleanup(this)
         while waiters.Count > 0 do
             let waitingChannel = waiters.Dequeue()
@@ -461,6 +484,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     
     let discardCorruptedMessage (msgId: MessageId) (clientCnx: ClientCnx) error =
+        stats.IncrementNumReceiveFailed()
         let command = Commands.newErrorAck consumerId msgId.LedgerId msgId.EntryId AckType.Individual error
         clientCnx.Send command
         
@@ -862,7 +886,17 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     
                     Log.Logger.LogInformation("{0} ActiveConsumerChanged isActive={1}", prefix, isActive)
                     return! loop ()
-
+                        
+                | ConsumerMessage.StatTick ->
+                    
+                    stats.TickTime(incomingMessages.Count)
+                    return! loop()
+                    
+                | ConsumerMessage.GetStats channel ->
+                    
+                    channel.Reply <| stats.GetStats()
+                    return! loop ()
+                    
                 | ConsumerMessage.Close channel ->
 
                     match connectionHandler.ConnectionState with
@@ -911,11 +945,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
                         channel.Reply <| Error(NotConnectedException "Not connected to broker")
                         return! loop ()
-
             }
         loop ()
     )
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
+    do startStatTimer()
 
     member private this.Mb with get(): MailboxProcessor<ConsumerMessage<'T>> = mb
 
@@ -958,28 +992,54 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     member this.ReceiveFsharpAsync() =
         async {
-            connectionHandler.CheckIfActive() |> throwIfNotNull
-            return! mb.PostAndAsyncReply(Receive)
+            let exn = connectionHandler.CheckIfActive()
+            if not (isNull exn) then
+                raise exn
+
+            let! msgResult = mb.PostAndAsyncReply(Receive)
+            match msgResult with
+            | Ok _ ->
+                return msgResult
+            | Error _ ->
+                stats.IncrementNumReceiveFailed()
+                return msgResult
         }
     
     interface IConsumer<'T> with
         
         member this.ReceiveAsync() =
             task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
-                return! wrapPostAndReply <| mb.PostAndAsyncReply(Receive)
+                let exn = connectionHandler.CheckIfActive()
+                if not (isNull exn) then
+                    raise exn
+
+                match! mb.PostAndAsyncReply(Receive) with
+                | Ok msg ->
+                    return msg
+                | Error exn ->
+                    stats.IncrementNumReceiveFailed()
+                    return reraize exn
             }
 
         member this.BatchReceiveAsync() =
             task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
-                return! wrapPostAndReply <| mb.PostAndAsyncReply(BatchReceive)
+                let exn = connectionHandler.CheckIfActive()
+                if not (isNull exn) then
+                    raise exn
+
+                match! mb.PostAndAsyncReply(BatchReceive) with
+                | Ok msg ->
+                    return msg
+                | Error exn ->
+                    stats.IncrementNumBatchReceiveFailed()
+                    return reraize exn
             }
 
         member this.AcknowledgeAsync (msgId: MessageId) =
             task {
                 let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then 
+                if not (isNull exn) then
+                    stats.IncrementNumAcksFailed()
                     interceptors.OnAcknowledge(this, msgId, exn)
                     raise exn
                 
@@ -989,8 +1049,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.AcknowledgeAsync (msgs: Messages<'T>) =
             task {
                 let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then 
+                if not (isNull exn) then
                     for msg in msgs do
+                        stats.IncrementNumAcksFailed()
                         interceptors.OnAcknowledge(this, msg.MessageId, exn)
                     raise exn
 
@@ -1001,7 +1062,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
             task {
                 let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then 
+                if not (isNull exn) then
+                    stats.IncrementNumAcksFailed()
                     interceptors.OnAcknowledgeCumulative(this, msgId, exn)
                     raise exn
 
@@ -1055,6 +1117,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.Topic with get() = %consumerConfig.Topic.CompleteTopicName
 
         member this.Name = consumerConfig.ConsumerName
+
+        member this.GetStatsAsync() =
+            mb.PostAndAsyncReply(ConsumerMessage.GetStats) |> Async.StartAsTask
         
     interface IAsyncDisposable with
         
@@ -1069,6 +1134,4 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | Ok () -> ()
                     | Error ex -> reraize ex 
                 } |> ValueTask
-
-
 
