@@ -1,24 +1,24 @@
 ﻿namespace Pulsar.Client.Api
 
+open System
 open System.Threading.Tasks
 open Pulsar.Client.Common
 
-type IConsumer =
+type IConsumer<'T> =
+    inherit IAsyncDisposable
 
     /// Receive a single message, wait asynchronously if no message is ready.
-    abstract member ReceiveAsync: unit -> Task<Message>
+    abstract member ReceiveAsync: unit -> Task<Message<'T>>
     /// Retrieves messages when has enough messages or wait timeout and completes with received messages.
-    abstract member BatchReceiveAsync: unit -> Task<Messages>
+    abstract member BatchReceiveAsync: unit -> Task<Messages<'T>>
     /// Asynchronously acknowledge the consumption of a single message
     abstract member AcknowledgeAsync: messageId:MessageId -> Task<unit>
     /// Asynchronously acknowledge the consumption of Messages
-    abstract member AcknowledgeAsync: messages:Messages -> Task<unit>
+    abstract member AcknowledgeAsync: messages:Messages<'T> -> Task<unit>
     /// Acknowledge the reception of all the messages in the stream up to (and including) the provided message.
     abstract member AcknowledgeCumulativeAsync: messageId:MessageId -> Task<unit>
     /// Redelivers all the unacknowledged messages
     abstract member RedeliverUnacknowledgedMessagesAsync: unit -> Task<unit>
-    /// Clean up resources
-    abstract member CloseAsync: unit -> Task<unit>
     /// Unsubscribes consumer
     abstract member UnsubscribeAsync: unit -> Task<unit>
     /// Return true if the topic was terminated and this consumer has already consumed all the messages in the topic.
@@ -32,7 +32,7 @@ type IConsumer =
     /// Acknowledge the failure to process a single message.
     abstract member NegativeAcknowledge: messageId:MessageId -> Task<unit>
     /// Acknowledge the failure to process Messages
-    abstract member NegativeAcknowledge: messages:Messages -> Task<unit>
+    abstract member NegativeAcknowledge: messages:Messages<'T> -> Task<unit>
     /// Internal client consumer id
     abstract member ConsumerId: ConsumerId
     /// Get a topic for the consumer

@@ -27,6 +27,8 @@ Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "Pulsar.Client", "src\Pulsar
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Pulsar.Client.Proto", "src\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj", "{07E28F24-6660-4805-BF92-89EEA4711CA2}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Avro.main", "src\Avro\Avro.main.csproj", "{12747DA9-821C-44B7-9228-6AE965BE28C8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -57,6 +59,10 @@ Global
 		{07E28F24-6660-4805-BF92-89EEA4711CA2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{07E28F24-6660-4805-BF92-89EEA4711CA2}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{07E28F24-6660-4805-BF92-89EEA4711CA2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{12747DA9-821C-44B7-9228-6AE965BE28C8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{12747DA9-821C-44B7-9228-6AE965BE28C8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{12747DA9-821C-44B7-9228-6AE965BE28C8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{12747DA9-821C-44B7-9228-6AE965BE28C8}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -68,6 +74,7 @@ Global
 		{20835368-73B3-45AF-B0AB-B33F120B74BA} = {57300837-ACF8-47EF-9271-E72D12D5D4A4}
 		{ED95CEE6-3023-4D09-8570-425390D351B3} = {A69013AE-F033-4D8F-8C84-D238F1E7C45B}
 		{07E28F24-6660-4805-BF92-89EEA4711CA2} = {A69013AE-F033-4D8F-8C84-D238F1E7C45B}
+		{12747DA9-821C-44B7-9228-6AE965BE28C8} = {A69013AE-F033-4D8F-8C84-D238F1E7C45B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {5F50C1BF-3713-4686-906F-8051FD013D96}

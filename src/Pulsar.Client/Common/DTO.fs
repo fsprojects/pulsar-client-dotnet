@@ -18,9 +18,12 @@ type internal PartitionedTopicMetadata =
         Partitions: int
     }
 
+type SchemaVersion = SchemaVersion of byte[]
+
 type internal ProducerSuccess =
     {
         GeneratedProducerName: string
+        SchemaVersion: SchemaVersion option
         LastSequenceId: int64
     }
 
@@ -36,6 +39,45 @@ type internal LookupTopicResult =
 type internal TopicsOfNamespace =
     {
         Topics : string list
+    }    
+
+type KeyValueEncodingType =
+    | SEPARATED = 0
+    | INLINE = 1
+
+type SchemaType =
+    | NONE = 0
+    | STRING = 1
+    | JSON = 2
+    | PROTOBUF = 3
+    | AVRO = 4
+    | BOOLEAN = 5
+    | INT8 = 6
+    | INT16 = 7
+    | INT32 = 8
+    | INT64 = 9
+    | FLOAT = 10
+    | DOUBLE = 11
+    | DATE = 12
+    | TIME = 13
+    | TIMESTAMP = 14
+    | KEY_VALUE = 15
+    | BYTES = -1
+    | AUTO_CONSUME = -3
+    | AUTO_PUBLISH = -4
+
+type SchemaInfo =
+    {
+        Name: string
+        Schema: byte[]
+        Type: SchemaType
+        Properties: IReadOnlyDictionary<string, string>
+    }
+    
+type internal TopicSchema =
+    {
+        SchemaInfo: SchemaInfo
+        SchemaVersion: SchemaVersion option
     }
 
 type SubscriptionType =
@@ -166,7 +208,14 @@ type internal Metadata =
         HasNumMessagesInBatch: bool
         CompressionType: CompressionType
         UncompressedMessageSize: int32
+        SchemaVersion: SchemaVersion option
         SequenceId: uint64
+    }
+
+type MessageKey =
+    {
+        PartitionKey: PartitionKey
+        IsBase64Encoded: bool
     }
 
 type internal RawMessage =
@@ -175,25 +224,37 @@ type internal RawMessage =
         Metadata: Metadata
         RedeliveryCount: uint32
         Payload: byte[]
-        MessageKey: MessageKey
+        MessageKey: string
+        IsKeyBase64Encoded: bool
+        CheckSumValid: bool
         Properties: IReadOnlyDictionary<string, string>
     }
 
-type Message =
+type Message<'T> =
     {
+        /// Get the unique message ID associated with this message.
         MessageId: MessageId
+        /// Get the raw payload of the message.
         Data: byte[]
-        Key: string
+        /// Get the key of the message.
+        Key: PartitionKey
+        /// Check whether the key has been base64 encoded.
+        HasBase64EncodedKey: bool
+        /// Return the properties attached to the message.
         Properties: IReadOnlyDictionary<string, string>
+        /// Get the de-serialized value of the message, according the configured Schema.
+        GetValue: unit -> 'T
+        // Schema version of the message if the message is produced with schema otherwise null.
+        SchemaVersion: byte[]
         SequenceId: uint64
     }
 
-type Messages internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
+type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 
     let mutable currentNumberOfMessages = 0
     let mutable currentSizeOfMessages = 0L
 
-    let messageList = if maxNumberOfMessages > 0 then ResizeArray<Message>(maxNumberOfMessages) else ResizeArray<Message>()
+    let messageList = if maxNumberOfMessages > 0 then ResizeArray<Message<'T>>(maxNumberOfMessages) else ResizeArray<Message<'T>>()
 
     
     member this.Count with get() =
@@ -205,65 +266,48 @@ type Messages internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
         currentNumberOfMessages = maxNumberOfMessages
         || currentSizeOfMessages = maxSizeOfMessages
     
-    member internal this.CanAdd(message: Message) =
+    member internal this.CanAdd(message: Message<'T>) =
         if (maxNumberOfMessages <= 0 && maxSizeOfMessages <= 0L) then
             true
         else
             (maxNumberOfMessages > 0 && currentNumberOfMessages + 1 <= maxNumberOfMessages)
                 || (maxSizeOfMessages > 0L && currentSizeOfMessages + (int64 message.Data.Length) <= maxSizeOfMessages)
 
-    member internal this.Add(message: Message) =
+    member internal this.Add(message: Message<'T>) =
         currentNumberOfMessages <- currentNumberOfMessages + 1
         currentSizeOfMessages <- currentSizeOfMessages + (int64 message.Data.Length)
         messageList.Add(message)
 
-    interface IEnumerable<Message> with
+    interface IEnumerable<Message<'T>> with
         member this.GetEnumerator() =
             messageList.GetEnumerator() :> Collections.IEnumerator
         member this.GetEnumerator() =
-            messageList.GetEnumerator() :> IEnumerator<Message>
+            messageList.GetEnumerator() :> IEnumerator<Message<'T>>
 
 /// <summary>
 ///     Message builder that constructs a message to be published through a producer.
 /// </summary>
-type MessageBuilder =
-    val Value: byte[]
-    val Key: MessageKey
+type MessageBuilder<'T> =
+    val Value: 'T
+    val Payload: byte[]
+    val Key: MessageKey option
     val Properties: IReadOnlyDictionary<string, string>
     val DeliverAt: Nullable<int64>
     val SequenceId: Nullable<uint64>
 
-    /// <summary>
-    ///     Constructs <see cref="Pulsar.Client.Common.MessageBuilder" />
-    /// </summary>
-    /// <param name="value">Message data serialized to array of bytes.</param>
-    /// <param name="properties">The readonly dictionary with message properties.</param>
-    /// <param name="deliverAt">Unix timestamp in milliseconds after which message should be delivered to consumer(s).</param>
-    /// <param name="sequenceId">
-    ///     Specify a custom sequence id for the message being published.
-    ///     The sequence id can be used for deduplication purposes and it needs to follow these rules:
-    ///         - <c>sequenceId >= 0</c>
-    ///         - Sequence id for a message needs to be greater than sequence id for earlier messages:
-    ///             <c>sequenceId(N+1) > sequenceId(N)</c>
-    ///         - It's not necessary for sequence ids to be consecutive. There can be holes between messages. Eg. the
-    ///             <c>sequenceId</c> could represent an offset or a cumulative size.
-    /// </param>
-    /// <remarks>
-    ///     This <paramref name="deliverAt" /> timestamp must be expressed as unix time milliseconds based on UTC.
-    ///     For example: <code>DateTimeOffset.UtcNow.AddSeconds(2.0).ToUnixTimeMilliseconds()</code>.
-    /// </remarks>
-    new (value : byte[],
-            [<Optional; DefaultParameterValue(null:string)>] key : string,
+    internal new (value : 'T, payload: byte[], key : MessageKey option,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] properties : IReadOnlyDictionary<string, string>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>] deliverAt : Nullable<int64>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<uint64>)>] sequenceId : Nullable<uint64>) =
             {
                 Value = value
-                Key = if isNull key then %"" else %key
+                Key = key
                 Properties = if isNull properties then EmptyProps else properties
                 DeliverAt = deliverAt
+                Payload = payload
                 SequenceId = sequenceId
             }
+        
         
 type internal WriterStream = Stream
 type internal Payload = WriterStream -> Task
@@ -275,23 +319,23 @@ type internal Connection =
     }
 type internal RedeliverSet = HashSet<MessageId>
 
-type internal SingleCallback = MessageBuilder * TaskCompletionSource<MessageId>
-type internal BatchCallback = BatchDetails * MessageBuilder * TaskCompletionSource<MessageId>
-type internal PendingCallback = 
-    | SingleCallback of SingleCallback
-    | BatchCallbacks of BatchCallback[]
+type internal SingleCallback<'T> = MessageBuilder<'T> * TaskCompletionSource<MessageId>
+type internal BatchCallback<'T> = BatchDetails * MessageBuilder<'T> * TaskCompletionSource<MessageId>
+type internal PendingCallback<'T> = 
+    | SingleCallback of SingleCallback<'T>
+    | BatchCallbacks of BatchCallback<'T>[]
 
-type internal PendingMessage =
+type internal PendingMessage<'T> =
     {
         CreatedAt: DateTime
         SequenceId: SequenceId
         Payload: Payload
-        Callback : PendingCallback
+        Callback : PendingCallback<'T>
     }
 
-type internal BatchItem =
+type internal BatchItem<'T> =
     {
-        Message: MessageBuilder
+        Message: MessageBuilder<'T>
         Tcs : TaskCompletionSource<MessageId>
     }
 
@@ -307,6 +351,7 @@ type internal PulsarResponseType =
     | ProducerSuccess of ProducerSuccess
     | TopicsOfNamespace of TopicsOfNamespace
     | LastMessageId of MessageId
+    | TopicSchema of TopicSchema option
     | Error
     | Empty
 
@@ -334,6 +379,11 @@ type internal PulsarResponseType =
         match req with
         | LastMessageId msgId -> msgId
         | _ -> failwith "Incorrect return type"
+        
+    static member GetTopicSchema req =
+        match req with
+        | TopicSchema x -> x
+        | _ -> failwith "Incorrect return type"
 
     static member GetEmpty req =
         match req with
@@ -353,40 +403,6 @@ type AuthData =
         Bytes: byte[]
     }
     static member INIT_AUTH_DATA = Encoding.UTF8.GetBytes("PulsarAuthInit")
-
-type internal ProducerMessage =
-    | ConnectionOpened
-    | ConnectionFailed of exn
-    | ConnectionClosed of obj // ClientCnx
-    | AckReceived of SendReceipt
-    | BeginSendMessage of MessageBuilder * AsyncReplyChannel<TaskCompletionSource<MessageId>>
-    | SendMessage of PendingMessage
-    | RecoverChecksumError of SequenceId
-    | Terminated
-    | Close of AsyncReplyChannel<Task>
-    | StoreBatchItem of MessageBuilder * AsyncReplyChannel<TaskCompletionSource<MessageId>>
-    | SendBatchTick
-    | SendTimeoutTick
-
-type internal ConsumerMessage =
-    | ConnectionOpened
-    | ConnectionFailed of exn
-    | ConnectionClosed of obj // ClientCnx
-    | ReachedEndOfTheTopic
-    | MessageReceived of RawMessage
-    | Receive of AsyncReplyChannel<ResultOrException<Message>>
-    | BatchReceive of AsyncReplyChannel<ResultOrException<Messages>>
-    | SendBatchByTimeout
-    | Acknowledge of MessageId * AckType
-    | NegativeAcknowledge of MessageId
-    | RedeliverUnacknowledged of RedeliverSet * AsyncReplyChannel<unit>
-    | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
-    | SeekAsync of SeekData * AsyncReplyChannel<ResultOrException<unit>>
-    | SendFlowPermits of int
-    | HasMessageAvailable of AsyncReplyChannel<Task<bool>>
-    | ActiveConsumerChanged of bool
-    | Close of AsyncReplyChannel<ResultOrException<unit>>
-    | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
 
 type MessageRoutingMode =
     | SinglePartition = 0
@@ -429,5 +445,9 @@ exception TopicDoesNotExistException of string
 // custom exception
 exception ConnectionFailedOnSend of string
 exception MaxMessageSizeChanged of int
+exception SchemaSerializationException of string
+
+exception DecompressionException of string
+exception BatchDeserializationException of string
 
 

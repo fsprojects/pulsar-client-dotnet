@@ -3,8 +3,9 @@
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open System
+open System.Threading.Tasks
 
-type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguration, producerInterceptors: ProducerInterceptors) =
+type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfiguration, producerInterceptors: ProducerInterceptors<'T>, schema: ISchema<'T>) =
 
     let verify(config : ProducerConfiguration) =
         let checkValue check config =
@@ -21,13 +22,13 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                 c.MessageRoutingMode
                 |> invalidArgIf (fun mode -> mode = MessageRoutingMode.CustomPartition && Option.isNone config.CustomMessageRouter) "Valid router should be set with CustomPartition routing mode.")
 
-    new(client: PulsarClient) = ProducerBuilder(client, ProducerConfiguration.Default, ProducerInterceptors.Empty)
+    internal new(сreateProducerAsync, schema: ISchema<'T>) = ProducerBuilder(сreateProducerAsync, ProducerConfiguration.Default, ProducerInterceptors.Empty, schema)
 
     member private this.With(newConfig: ProducerConfiguration) =
-        ProducerBuilder(client, newConfig, producerInterceptors)
+        ProducerBuilder<'T>(сreateProducerAsync, newConfig, producerInterceptors, schema)
 
-    member private this.With(newInterceptors: ProducerInterceptors) =
-        ProducerBuilder(client, config, newInterceptors)
+    member private this.With(newInterceptors: ProducerInterceptors<'T>) =
+        ProducerBuilder<'T>(сreateProducerAsync, config, newInterceptors, schema)
 
     member this.Topic topic =
         { config with
@@ -122,16 +123,14 @@ type ProducerBuilder private (client: PulsarClient, config: ProducerConfiguratio
                 InitialSequenceId = initialSequenceId }
         |> this.With
 
-    member this.Intercept ([<ParamArray>] interceptors: IProducerInterceptor array) =
+    member this.Intercept ([<ParamArray>] interceptors: IProducerInterceptor<'T> array) =
         if interceptors.Length = 0 then this
         else
             ProducerInterceptors(Array.append producerInterceptors.Interceptors interceptors)
             |> this.With
-
-    member this.CreateAsync() =
-        config
-        |> verify
-        |> client.CreateProducerAsync producerInterceptors
+    
+    member this.CreateAsync(): Task<IProducer<'T>> =
+        сreateProducerAsync(verify config, schema, producerInterceptors)
 
     override this.ToString() =
         config.ToString()

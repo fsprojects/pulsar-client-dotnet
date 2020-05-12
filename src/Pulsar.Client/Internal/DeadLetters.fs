@@ -7,14 +7,15 @@ open System.Collections.Generic
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
+open FSharp.UMX
 
-type internal DeadLettersProcessor
+type internal DeadLettersProcessor<'T>
     (policy: DeadLettersPolicy,
      getTopicName: unit -> string,
      getSubscriptionNameName: unit -> string,
-     createProducer: string -> Task<IProducer>) =
+     createProducer: string -> Task<IProducer<'T>>) =
 
-    let store = Dictionary<MessageId, Message>()
+    let store = Dictionary<MessageId, Message<'T>>()
 
     let topicName =
         if String.IsNullOrEmpty(policy.DeadLetterTopic) |> not then
@@ -22,18 +23,11 @@ type internal DeadLettersProcessor
         else
             (sprintf "%s-%s-DLQ" (getTopicName()) (getSubscriptionNameName()))
 
-    let producer = lazy (
+    let producer: Lazy<Task<IProducer<'T>>> = lazy (
         createProducer topicName
     )
 
-    let sendMessage (builder : MessageBuilder) =
-        task {
-            let! p = producer.Value
-            let! _ = p.SendAsync(builder)
-            return ()
-        }
-
-    interface IDeadLettersProcessor with
+    interface IDeadLettersProcessor<'T> with
         member this.ClearMessages() =
             store.Clear()
 
@@ -49,8 +43,14 @@ type internal DeadLettersProcessor
                 | true, message ->
                     Log.Logger.LogInformation("DeadLetter processing topic: {0}, messageId: {1}", topicName, messageId)
                     try
-                        let mb = MessageBuilder(message.Data, message.Key, message.Properties)
-                        do! sendMessage mb
+                        let! producer = producer.Value
+                        let key =
+                            if String.IsNullOrEmpty(%message.Key) then
+                                Some { PartitionKey = message.Key; IsBase64Encoded =  message.HasBase64EncodedKey  }
+                            else
+                                None
+                        let msg = MessageBuilder(message.GetValue(), message.Data, key, message.Properties)
+                        let! _ = producer.SendAsync(msg)
                         do! acknowledge messageId
                         return true
                     with
@@ -64,7 +64,7 @@ type internal DeadLettersProcessor
         member this.MaxRedeliveryCount = policy.MaxRedeliveryCount |> uint32
 
     static member Disabled = {
-        new IDeadLettersProcessor with
+        new IDeadLettersProcessor<'T> with
             member this.ClearMessages() = ()
             member this.AddMessage _ _ = ()
             member this.RemoveMessage _ = ()

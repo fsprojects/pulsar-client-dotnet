@@ -21,7 +21,7 @@ let runReader () =
     task {
 
         let! producer =
-            ProducerBuilder(client)
+            client.NewProducer()
                 .Topic(topicName)
                 .CreateAsync()
 
@@ -31,7 +31,7 @@ let runReader () =
         printfn "MessageId is: '%A'" messageId2
 
         let! reader =
-            ReaderBuilder(client)
+            client.NewReader()
                 .Topic(topicName)
                 .StartMessageId(messageId1)
                 .CreateAsync()

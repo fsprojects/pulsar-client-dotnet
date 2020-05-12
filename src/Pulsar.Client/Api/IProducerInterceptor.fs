@@ -3,12 +3,12 @@
 open System
 open Pulsar.Client.Common
 
-type IProducerInterceptor =
+type IProducerInterceptor<'T> =
     
     abstract member Close: unit -> unit
     
-    abstract member Eligible: message:MessageBuilder -> bool
+    abstract member Eligible: message:MessageBuilder<'T> -> bool
     
-    abstract member BeforeSend: producer:IProducer * message:MessageBuilder -> MessageBuilder  
+    abstract member BeforeSend: producer:IProducer<'T> * message:MessageBuilder<'T> -> MessageBuilder<'T>  
 
-    abstract member OnSendAcknowledgement: producer:IProducer * message:MessageBuilder * messageId:MessageId * ``exception``:Exception -> unit
+    abstract member OnSendAcknowledgement: producer:IProducer<'T> * message:MessageBuilder<'T> * messageId:MessageId * ``exception``:Exception -> unit

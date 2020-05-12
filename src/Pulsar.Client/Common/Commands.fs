@@ -3,6 +3,7 @@
 open pulsar.proto
 open FSharp.UMX
 open System
+open System.Data
 open ProtoBuf
 open System.IO
 open System.Net
@@ -110,6 +111,14 @@ let newAck (consumerId : ConsumerId) (ledgerId: LedgerId) (entryId: EntryId) (ac
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 
+let newErrorAck (consumerId : ConsumerId) (ledgerId: LedgerId) (entryId: EntryId) (ackType : AckType)
+    (error: CommandAck.ValidationError) : Payload =
+    let request = CommandAck(ConsumerId = %consumerId, ack_type = ackType.ToCommandAckType())
+    request.MessageIds.Add(MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId))
+    request.validation_error <- error
+    let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
+    serializeSimpleCommand command
+
 let newMultiMessageAck (consumerId : ConsumerId) (messages: seq<LedgerId*EntryId>) : Payload =
     let request = CommandAck(ConsumerId = %consumerId, ack_type = CommandAck.AckType.Individual)
     messages
@@ -140,8 +149,11 @@ let newLookup (topicName : CompleteTopicName) (requestId : RequestId) (authorita
     let command = BaseCommand(``type`` = CommandType.Lookup, lookupTopic = request)
     command |> serializeSimpleCommand
 
-let newProducer (topicName : CompleteTopicName) (producerName: string) (producerId : ProducerId) (requestId : RequestId) =
-    let request = CommandProducer(Topic = %topicName, ProducerId = %producerId, RequestId = %requestId, ProducerName = producerName)
+let newProducer (topicName : CompleteTopicName) (producerName: string) (producerId : ProducerId) (requestId : RequestId)
+                (schemaInfo: SchemaInfo) (epoch: uint64) =
+    let schema = getProtoSchema schemaInfo
+    let request = CommandProducer(Topic = %topicName, ProducerId = %producerId, RequestId = %requestId, ProducerName = producerName,
+                                  Schema = schema, Epoch = epoch)
     let command = BaseCommand(``type`` = CommandType.Producer, Producer = request)
     command |> serializeSimpleCommand
 
@@ -174,7 +186,8 @@ let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) 
 let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumerId: ConsumerId) (requestId: RequestId)
     (consumerName: string) (subscriptionType: SubscriptionType) (subscriptionInitialPosition: SubscriptionInitialPosition)
     (readCompacted: bool) (startMessageId: MessageIdData) (durable: bool) (startMessageRollbackDuration: TimeSpan)
-    (createTopicIfDoesNotExist: bool) (keySharedPolicy: KeySharedPolicy option) =
+    (createTopicIfDoesNotExist: bool) (keySharedPolicy: KeySharedPolicy option) (schemaInfo: SchemaInfo) =
+    let schema = getProtoSchema schemaInfo
     let subType =
         match subscriptionType with
         | SubscriptionType.Exclusive -> CommandSubscribe.SubType.Exclusive
@@ -189,7 +202,7 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
         | _ -> failwith "Unknown initialPosition type"
     let request = CommandSubscribe(Topic = %topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId,
                     RequestId = %requestId, ConsumerName =  consumerName, initialPosition = initialPosition, ReadCompacted = readCompacted,
-                    StartMessageId = startMessageId, Durable = durable, ForceTopicCreation = createTopicIfDoesNotExist)
+                    StartMessageId = startMessageId, Durable = durable, ForceTopicCreation = createTopicIfDoesNotExist, Schema = schema)
     match keySharedPolicy with
     | Some keySharedPolicy ->
         let meta = KeySharedMeta()
@@ -232,14 +245,20 @@ let newCloseProducer (producerId: ProducerId) (requestId : RequestId) =
 let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<seq<MessageIdData>>) =
     let request = CommandRedeliverUnacknowledgedMessages(ConsumerId = %consumerId)
     match messageIds with
-    | Some ids ->
-        ids |> Seq.iter (fun msgIdData -> request.MessageIds.Add(msgIdData))
-    | None ->
-        ()
+    | Some ids -> ids |> Seq.iter (fun msgIdData -> request.MessageIds.Add(msgIdData))
+    | None -> ()
     let command = BaseCommand(``type`` = CommandType.RedeliverUnacknowledgedMessages, redeliverUnacknowledgedMessages = request)
     command |> serializeSimpleCommand
 
 let newGetLastMessageId (consumerId: ConsumerId) (requestId: RequestId) =
     let request = CommandGetLastMessageId(ConsumerId = %consumerId, RequestId = %requestId)
     let command = BaseCommand(``type`` = CommandType.GetLastMessageId, getLastMessageId = request)
+    command |> serializeSimpleCommand
+    
+let newGetSchema (topicName: CompleteTopicName) (requestId : RequestId) (schemaVersion: Option<SchemaVersion>) =
+    let request = CommandGetSchema(Topic = %topicName, RequestId = %requestId)
+    match schemaVersion with
+    | Some (SchemaVersion sv) -> request.SchemaVersion <- sv
+    | None -> ()        
+    let command = BaseCommand(``type`` = CommandType.GetSchema, getSchema = request)
     command |> serializeSimpleCommand

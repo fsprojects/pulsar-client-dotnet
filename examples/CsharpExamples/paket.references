@@ -1,3 +1,2 @@
 group Examples
 Microsoft.Extensions.Logging.Console
-Pulsar.Client

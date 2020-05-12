@@ -12,7 +12,7 @@ open System.Threading.Tasks
 
 
 
-let internal processMessages<'a> (consumer: IConsumer, logger: ILogger, f: Message -> Task<unit>, cancellationToken: CancellationToken) =
+let internal processMessages<'a> (consumer: IConsumer<byte[]>, logger: ILogger, f: Message<byte[]> -> Task<unit>, cancellationToken: CancellationToken) =
     task {
         try
             while not cancellationToken.IsCancellationRequested do
@@ -34,7 +34,7 @@ let internal processMessages<'a> (consumer: IConsumer, logger: ILogger, f: Messa
                 logger.LogError(ex, "ProcessMessages failed for {0}", consumer.Topic)
    }
     
-let internal sendMessage (producer: IProducer, logger: ILogger, message: byte[]) =
+let internal sendMessage (producer: IProducer<byte[]>, logger: ILogger, message: byte[]) =
     task {
         try
             let! messageId = producer.SendAsync(message)
@@ -57,13 +57,13 @@ let runRealWorld (logger: ILogger) =
     task {
 
         let! producer =
-            ProducerBuilder(client)
+            client.NewProducer()
                 .Topic(topicName)
                 .EnableBatching(false)
                 .CreateAsync()
 
         let! consumer =
-            ConsumerBuilder(client)
+            client.NewConsumer()
                 .Topic(topicName)
                 .SubscriptionName(subscriptionName)
                 .SubscribeAsync()
@@ -83,7 +83,7 @@ let runRealWorld (logger: ILogger) =
         
         cts.Dispose()
         do! Task.Delay(200);// wait for pending acknowledgments to complete
-        do! consumer.CloseAsync();
-        do! producer.CloseAsync()
+        do! consumer.DisposeAsync()
+        do! producer.DisposeAsync()
         do! client.CloseAsync()
     }

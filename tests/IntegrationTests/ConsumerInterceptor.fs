@@ -12,9 +12,9 @@ open Pulsar.Client.IntegrationTests.Common
 open FSharp.UMX
 
 type ConsumerInterceptorBeforeConsume() =
-    member val BeforeMessages = ResizeArray<MessageBuilder>() with get
+    member val BeforeMessages = ResizeArray<MessageBuilder<byte[]>>() with get
 
-    interface IConsumerInterceptor with
+    interface IConsumerInterceptor<byte[]> with
         member this.Close() = ()
         member this.BeforeConsume(_, message)  =
             let msgValue = message.Data |> Encoding.UTF8.GetString
@@ -34,7 +34,7 @@ type ConsumerInterceptorOnAcknowledge() =
     member val AckNegativeMessageIds = ResizeArray<MessageId>() with get
     member val AckTimeoutMessageIds = ResizeArray<MessageId>() with get
 
-    interface IConsumerInterceptor with
+    interface IConsumerInterceptor<byte[]> with
         member this.Close() =
             this.Closed <- true
         member this.BeforeConsume(_, message) = message
@@ -51,6 +51,7 @@ type ConsumerInterceptorOnAcknowledge() =
 [<Tests>]
 let tests =
     testList "ConsumerInterceptor" [
+        
         testAsync "Check OnClose" {
 
             let client = getClient()
@@ -61,13 +62,13 @@ let tests =
             let interceptName = "OnClose"
             
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(interceptName)
                     .CreateAsync() |> Async.AwaitTask
             
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
@@ -86,13 +87,14 @@ let tests =
                         for _ in 1..numberOfMessages do
                             let! message = consumer.ReceiveAsync()
                             messageIds.Add message.MessageId
-                        do! consumer.CloseAsync()
+                        do! consumer.DisposeAsync()
                     }:> Task)
 
             do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
             if not consumerInterceptor.Closed then failwith "OnClose missed"
         }
+        
         testAsync "Check BeforeConsume" {
 
             let client = getClient()
@@ -101,13 +103,13 @@ let tests =
             let interceptName = "BeforeConsume"
 
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(interceptName)
                     .CreateAsync() |> Async.AwaitTask
             
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
@@ -135,6 +137,7 @@ let tests =
 
             do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
         }
+        
         testAsync "Check OnAcknowledge" {
 
             let client = getClient()
@@ -145,13 +148,13 @@ let tests =
             let interceptName = "OnAcknowledge"
             
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(interceptName)
                     .CreateAsync() |> Async.AwaitTask
             
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
@@ -181,6 +184,7 @@ let tests =
 
             if not (inMessagesIdSet - ackMessagesIdSet).IsEmpty then failwith "MessageIds in OnAcknowledge not equal to send messageIds"
         }
+        
         testAsync "Check OnAcknowledgeCumulative" {
 
             let client = getClient()
@@ -191,7 +195,7 @@ let tests =
             let interceptName = "OnAcknowledgeCumulative"
             
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(interceptName)
                     .BatchingMaxMessages(3)
@@ -199,7 +203,7 @@ let tests =
                     .CreateAsync() |> Async.AwaitTask
             
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
@@ -248,6 +252,7 @@ let tests =
                     failwith "No interceptor for secondAck"
             | _ -> failwith "MessageIdType should be Cumulative"
         }
+        
         testAsync "Check OnNegativeAcksSend" {
 
             let client = getClient()
@@ -258,13 +263,13 @@ let tests =
             let interceptName = "OnNegativeAcksSend"
             
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(interceptName)
                     .CreateAsync() |> Async.AwaitTask
             
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
@@ -296,6 +301,7 @@ let tests =
 
             if not (inMessagesIdSet - ackMessagesIdSet).IsEmpty then failwith "MessageIds in NegativeAcknowledge not equal to send messageIds"
         }
+        
         testAsync "Check OnAckTimeoutSend" {
 
             let client = getClient()
@@ -306,13 +312,13 @@ let tests =
             let interceptName = "OnAckTimeoutSend"
             
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(interceptName)
                     .CreateAsync() |> Async.AwaitTask
             
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")

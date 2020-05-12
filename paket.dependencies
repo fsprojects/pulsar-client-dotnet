@@ -8,6 +8,8 @@ nuget FSharp.Core
 nuget Microsoft.Extensions.Logging
 nuget Microsoft.Extensions.Logging.Abstractions
 nuget Microsoft.IO.RecyclableMemoryStream
+nuget Microsoft.Bcl.AsyncInterfaces
+nuget System.Text.Json
 nuget Pipelines.Sockets.Unofficial
 nuget TaskBuilder.fs
 nuget protobuf-net
@@ -16,6 +18,8 @@ nuget zlib.net-mutliplatform
 nuget K4os.Compression.LZ4
 nuget Snappy.Standard
 nuget ZstdNet
+nuget AvroSchemaGenerator 1.1
+nuget Microsoft.Extensions.Caching.Memory
 
 group Tests
   framework: netcoreapp3.1

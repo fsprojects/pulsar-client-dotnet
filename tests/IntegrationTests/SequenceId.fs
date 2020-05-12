@@ -16,14 +16,14 @@ let tests =
     let client = getClient()
 
     let getProducer() =
-        ProducerBuilder(client)
+        client.NewProducer()
             .Topic(topicName)
             .ProducerName("sequence-id-producer")
             .EnableBatching(false)
             .CreateAsync() |> Async.AwaitTask
 
     let getConsumer() =
-        ConsumerBuilder(client)
+        client.NewConsumer()
             .Topic(topicName)
             .ConsumerName("sequence-id-consumer")
             .SubscriptionName("sequence-id-subscription")

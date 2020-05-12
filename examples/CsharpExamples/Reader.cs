@@ -18,7 +18,7 @@ namespace CsharpExamples
                 .ServiceUrl(serviceUrl)
                 .Build();
 
-            var producer = await new ProducerBuilder(client)
+            var producer = await client.NewProducer()
                 .Topic(topicName)
                 .CreateAsync();
 
@@ -27,7 +27,7 @@ namespace CsharpExamples
             var messageId2 = await producer.SendAsync(Encoding.UTF8.GetBytes($"Sent 2 from C# at '{DateTime.Now}'"));
             Console.WriteLine($"MessageId is: '{messageId2}'");
 
-            var reader = await new ReaderBuilder(client)
+            var reader = await client.NewReader()
                 .Topic(topicName)
                 .StartMessageId(messageId1)
                 .CreateAsync();

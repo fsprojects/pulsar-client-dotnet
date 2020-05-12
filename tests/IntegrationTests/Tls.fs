@@ -1,5 +1,7 @@
 ﻿module Pulsar.Client.IntegrationTests.Tls
 
+#if !NOTLS
+
 open System
 open Expecto
 open Pulsar.Client.Api
@@ -8,7 +10,7 @@ open System.Threading.Tasks
 open Pulsar.Client.Common
 open Pulsar.Client.IntegrationTests.Common
 
-#if !NOTLS
+
 [<Tests>]
 let tests =
     testList "Tls" [
@@ -19,12 +21,12 @@ let tests =
             let messageIds = ResizeArray<MessageId>()
             
             let! producer =
-                ProducerBuilder(client)
+                client.NewProducer()
                     .Topic(topicName)
                     .CreateAsync() |> Async.AwaitTask
             
             let! consumer =
-                ConsumerBuilder(client)
+                client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("concurrent")
                     .SubscriptionName("test-subscription")
@@ -42,7 +44,7 @@ let tests =
                         for _ in 1..numberOfMessages do
                             let! message = consumer.ReceiveAsync()
                             messageIds.Add message.MessageId
-                        do! consumer.CloseAsync()
+                        do! consumer.DisposeAsync()
                     }:> Task)
 
             do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
