@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>0.18.4</Version>
+    <Version>1.0.1</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Documentation comments added</PackageReleaseNotes>
+    <PackageReleaseNotes>Avro nuget dependency removed</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
-    <PackageVersion>0.18.4</PackageVersion>
+    <PackageVersion>1.0.1</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
@@ -34,7 +34,7 @@
     <DebugType>portable</DebugType>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Avro\Avro.main.csproj" />
+    <ProjectReference Include="..\Avro\Avro.main.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" PrivateAssets="all" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0" PrivateAssets="All" />
   </ItemGroup>

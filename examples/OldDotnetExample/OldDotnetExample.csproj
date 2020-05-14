@@ -35,6 +35,14 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="Avro, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
+      <HintPath>packages\Pulsar.Client.1.0.1\lib\netstandard2.0\Avro.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="AvroSchemaGenerator, Version=1.5.2.0, Culture=neutral, PublicKeyToken=null">
+      <HintPath>packages\AvroSchemaGenerator.1.5.2\lib\netstandard2.0\AvroSchemaGenerator.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="FSharp.Control.AsyncSeq, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
       <HintPath>..\..\packages\FSharp.Control.AsyncSeq.2.0.23\lib\net45\FSharp.Control.AsyncSeq.dll</HintPath>
       <Private>True</Private>
@@ -51,7 +59,15 @@
       <HintPath>..\..\packages\K4os.Compression.LZ4.1.2.1-beta\lib\net46\K4os.Compression.LZ4.dll</HintPath>
     </Reference>
     <Reference Include="Microsoft.Bcl.AsyncInterfaces, Version=1.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
-      <HintPath>..\..\packages\Microsoft.Bcl.AsyncInterfaces.1.1.0\lib\net461\Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
+      <HintPath>packages\Microsoft.Bcl.AsyncInterfaces.1.1.1\lib\net461\Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Caching.Abstractions, Version=3.1.4.0, Culture=neutral, PublicKeyToken=adb9793829ddae60">
+      <HintPath>packages\Microsoft.Extensions.Caching.Abstractions.3.1.4\lib\netstandard2.0\Microsoft.Extensions.Caching.Abstractions.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Caching.Memory, Version=3.1.4.0, Culture=neutral, PublicKeyToken=adb9793829ddae60">
+      <HintPath>packages\Microsoft.Extensions.Caching.Memory.3.1.4\lib\netstandard2.0\Microsoft.Extensions.Caching.Memory.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="Microsoft.Extensions.Configuration, Version=5.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60">
@@ -113,7 +129,7 @@
     </Reference>
     <Reference Include="mscorlib" />
     <Reference Include="Pipelines.Sockets.Unofficial, Version=1.0.0.0, Culture=neutral, PublicKeyToken=42ea0a778e13fbe2">
-      <HintPath>..\..\packages\Pipelines.Sockets.Unofficial.2.1.1\lib\net461\Pipelines.Sockets.Unofficial.dll</HintPath>
+      <HintPath>packages\Pipelines.Sockets.Unofficial.2.1.11\lib\net461\Pipelines.Sockets.Unofficial.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="protobuf-net, Version=3.0.0.0, Culture=neutral, PublicKeyToken=257b51d87d2e4d67, processorArchitecture=MSIL">
@@ -122,12 +138,12 @@
     <Reference Include="protobuf-net.Core, Version=3.0.0.0, Culture=neutral, PublicKeyToken=257b51d87d2e4d67, processorArchitecture=MSIL">
       <HintPath>..\..\packages\protobuf-net.Core.3.0.0-alpha.133\lib\net461\protobuf-net.Core.dll</HintPath>
     </Reference>
-    <Reference Include="Pulsar.Client, Version=0.18.0.0, Culture=neutral, PublicKeyToken=null">
-      <HintPath>..\..\packages\Pulsar.Client.0.18.0\lib\netstandard2.0\Pulsar.Client.dll</HintPath>
+    <Reference Include="Pulsar.Client, Version=1.0.1.0, Culture=neutral, PublicKeyToken=null">
+      <HintPath>packages\Pulsar.Client.1.0.1\lib\netstandard2.0\Pulsar.Client.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="Pulsar.Client.Proto, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
-      <HintPath>..\..\packages\Pulsar.Client.0.18.0\lib\netstandard2.0\Pulsar.Client.Proto.dll</HintPath>
+      <HintPath>packages\Pulsar.Client.1.0.1\lib\netstandard2.0\Pulsar.Client.Proto.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="Snappy.Standard, Version=0.2.0.0, Culture=neutral, PublicKeyToken=null">
@@ -240,6 +256,14 @@
       <Private>True</Private>
     </Reference>
     <Reference Include="System.ServiceModel" />
+    <Reference Include="System.Text.Encodings.Web, Version=4.0.5.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
+      <HintPath>packages\System.Text.Encodings.Web.4.7.1\lib\net461\System.Text.Encodings.Web.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Text.Json, Version=4.0.1.2, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
+      <HintPath>packages\System.Text.Json.4.7.2\lib\net461\System.Text.Json.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="System.Threading.Tasks.Extensions, Version=4.2.0.1, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>..\..\packages\System.Threading.Tasks.Extensions.4.5.4\lib\net461\System.Threading.Tasks.Extensions.dll</HintPath>
     </Reference>
