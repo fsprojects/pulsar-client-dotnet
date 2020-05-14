@@ -1,6 +1,7 @@
 ﻿namespace Pulsar.Client.Internal
 
 open System.IO
+open Pulsar.Client.Api
 open Pulsar.Client.Common
 open ComponentAce.Compression.Libs.zlib
 open K4os.Compression.LZ4

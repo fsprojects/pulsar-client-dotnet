@@ -430,7 +430,10 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let result = LastMessageId {
                 LedgerId = %(int64 cmd.LastMessageId.ledgerId)
                 EntryId = %(int64 cmd.LastMessageId.entryId)
-                Type = Individual
+                Type =
+                    match cmd.LastMessageId.BatchIndex with
+                    | index when index >= 0  -> Cumulative(%index, BatchMessageAcker.NullAcker)
+                    | _ -> Individual
                 Partition = cmd.LastMessageId.Partition
                 TopicName = %"" }
             handleSuccess %cmd.RequestId result
@@ -485,7 +488,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                         | Result.Error (UnknownCommandType unknownType), consumed ->
                             Log.Logger.LogError("{0} UnknownCommandType {1}, ignoring message", prefix, unknownType)
                             reader.AdvanceTo consumed
-            with ex ->
+            with Flatten ex ->
                 if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
                     Log.Logger.LogWarning("{0} New connection was aborted", prefix)
                 Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally while reading", prefix)

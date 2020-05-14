@@ -151,7 +151,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         Log.Logger.LogInformation("{0} created", prefix)
                         consumerCreatedTsc.SetResult()
                         return! loop { Stream = newStream; Enumerator = newStream.GetEnumerator()}
-                    with ex ->
+                    with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not create", prefix)
                         do! consumerTasks
                             |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
@@ -283,7 +283,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             Log.Logger.LogInformation("{0} closed", prefix)
                             stopConsumer()
                             channel.Reply <| Result()
-                        with ex ->
+                        with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} could not close", prefix)
                             this.ConnectionState <- Failed
                             channel.Reply <| Exn ex
@@ -305,7 +305,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             Log.Logger.LogInformation("{0} unsubscribed", prefix)    
                             stopConsumer()
                             channel.Reply <| Result()
-                        with ex ->
+                        with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} could not unsubscribe", prefix)
                             this.ConnectionState <- Failed    
                             channel.Reply <| Exn ex
@@ -371,7 +371,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                     prefix, numPartitions, partitionedTopicNames.Length )
                                 numPartitions <- partitionedTopicNames.Length
                                 return! loop { Stream = newStream; Enumerator = newStream.GetEnumerator()}
-                            with ex ->
+                            with Flatten ex ->
                                 do! consumerTasks
                                     |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
                                     |> Seq.map (fun t ->

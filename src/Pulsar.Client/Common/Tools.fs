@@ -63,6 +63,11 @@ let reraize<'a> ex =
 
 let throwIfNotNull (exn:Exception) = if not(isNull exn) then raise exn
 
+let (|Flatten|) (ex: exn) =
+    match ex with
+    | :? AggregateException as aggrEx -> aggrEx.Flatten().InnerException
+    | _ -> ex
+
 // DateTime conversions
 
 let UTC_EPOCH = DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);

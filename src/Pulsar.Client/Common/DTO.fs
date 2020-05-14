@@ -349,38 +349,31 @@ type internal PulsarResponseType =
     | Error
     | Empty
 
-    static member GetPartitionedTopicMetadata req =
-        match req with
+    static member GetPartitionedTopicMetadata = function
         | PartitionedTopicMetadata x -> x
         | _ -> failwith "Incorrect return type"
 
-    static member GetLookupTopicResult req =
-        match req with
+    static member GetLookupTopicResult = function
         | LookupTopicResult x -> x
         | _ -> failwith "Incorrect return type"
 
-    static member GetProducerSuccess req =
-        match req with
+    static member GetProducerSuccess = function
         | ProducerSuccess x -> x
         | _ -> failwith "Incorrect return type"
 
-    static member GetTopicsOfNamespace req =
-        match req with
+    static member GetTopicsOfNamespace = function
         | TopicsOfNamespace x -> x
         | _ -> failwith "Incorrect return type"
 
-    static member GetLastMessageId req =
-        match req with
+    static member GetLastMessageId = function
         | LastMessageId msgId -> msgId
         | _ -> failwith "Incorrect return type"
         
-    static member GetTopicSchema req =
-        match req with
+    static member GetTopicSchema = function
         | TopicSchema x -> x
         | _ -> failwith "Incorrect return type"
 
-    static member GetEmpty req =
-        match req with
+    static member GetEmpty = function
         | Empty -> ()
         | _ -> failwith "Incorrect return type"
 
@@ -406,42 +399,5 @@ type MessageRoutingMode =
 type HashingScheme =
     | DotnetStringHash = 0
     | Murmur3_32Hash = 1
-
-exception InvalidServiceURL
-exception InvalidConfigurationException of string
-exception NotFoundException of string
-exception TimeoutException of string
-exception IncompatibleSchemaException of string
-exception LookupException of string
-exception TooManyRequestsException of string
-exception ConnectException of string
-exception AlreadyClosedException of string
-exception TopicTerminatedException of string
-exception AuthenticationException of string
-exception AuthorizationException of string
-exception GettingAuthenticationDataException of string
-exception UnsupportedAuthenticationException of string
-exception BrokerPersistenceException of string
-exception BrokerMetadataException of string
-exception ProducerBusyException of string
-exception ConsumerBusyException of string
-exception NotConnectedException of string
-exception InvalidMessageException of string
-exception InvalidTopicNameException of string
-exception NotSupportedException of string
-exception ProducerQueueIsFullError of string
-exception ProducerBlockedQuotaExceededError of string
-exception ProducerBlockedQuotaExceededException of string
-exception ChecksumException of string
-exception CryptoExceptionof of string
-exception TopicDoesNotExistException of string
-
-// custom exception
-exception ConnectionFailedOnSend of string
-exception MaxMessageSizeChanged of int
-exception SchemaSerializationException of string
-
-exception DecompressionException of string
-exception BatchDeserializationException of string
 
 

@@ -53,6 +53,7 @@
     <Compile Include="Api\BatchReceivePolicy.fs" />
     <Compile Include="Api\KeySharedPolicy.fs" />
     <Compile Include="Api\ISchema.fs" />
+    <Compile Include="Api\PulsarClientException.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Api\AuthenticationDataProvider.fs" />
     <Compile Include="Api\Authentication.fs" />

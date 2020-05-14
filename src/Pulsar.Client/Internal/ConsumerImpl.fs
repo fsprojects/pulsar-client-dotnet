@@ -57,7 +57,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mutable avalablePermits = 0
     let mutable startMessageId = startMessageId
     let mutable lastMessageIdInBroker = MessageId.Earliest
-    let mutable lastDequeuedMessage = startMessageId |> Option.defaultValue MessageId.Earliest
+    let mutable lastDequeuedMessageId = MessageId.Earliest
     let mutable duringSeek = None
     let initialStartMessageId = startMessageId
     let mutable incomingMessagesSize = 0L
@@ -71,8 +71,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             match! mbAsyncReply with
             | Result msg ->
                 return msg
-            | Exn exn ->
-                return reraize exn
+            | Exn ex ->
+                return reraize ex
         }
     
     let connectionHandler =
@@ -84,11 +84,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                           (fun ex -> this.Mb.Post(ConsumerMessage.ConnectionFailed ex)),
                           Backoff({ BackoffConfig.Default with Initial = TimeSpan.FromMilliseconds(100.0); Max = TimeSpan.FromSeconds(60.0) }))
 
-    let hasMoreMessages (lastMessageIdInBroker: MessageId) (lastDequeuedMessage: MessageId) =
-        if (lastMessageIdInBroker > lastDequeuedMessage && lastMessageIdInBroker.EntryId <> %(-1L)) then
+    let hasMoreMessages (lastMessageIdInBroker: MessageId) (lastDequeuedMessage: MessageId) (inclusive: bool) =
+        if (inclusive && lastMessageIdInBroker >= lastDequeuedMessage && lastMessageIdInBroker.EntryId <> %(-1L)) then
+            true
+        elif (not inclusive && lastMessageIdInBroker > lastDequeuedMessage && lastMessageIdInBroker.EntryId <> %(-1L)) then
             true
         else
-            lastMessageIdInBroker = lastDequeuedMessage && incomingMessages.Count > 0
+            false
 
     let increaseAvailablePermits delta =
         avalablePermits <- avalablePermits + delta
@@ -111,7 +113,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             duringSeek <- None
             seekMsgId
         | None when isDurable ->
-            None
+            startMessageId
         | _  ->        
             match nextMsg with
             | Some nextMessageInQueue ->                
@@ -125,10 +127,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         { nextMessageInQueue with EntryId = nextMessageInQueue.EntryId - %1L }
                 Some previousMessage
             | None ->
-                if lastDequeuedMessage <> MessageId.Earliest then
+                if lastDequeuedMessageId <> MessageId.Earliest then
                     // If the queue was empty we need to restart from the message just after the last one that has been dequeued
                     // in the past
-                    Some lastDequeuedMessage
+                    Some lastDequeuedMessageId
                 else
                     // No message was received or dequeued by this consumer. Next message would still be the startMessageId
                     startMessageId
@@ -381,7 +383,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     /// Record the event that one message has been processed by the application.
     /// Periodically, it sends a Flow command to notify the broker that it can push more messages
     let messageProcessed (msg: Message<'T>) =
-        lastDequeuedMessage <- msg.MessageId
+        lastDequeuedMessageId <- msg.MessageId
         increaseAvailablePermits 1
         if consumerConfig.AckTimeout <> TimeSpan.Zero then
             unAckedMessageTracker.Add msg.MessageId |> ignore
@@ -591,11 +593,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                     Log.Logger.LogDebug("{0} initial flow sent {1}", prefix, initialFlowCount)
                                 else
                                     raise (ConnectionFailedOnSend "FlowCommand")
-                        with
-                        | ex ->
+                        with Flatten ex ->
                             clientCnx.RemoveConsumer consumerId
                             Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
-                            if (connectionHandler.IsRetriableError ex && DateTime.Now < subscribeTimeout) then
+                            if (PulsarClientException.isRetriableError ex && DateTime.Now < subscribeTimeout) then
                                 connectionHandler.ReconnectLater ex
                             else
                                 if not subscribeTsc.Task.IsCompleted then
@@ -781,14 +782,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             response |> PulsarResponseType.GetEmpty
                             
                             duringSeek <- Some lastMessage
-                            lastDequeuedMessage <- MessageId.Earliest
+                            lastDequeuedMessageId <- MessageId.Earliest
                             
                             acksGroupingTracker.FlushAndClean()
                             incomingMessages.Clear()
                             Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
                             channel.Reply <| Result()
-                        with
-                        | ex ->
+                        with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
                             channel.Reply <| Exn ex
                     | _ ->
@@ -817,14 +817,43 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | ConsumerMessage.HasMessageAvailable channel ->
 
                     Log.Logger.LogDebug("{0} HasMessageAvailable", prefix)
-                    if hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessage then
-                        channel.Reply(Task.FromResult(true))
+                    
+                    // avoid null referenece
+                    let startMessageId = startMessageId |> Option.defaultValue lastDequeuedMessageId
+                    
+                    // we haven't read yet. use startMessageId for comparison
+                    if lastDequeuedMessageId = MessageId.Earliest then
+                        // if we are starting from latest, we should seek to the actual last message first.
+                        // allow the last one to be read when read head inclusively.
+                        if startMessageId = MessageId.Latest then                            
+                            let! messageId = getLastMessageIdAsync() |> Async.AwaitTask
+                            task {
+                                let! result = this.Mb.PostAndAsyncReply(fun channel -> SeekAsync ((MessageId messageId), channel))
+                                return
+                                    match result with
+                                    | Result () -> consumerConfig.ResetIncludeHead
+                                    | Exn ex -> reraize ex
+                            } |> channel.Reply
+                        elif hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead then
+                            channel.Reply(Task.FromResult(true))
+                        else
+                            task {
+                                let! messageId = getLastMessageIdAsync()
+                                this.LastMessageIdInBroker <- messageId // Concurrent update - handle wisely
+                                return hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead
+                            } |> channel.Reply
+
                     else
-                        task {
-                            let! messageId = getLastMessageIdAsync()
-                            this.LastMessageIdInBroker <- messageId // Concurrent update - handle wisely
-                            return hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessage                                
-                        } |> channel.Reply
+                        // read before, use lastDequeueMessage for comparison
+                        if hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false then
+                            channel.Reply(Task.FromResult(true))
+                        else
+                            task {
+                                let! messageId = getLastMessageIdAsync()
+                                this.LastMessageIdInBroker <- messageId // Concurrent update - handle wisely
+                                return hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false
+                            } |> channel.Reply
+
                     return! loop ()
                                     
                 | ConsumerMessage.ActiveConsumerChanged isActive ->
@@ -847,8 +876,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             connectionHandler.Closed()
                             stopConsumer()
                             channel.Reply <| Result()
-                        with
-                        | ex ->
+                        with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} failed to close", prefix)
                             channel.Reply <| Exn ex
                     | _ ->
@@ -874,8 +902,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             connectionHandler.Closed()
                             stopConsumer()
                             channel.Reply <| Result()
-                        with
-                        | ex ->
+                        with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
                             channel.Reply <| Exn ex
                     | _ ->
