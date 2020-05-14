@@ -4,7 +4,7 @@ open Pulsar.Client.Api
 open System
 open Pulsar.Client.Common
 
-type DateSchema() =
+type internal DateSchema() =
     inherit ISchema<DateTime>()
     override this.SchemaInfo = { Name = "Date"; Type = SchemaType.DATE; Schema = [||]; Properties = Map.empty }
     override this.Encode value =

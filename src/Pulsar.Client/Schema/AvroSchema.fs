@@ -10,7 +10,7 @@ open Pulsar.Client.Api
 open AvroSchemaGenerator
 open Pulsar.Client.Common
 
-type AvroSchema<'T> private (stringSchema) =
+type internal AvroSchema<'T> private (stringSchema) =
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
     let avroSchema = Schema.Parse(stringSchema)

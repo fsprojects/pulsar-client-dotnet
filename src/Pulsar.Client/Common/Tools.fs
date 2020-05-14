@@ -1,5 +1,5 @@
 ﻿[<AutoOpen>]
-module Pulsar.Client.Common.Tools
+module internal Pulsar.Client.Common.Tools
 
 open System.Net
 open System
@@ -7,28 +7,28 @@ open Microsoft.IO
 open System.Runtime.ExceptionServices
 open System.Collections.Generic
 
-let internal MemoryStreamManager = RecyclableMemoryStreamManager()
-let internal MagicNumber = int16 0x0e01
-let internal RandomGenerator = Random()
-let internal EmptyProps: IReadOnlyDictionary<string, string> = readOnlyDict []
+let MemoryStreamManager = RecyclableMemoryStreamManager()
+let MagicNumber = int16 0x0e01
+let RandomGenerator = Random()
+let EmptyProps: IReadOnlyDictionary<string, string> = readOnlyDict []
 
 // Converts
 
-let inline int32ToBigEndian(num : Int32) =
+let int32ToBigEndian(num : Int32) =
     IPAddress.HostToNetworkOrder(num)
 
-let inline int32FromBigEndian(num : Int32) =
+let int32FromBigEndian(num : Int32) =
     IPAddress.NetworkToHostOrder(num)
     
-let inline int16ToBigEndian(num : Int16) =
+let int16ToBigEndian(num : Int16) =
     IPAddress.HostToNetworkOrder(num)
-let inline int16FromBigEndian(num : Int16) =
+let int16FromBigEndian(num : Int16) =
     IPAddress.NetworkToHostOrder(num)
 
-let inline int64ToBigEndian(num : Int64) =
+let int64ToBigEndian(num : Int64) =
     IPAddress.HostToNetworkOrder(num)
 
-let inline int64FromBigEndian(num : Int64) =
+let int64FromBigEndian(num : Int64) =
     IPAddress.NetworkToHostOrder(num)
 
 // Exception helper

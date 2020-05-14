@@ -4,7 +4,7 @@ open Pulsar.Client.Api
 open System
 open Pulsar.Client.Common
 
-type FloatSchema() =
+type internal FloatSchema() =
     inherit ISchema<single>()
     override this.SchemaInfo = { Name = "Float"; Type = SchemaType.FLOAT; Schema = [||]; Properties = Map.empty }
     override this.Encode value =

@@ -3,7 +3,7 @@ namespace Pulsar.Client.Schema
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
-type StringSchema internal (charset: System.Text.Encoding) =
+type internal StringSchema (charset: System.Text.Encoding) =
     inherit ISchema<string>()
     override this.SchemaInfo = { Name = "String"; Type = SchemaType.STRING; Schema = [||]; Properties = Map.empty }
     override this.Encode value =

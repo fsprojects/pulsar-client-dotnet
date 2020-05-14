@@ -4,7 +4,7 @@ open Pulsar.Client.Api
 open System
 open Pulsar.Client.Common
 
-type ByteSchema() =
+type internal ByteSchema() =
     inherit ISchema<byte>()
     override this.SchemaInfo = { Name = "INT8"; Type = SchemaType.INT8; Schema = [||]; Properties = Map.empty }
     override this.Encode value = [| value |]

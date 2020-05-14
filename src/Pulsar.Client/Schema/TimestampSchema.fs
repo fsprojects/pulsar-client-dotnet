@@ -4,7 +4,7 @@ open Pulsar.Client.Api
 open System
 open Pulsar.Client.Common
 
-type TimestampSchema() =
+type internal TimestampSchema() =
     inherit ISchema<DateTimeOffset>()
     override this.SchemaInfo = { Name = "Timestamp"; Type = SchemaType.TIMESTAMP; Schema = [||]; Properties = Map.empty }
     override this.Encode value =

@@ -4,7 +4,7 @@ open Pulsar.Client.Api
 open System
 open Pulsar.Client.Common
 
-type DoubleSchema() =
+type internal DoubleSchema() =
     inherit ISchema<float>()
     override this.SchemaInfo = { Name = "Double"; Type = SchemaType.DOUBLE; Schema = [||]; Properties = Map.empty }
     override this.Encode value =

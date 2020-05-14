@@ -4,7 +4,7 @@ open Pulsar.Client.Api
 open System
 open Pulsar.Client.Common
 
-type IntSchema() =
+type internal IntSchema() =
     inherit ISchema<int>()
     override this.SchemaInfo = { Name = "INT32"; Type = SchemaType.INT32; Schema = [||]; Properties = Map.empty }
     override this.Encode value =
