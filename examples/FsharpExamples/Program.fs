@@ -6,6 +6,7 @@ open Simple
 open CustomProps
 open ReaderApi
 open RealWorld
+open Schema
 
 [<EntryPoint>]
 let main _ =
@@ -18,11 +19,12 @@ let main _ =
         )
     PulsarClient.Logger <- loggerFactory.CreateLogger("PulsarLogger") 
 
-    runSimple().Wait()
+//    runSimple().Wait()
 //    runTlsAuthentication().Wait()
 //    runCustomProps().Wait()
 //    runReader().Wait()
 //    runRealWorld(PulsarClient.Logger).Wait()
+    runSchema().Wait()
 
     printfn "Example ended. Press any key to exit"
     Console.ReadKey() |> ignore
