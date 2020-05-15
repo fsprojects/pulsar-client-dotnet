@@ -42,7 +42,7 @@ namespace CsharpExamples
             Console.WriteLine($"MessageId is: '{messageId}'");
 
             var message = await consumer.ReceiveAsync();
-            Console.WriteLine($"Received: {message.GetValue.Invoke(null)}");
+            Console.WriteLine($"Received: {message.GetValue()}");
 
             await consumer.AcknowledgeAsync(message.MessageId);
         }

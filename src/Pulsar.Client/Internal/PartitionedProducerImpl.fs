@@ -117,7 +117,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
                     match this.ConnectionState with
                     | Closing | Closed ->
-                        channel.Reply <| Result()
+                        channel.Reply <| Ok()
                     | _ ->
                         this.ConnectionState <- Closing
                         let producersTasks = producers |> Seq.map(fun producer -> task { return! producer.DisposeAsync() })                       
@@ -129,7 +129,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} could not close", prefix)
                             this.ConnectionState <- Failed
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                             return! loop ()
 
                 | TickTime  ->
@@ -289,6 +289,6 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                 | _ ->
                     let! result = mb.PostAndAsyncReply(Close)
                     match result with
-                    | Result () -> ()
-                    | Exn ex -> reraize ex
+                    | Ok () -> ()
+                    | Error ex -> reraize ex
             } |> ValueTask

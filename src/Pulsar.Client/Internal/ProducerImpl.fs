@@ -452,16 +452,16 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             connectionHandler.Closed()
                             stopProducer()
                             failPendingMessages(AlreadyClosedException("Producer was already closed"))
-                            channel.Reply <| Result()
+                            channel.Reply <| Ok()
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} failed to close", prefix)
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                     | _ ->
                         Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
                         connectionHandler.Closed()
                         stopProducer()
                         failPendingMessages(AlreadyClosedException("Producer was already closed"))
-                        channel.Reply <| Result()
+                        channel.Reply <| Ok()
 
             }
         loop ()
@@ -558,7 +558,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 task {
                     let! result = mb.PostAndAsyncReply(ProducerMessage.Close)
                     match result with
-                    | Result () -> ()
-                    | Exn ex -> reraize ex 
+                    | Ok () -> ()
+                    | Error ex -> reraize ex 
                 } |> ValueTask
             

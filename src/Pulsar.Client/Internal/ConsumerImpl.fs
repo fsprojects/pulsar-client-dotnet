@@ -69,9 +69,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let wrapPostAndReply (mbAsyncReply: Async<ResultOrException<'A>>) =
         async {
             match! mbAsyncReply with
-            | Result msg ->
+            | Ok msg ->
                 return msg
-            | Exn ex ->
+            | Error ex ->
                 return reraize ex
         }
     
@@ -311,7 +311,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             return deadMessageProcessed
         }
 
-    let enqueueMessage msg =
+    let enqueueMessage (msg: Message<'T>) =
         incomingMessagesSize <- incomingMessagesSize + msg.Data.LongLength
         incomingMessages.Enqueue(msg)
 
@@ -347,23 +347,23 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 let getValue () =
                     keyValueProcessor
                     |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, singleMessagePayload) :?> 'T)
-                    |> Option.defaultWith (fun() -> schemaDecodeFunction singleMessagePayload)                   
-                let message =
-                    {
-                        MessageId = messageId
-                        Properties =
-                            if singleMessageMetadata.Properties.Count > 0 then
+                    |> Option.defaultWith (fun() -> schemaDecodeFunction singleMessagePayload)
+                let properties =
+                    if singleMessageMetadata.Properties.Count > 0 then
                                 singleMessageMetadata.Properties
                                 |> Seq.map (fun prop -> (prop.Key, prop.Value))
                                 |> readOnlyDict
                             else
                                 EmptyProps
-                        Key = %msgKey
-                        HasBase64EncodedKey = singleMessageMetadata.PartitionKeyB64Encoded
-                        Data = singleMessagePayload
-                        GetValue = getValue
-                        SchemaVersion = getSchemaVersionBytes rawMessage.Metadata.SchemaVersion
-                    }
+                let message = Message (
+                                messageId,
+                                singleMessagePayload,
+                                %msgKey,                        
+                                singleMessageMetadata.PartitionKeyB64Encoded,
+                                properties,
+                                getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+                                getValue
+                            )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                     deadLettersProcessor.AddMessage messageId message
                 enqueueMessage message
@@ -404,7 +404,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             else
                 shouldContinue <- false
         Log.Logger.LogDebug("{0} BatchFormed with size {1}", prefix, messages.Size)
-        ch.Reply(Result messages)
+        ch.Reply(Ok messages)
     
     let removeExpiredMessagesFromQueue (msgIds: RedeliverSet) =
         if incomingMessages.Count > 0 then
@@ -429,7 +429,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let replyWithMessage (channel: AsyncReplyChannel<ResultOrException<Message<'T>>>) message =
         messageProcessed message
         let interceptMsg = interceptors.BeforeConsume(this, message)
-        channel.Reply (Result interceptMsg)
+        channel.Reply (Ok interceptMsg)
 
     let stopConsumer () =
         unAckedMessageTracker.Close()
@@ -441,10 +441,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         cleanup(this)
         while waiters.Count > 0 do
             let waitingChannel = waiters.Dequeue()
-            waitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
+            waitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed")))
         while batchWaiters.Count > 0 do
             let cts, batchWaitingChannel = batchWaiters.Dequeue()
-            batchWaitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
+            batchWaitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed")))
             cts.Cancel()
             cts.Dispose()
         Log.Logger.LogInformation("{0} stopped", prefix)
@@ -487,15 +487,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         keyValueProcessor
                         |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, payload) :?> 'T)
                         |> Option.defaultWith (fun () -> schemaDecodeFunction payload)
-                    let message = {
-                        GetValue = getValue
-                        MessageId = msgId
-                        Data = payload
-                        Key = %msgKey
-                        HasBase64EncodedKey = rawMessage.IsKeyBase64Encoded
-                        Properties = rawMessage.Properties
-                        SchemaVersion = getSchemaVersionBytes rawMessage.Metadata.SchemaVersion
-                    } 
+                    let message = Message(
+                                    msgId,
+                                    payload,
+                                    %msgKey,
+                                    rawMessage.IsKeyBase64Encoded,
+                                    rawMessage.Properties,
+                                    getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+                                    getValue
+                                )
                     if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                         deadLettersProcessor.AddMessage message.MessageId message
                     if hasWaitingChannel then
@@ -787,12 +787,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             acksGroupingTracker.FlushAndClean()
                             incomingMessages.Clear()
                             Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
-                            channel.Reply <| Result()
+                            channel.Reply <| Ok()
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                     | _ ->
-                        channel.Reply <| Exn(NotConnectedException "Not connected to broker")
+                        channel.Reply <| Error(NotConnectedException "Not connected to broker")
                         Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
                     return! loop ()
 
@@ -831,8 +831,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 let! result = this.Mb.PostAndAsyncReply(fun channel -> SeekAsync ((MessageId messageId), channel))
                                 return
                                     match result with
-                                    | Result () -> consumerConfig.ResetIncludeHead
-                                    | Exn ex -> reraize ex
+                                    | Ok () -> consumerConfig.ResetIncludeHead
+                                    | Error ex -> reraize ex
                             } |> channel.Reply
                         elif hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead then
                             channel.Reply(Task.FromResult(true))
@@ -875,15 +875,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             clientCnx.RemoveConsumer(consumerId)
                             connectionHandler.Closed()
                             stopConsumer()
-                            channel.Reply <| Result()
+                            channel.Reply <| Ok()
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} failed to close", prefix)
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                     | _ ->
                         Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
                         connectionHandler.Closed()
                         stopConsumer()
-                        channel.Reply <| Result()
+                        channel.Reply <| Ok()
 
                 | ConsumerMessage.Unsubscribe channel ->
 
@@ -901,13 +901,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             clientCnx.RemoveConsumer(consumerId)
                             connectionHandler.Closed()
                             stopConsumer()
-                            channel.Reply <| Result()
+                            channel.Reply <| Ok()
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                     | _ ->
                         Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
-                        channel.Reply <| Exn(NotConnectedException "Not connected to broker")
+                        channel.Reply <| Error(NotConnectedException "Not connected to broker")
                         return! loop ()
 
             }
@@ -1062,8 +1062,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 task {
                     let! result = mb.PostAndAsyncReply(ConsumerMessage.Close)
                     match result with
-                    | Result () -> ()
-                    | Exn ex -> reraize ex 
+                    | Ok () -> ()
+                    | Error ex -> reraize ex 
                 } |> ValueTask
 
 

@@ -228,23 +228,34 @@ type internal RawMessage =
         Properties: IReadOnlyDictionary<string, string>
     }
 
-type Message<'T> =
-    {
-        /// Get the unique message ID associated with this message.
-        MessageId: MessageId
-        /// Get the raw payload of the message.
-        Data: byte[]
-        /// Get the key of the message.
-        Key: PartitionKey
-        /// Check whether the key has been base64 encoded.
-        HasBase64EncodedKey: bool
-        /// Return the properties attached to the message.
-        Properties: IReadOnlyDictionary<string, string>
-        /// Get the de-serialized value of the message, according the configured Schema.
-        GetValue: unit -> 'T
-        // Schema version of the message if the message is produced with schema otherwise null.
-        SchemaVersion: byte[]
-    }
+type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey, hasBase64EncodedKey: bool,
+                  properties: IReadOnlyDictionary<string, string>, schemaVersion: byte[], getValue: unit -> 'T) =
+    /// Get the unique message ID associated with this message.
+    member this.MessageId = messageId
+    /// Get the raw payload of the message.
+    member this.Data = data
+    /// Get the key of the message.
+    member this.Key = key
+    /// Check whether the key has been base64 encoded.
+    member this.HasBase64EncodedKey = hasBase64EncodedKey
+    /// Return the properties attached to the message.
+    member this.Properties = properties
+    // Schema version of the message if the message is produced with schema otherwise null.
+    member this.SchemaVersion = schemaVersion    
+    /// Get the de-serialized value of the message, according the configured Schema.
+    member this.GetValue() =
+        getValue()
+    member internal this.WithMessageId messageId =
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, getValue)
+    /// Get a new instance of the message with updated data
+    member this.WithData data =
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, getValue)
+    /// Get a new instance of the message with updated key
+    member this.WithKey (key, hasBase64EncodedKey) =
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, getValue)
+    /// Get a new instance of the message with updated properties
+    member this.WithProperties properties =
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, getValue)
 
 type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 
@@ -252,7 +263,6 @@ type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
     let mutable currentSizeOfMessages = 0L
 
     let messageList = if maxNumberOfMessages > 0 then ResizeArray<Message<'T>>(maxNumberOfMessages) else ResizeArray<Message<'T>>()
-
     
     member this.Count with get() =
         currentNumberOfMessages
@@ -346,7 +356,7 @@ type internal PulsarResponseType =
     | TopicsOfNamespace of TopicsOfNamespace
     | LastMessageId of MessageId
     | TopicSchema of TopicSchema option
-    | Error
+    | PulsarError
     | Empty
 
     static member GetPartitionedTopicMetadata = function
@@ -377,9 +387,7 @@ type internal PulsarResponseType =
         | Empty -> ()
         | _ -> failwith "Incorrect return type"
 
-type internal ResultOrException<'T> =
-    | Result of 'T
-    | Exn of exn
+type internal ResultOrException<'T> = Result<'T, exn>
 
 type internal SeekData =
     | MessageId of MessageId

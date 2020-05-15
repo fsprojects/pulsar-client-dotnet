@@ -64,8 +64,8 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
     let batchWaiters = Queue<CancellationToken*AsyncReplyChannel<Async<ResultOrException<Messages<'T>>>>>()
     let mutable unhandleMessage: ResultOrException<Message<'T>> option = None
     
-    let alreadyCancelledExn = Exn <| Exception "Batch already cancelled"
-    let noMoreMessagesExn = Exn <| Exception "No more messages available"
+    let alreadyCancelledExn = Error <| Exception "Batch already cancelled"
+    let noMoreMessagesExn = Error <| Exception "No more messages available"
 
     let timer = new Timer(1000.0 * 60.0) // 1 minute
     
@@ -74,11 +74,11 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
         asyncSeq {
             while not consumerImp.HasReachedEndOfTopic do
                 let! message = consumer.ReceiveFsharpAsync()
-                match message with
-                | Result msg ->
-                    let newMessageId = { msg.MessageId with TopicName = topic }
-                    yield Result { msg with MessageId = newMessageId }
-                | ex -> yield ex
+                yield
+                    message |> Result.map (fun msg ->
+                        let newMessageId = { msg.MessageId with TopicName = topic }
+                        msg.WithMessageId(newMessageId)
+                    )
         }
         
     let stopConsumer() =
@@ -86,7 +86,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
         timer.Close()
         while batchWaiters.Count > 0 do
             let _, batchWaitingChannel = batchWaiters.Dequeue()
-            batchWaitingChannel.Reply(async{ return Exn (AlreadyClosedException("Consumer is already closed"))})
+            batchWaitingChannel.Reply(async{ return Error (AlreadyClosedException("Consumer is already closed"))})
 
     let rec work ct =
         async {
@@ -96,7 +96,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 match! this.Mb.PostAndAsyncReply(fun ch -> AddBatchMessage(ch, msg, ct)) with
                 | BatchReady msgs ->
                     Log.Logger.LogDebug("{0} completing batch work. {1} messages", prefix, msgs.Count)
-                    return Result msgs
+                    return Ok msgs
                 | Success ->
                     Log.Logger.LogDebug("{0} adding one message to batch", prefix)
                     return! work ct
@@ -181,9 +181,9 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     
                     Log.Logger.LogDebug("{0} BatchReceive", prefix)
                     match unhandleMessage with
-                    | Some (Exn exn) ->
+                    | Some (Error exn) ->
                         unhandleMessage <- None
-                        channel.Reply(async { return Exn exn })
+                        channel.Reply(async { return Error exn })
                     | _ ->
                         if batchWaiters.Count = 0 then
                             channel.Reply(work ct)
@@ -200,7 +200,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         channel.Reply(Expired)
                     else
                         match message with
-                        | Result msg ->
+                        | Ok msg ->
                             if (currentBatch.CanAdd(msg)) then
                                 currentBatch.Add(msg)
                                 if currentBatch.IsFull then
@@ -210,7 +210,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             else
                                 unhandleMessage <- Some message
                                 BatchReady <| completeBatch()
-                        | Exn _ ->
+                        | Error _ ->
                             unhandleMessage <- Some message
                             BatchReady <| completeBatch()
                         |> channel.Reply
@@ -228,7 +228,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     
                     Log.Logger.LogDebug("{0} BatchTimeout", prefix)
                     if not ct.IsCancellationRequested then
-                        completeBatch() |> Result |> channel.Reply
+                        completeBatch() |> Ok |> channel.Reply
                     else
                         alreadyCancelledExn |> channel.Reply
                     return! loop state
@@ -273,7 +273,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     Log.Logger.LogDebug("{0} Close", prefix)
                     match this.ConnectionState with
                     | Closing | Closed ->
-                        channel.Reply <| Result()
+                        channel.Reply <| Ok()
                     | _ ->
                         this.ConnectionState <- Closing
                         let consumerTasks = consumers |> Seq.map(fun kv -> kv.Value.DisposeAsync().AsTask())
@@ -282,11 +282,11 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             this.ConnectionState <- Closed
                             Log.Logger.LogInformation("{0} closed", prefix)
                             stopConsumer()
-                            channel.Reply <| Result()
+                            channel.Reply <| Ok()
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} could not close", prefix)
                             this.ConnectionState <- Failed
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                             return! loop state
                         
 
@@ -295,7 +295,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     Log.Logger.LogDebug("{0} Unsubscribe", prefix)
                     match this.ConnectionState with
                     | Closing | Closed ->
-                        channel.Reply <| Result()
+                        channel.Reply <| Ok()
                     | _ ->
                         this.ConnectionState <- Closing
                         let consumerTasks = consumers |> Seq.map(fun kv -> kv.Value.UnsubscribeAsync())
@@ -304,11 +304,11 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             this.ConnectionState <- Closed
                             Log.Logger.LogInformation("{0} unsubscribed", prefix)    
                             stopConsumer()
-                            channel.Reply <| Result()
+                            channel.Reply <| Ok()
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} could not unsubscribe", prefix)
                             this.ConnectionState <- Failed    
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                             return! loop state
 
                 | HasReachedEndOfTheTopic channel ->
@@ -444,9 +444,9 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 match! t with
                 | Some result ->
                     match result with
-                    | Result msg ->
+                    | Ok msg ->
                         return msg
-                    | Exn exn ->
+                    | Error exn ->
                         return reraize exn
                 | None ->
                     return failwith "No more messages available"
@@ -475,9 +475,9 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 let! result = seq { receiveBatchTask; timeoutTask } |> Task.WhenAny
                 cts.Cancel()
                 match! result with
-                | Result msgs ->
+                | Ok msgs ->
                     return msgs
-                | Exn exn ->
+                | Error exn ->
                     return reraize exn
             }
 
@@ -522,8 +522,8 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
             task {
                 let! result = mb.PostAndAsyncReply(Unsubscribe)
                 match result with
-                | Result () -> ()
-                | Exn ex -> reraize ex
+                | Ok () -> ()
+                | Error ex -> reraize ex
             }
 
         member this.HasReachedEndOfTopic with get() =
@@ -556,6 +556,6 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 | _ ->
                     let! result = mb.PostAndAsyncReply(Close)
                     match result with
-                    | Result () -> ()
-                    | Exn ex -> reraize ex
+                    | Ok () -> ()
+                    | Error ex -> reraize ex
             } |> ValueTask
