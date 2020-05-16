@@ -3,7 +3,7 @@ namespace Pulsar.Client.Schema
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
-type AutoProduceBytesSchemaStub() =
+type internal AutoProduceBytesSchemaStub() =
     inherit ISchema<byte[]>()
     override this.SchemaInfo = { Name = "AutoProduce"; Type = SchemaType.AUTO_PUBLISH; Schema = [||]; Properties = Map.empty }
     override this.Encode _ = raise <| SchemaSerializationException "AutoProduceBytesSchema is just stub!"

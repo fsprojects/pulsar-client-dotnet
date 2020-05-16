@@ -262,23 +262,28 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             Result.Error (UnknownCommandType unknownType)
     
     let tryParse (buffer: ReadOnlySequence<byte>) =
-        let array = buffer.ToArray()
-        if (array.Length >= 8) then
-            use stream =  new MemoryStream(array)
-            use reader = new BinaryReader(stream)
-            let totalength = reader.ReadInt32() |> int32FromBigEndian
-            let frameLength = totalength + 4
-            if (array.Length >= frameLength) then                
-                let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
-                Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
-                let consumed = int64 frameLength |> buffer.GetPosition
-                try
-                    let wrappedCommand = readCommand command reader stream frameLength
-                    wrappedCommand, consumed
-                with ex ->
-                    Result.Error (CorruptedCommand ex), consumed
-            else
-                Result.Error IncompleteCommand, SequencePosition()
+        let length = int buffer.Length
+        if (length >= 8) then            
+            let array = ArrayPool.Shared.Rent length
+            try
+                buffer.CopyTo(Span(array))
+                use stream =  new MemoryStream(array)
+                use reader = new BinaryReader(stream)
+                let totalength = reader.ReadInt32() |> int32FromBigEndian
+                let frameLength = totalength + 4
+                if (length >= frameLength) then                
+                    let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
+                    Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
+                    let consumed = int64 frameLength |> buffer.GetPosition
+                    try
+                        let wrappedCommand = readCommand command reader stream frameLength
+                        wrappedCommand, consumed
+                    with ex ->
+                        Result.Error (CorruptedCommand ex), consumed
+                else
+                    Result.Error IncompleteCommand, SequencePosition()
+            finally
+                ArrayPool.Shared.Return array
         else
             Result.Error IncompleteCommand, SequencePosition()
         
@@ -432,7 +437,10 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let result = LastMessageId {
                 LedgerId = %(int64 cmd.LastMessageId.ledgerId)
                 EntryId = %(int64 cmd.LastMessageId.entryId)
-                Type = Individual
+                Type =
+                    match cmd.LastMessageId.BatchIndex with
+                    | index when index >= 0  -> Cumulative(%index, BatchMessageAcker.NullAcker)
+                    | _ -> Individual
                 Partition = cmd.LastMessageId.Partition
                 TopicName = %"" }
             handleSuccess %cmd.RequestId result
@@ -487,7 +495,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                         | Result.Error (UnknownCommandType unknownType), consumed ->
                             Log.Logger.LogError("{0} UnknownCommandType {1}, ignoring message", prefix, unknownType)
                             reader.AdvanceTo consumed
-            with ex ->
+            with Flatten ex ->
                 if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
                     Log.Logger.LogWarning("{0} New connection was aborted", prefix)
                 Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally while reading", prefix)

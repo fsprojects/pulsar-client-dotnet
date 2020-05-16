@@ -18,7 +18,7 @@ nuget zlib.net-mutliplatform
 nuget K4os.Compression.LZ4
 nuget Snappy.Standard
 nuget ZstdNet
-nuget AvroSchemaGenerator 1.1
+nuget AvroSchemaGenerator
 nuget Microsoft.Extensions.Caching.Memory
 
 group Tests

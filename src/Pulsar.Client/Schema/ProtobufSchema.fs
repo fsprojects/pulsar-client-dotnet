@@ -7,7 +7,7 @@ open System.Text
 open Pulsar.Client.Api
 open AvroSchemaGenerator
 
-type ProtobufSchema<'T>() =
+type internal ProtobufSchema<'T>() =
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
     let stringSchema = typeof<'T>.GetSchema()

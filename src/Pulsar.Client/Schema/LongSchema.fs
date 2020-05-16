@@ -4,7 +4,7 @@ open Pulsar.Client.Api
 open System
 open Pulsar.Client.Common
 
-type LongSchema() =
+type internal LongSchema() =
     inherit ISchema<int64>()
     override this.SchemaInfo = { Name = "INT64"; Type = SchemaType.INT64; Schema = [||]; Properties = Map.empty }
     override this.Encode value =

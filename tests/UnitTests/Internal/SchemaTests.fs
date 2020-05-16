@@ -26,7 +26,7 @@ type AvroSchemaTest = { X: string; Y: ResizeArray<int> }
 [<Tests>]
 let tests =
     
-    ftestList "Schema tests" [
+    testList "Schema tests" [
 
         test "Bytes schema works fine" {
             let input = [| 1uy; 2uy; 3uy |]

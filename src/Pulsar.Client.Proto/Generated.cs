@@ -522,6 +522,29 @@ namespace pulsar.proto
         internal void ResetOriginalAuthMethod() => __pbn__OriginalAuthMethod = null;
         private string __pbn__OriginalAuthMethod;
 
+        [global::ProtoBuf.ProtoMember(10, Name = @"feature_flags")]
+        internal FeatureFlags FeatureFlags { get; set; }
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class FeatureFlags : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"supports_auth_refresh")]
+        [global::System.ComponentModel.DefaultValue(false)]
+        internal bool SupportsAuthRefresh
+        {
+            get { return __pbn__SupportsAuthRefresh ?? false; }
+            set { __pbn__SupportsAuthRefresh = value; }
+        }
+        internal bool ShouldSerializeSupportsAuthRefresh() => __pbn__SupportsAuthRefresh != null;
+        internal void ResetSupportsAuthRefresh() => __pbn__SupportsAuthRefresh = null;
+        private bool? __pbn__SupportsAuthRefresh;
+
     }
 
     [global::ProtoBuf.ProtoContract()]

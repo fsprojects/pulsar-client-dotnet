@@ -256,11 +256,17 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 startSendBatchTimer()
 
                             resendMessages()
-                        with
-                        | ex ->
+                        with Flatten ex ->
                             clientCnx.RemoveProducer producerId
                             Log.Logger.LogError(ex, "{0} Failed to create", prefix)
-                            match ex with
+                            match ex with                            
+                            | TopicDoesNotExistException reason ->
+                                match connectionHandler.ConnectionState with
+                                | Failed ->
+                                    Log.Logger.LogWarning("{0} Topic doesn't exist exception {1}", prefix, reason)
+                                    this.Mb.PostAndAsyncReply(ProducerMessage.Close) |> ignore
+                                    producerCreatedTsc.TrySetException(ex) |> ignore
+                                | _ -> ()
                             | ProducerBlockedQuotaExceededException reason ->
                                 Log.Logger.LogWarning("{0} Topic backlog quota exceeded. {1}", prefix, reason)
                                 failPendingMessages(ex)
@@ -276,7 +282,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 failPendingMessages(ex)
                                 producerCreatedTsc.TrySetException(ex) |> ignore
                                 stopProducer()
-                            | _ when producerCreatedTsc.Task.IsCompleted || (connectionHandler.IsRetriableError ex && DateTime.Now < createProducerTimeout) ->
+                            | _ when producerCreatedTsc.Task.IsCompleted || (PulsarClientException.isRetriableError ex && DateTime.Now < createProducerTimeout) ->
                                 // Either we had already created the producer once (producerCreatedFuture.isDone()) or we are
                                 // still within the initial timeout budget and we are dealing with a retryable error
                                 connectionHandler.ReconnectLater ex
@@ -295,7 +301,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     clientCnx.RemoveProducer(producerId)
                     return! loop ()
 
-                | ProducerMessage.ConnectionFailed  ex ->
+                | ProducerMessage.ConnectionFailed ex ->
 
                     Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
                     if (DateTime.Now > createProducerTimeout && producerCreatedTsc.TrySetException(ex)) then
@@ -463,17 +469,16 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             connectionHandler.Closed()
                             stopProducer()
                             failPendingMessages(AlreadyClosedException("Producer was already closed"))
-                            channel.Reply <| Result()
-                        with
-                        | ex ->
+                            channel.Reply <| Ok()
+                        with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} failed to close", prefix)
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                     | _ ->
                         Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
                         connectionHandler.Closed()
                         stopProducer()
                         failPendingMessages(AlreadyClosedException("Producer was already closed"))
-                        channel.Reply <| Result()
+                        channel.Reply <| Ok()
 
             }
         loop ()
@@ -575,7 +580,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 task {
                     let! result = mb.PostAndAsyncReply(ProducerMessage.Close)
                     match result with
-                    | Result () -> ()
-                    | Exn ex -> reraize ex 
+                    | Ok () -> ()
+                    | Error ex -> reraize ex 
                 } |> ValueTask
             

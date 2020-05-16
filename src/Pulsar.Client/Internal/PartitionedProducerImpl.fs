@@ -101,7 +101,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         Log.Logger.LogInformation("{0} created", prefix)
                         producerCreatedTsc.SetResult()
                         return! loop ()
-                    with ex ->
+                    with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not create", prefix)
                         do! producerTasks
                             |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
@@ -117,7 +117,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
                     match this.ConnectionState with
                     | Closing | Closed ->
-                        channel.Reply <| Result()
+                        channel.Reply <| Ok()
                     | _ ->
                         this.ConnectionState <- Closing
                         let producersTasks = producers |> Seq.map(fun producer -> task { return! producer.DisposeAsync() })                       
@@ -126,10 +126,10 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                             this.ConnectionState <- Closed
                             Log.Logger.LogInformation("{0} closed", prefix)
                             stopProducer()
-                        with ex ->
+                        with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} could not close", prefix)
                             this.ConnectionState <- Failed
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                             return! loop ()
 
                 | TickTime  ->
@@ -166,7 +166,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                                 Log.Logger.LogDebug("{0} success create producers for extended partitions. old: {1}, new: {2}",
                                     prefix, numPartitions, partitionedTopicNames.Length )
                                 numPartitions <- partitionedTopicNames.Length
-                            with ex ->
+                            with Flatten ex ->
                                 do! producerTasks
                                     |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
                                     |> Seq.map (fun t -> task { return! t.Result.DisposeAsync() })
@@ -293,6 +293,6 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                 | _ ->
                     let! result = mb.PostAndAsyncReply(Close)
                     match result with
-                    | Result () -> ()
-                    | Exn ex -> reraize ex
+                    | Ok () -> ()
+                    | Error ex -> reraize ex
             } |> ValueTask

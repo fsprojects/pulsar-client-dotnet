@@ -20,7 +20,7 @@ type ConsumerInterceptorBeforeConsume() =
             let msgValue = message.Data |> Encoding.UTF8.GetString
             let newProp = Dictionary(message.Properties)
             newProp.Add("BeforeConsume", msgValue)
-            {message with Properties = newProp}
+            message.WithProperties(newProp)
         
         member this.OnAcknowledge(_,_,_) = ()
         member this.OnAcknowledgeCumulative(_,_,_) = ()

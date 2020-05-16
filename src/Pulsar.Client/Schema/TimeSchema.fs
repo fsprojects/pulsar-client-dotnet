@@ -4,7 +4,7 @@ open Pulsar.Client.Api
 open System
 open Pulsar.Client.Common
 
-type TimeSchema() =
+type internal TimeSchema() =
     inherit ISchema<TimeSpan>()
     override this.SchemaInfo = { Name = "Time"; Type = SchemaType.TIME; Schema = [||]; Properties = Map.empty }
     override this.Encode value =

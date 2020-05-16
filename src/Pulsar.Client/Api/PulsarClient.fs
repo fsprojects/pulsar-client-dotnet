@@ -129,10 +129,10 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         async {
             try
                 return! lookupService.GetPartitionedTopicMetadata topicName |> Async.AwaitTask
-            with ex ->
+            with Flatten ex ->
                 let delay = Math.Min(backoff.Next(), remainingTimeMs)
-                // skip retry scheduler when set lookup throttle in client or server side which will lead to `TooManyRequestsException`
-                let isLookupThrottling = (ex :?> AggregateException).InnerExceptions |> Seq.exists (fun e -> e :? TooManyRequestsException)
+                // skip retry scheduler when set lookup throttle in client or server side which will lead to `TooManyRequestsException`                
+                let isLookupThrottling = PulsarClientException.isRetriableError ex |> not
                 if delay <= 0 || isLookupThrottling then
                     reraize ex
                 Log.Logger.LogWarning(ex, "Could not get connection while getPartitionedTopicMetadata -- Will try again in {0} ms", delay)

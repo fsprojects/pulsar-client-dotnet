@@ -2,6 +2,7 @@
 
 open Microsoft.Extensions.Logging
 open System.Threading
+open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System
 
@@ -56,17 +57,17 @@ type internal ConnectionHandler( parentPrefix: string,
                                 let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize, false) |> Async.AwaitTask
                                 this.ConnectionState <- Ready clientCnx
                                 connectionOpened epoch
-                            with
-                            | :? AggregateException as ex when (ex.InnerException :? MaxMessageSizeChanged) ->
-                                let newSize = (ex.InnerException :?> MaxMessageSizeChanged).Data0
-                                Log.Logger.LogInformation("{0} MaxMessageSizeChanged to {1}", prefix, newSize)
-                                maxMessageSize <- newSize
-                                this.Mb.Post(GrabCnx)                                
-                            | ex ->
-                                Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
-                                connectionFailed ex
-                                if isValidStateForReconnection() then
-                                    this.Mb.Post(ReconnectLater ex)
+                            with Flatten ex ->
+                                match ex with
+                                | MaxMessageSizeChanged newSize ->
+                                    Log.Logger.LogInformation("{0} MaxMessageSizeChanged to {1}", prefix, newSize)
+                                    maxMessageSize <- newSize
+                                    this.Mb.Post(GrabCnx)                                
+                                | _ ->
+                                    Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                                    connectionFailed ex
+                                    if isValidStateForReconnection() then
+                                        this.Mb.Post(ReconnectLater ex)
                         else
                             Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", prefix, topic, this.ConnectionState)
                     return! loop ()
@@ -141,12 +142,7 @@ type internal ConnectionHandler( parentPrefix: string,
     member this.ConnectionState
         with get() = Volatile.Read(&connectionState)
         and private set(value) = Volatile.Write(&connectionState, value)
-
-    member this.IsRetriableError ex =
-        match ex with
-        | LookupException _ -> true
-        | _ -> false
-
+        
     member this.CheckIfActive() =
         match this.ConnectionState with
         | Ready _ | Connecting -> null

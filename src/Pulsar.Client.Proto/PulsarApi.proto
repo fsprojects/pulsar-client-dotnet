@@ -42,10 +42,10 @@ message Schema {
 		KeyValue = 15;
 	}
 
-    required string name = 1;
-    required bytes schema_data = 3;
+	required string name = 1;
+	required bytes schema_data = 3;
 	required Type type = 4;
-    repeated KeyValue properties = 5;
+	repeated KeyValue properties = 5;
 
 }
 
@@ -62,8 +62,13 @@ message KeyValue {
 }
 
 message KeyLongValue {
-        required string key = 1;
-        required uint64 value = 2;
+	required string key = 1;
+	required uint64 value = 2;
+}
+
+message IntRange {
+	required int32 start = 1;
+	required int32 end = 2;
 }
 
 message EncryptionKeys {
@@ -119,53 +124,63 @@ message MessageMetadata {
 	// Mark the message to be delivered at or after the specified timestamp
 	optional int64 deliver_at_time = 19;
 
-    // Identify whether a message is a "marker" message used for
-    // internal metadata instead of application published data.
-    // Markers will generally not be propagated back to clients
-    optional int32 marker_type = 20;
+	// Identify whether a message is a "marker" message used for
+	// internal metadata instead of application published data.
+	// Markers will generally not be propagated back to clients
+	optional int32 marker_type = 20;
+
+	// transaction related message info
+	optional uint64 txnid_least_bits = 22 [default = 0];
+	optional uint64 txnid_most_bits = 23 [default = 0];
+
+	/// Add highest sequence id to support batch message with external sequence id
+	optional uint64 highest_sequence_id = 24 [default = 0];
 }
 
 message SingleMessageMetadata {
 	repeated KeyValue properties    = 1;
 	optional string partition_key   = 2;
-	required int32 payload_size	= 3;
+	required int32 payload_size    = 3;
 	optional bool compacted_out     = 4 [default = false];
 
 	// the timestamp that this event occurs. it is typically set by applications.
 	// if this field is omitted, `publish_time` can be used for the purpose of `event_time`.
 	optional uint64 event_time = 5 [default = 0];
 	optional bool partition_key_b64_encoded = 6 [ default = false ];
-    // Specific a key to overwrite the message key which used for ordering dispatch in Key_Shared mode.
+	// Specific a key to overwrite the message key which used for ordering dispatch in Key_Shared mode.
 	optional bytes ordering_key = 7;
 	// Allows consumer retrieve the sequence id that the producer set.
 	optional uint64 sequence_id = 8;
 }
 
 enum ServerError {
-    UnknownError        = 0;
+	UnknownError        = 0;
 	MetadataError       = 1; // Error with ZK/metadata
 	PersistenceError    = 2; // Error writing reading from BK
 	AuthenticationError = 3; // Non valid authentication
 	AuthorizationError  = 4; // Not authorized to use resource
 
 	ConsumerBusy        = 5; // Unable to subscribe/unsubscribe because
-	                         // other consumers are connected
-    ServiceNotReady     = 6; // Any error that requires client retry operation with a fresh lookup
-    ProducerBlockedQuotaExceededError = 7; // Unable to create producer because backlog quota exceeded
-    ProducerBlockedQuotaExceededException = 8; // Exception while creating producer because quota exceeded
-    ChecksumError = 9; // Error while verifying message checksum
-    UnsupportedVersionError = 10; // Error when an older client/version doesn't support a required feature
-    TopicNotFound = 11; // Topic not found
-    SubscriptionNotFound = 12; // Subscription not found
-    ConsumerNotFound = 13; // Consumer not found
-    TooManyRequests = 14; // Error with too many simultaneously request
-    TopicTerminatedError = 15; // The topic has been terminated
+	// other consumers are connected
+	ServiceNotReady     = 6; // Any error that requires client retry operation with a fresh lookup
+	ProducerBlockedQuotaExceededError = 7; // Unable to create producer because backlog quota exceeded
+	ProducerBlockedQuotaExceededException = 8; // Exception while creating producer because quota exceeded
+	ChecksumError = 9; // Error while verifying message checksum
+	UnsupportedVersionError = 10; // Error when an older client/version doesn't support a required feature
+	TopicNotFound = 11; // Topic not found
+	SubscriptionNotFound = 12; // Subscription not found
+	ConsumerNotFound = 13; // Consumer not found
+	TooManyRequests = 14; // Error with too many simultaneously request
+	TopicTerminatedError = 15; // The topic has been terminated
 
-    ProducerBusy         = 16; // Producer with same name is already connected
-    InvalidTopicName = 17; // The topic name is not valid
+	ProducerBusy         = 16; // Producer with same name is already connected
+	InvalidTopicName = 17; // The topic name is not valid
 
-    IncompatibleSchema = 18; // Specified schema was incompatible with topic schema
+	IncompatibleSchema = 18; // Specified schema was incompatible with topic schema
 	ConsumerAssignError = 19; // Dispatcher assign consumer error
+
+	TransactionCoordinatorNotFound = 20; // Transaction coordinator not found error
+	InvalidTxnStatus = 21; // Invalid txn status error
 }
 
 enum AuthMethod {
@@ -190,11 +205,12 @@ enum ProtocolVersion {
 	v10 = 10;// Added proxy to broker
 	v11 = 11;// C++ consumers before this version are not correctly handling the checksum field
 	v12 = 12;// Added get topic's last messageId from broker
-			 // Added CommandActiveConsumerChange
-			 // Added CommandGetTopicsOfNamespace
+	// Added CommandActiveConsumerChange
+	// Added CommandGetTopicsOfNamespace
 	v13 = 13; // Schema-registry : added avro schema format for json
 	v14 = 14; // Add CommandAuthChallenge and CommandAuthResponse for mutual auth
-	          // Added Key_Shared subscription
+	// Added Key_Shared subscription
+	v15 = 15; // Add CommandGetOrCreateSchema and CommandGetOrCreateSchemaResponse
 }
 
 message CommandConnect {
@@ -219,6 +235,12 @@ message CommandConnect {
 	optional string original_auth_data = 8;
 	optional string original_auth_method = 9;
 
+	// Feature flags
+	optional FeatureFlags feature_flags = 10;
+}
+
+message FeatureFlags {
+	optional bool supports_auth_refresh = 1 [default = false];
 }
 
 message CommandConnected {
@@ -243,6 +265,16 @@ message CommandAuthChallenge {
 message AuthData {
 	optional string auth_method_name = 1;
 	optional bytes auth_data = 2;
+}
+
+enum KeySharedMode {
+	AUTO_SPLIT = 0;
+	STICKY = 1;
+}
+
+message KeySharedMeta {
+	required KeySharedMode keySharedMode = 1;
+	repeated IntRange hashRanges = 3;
 }
 
 message CommandSubscribe {
@@ -271,23 +303,36 @@ message CommandSubscribe {
 	optional MessageIdData start_message_id = 9;
 
 	/// Add optional metadata key=value to this consumer
-    repeated KeyValue metadata = 10;
+	repeated KeyValue metadata = 10;
 
-    optional bool read_compacted = 11;
+	optional bool read_compacted = 11;
 
 	optional Schema schema = 12;
 	enum InitialPosition {
 		Latest   = 0;
 		Earliest = 1;
 	}
-	// Signal wthether the subscription will initialize on latest
+	// Signal whether the subscription will initialize on latest
 	// or not -- earliest
 	optional InitialPosition initialPosition = 13 [default = Latest];
 
-    // Mark the subscription as "replicated". Pulsar will make sure
-    // to periodically sync the state of replicated subscriptions
-    // across different clusters (when using geo-replication).
-    optional bool replicate_subscription_state = 14;
+	// Mark the subscription as "replicated". Pulsar will make sure
+	// to periodically sync the state of replicated subscriptions
+	// across different clusters (when using geo-replication).
+	optional bool replicate_subscription_state = 14;
+
+	// If true, the subscribe operation will cause a topic to be
+	// created if it does not exist already (and if topic auto-creation
+	// is allowed by broker.
+	// If false, the subscribe operation will fail if the topic
+	// does not exist.
+	optional bool force_topic_creation = 15 [default = true];
+
+	// If specified, the subscription will reset cursor's position back
+	// to specified seconds and  will send messages from that point
+	optional uint64 start_message_rollback_duration_sec = 16 [default = 0];
+
+	optional KeySharedMeta keySharedMeta = 17;
 }
 
 message CommandPartitionedTopicMetadata {
@@ -366,22 +411,35 @@ message CommandProducer {
 
 	optional bool encrypted       = 5 [default = false];
 
-    /// Add optional metadata key=value to this producer
-    repeated KeyValue metadata    = 6;
+	/// Add optional metadata key=value to this producer
+	repeated KeyValue metadata    = 6;
 
 	optional Schema schema = 7;
+
+	// If producer reconnect to broker, the epoch of this producer will +1
+	optional uint64 epoch = 8 [default = 0];
+
+	// Indicate the name of the producer is generated or user provided
+	// Use default true here is in order to be forward compatible with the client
+	optional bool user_provided_producer_name = 9 [default = true];
 }
 
 message CommandSend {
-	required uint64 producer_id   = 1;
-	required uint64 sequence_id   = 2;
+	required uint64 producer_id = 1;
+	required uint64 sequence_id = 2;
 	optional int32 num_messages = 3 [default = 1];
+	optional uint64 txnid_least_bits = 4 [default = 0];
+	optional uint64 txnid_most_bits = 5 [default = 0];
+
+	/// Add highest sequence id to support batch message with external sequence id
+	optional uint64 highest_sequence_id = 6 [default = 0];
 }
 
 message CommandSendReceipt {
 	required uint64 producer_id = 1;
 	required uint64 sequence_id = 2;
 	optional MessageIdData message_id = 3;
+	optional uint64 highest_sequence_id = 4 [default = 0];
 }
 
 message CommandSendError {
@@ -422,12 +480,23 @@ message CommandAck {
 
 	optional ValidationError validation_error = 4;
 	repeated KeyLongValue properties = 5;
+
+	optional uint64 txnid_least_bits = 6 [default = 0];
+	optional uint64 txnid_most_bits = 7 [default = 0];
+}
+
+message CommandAckResponse {
+	required uint64 consumer_id = 1;
+	optional uint64 txnid_least_bits  = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	optional ServerError error = 4;
+	optional string message = 5;
 }
 
 // changes on active consumer
 message CommandActiveConsumerChange {
-        required uint64 consumer_id	= 1;
-        optional bool is_active     = 2 [default = false];
+	required uint64 consumer_id    = 1;
+	optional bool is_active     = 2 [default = false];
 }
 
 message CommandFlow {
@@ -505,52 +574,52 @@ message CommandPong {
 }
 
 message CommandConsumerStats {
-        required uint64 request_id         = 1;
-        // required string topic_name         = 2;
-        // required string subscription_name  = 3;
-        required uint64 consumer_id        = 4;
+	required uint64 request_id         = 1;
+	// required string topic_name         = 2;
+	// required string subscription_name  = 3;
+	required uint64 consumer_id        = 4;
 }
 
 message CommandConsumerStatsResponse {
-        required uint64 request_id              = 1;
-        optional ServerError error_code         = 2;
-        optional string error_message           = 3;
+	required uint64 request_id              = 1;
+	optional ServerError error_code         = 2;
+	optional string error_message           = 3;
 
-        /// Total rate of messages delivered to the consumer. msg/s
-        optional double msgRateOut                  = 4;
+	/// Total rate of messages delivered to the consumer. msg/s
+	optional double msgRateOut                  = 4;
 
-        /// Total throughput delivered to the consumer. bytes/s
-        optional double msgThroughputOut            = 5;
+	/// Total throughput delivered to the consumer. bytes/s
+	optional double msgThroughputOut            = 5;
 
-        /// Total rate of messages redelivered by this consumer. msg/s
-        optional double msgRateRedeliver            = 6;
+	/// Total rate of messages redelivered by this consumer. msg/s
+	optional double msgRateRedeliver            = 6;
 
-        /// Name of the consumer
-        optional string consumerName                = 7;
+	/// Name of the consumer
+	optional string consumerName                = 7;
 
-        /// Number of available message permits for the consumer
-        optional uint64 availablePermits            = 8;
+	/// Number of available message permits for the consumer
+	optional uint64 availablePermits            = 8;
 
-        /// Number of unacknowledged messages for the consumer
-        optional uint64 unackedMessages             = 9;
+	/// Number of unacknowledged messages for the consumer
+	optional uint64 unackedMessages             = 9;
 
-        /// Flag to verify if consumer is blocked due to reaching threshold of unacked messages
-        optional bool blockedConsumerOnUnackedMsgs  = 10;
+	/// Flag to verify if consumer is blocked due to reaching threshold of unacked messages
+	optional bool blockedConsumerOnUnackedMsgs  = 10;
 
-        /// Address of this consumer
-        optional string address                     = 11;
+	/// Address of this consumer
+	optional string address                     = 11;
 
-        /// Timestamp of connection
-        optional string connectedSince              = 12;
+	/// Timestamp of connection
+	optional string connectedSince              = 12;
 
-        /// Whether this subscription is Exclusive or Shared or Failover
-        optional string type                        = 13;
+	/// Whether this subscription is Exclusive or Shared or Failover
+	optional string type                        = 13;
 
-        /// Total rate of messages expired on this subscription. msg/s
-        optional double msgRateExpired              = 14;
+	/// Total rate of messages expired on this subscription. msg/s
+	optional double msgRateExpired              = 14;
 
-        /// Number of messages in the subscription backlog
-        optional uint64 msgBacklog                  = 15;
+	/// Number of messages in the subscription backlog
+	optional uint64 msgBacklog                  = 15;
 }
 
 message CommandGetLastMessageId {
@@ -564,19 +633,19 @@ message CommandGetLastMessageIdResponse {
 }
 
 message CommandGetTopicsOfNamespace {
-    enum Mode {
-        PERSISTENT = 0;
-        NON_PERSISTENT = 1;
-        ALL = 2;
-    }
-	required uint64 request_id	= 1;
-	required string namespace	= 2;
-    optional Mode mode = 3 [default = PERSISTENT];
+	enum Mode {
+		PERSISTENT = 0;
+		NON_PERSISTENT = 1;
+		ALL = 2;
+	}
+	required uint64 request_id    = 1;
+	required string namespace    = 2;
+	optional Mode mode = 3 [default = PERSISTENT];
 }
 
 message CommandGetTopicsOfNamespaceResponse {
-	required uint64 request_id	= 1;
-	repeated string topics 		= 2;
+	required uint64 request_id    = 1;
+	repeated string topics         = 2;
 }
 
 message CommandGetSchema {
@@ -589,10 +658,126 @@ message CommandGetSchema {
 message CommandGetSchemaResponse {
 	required uint64 request_id      = 1;
 	optional ServerError error_code = 2;
-    optional string error_message   = 3;
+	optional string error_message   = 3;
 
 	optional Schema schema          = 4;
 	optional bytes schema_version   = 5;
+}
+
+message CommandGetOrCreateSchema {
+	required uint64 request_id = 1;
+	required string topic      = 2;
+	required Schema schema     = 3;
+}
+
+message CommandGetOrCreateSchemaResponse {
+	required uint64 request_id      = 1;
+	optional ServerError error_code = 2;
+	optional string error_message   = 3;
+
+	optional bytes schema_version   = 4;
+}
+
+/// --- transaction related ---
+
+enum TxnAction {
+	COMMIT = 0;
+	ABORT = 1;
+}
+
+message CommandNewTxn {
+	required uint64 request_id = 1;
+	optional uint64 txn_ttl_seconds = 2 [default = 0];
+	optional uint64 tc_id = 3 [default = 0];
+}
+
+message CommandNewTxnResponse {
+	required uint64 request_id = 1;
+	optional uint64 txnid_least_bits = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	optional ServerError error = 4;
+	optional string message = 5;
+}
+
+message CommandAddPartitionToTxn {
+	required uint64 request_id = 1;
+	optional uint64 txnid_least_bits = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	repeated string partitions = 4;
+}
+
+message CommandAddPartitionToTxnResponse {
+	required uint64 request_id = 1;
+	optional uint64 txnid_least_bits = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	optional ServerError error = 4;
+	optional string message = 5;
+}
+
+message Subscription {
+	required string topic = 1;
+	required string subscription = 2;
+}
+message CommandAddSubscriptionToTxn {
+	required uint64 request_id = 1;
+	optional uint64 txnid_least_bits = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	repeated Subscription subscription = 4;
+}
+
+message CommandAddSubscriptionToTxnResponse {
+	required uint64 request_id = 1;
+	optional uint64 txnid_least_bits = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	optional ServerError error = 4;
+	optional string message = 5;
+}
+
+message CommandEndTxn {
+	required uint64 request_id = 1;
+	optional uint64 txnid_least_bits = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	optional TxnAction txn_action = 4;
+}
+
+message CommandEndTxnResponse {
+	required uint64 request_id = 1;
+	optional uint64 txnid_least_bits = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	optional ServerError error = 4;
+	optional string message = 5;
+}
+
+message CommandEndTxnOnPartition {
+	required uint64 request_id = 1;
+	optional uint64 txnid_least_bits = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	optional string topic = 4;
+	optional TxnAction txn_action = 5;
+}
+
+message CommandEndTxnOnPartitionResponse {
+	required uint64 request_id = 1;
+	optional uint64 txnid_least_bits = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	optional ServerError error = 4;
+	optional string message = 5;
+}
+
+message CommandEndTxnOnSubscription {
+	required uint64 request_id = 1;
+	optional uint64 txnid_least_bits = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	optional Subscription subscription= 4;
+	optional TxnAction txn_action = 5;
+}
+
+message CommandEndTxnOnSubscriptionResponse {
+	required uint64 request_id = 1;
+	optional uint64 txnid_least_bits = 2 [default = 0];
+	optional uint64 txnid_most_bits = 3 [default = 0];
+	optional ServerError error = 4;
+	optional string message = 5;
 }
 
 message BaseCommand {
@@ -632,8 +817,8 @@ message BaseCommand {
 		LOOKUP           = 23;
 		LOOKUP_RESPONSE  = 24;
 
-		CONSUMER_STATS		= 25;
-		CONSUMER_STATS_RESPONSE	= 26;
+		CONSUMER_STATS        = 25;
+		CONSUMER_STATS_RESPONSE    = 26;
 
 		REACHED_END_OF_TOPIC = 27;
 
@@ -645,14 +830,39 @@ message BaseCommand {
 		ACTIVE_CONSUMER_CHANGE = 31;
 
 
-		GET_TOPICS_OF_NAMESPACE 			= 32;
-		GET_TOPICS_OF_NAMESPACE_RESPONSE 	= 33;
+		GET_TOPICS_OF_NAMESPACE             = 32;
+		GET_TOPICS_OF_NAMESPACE_RESPONSE     = 33;
 
 		GET_SCHEMA = 34;
 		GET_SCHEMA_RESPONSE = 35;
 
 		AUTH_CHALLENGE = 36;
 		AUTH_RESPONSE = 37;
+
+		ACK_RESPONSE = 38;
+
+		GET_OR_CREATE_SCHEMA = 39;
+		GET_OR_CREATE_SCHEMA_RESPONSE = 40;
+
+		// transaction related
+		NEW_TXN = 50;
+		NEW_TXN_RESPONSE = 51;
+
+		ADD_PARTITION_TO_TXN = 52;
+		ADD_PARTITION_TO_TXN_RESPONSE = 53;
+
+		ADD_SUBSCRIPTION_TO_TXN = 54;
+		ADD_SUBSCRIPTION_TO_TXN_RESPONSE = 55;
+
+		END_TXN = 56;
+		END_TXN_RESPONSE = 57;
+
+		END_TXN_ON_PARTITION = 58;
+		END_TXN_ON_PARTITION_RESPONSE = 59;
+
+		END_TXN_ON_SUBSCRIPTION = 60;
+		END_TXN_ON_SUBSCRIPTION_RESPONSE = 61;
+
 	}
 
 
@@ -709,4 +919,22 @@ message BaseCommand {
 	optional CommandAuthChallenge authChallenge = 36;
 	optional CommandAuthResponse authResponse = 37;
 
+	optional CommandAckResponse ackResponse = 38;
+
+	optional CommandGetOrCreateSchema getOrCreateSchema = 39;
+	optional CommandGetOrCreateSchemaResponse getOrCreateSchemaResponse = 40;
+
+	// transaction related
+	optional CommandNewTxn newTxn = 50;
+	optional CommandNewTxnResponse newTxnResponse = 51;
+	optional CommandAddPartitionToTxn addPartitionToTxn= 52;
+	optional CommandAddPartitionToTxnResponse addPartitionToTxnResponse = 53;
+	optional CommandAddSubscriptionToTxn addSubscriptionToTxn = 54;
+	optional CommandAddSubscriptionToTxnResponse addSubscriptionToTxnResponse = 55;
+	optional CommandEndTxn endTxn = 56;
+	optional CommandEndTxnResponse endTxnResponse = 57;
+	optional CommandEndTxnOnPartition endTxnOnPartition = 58;
+	optional CommandEndTxnOnPartitionResponse endTxnOnPartitionResponse = 59;
+	optional CommandEndTxnOnSubscription endTxnOnSubscription = 60;
+	optional CommandEndTxnOnSubscriptionResponse endTxnOnSubscriptionResponse = 61;
 }

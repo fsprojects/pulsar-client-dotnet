@@ -1,13 +1,20 @@
-﻿module Simple
+﻿module Schema
 
 // Learn more about F# at http://fsharp.org
 open System
+open System.ComponentModel.DataAnnotations
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Common
-open System.Text
 
-let runSimple () =
+[<CLIMutable>]
+type Product = {
+    [<Required>]
+    Name: string
+    Rating: float
+}
+
+let runSchema () =
 
     let serviceUrl = "pulsar://my-pulsar-cluster:30002"
     let subscriptionName = "my-subscription"
@@ -21,22 +28,22 @@ let runSimple () =
     task {
 
         let! producer =
-            client.NewProducer()
+            client.NewProducer(Schema.JSON<Product>())
                 .Topic(topicName)
                 .CreateAsync()
 
         let! consumer =
-            client.NewConsumer()
+            client.NewConsumer(Schema.JSON<Product>())
                 .Topic(topicName)
                 .SubscriptionName(subscriptionName)
                 .SubscriptionType(SubscriptionType.Exclusive)
-                .SubscribeAsync()        
+                .SubscribeAsync()
         
-        let! messageId = producer.SendAsync(Encoding.UTF8.GetBytes("Sent from F# at " + DateTime.Now.ToString()))
+        let! messageId = producer.SendAsync({ Name = "IPhone"; Rating = 1.1 })
         printfn "MessageId is: '%A'" messageId
 
         let! message = consumer.ReceiveAsync()
-        printfn "Received: %A" (message.Data |> Encoding.UTF8.GetString)
+        printfn "Received: %A" (message.GetValue())
 
         do! consumer.AcknowledgeAsync(message.MessageId)
     }

@@ -57,7 +57,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mutable avalablePermits = 0
     let mutable startMessageId = startMessageId
     let mutable lastMessageIdInBroker = MessageId.Earliest
-    let mutable lastDequeuedMessage = startMessageId |> Option.defaultValue MessageId.Earliest
+    let mutable lastDequeuedMessageId = MessageId.Earliest
     let mutable duringSeek = None
     let initialStartMessageId = startMessageId
     let mutable incomingMessagesSize = 0L
@@ -69,10 +69,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let wrapPostAndReply (mbAsyncReply: Async<ResultOrException<'A>>) =
         async {
             match! mbAsyncReply with
-            | Result msg ->
+            | Ok msg ->
                 return msg
-            | Exn exn ->
-                return reraize exn
+            | Error ex ->
+                return reraize ex
         }
     
     let connectionHandler =
@@ -84,11 +84,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                           (fun ex -> this.Mb.Post(ConsumerMessage.ConnectionFailed ex)),
                           Backoff({ BackoffConfig.Default with Initial = TimeSpan.FromMilliseconds(100.0); Max = TimeSpan.FromSeconds(60.0) }))
 
-    let hasMoreMessages (lastMessageIdInBroker: MessageId) (lastDequeuedMessage: MessageId) =
-        if (lastMessageIdInBroker > lastDequeuedMessage && lastMessageIdInBroker.EntryId <> %(-1L)) then
+    let hasMoreMessages (lastMessageIdInBroker: MessageId) (lastDequeuedMessage: MessageId) (inclusive: bool) =
+        if (inclusive && lastMessageIdInBroker >= lastDequeuedMessage && lastMessageIdInBroker.EntryId <> %(-1L)) then
+            true
+        elif (not inclusive && lastMessageIdInBroker > lastDequeuedMessage && lastMessageIdInBroker.EntryId <> %(-1L)) then
             true
         else
-            lastMessageIdInBroker = lastDequeuedMessage && incomingMessages.Count > 0
+            false
 
     let increaseAvailablePermits delta =
         avalablePermits <- avalablePermits + delta
@@ -111,7 +113,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             duringSeek <- None
             seekMsgId
         | None when isDurable ->
-            None
+            startMessageId
         | _  ->        
             match nextMsg with
             | Some nextMessageInQueue ->                
@@ -125,10 +127,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         { nextMessageInQueue with EntryId = nextMessageInQueue.EntryId - %1L }
                 Some previousMessage
             | None ->
-                if lastDequeuedMessage <> MessageId.Earliest then
+                if lastDequeuedMessageId <> MessageId.Earliest then
                     // If the queue was empty we need to restart from the message just after the last one that has been dequeued
                     // in the past
-                    Some lastDequeuedMessage
+                    Some lastDequeuedMessageId
                 else
                     // No message was received or dequeued by this consumer. Next message would still be the startMessageId
                     startMessageId
@@ -309,7 +311,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             return deadMessageProcessed
         }
 
-    let enqueueMessage msg =
+    let enqueueMessage (msg: Message<'T>) =
         incomingMessagesSize <- incomingMessagesSize + msg.Data.LongLength
         incomingMessages.Enqueue(msg)
 
@@ -345,24 +347,24 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 let getValue () =
                     keyValueProcessor
                     |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, singleMessagePayload) :?> 'T)
-                    |> Option.defaultWith (fun() -> schemaDecodeFunction singleMessagePayload)                   
-                let message =
-                    {
-                        MessageId = messageId
-                        Properties =
-                            if singleMessageMetadata.Properties.Count > 0 then
+                    |> Option.defaultWith (fun() -> schemaDecodeFunction singleMessagePayload)
+                let properties =
+                    if singleMessageMetadata.Properties.Count > 0 then
                                 singleMessageMetadata.Properties
                                 |> Seq.map (fun prop -> (prop.Key, prop.Value))
                                 |> readOnlyDict
                             else
                                 EmptyProps
-                        Key = %msgKey
-                        HasBase64EncodedKey = singleMessageMetadata.PartitionKeyB64Encoded
-                        Data = singleMessagePayload
-                        GetValue = getValue
-                        SchemaVersion = getSchemaVersionBytes rawMessage.Metadata.SchemaVersion
-                        SequenceId = singleMessageMetadata.SequenceId
-                    }
+                let message = Message (
+                                messageId,
+                                singleMessagePayload,
+                                %msgKey,                        
+                                singleMessageMetadata.PartitionKeyB64Encoded,
+                                properties,
+                                getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+                                singleMessageMetadata.SequenceId,
+                                getValue
+                            )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                     deadLettersProcessor.AddMessage messageId message
                 enqueueMessage message
@@ -382,7 +384,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     /// Record the event that one message has been processed by the application.
     /// Periodically, it sends a Flow command to notify the broker that it can push more messages
     let messageProcessed (msg: Message<'T>) =
-        lastDequeuedMessage <- msg.MessageId
+        lastDequeuedMessageId <- msg.MessageId
         increaseAvailablePermits 1
         if consumerConfig.AckTimeout <> TimeSpan.Zero then
             unAckedMessageTracker.Add msg.MessageId |> ignore
@@ -403,7 +405,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             else
                 shouldContinue <- false
         Log.Logger.LogDebug("{0} BatchFormed with size {1}", prefix, messages.Size)
-        ch.Reply(Result messages)
+        ch.Reply(Ok messages)
     
     let removeExpiredMessagesFromQueue (msgIds: RedeliverSet) =
         if incomingMessages.Count > 0 then
@@ -428,7 +430,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let replyWithMessage (channel: AsyncReplyChannel<ResultOrException<Message<'T>>>) message =
         messageProcessed message
         let interceptMsg = interceptors.BeforeConsume(this, message)
-        channel.Reply (Result interceptMsg)
+        channel.Reply (Ok interceptMsg)
 
     let stopConsumer () =
         unAckedMessageTracker.Close()
@@ -440,10 +442,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         cleanup(this)
         while waiters.Count > 0 do
             let waitingChannel = waiters.Dequeue()
-            waitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
+            waitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed")))
         while batchWaiters.Count > 0 do
             let cts, batchWaitingChannel = batchWaiters.Dequeue()
-            batchWaitingChannel.Reply(Exn (AlreadyClosedException("Consumer is already closed")))
+            batchWaitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed")))
             cts.Cancel()
             cts.Dispose()
         Log.Logger.LogInformation("{0} stopped", prefix)
@@ -486,16 +488,16 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         keyValueProcessor
                         |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, payload) :?> 'T)
                         |> Option.defaultWith (fun () -> schemaDecodeFunction payload)
-                    let message = {
-                        GetValue = getValue
-                        MessageId = msgId
-                        Data = payload
-                        Key = %msgKey
-                        HasBase64EncodedKey = rawMessage.IsKeyBase64Encoded
-                        Properties = rawMessage.Properties
-                        SchemaVersion = getSchemaVersionBytes rawMessage.Metadata.SchemaVersion
-                        SequenceId = rawMessage.Metadata.SequenceId
-                    } 
+                    let message = Message(
+                                    msgId,
+                                    payload,
+                                    %msgKey,
+                                    rawMessage.IsKeyBase64Encoded,
+                                    rawMessage.Properties,
+                                    getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+                                    rawMessage.Metadata.SequenceId,
+                                    getValue
+                                )
                     if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                         deadLettersProcessor.AddMessage message.MessageId message
                     if hasWaitingChannel then
@@ -593,11 +595,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                     Log.Logger.LogDebug("{0} initial flow sent {1}", prefix, initialFlowCount)
                                 else
                                     raise (ConnectionFailedOnSend "FlowCommand")
-                        with
-                        | ex ->
+                        with Flatten ex ->
                             clientCnx.RemoveConsumer consumerId
                             Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
-                            if (connectionHandler.IsRetriableError ex && DateTime.Now < subscribeTimeout) then
+                            if (PulsarClientException.isRetriableError ex && DateTime.Now < subscribeTimeout) then
                                 connectionHandler.ReconnectLater ex
                             else
                                 if not subscribeTsc.Task.IsCompleted then
@@ -783,18 +784,17 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             response |> PulsarResponseType.GetEmpty
                             
                             duringSeek <- Some lastMessage
-                            lastDequeuedMessage <- MessageId.Earliest
+                            lastDequeuedMessageId <- MessageId.Earliest
                             
                             acksGroupingTracker.FlushAndClean()
                             incomingMessages.Clear()
                             Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
-                            channel.Reply <| Result()
-                        with
-                        | ex ->
+                            channel.Reply <| Ok()
+                        with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                     | _ ->
-                        channel.Reply <| Exn(NotConnectedException "Not connected to broker")
+                        channel.Reply <| Error(NotConnectedException "Not connected to broker")
                         Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
                     return! loop ()
 
@@ -819,14 +819,43 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | ConsumerMessage.HasMessageAvailable channel ->
 
                     Log.Logger.LogDebug("{0} HasMessageAvailable", prefix)
-                    if hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessage then
-                        channel.Reply(Task.FromResult(true))
+                    
+                    // avoid null referenece
+                    let startMessageId = startMessageId |> Option.defaultValue lastDequeuedMessageId
+                    
+                    // we haven't read yet. use startMessageId for comparison
+                    if lastDequeuedMessageId = MessageId.Earliest then
+                        // if we are starting from latest, we should seek to the actual last message first.
+                        // allow the last one to be read when read head inclusively.
+                        if startMessageId = MessageId.Latest then                            
+                            let! messageId = getLastMessageIdAsync() |> Async.AwaitTask
+                            task {
+                                let! result = this.Mb.PostAndAsyncReply(fun channel -> SeekAsync ((MessageId messageId), channel))
+                                return
+                                    match result with
+                                    | Ok () -> consumerConfig.ResetIncludeHead
+                                    | Error ex -> reraize ex
+                            } |> channel.Reply
+                        elif hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead then
+                            channel.Reply(Task.FromResult(true))
+                        else
+                            task {
+                                let! messageId = getLastMessageIdAsync()
+                                this.LastMessageIdInBroker <- messageId // Concurrent update - handle wisely
+                                return hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead
+                            } |> channel.Reply
+
                     else
-                        task {
-                            let! messageId = getLastMessageIdAsync()
-                            this.LastMessageIdInBroker <- messageId // Concurrent update - handle wisely
-                            return hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessage                                
-                        } |> channel.Reply
+                        // read before, use lastDequeueMessage for comparison
+                        if hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false then
+                            channel.Reply(Task.FromResult(true))
+                        else
+                            task {
+                                let! messageId = getLastMessageIdAsync()
+                                this.LastMessageIdInBroker <- messageId // Concurrent update - handle wisely
+                                return hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false
+                            } |> channel.Reply
+
                     return! loop ()
                                     
                 | ConsumerMessage.ActiveConsumerChanged isActive ->
@@ -848,16 +877,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             clientCnx.RemoveConsumer(consumerId)
                             connectionHandler.Closed()
                             stopConsumer()
-                            channel.Reply <| Result()
-                        with
-                        | ex ->
+                            channel.Reply <| Ok()
+                        with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} failed to close", prefix)
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                     | _ ->
                         Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
                         connectionHandler.Closed()
                         stopConsumer()
-                        channel.Reply <| Result()
+                        channel.Reply <| Ok()
 
                 | ConsumerMessage.Unsubscribe channel ->
 
@@ -875,14 +903,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             clientCnx.RemoveConsumer(consumerId)
                             connectionHandler.Closed()
                             stopConsumer()
-                            channel.Reply <| Result()
-                        with
-                        | ex ->
+                            channel.Reply <| Ok()
+                        with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
-                            channel.Reply <| Exn ex
+                            channel.Reply <| Error ex
                     | _ ->
                         Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
-                        channel.Reply <| Exn(NotConnectedException "Not connected to broker")
+                        channel.Reply <| Error(NotConnectedException "Not connected to broker")
                         return! loop ()
 
             }
@@ -1039,8 +1066,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 task {
                     let! result = mb.PostAndAsyncReply(ConsumerMessage.Close)
                     match result with
-                    | Result () -> ()
-                    | Exn ex -> reraize ex 
+                    | Ok () -> ()
+                    | Error ex -> reraize ex 
                 } |> ValueTask
 
 

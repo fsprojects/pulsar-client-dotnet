@@ -38,6 +38,11 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
                 invalidArgIfTrue (
                     c.KeySharedPolicy.IsSome && c.SubscriptionType <> SubscriptionType.KeyShared
                 ) "KeySharedPolicy must be set with KeyShared subscription")
+        |> checkValue
+            (fun c ->
+                 invalidArgIfTrue (
+                    c.BatchReceivePolicy.MaxNumMessages > c.ReceiverQueueSize
+                 ) "MaxNumMessages can't be greater than ReceiverQueueSize")
 
     internal new(createConsumerAsync, сreateProducerAsync, schema) = ConsumerBuilder(createConsumerAsync, сreateProducerAsync, ConsumerConfiguration.Default, ConsumerInterceptors.Empty, schema)
 

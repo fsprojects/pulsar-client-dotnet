@@ -10,7 +10,7 @@ open Pulsar.Client.Api
 open AvroSchemaGenerator
 open Pulsar.Client.Common
 
-type JsonSchema<'T> () =
+type internal JsonSchema<'T> () =
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
     let options = JsonSerializerOptions(IgnoreNullValues = true)
@@ -23,7 +23,7 @@ type JsonSchema<'T> () =
     override this.Decode bytes =
         JsonSerializer.Deserialize<'T>(ReadOnlySpan bytes, options)
     
-type GenericJsonSchema internal (topicSchema: TopicSchema) =
+type internal GenericJsonSchema (topicSchema: TopicSchema) =
     inherit ISchema<GenericRecord>()
     let dynamicSerializerOptions = JsonSerializerOptions(IgnoreNullValues = true)
     do dynamicSerializerOptions.Converters.Add <| DynamicJsonConverter()

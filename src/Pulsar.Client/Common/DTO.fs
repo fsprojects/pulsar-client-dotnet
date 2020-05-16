@@ -230,24 +230,37 @@ type internal RawMessage =
         Properties: IReadOnlyDictionary<string, string>
     }
 
-type Message<'T> =
-    {
-        /// Get the unique message ID associated with this message.
-        MessageId: MessageId
-        /// Get the raw payload of the message.
-        Data: byte[]
-        /// Get the key of the message.
-        Key: PartitionKey
-        /// Check whether the key has been base64 encoded.
-        HasBase64EncodedKey: bool
-        /// Return the properties attached to the message.
-        Properties: IReadOnlyDictionary<string, string>
-        /// Get the de-serialized value of the message, according the configured Schema.
-        GetValue: unit -> 'T
-        // Schema version of the message if the message is produced with schema otherwise null.
-        SchemaVersion: byte[]
-        SequenceId: uint64
-    }
+type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey, hasBase64EncodedKey: bool,
+                  properties: IReadOnlyDictionary<string, string>, schemaVersion: byte[], sequenceId: uint64,
+                  getValue: unit -> 'T) =
+    /// Get the unique message ID associated with this message.
+    member this.MessageId = messageId
+    /// Get the raw payload of the message.
+    member this.Data = data
+    /// Get the key of the message.
+    member this.Key = key
+    /// Check whether the key has been base64 encoded.
+    member this.HasBase64EncodedKey = hasBase64EncodedKey
+    /// Return the properties attached to the message.
+    member this.Properties = properties
+    /// Schema version of the message if the message is produced with schema otherwise null.
+    member this.SchemaVersion = schemaVersion
+    /// Get the sequence id associated with this message
+    member this.SequenceId = sequenceId
+    /// Get the de-serialized value of the message, according the configured Schema.
+    member this.GetValue() =
+        getValue()
+    member internal this.WithMessageId messageId =
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
+    /// Get a new instance of the message with updated data
+    member this.WithData data =
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
+    /// Get a new instance of the message with updated key
+    member this.WithKey (key, hasBase64EncodedKey) =
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
+    /// Get a new instance of the message with updated properties
+    member this.WithProperties properties =
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
 
 type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 
@@ -255,7 +268,6 @@ type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
     let mutable currentSizeOfMessages = 0L
 
     let messageList = if maxNumberOfMessages > 0 then ResizeArray<Message<'T>>(maxNumberOfMessages) else ResizeArray<Message<'T>>()
-
     
     member this.Count with get() =
         currentNumberOfMessages
@@ -352,47 +364,38 @@ type internal PulsarResponseType =
     | TopicsOfNamespace of TopicsOfNamespace
     | LastMessageId of MessageId
     | TopicSchema of TopicSchema option
-    | Error
+    | PulsarError
     | Empty
 
-    static member GetPartitionedTopicMetadata req =
-        match req with
+    static member GetPartitionedTopicMetadata = function
         | PartitionedTopicMetadata x -> x
         | _ -> failwith "Incorrect return type"
 
-    static member GetLookupTopicResult req =
-        match req with
+    static member GetLookupTopicResult = function
         | LookupTopicResult x -> x
         | _ -> failwith "Incorrect return type"
 
-    static member GetProducerSuccess req =
-        match req with
+    static member GetProducerSuccess = function
         | ProducerSuccess x -> x
         | _ -> failwith "Incorrect return type"
 
-    static member GetTopicsOfNamespace req =
-        match req with
+    static member GetTopicsOfNamespace = function
         | TopicsOfNamespace x -> x
         | _ -> failwith "Incorrect return type"
 
-    static member GetLastMessageId req =
-        match req with
+    static member GetLastMessageId = function
         | LastMessageId msgId -> msgId
         | _ -> failwith "Incorrect return type"
         
-    static member GetTopicSchema req =
-        match req with
+    static member GetTopicSchema = function
         | TopicSchema x -> x
         | _ -> failwith "Incorrect return type"
 
-    static member GetEmpty req =
-        match req with
+    static member GetEmpty = function
         | Empty -> ()
         | _ -> failwith "Incorrect return type"
 
-type internal ResultOrException<'T> =
-    | Result of 'T
-    | Exn of exn
+type internal ResultOrException<'T> = Result<'T, exn>
 
 type internal SeekData =
     | MessageId of MessageId
@@ -412,42 +415,5 @@ type MessageRoutingMode =
 type HashingScheme =
     | DotnetStringHash = 0
     | Murmur3_32Hash = 1
-
-exception InvalidServiceURL
-exception InvalidConfigurationException of string
-exception NotFoundException of string
-exception TimeoutException of string
-exception IncompatibleSchemaException of string
-exception LookupException of string
-exception TooManyRequestsException of string
-exception ConnectException of string
-exception AlreadyClosedException of string
-exception TopicTerminatedException of string
-exception AuthenticationException of string
-exception AuthorizationException of string
-exception GettingAuthenticationDataException of string
-exception UnsupportedAuthenticationException of string
-exception BrokerPersistenceException of string
-exception BrokerMetadataException of string
-exception ProducerBusyException of string
-exception ConsumerBusyException of string
-exception NotConnectedException of string
-exception InvalidMessageException of string
-exception InvalidTopicNameException of string
-exception NotSupportedException of string
-exception ProducerQueueIsFullError of string
-exception ProducerBlockedQuotaExceededError of string
-exception ProducerBlockedQuotaExceededException of string
-exception ChecksumException of string
-exception CryptoExceptionof of string
-exception TopicDoesNotExistException of string
-
-// custom exception
-exception ConnectionFailedOnSend of string
-exception MaxMessageSizeChanged of int
-exception SchemaSerializationException of string
-
-exception DecompressionException of string
-exception BatchDeserializationException of string
 
 

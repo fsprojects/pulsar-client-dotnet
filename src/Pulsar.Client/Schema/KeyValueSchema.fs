@@ -92,7 +92,7 @@ type internal KeyValueSchema =
         }
 
 
-type KeyValueSchema<'K,'V>(keySchema: ISchema<'K>, valueSchema: ISchema<'V>, kvType: KeyValueEncodingType) =
+type internal KeyValueSchema<'K,'V>(keySchema: ISchema<'K>, valueSchema: ISchema<'V>, kvType: KeyValueEncodingType) =
     inherit ISchema<KeyValuePair<'K,'V>>()
     member this.KeyValueEncodingType = kvType    
     member this.KeySchema = keySchema    

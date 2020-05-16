@@ -4,7 +4,7 @@ open Pulsar.Client.Api
 open System
 open Pulsar.Client.Common
 
-type ShortSchema() =
+type internal ShortSchema() =
     inherit ISchema<int16>()
     override this.SchemaInfo = { Name = "INT16"; Type = SchemaType.INT16; Schema = [||]; Properties = Map.empty }
     override this.Encode value =

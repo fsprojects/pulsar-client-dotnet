@@ -79,7 +79,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 let payload = Commands.newGetTopicsOfNamespaceRequest ns requestId mode
                 let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                 return (endpoint, response)
-            with ex ->
+            with Flatten ex ->
                 let delay = Math.Min(backoff.Next(), remainingTimeMs)
                 if delay <= 0 then
                     raise (TimeoutException "Could not getTopicsUnderNamespace within configured timeout.")
