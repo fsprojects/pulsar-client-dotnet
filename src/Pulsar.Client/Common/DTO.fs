@@ -305,7 +305,7 @@ type MessageBuilder<'T> =
     val Key: MessageKey option
     val Properties: IReadOnlyDictionary<string, string>
     val DeliverAt: Nullable<int64>
-    val SequenceId: Nullable<uint64>
+    val SequenceId: Nullable<SequenceId>
 
     internal new (value : 'T, payload: byte[], key : MessageKey option,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] properties : IReadOnlyDictionary<string, string>,
@@ -317,7 +317,7 @@ type MessageBuilder<'T> =
                 Properties = if isNull properties then EmptyProps else properties
                 DeliverAt = deliverAt
                 Payload = payload
-                SequenceId = sequenceId
+                SequenceId = if sequenceId.HasValue then Nullable(%sequenceId.Value) else Nullable()
             }
         
         

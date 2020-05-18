@@ -141,7 +141,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let createMessageMetadata (message : MessageBuilder<'a>) (numMessagesInBatch: int option) =
         let sequenceId =
             if message.SequenceId.HasValue then
-                message.SequenceId.Value
+                %message.SequenceId.Value
             else System.Threading.Interlocked.Exchange(&messageIdGenerator, messageIdGenerator + 1L) |> uint64
 
         let metadata =
