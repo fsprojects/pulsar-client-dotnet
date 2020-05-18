@@ -560,7 +560,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             |> Option.defaultWith (fun () ->
                 MessageBuilder(value, schema.Encode(value),
                                 (if String.IsNullOrEmpty(key) then None else Some { PartitionKey = %key; IsBase64Encoded = false }),
-                                properties, deliverAt, sequenceId))
+                                properties, deliverAt, if sequenceId.HasValue then Nullable(%sequenceId.Value) else Nullable()))
                 
         member this.ProducerId = producerId
 

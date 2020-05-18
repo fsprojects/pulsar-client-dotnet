@@ -310,14 +310,14 @@ type MessageBuilder<'T> =
     internal new (value : 'T, payload: byte[], key : MessageKey option,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] properties : IReadOnlyDictionary<string, string>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>] deliverAt : Nullable<int64>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<uint64>)>] sequenceId : Nullable<uint64>) =
+            [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>] sequenceId : Nullable<SequenceId>) =
             {
                 Value = value
                 Key = key
                 Properties = if isNull properties then EmptyProps else properties
                 DeliverAt = deliverAt
                 Payload = payload
-                SequenceId = if sequenceId.HasValue then Nullable(%sequenceId.Value) else Nullable()
+                SequenceId = sequenceId
             }
         
         
