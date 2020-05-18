@@ -112,15 +112,15 @@ let produceMessagesWithSameKey (producer: IProducer<byte[]>) number key producer
             ()
     }
 
-let produceMessagesWithSequenceId (producer: IProducer<byte[]>) number getSequenceId =
-    task {
-        for i in [1..number] do
-            let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producer.Name (DateTime.Now.ToLongTimeString()) )
-            let sequenceId = Nullable<uint64>(getSequenceId i)
-            let message = producer.NewMessage(payload, sequenceId = sequenceId)
-            let! _ = producer.SendAsync(message)
-            ()
-    }
+//let produceMessagesWithSequenceId (producer: IProducer<byte[]>) number getSequenceId =
+//    task {
+//        for i in [1..number] do
+//            let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producer.Name (DateTime.Now.ToLongTimeString()) )
+//            let sequenceId = Nullable<uint64>(getSequenceId i)
+//            let message = producer.NewMessage(payload, sequenceId = sequenceId)
+//            let! _ = producer.SendAsync(message)
+//            ()
+//    }
 
 let generateMessages number producerName =
     [|

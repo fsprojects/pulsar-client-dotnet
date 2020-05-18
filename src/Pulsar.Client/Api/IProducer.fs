@@ -5,6 +5,7 @@ open System.Collections.Generic
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open System.Runtime.InteropServices
+open FSharp.UMX
 
 type IProducer<'T> =
     inherit IAsyncDisposable
@@ -45,7 +46,7 @@ type IProducer<'T> =
         * [<Optional; DefaultParameterValue(null:string)>]key:string
         * [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string,string>)>]properties: IReadOnlyDictionary<string, string>
         * [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>
-        * [<Optional; DefaultParameterValue(Nullable():Nullable<uint64>)>]sequenceId:Nullable<uint64>
+        * [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>
         -> MessageBuilder<'T>
     /// The last sequence id that was published by this producer.
     /// This represent either the automatically assigned
