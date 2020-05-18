@@ -362,7 +362,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 singleMessageMetadata.PartitionKeyB64Encoded,
                                 properties,
                                 getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                                singleMessageMetadata.SequenceId,
+                                %singleMessageMetadata.SequenceId,
                                 getValue
                             )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
@@ -495,7 +495,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                     rawMessage.IsKeyBase64Encoded,
                                     rawMessage.Properties,
                                     getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                                    rawMessage.Metadata.SequenceId,
+                                    %rawMessage.Metadata.SequenceId,
                                     getValue
                                 )
                     if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then

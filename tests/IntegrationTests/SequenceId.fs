@@ -7,6 +7,7 @@ open Pulsar.Client.Api
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Serilog
+open FSharp.UMX
 
 [<Tests>]
 let tests =
@@ -39,7 +40,7 @@ let tests =
 
             let messagesCount = 10
             let sequenceIdStart = Random().Next()
-            let getSequenceId i = (sequenceIdStart + i) |> uint64
+            let getSequenceId i = %((sequenceIdStart + i) |> uint64)
 
             let! producer = getProducer()
             let! consumer = getConsumer()

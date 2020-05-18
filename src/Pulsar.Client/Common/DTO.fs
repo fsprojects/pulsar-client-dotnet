@@ -231,7 +231,7 @@ type internal RawMessage =
     }
 
 type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey, hasBase64EncodedKey: bool,
-                  properties: IReadOnlyDictionary<string, string>, schemaVersion: byte[], sequenceId: uint64,
+                  properties: IReadOnlyDictionary<string, string>, schemaVersion: byte[], sequenceId: SequenceId,
                   getValue: unit -> 'T) =
     /// Get the unique message ID associated with this message.
     member this.MessageId = messageId
