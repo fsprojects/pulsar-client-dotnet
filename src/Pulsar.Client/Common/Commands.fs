@@ -153,7 +153,9 @@ let newProducer (topicName : CompleteTopicName) (producerName: string) (producer
                 (schemaInfo: SchemaInfo) (epoch: uint64) =
     let schema = getProtoSchema schemaInfo
     let request = CommandProducer(Topic = %topicName, ProducerId = %producerId, RequestId = %requestId, ProducerName = producerName,
-                                  Schema = schema, Epoch = epoch)
+                                  Epoch = epoch)
+    if schema.``type`` <> Schema.Type.None then
+        request.Schema <- schema
     let command = BaseCommand(``type`` = CommandType.Producer, Producer = request)
     command |> serializeSimpleCommand
 
@@ -202,7 +204,7 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
         | _ -> failwith "Unknown initialPosition type"
     let request = CommandSubscribe(Topic = %topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId,
                     RequestId = %requestId, ConsumerName =  consumerName, initialPosition = initialPosition, ReadCompacted = readCompacted,
-                    StartMessageId = startMessageId, Durable = durable, ForceTopicCreation = createTopicIfDoesNotExist, Schema = schema)
+                    StartMessageId = startMessageId, Durable = durable, ForceTopicCreation = createTopicIfDoesNotExist)
     match keySharedPolicy with
     | Some keySharedPolicy ->
         let meta = KeySharedMeta()
@@ -219,6 +221,8 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
         ()
     if startMessageRollbackDuration > TimeSpan.Zero then
         request.StartMessageRollbackDurationSec <- (startMessageRollbackDuration.TotalSeconds |> uint64)
+    if schema.``type`` <> Schema.Type.None then
+        request.Schema <- schema
     let command = BaseCommand(``type`` = CommandType.Subscribe, Subscribe = request)
     command |> serializeSimpleCommand
 

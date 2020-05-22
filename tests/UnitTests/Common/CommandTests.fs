@@ -130,8 +130,8 @@ module CommandsTests =
                 let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand (newProducer topicName producerName producerId requestId (Schema.BYTES().SchemaInfo) 0UL)
 
-                totalSize |> Expect.equal "" 54
-                commandSize |> Expect.equal "" 50
+                totalSize |> Expect.equal "" 41
+                commandSize |> Expect.equal "" 37
                 command.``type``  |> Expect.equal "" CommandType.Producer
                 command.Producer.Topic |> Expect.equal "" %topicName
                 command.Producer.RequestId |> Expect.equal "" %requestId
@@ -150,8 +150,8 @@ module CommandsTests =
                         (newSubscribe topicName "test-subscription" consumerId requestId consumerName
                             SubscriptionType.Exclusive SubscriptionInitialPosition.Earliest false null true TimeSpan.Zero true None (Schema.BYTES().SchemaInfo))
 
-                totalSize |> Expect.equal "" 81
-                commandSize |> Expect.equal "" 77
+                totalSize |> Expect.equal "" 68
+                commandSize |> Expect.equal "" 64
                 command.``type``  |> Expect.equal "" CommandType.Subscribe
                 command.Subscribe.Topic |> Expect.equal "" %topicName
                 command.Subscribe.RequestId |> Expect.equal "" %requestId
