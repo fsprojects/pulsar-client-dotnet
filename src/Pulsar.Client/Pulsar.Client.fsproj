@@ -30,8 +30,9 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <WarningLevel>3</WarningLevel>
-    <WarningsAsErrors>0025</WarningsAsErrors>
+    <WarningsAsErrors>3239;0025</WarningsAsErrors>
     <DebugType>portable</DebugType>
+    <NoWarn>3186</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Avro\Avro.main.csproj" PrivateAssets="all" />

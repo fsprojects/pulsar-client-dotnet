@@ -362,7 +362,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 singleMessageMetadata.PartitionKeyB64Encoded,
                                 properties,
                                 getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                                singleMessageMetadata.SequenceId,
+                                %(int64 singleMessageMetadata.SequenceId),
                                 getValue
                             )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then

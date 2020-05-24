@@ -5,6 +5,7 @@ open System.Collections.Generic
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open System.Runtime.InteropServices
+open FSharp.UMX
 
 type IProducer<'T> =
     inherit IAsyncDisposable
@@ -45,13 +46,13 @@ type IProducer<'T> =
         * [<Optional; DefaultParameterValue(null:string)>]key:string
         * [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string,string>)>]properties: IReadOnlyDictionary<string, string>
         * [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>
-        * [<Optional; DefaultParameterValue(Nullable():Nullable<uint64>)>]sequenceId:Nullable<uint64>
+        * [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>
         -> MessageBuilder<'T>
     /// The last sequence id that was published by this producer.
     /// This represent either the automatically assigned
     /// or custom sequence id that was published and acknowledged by the broker.
     /// After recreating a producer with the same producer name, this will return the last message that was
     /// published in the previous producer session, or -1 if there no message was ever published.
-    abstract member LastSequenceId : int64
+    abstract member LastSequenceId : SequenceId
     /// Get the producer name
     abstract member Name: string

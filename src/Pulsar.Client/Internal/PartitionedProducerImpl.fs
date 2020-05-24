@@ -15,6 +15,7 @@ open System.Timers
 
 type internal PartitionedProducerMessage =
     | Init
+    | LastSequenceId of AsyncReplyChannel<SequenceId>
     | Close of AsyncReplyChannel<ResultOrException<unit>>
     | TickTime
 
@@ -112,6 +113,15 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         this.ConnectionState <- Failed
                         producerCreatedTsc.SetException(ex)
                         stopProducer()
+                        
+                | LastSequenceId channel ->
+
+                    Log.Logger.LogDebug("{0} LastSequenceId", prefix)
+                    producers
+                    |> Seq.map (fun producer -> producer.LastSequenceId)
+                    |> Seq.max
+                    |> channel.Reply
+                    return! loop ()
 
                 | Close channel ->
 
@@ -120,12 +130,13 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         channel.Reply <| Ok()
                     | _ ->
                         this.ConnectionState <- Closing
-                        let producersTasks = producers |> Seq.map(fun producer -> task { return! producer.DisposeAsync() })                       
+                        let producersTasks = producers |> Seq.map(fun producer -> task { return! producer.DisposeAsync() })
                         try
                             let! _ = Task.WhenAll producersTasks |> Async.AwaitTask
                             this.ConnectionState <- Closed
                             Log.Logger.LogInformation("{0} closed", prefix)
                             stopProducer()
+                            channel.Reply <| Ok()
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} could not close", prefix)
                             this.ConnectionState <- Failed
@@ -266,7 +277,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             [<Optional; DefaultParameterValue(null:string)>]key:string,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string,string>)>]properties: IReadOnlyDictionary<string, string>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<uint64>)>]sequenceId:Nullable<uint64>) =  
+            [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>) =  
             
             keyValueProcessor
             |> Option.map(fun kvp -> kvp.EncodeKeyValue value)
@@ -280,7 +291,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
         member this.Topic = %producerConfig.Topic.CompleteTopicName
 
-        member this.LastSequenceId = 0L
+        member this.LastSequenceId = mb.PostAndReply(LastSequenceId)
 
         member this.Name = producerConfig.ProducerName
         

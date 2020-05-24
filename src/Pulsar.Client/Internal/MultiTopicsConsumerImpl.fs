@@ -260,7 +260,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     match this.ConnectionState with
                     | Ready ->
                         consumers
-                        |> Seq.map(fun consumer -> consumer.Value.RedeliverUnacknowledgedMessagesAsync())
+                        |> Seq.map(fun (KeyValue(_, consumer)) -> consumer.RedeliverUnacknowledgedMessagesAsync())
                         |> Seq.toArray
                         |> Task.WhenAll
                         |> channel.Reply
@@ -276,7 +276,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         channel.Reply <| Ok()
                     | _ ->
                         this.ConnectionState <- Closing
-                        let consumerTasks = consumers |> Seq.map(fun kv -> kv.Value.DisposeAsync().AsTask())
+                        let consumerTasks = consumers |> Seq.map(fun (KeyValue(_, consumer)) -> consumer.DisposeAsync().AsTask())
                         try
                             let! _ = Task.WhenAll consumerTasks |> Async.AwaitTask
                             this.ConnectionState <- Closed
@@ -298,7 +298,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         channel.Reply <| Ok()
                     | _ ->
                         this.ConnectionState <- Closing
-                        let consumerTasks = consumers |> Seq.map(fun kv -> kv.Value.UnsubscribeAsync())
+                        let consumerTasks = consumers |> Seq.map(fun (KeyValue(_, consumer)) -> consumer.UnsubscribeAsync())
                         try
                             let! _ = Task.WhenAll consumerTasks |> Async.AwaitTask
                             this.ConnectionState <- Closed
@@ -315,7 +315,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
 
                     Log.Logger.LogDebug("{0} HasReachedEndOfTheTopic", prefix)
                     consumers
-                    |> Seq.forall (fun kv -> kv.Value.HasReachedEndOfTopic)
+                    |> Seq.forall (fun (KeyValue(_, consumer)) -> consumer.HasReachedEndOfTopic)
                     |> channel.Reply
                     return! loop state
 

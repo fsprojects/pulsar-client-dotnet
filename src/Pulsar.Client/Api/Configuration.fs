@@ -92,7 +92,7 @@ type ProducerConfiguration =
         CustomMessageRouter: IMessageRouter option
         AutoUpdatePartitions: bool
         HashingScheme: HashingScheme
-        InitialSequenceId : int64 option
+        InitialSequenceId : SequenceId option
     }
     member this.BatchingPartitionSwitchFrequencyIntervalMs =
         this.BatchingPartitionSwitchFrequencyByPublishDelay * (int this.BatchingMaxPublishDelay.TotalMilliseconds)

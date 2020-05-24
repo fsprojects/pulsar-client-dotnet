@@ -19,7 +19,10 @@ module internal BatchHelpers =
             batchItems
             |> Seq.mapi (fun index batchItem ->
                 let message = batchItem.Message
-                let smm = SingleMessageMetadata(PayloadSize = message.Payload.Length)
+                let smm = SingleMessageMetadata(
+                           PayloadSize = message.Payload.Length,
+                           SequenceId = (batchItem.SequenceId |> uint64)
+                       )
                 match message.Key with
                 | Some key ->
                     smm.PartitionKey <- %key.PartitionKey
@@ -35,6 +38,13 @@ module internal BatchHelpers =
             |> Seq.toArray
         let batchPayload = messageStream.ToArray()
         (batchPayload, batchCallbacks)
+
+type internal OpSendMsg<'T> = byte[] * BatchCallback<'T>[]
+type internal OpSendMsgWrapper<'T> = {
+    OpSendMsg: OpSendMsg<'T>
+    LowestSequenceId: SequenceId
+    HighestSequenceId: SequenceId
+}
 
 [<AbstractClass>]
 type internal MessageContainer<'T>(config: ProducerConfiguration) =
@@ -52,8 +62,8 @@ type internal MessageContainer<'T>(config: ProducerConfiguration) =
         (maxBytesInBatch > 0 && this.CurrentBatchSizeBytes >= maxBytesInBatch)
         || (maxBytesInBatch <= 0 && this.CurrentBatchSizeBytes >= this.MaxMessageSize)
         || (maxNumMessagesInBatch > 0 && this.NumMessagesInBatch >= maxNumMessagesInBatch)
-    abstract member CreateOpSendMsg: unit -> byte[] * BatchCallback<'T>[]
-    abstract member CreateOpSendMsgs: unit -> seq<byte[] * BatchCallback<'T>[]>
+    abstract member CreateOpSendMsg: unit -> OpSendMsgWrapper<'T>
+    abstract member CreateOpSendMsgs: unit -> seq<OpSendMsgWrapper<'T>>
     abstract member Clear: unit -> unit
     abstract member IsMultiBatches: bool
     abstract member Discard: exn -> unit
@@ -79,7 +89,9 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
         batchItems.Add(batchItem)
         this.IsBatchFull()
     override this.CreateOpSendMsg () =
-        makeBatch batchItems
+        let lowestSequenceId = batchItems.[0].SequenceId
+        let highestSequenceId = batchItems.[batchItems.Count - 1].SequenceId
+        { OpSendMsg = makeBatch batchItems; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId }
     override this.CreateOpSendMsgs () =
         raise <| NotSupportedException()
     override this.Clear() =
@@ -117,7 +129,10 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
         raise <| NotSupportedException()
     override this.CreateOpSendMsgs () =
         keyBatchItems.Values
-        |> Seq.map (fun batchItems -> makeBatch batchItems)
+        |> Seq.map (fun batchItems ->
+            let lowestSequenceId = batchItems.[0].SequenceId
+            let highestSequenceId = batchItems.[batchItems.Count - 1].SequenceId
+            { OpSendMsg = makeBatch batchItems; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId })
     override this.Clear() =
         keyBatchItems.Clear()
         this.CurrentBatchSizeBytes <- 0

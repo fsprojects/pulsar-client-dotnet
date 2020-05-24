@@ -24,7 +24,7 @@ type internal ProducerSuccess =
     {
         GeneratedProducerName: string
         SchemaVersion: SchemaVersion option
-        LastSequenceId: int64
+        LastSequenceId: SequenceId
     }
 
 type internal LookupTopicResult =
@@ -181,9 +181,10 @@ type MessageId =
 
 type internal SendReceipt =
     {
-        SequenceId: SequenceId
+        SequenceId: int64
         LedgerId: LedgerId
         EntryId: EntryId
+        HighestSequenceId: int64
     }
 
 type internal LogicalAddress = LogicalAddress of DnsEndPoint
@@ -209,7 +210,7 @@ type internal Metadata =
         CompressionType: CompressionType
         UncompressedMessageSize: int32
         SchemaVersion: SchemaVersion option
-        SequenceId: uint64
+        SequenceId: SequenceId
     }
 
 type MessageKey =
@@ -231,7 +232,7 @@ type internal RawMessage =
     }
 
 type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey, hasBase64EncodedKey: bool,
-                  properties: IReadOnlyDictionary<string, string>, schemaVersion: byte[], sequenceId: uint64,
+                  properties: IReadOnlyDictionary<string, string>, schemaVersion: byte[], sequenceId: SequenceId,
                   getValue: unit -> 'T) =
     /// Get the unique message ID associated with this message.
     member this.MessageId = messageId
@@ -305,12 +306,12 @@ type MessageBuilder<'T> =
     val Key: MessageKey option
     val Properties: IReadOnlyDictionary<string, string>
     val DeliverAt: Nullable<int64>
-    val SequenceId: Nullable<uint64>
+    val SequenceId: Nullable<SequenceId>
 
     internal new (value : 'T, payload: byte[], key : MessageKey option,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] properties : IReadOnlyDictionary<string, string>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>] deliverAt : Nullable<int64>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<uint64>)>] sequenceId : Nullable<uint64>) =
+            [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>] sequenceId : Nullable<SequenceId>) =
             {
                 Value = value
                 Key = key
@@ -341,6 +342,7 @@ type internal PendingMessage<'T> =
     {
         CreatedAt: DateTime
         SequenceId: SequenceId
+        HighestSequenceId: SequenceId
         Payload: Payload
         Callback : PendingCallback<'T>
     }
@@ -349,12 +351,7 @@ type internal BatchItem<'T> =
     {
         Message: MessageBuilder<'T>
         Tcs : TaskCompletionSource<MessageId>
-    }
-
-type internal PendingBatch =
-    {
         SequenceId: SequenceId
-        CompletionSources : TaskCompletionSource<MessageId> list
     }
 
 type internal PulsarResponseType =

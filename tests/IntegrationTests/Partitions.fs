@@ -14,6 +14,7 @@ open Pulsar.Client.Common
 open Serilog
 open Pulsar.Client.IntegrationTests.Common
 open FSharp.Control
+open FSharp.UMX
 
 [<CLIMutable>]
 type SimpleRecord =
@@ -308,6 +309,62 @@ let tests =
             Expect.isEmpty "secondDict" secondDict            
             
             Log.Debug("Finished Auto schema works fine with partitioned topic")
+        }
+        
+        // ignore this test for local environment (or recreate public/deduplication/partitioned before each run)
+        testAsync "Deduplication works with partitions" {
+
+            Log.Debug("Started Deduplication works with partitions")
+
+            let messagesCount = 12
+            let client = getClient()
+            let topicName = "public/deduplication/partitioned"
+            let name = "deduplicationPartitions"
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(name)
+                    .CreateAsync() |> Async.AwaitTask
+                    
+            let! consumer =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(name)
+                    .BatchReceivePolicy(BatchReceivePolicy(-1, 10485760L, TimeSpan.FromSeconds(1.0)))
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            for i in 1..messagesCount do
+                let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producer.Name (DateTime.Now.ToLongTimeString()) )
+                let message = producer.NewMessage(payload, i.ToString(), sequenceId = Nullable(%(int64 i))  )
+                let! m1 = producer.SendAsync(message) |> Async.AwaitTask
+                Log.Logger.Debug("Sent {0} to {1}", i, m1.Partition)
+                let! m2 = producer.SendAsync(message) |> Async.AwaitTask
+                Log.Logger.Debug("Sent {0} to {1}", i, m2.Partition)
+                ()            
+            
+            do! producer.DisposeAsync().AsTask() |> Async.AwaitTask            
+            
+            let! newProducer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(name)
+                    .EnableBatching(false)
+                    .InitialSequenceId(%0L)
+                    .CreateAsync() |> Async.AwaitTask
+                    
+            for i in 1..messagesCount do
+                let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producer.Name (DateTime.Now.ToLongTimeString()) )
+                let message = newProducer.NewMessage(payload, i.ToString(), sequenceId = Nullable(%(int64 i))  )
+                let! _ = newProducer.SendAndForgetAsync(message) |> Async.AwaitTask
+                ()
+
+            let! messages = consumer.BatchReceiveAsync() |> Async.AwaitTask
+            
+            Expect.equal "" messagesCount messages.Count
+            
+            Log.Debug("Finished Deduplication works with partitions")
         }
 
     ]

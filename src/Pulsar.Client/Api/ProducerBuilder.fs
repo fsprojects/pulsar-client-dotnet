@@ -120,7 +120,7 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
 
     member this.InitialSequenceId initialSequenceId =
         { config with
-                InitialSequenceId = initialSequenceId }
+            InitialSequenceId = Some initialSequenceId }
         |> this.With
 
     member this.Intercept ([<ParamArray>] interceptors: IProducerInterceptor<'T> array) =
