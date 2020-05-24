@@ -5,6 +5,9 @@
     <IsPackable>false</IsPackable>
     <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <NoWarn>3186</NoWarn>
+  </PropertyGroup>
   <ItemGroup>
     <Compile Include="Expect.fs" />
     <Compile Include="Common.fs" />
@@ -17,6 +20,7 @@
     <Compile Include="Basic.fs" />
     <Compile Include="DeadLetters.fs" />
     <Compile Include="Compression.fs" />
+    <Compile Include="SequenceId.fs" />
     <Compile Include="ProducerInterceptor.fs" />
     <Compile Include="ConsumerInterceptor.fs" />
     <Compile Include="Tls.fs" />

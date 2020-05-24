@@ -7,7 +7,6 @@ open FSharp.UMX
 let mutable private requestId = 0L
 let mutable private producerId = 0L
 let mutable private consumerId = 0L
-let mutable private sequenceId = 0L
 let mutable private clientCnxId = 0L
 
 let getNextRequestId(): RequestId =
@@ -18,9 +17,6 @@ let getNextProducerId(): ProducerId =
 
 let getNextConsumerId(): ConsumerId =
     % (uint64 <| Interlocked.Increment(&consumerId))
-
-let getNextSequenceId(): SequenceId =
-    % (uint64 <| Interlocked.Increment(&sequenceId))
 
 let getNextClientCnxId(): ClientCnxId =
     % (uint64 <| Interlocked.Increment(&clientCnxId))

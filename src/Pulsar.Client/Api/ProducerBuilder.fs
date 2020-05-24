@@ -118,6 +118,11 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
             HashingScheme = hashingScheme }
         |> this.With
 
+    member this.InitialSequenceId initialSequenceId =
+        { config with
+            InitialSequenceId = Some initialSequenceId }
+        |> this.With
+
     member this.Intercept ([<ParamArray>] interceptors: IProducerInterceptor<'T> array) =
         if interceptors.Length = 0 then this
         else

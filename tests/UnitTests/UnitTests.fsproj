@@ -5,6 +5,9 @@
     <IsPackable>false</IsPackable>
     <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <NoWarn>3186</NoWarn>
+  </PropertyGroup>
   <ItemGroup>
     <Compile Include="Expect.fs" />
     <Compile Include="Common\Properties.fs" />

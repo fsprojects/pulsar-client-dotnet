@@ -100,8 +100,13 @@ let newPartitionMetadataRequest(topicName : CompleteTopicName) (requestId : Requ
     let command = BaseCommand(``type`` = CommandType.PartitionedMetadata, partitionMetadata = request)
     serializeSimpleCommand command
 
-let newSend (producerId : ProducerId) (sequenceId : SequenceId) (numMessages : int) (msgMetadata : MessageMetadata) (payload: byte[]) : Payload =
-    let request = CommandSend(ProducerId = %producerId, SequenceId = %sequenceId, NumMessages = numMessages)
+let newSend (producerId : ProducerId) (sequenceId : SequenceId) (highestSequenceId: SequenceId option)
+    (numMessages : int) (msgMetadata : MessageMetadata) (payload: byte[]) : Payload =
+    let request = CommandSend(ProducerId = %producerId, SequenceId = uint64 %sequenceId)
+    if numMessages > 1 then
+        request.NumMessages <- numMessages
+    if highestSequenceId.IsSome then
+        request.HighestSequenceId <- uint64 %highestSequenceId.Value
     let command = BaseCommand(``type`` = CommandType.Send, Send = request)
     serializePayloadCommand command msgMetadata payload
 

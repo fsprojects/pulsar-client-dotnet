@@ -343,8 +343,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             CompressionType = messageMetadata.Compression |> mapCompressionType
             UncompressedMessageSize = messageMetadata.UncompressedSize |> int32
             SchemaVersion = getOptionalSchemaVersion messageMetadata.SchemaVersion
-        } 
-            
+            SequenceId = %(int64 messageMetadata.SequenceId)
+        }
+
         {
             MessageId = { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); Type = Individual; Partition = -1; TopicName = %"" }
             RedeliveryCount = cmd.RedeliveryCount
@@ -380,13 +381,18 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 handleSuccess %cmd.RequestId result
         | XCommandSendReceipt cmd ->
             let producerOperations = producers.[%cmd.ProducerId]
-            producerOperations.AckReceived { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); SequenceId = %cmd.SequenceId }
+            producerOperations.AckReceived {
+                LedgerId = %(int64 cmd.MessageId.ledgerId)
+                EntryId = %(int64 cmd.MessageId.entryId)
+                SequenceId = %(int64 cmd.SequenceId)
+                HighestSequenceId = %(int64 cmd.HighestSequenceId)
+            }
         | XCommandSendError cmd ->
             Log.Logger.LogWarning("{0} Received send error from server: {1} : {2}", prefix, cmd.Error, cmd.Message)
             let producerOperations = producers.[%cmd.ProducerId]
             match cmd.Error with
             | ServerError.ChecksumError ->
-                producerOperations.RecoverChecksumError %cmd.SequenceId
+                producerOperations.RecoverChecksumError %(int64 cmd.SequenceId)
             | ServerError.TopicTerminatedError ->
                 producerOperations.TopicTerminatedError()
             | _ ->
@@ -415,6 +421,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let result = ProducerSuccess {
                 GeneratedProducerName = cmd.ProducerName
                 SchemaVersion = getOptionalSchemaVersion cmd.SchemaVersion
+                LastSequenceId = %cmd.LastSequenceId
             }
             handleSuccess %cmd.RequestId result
         | XCommandSuccess cmd ->

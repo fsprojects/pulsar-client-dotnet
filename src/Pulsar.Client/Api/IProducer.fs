@@ -5,6 +5,7 @@ open System.Collections.Generic
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open System.Runtime.InteropServices
+open FSharp.UMX
 
 type IProducer<'T> =
     inherit IAsyncDisposable
@@ -27,6 +28,15 @@ type IProducer<'T> =
     /// <param name="value">Message data</param>
     /// <param name="properties">The readonly dictionary with message properties.</param>
     /// <param name="deliverAt">Unix timestamp in milliseconds after which message should be delivered to consumer(s).</param>
+    /// <param name="sequenceId">
+    ///     Specify a custom sequence id for the message being published.
+    ///     The sequence id can be used for deduplication purposes and it needs to follow these rules:
+    ///         - <c>sequenceId >= 0</c>
+    ///         - Sequence id for a message needs to be greater than sequence id for earlier messages:
+    ///             <c>sequenceId(N+1) > sequenceId(N)</c>
+    ///         - It's not necessary for sequence ids to be consecutive. There can be holes between messages. Eg. the
+    ///             <c>sequenceId</c> could represent an offset or a cumulative size.
+    /// </param>    
     /// <remarks>
     ///     This <paramref name="deliverAt" /> timestamp must be expressed as unix time milliseconds based on UTC.
     ///     For example: <code>DateTimeOffset.UtcNow.AddSeconds(2.0).ToUnixTimeMilliseconds()</code>.
@@ -36,4 +46,13 @@ type IProducer<'T> =
         * [<Optional; DefaultParameterValue(null:string)>]key:string
         * [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string,string>)>]properties: IReadOnlyDictionary<string, string>
         * [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>
+        * [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>
         -> MessageBuilder<'T>
+    /// The last sequence id that was published by this producer.
+    /// This represent either the automatically assigned
+    /// or custom sequence id that was published and acknowledged by the broker.
+    /// After recreating a producer with the same producer name, this will return the last message that was
+    /// published in the previous producer session, or -1 if there no message was ever published.
+    abstract member LastSequenceId : SequenceId
+    /// Get the producer name
+    abstract member Name: string

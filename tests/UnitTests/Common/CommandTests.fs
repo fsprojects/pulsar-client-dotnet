@@ -103,13 +103,13 @@ module CommandsTests =
 
             test "newMessage should return correct frame" {
                 let producerId: ProducerId =  % 5UL
-                let sequenceId: SequenceId =  % 6UL
+                let sequenceId: SequenceId =  % 6L
                 let numMessages =  1
                 let metadata = MessageMetadata(ProducerName = "TestMe")
                 let payload = [| 1uy; 17uy; |]
 
                 let (bytes, totalSize, commandSize, command, magicNumber, crc32, medataSize, resultMetadata, resultPayload) =
-                    serializeDeserializePayloadCommand (newSend producerId sequenceId numMessages metadata payload)
+                    serializeDeserializePayloadCommand (newSend producerId sequenceId None numMessages metadata payload)
 
                 let crcArrayStart = 8 + commandSize + 6
                 let crcArray = bytes.AsSpan(crcArrayStart, 4 + medataSize + resultPayload.Length).ToArray()

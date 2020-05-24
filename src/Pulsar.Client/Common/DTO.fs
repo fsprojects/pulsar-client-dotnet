@@ -24,6 +24,7 @@ type internal ProducerSuccess =
     {
         GeneratedProducerName: string
         SchemaVersion: SchemaVersion option
+        LastSequenceId: SequenceId
     }
 
 type internal LookupTopicResult =
@@ -180,9 +181,10 @@ type MessageId =
 
 type internal SendReceipt =
     {
-        SequenceId: SequenceId
+        SequenceId: int64
         LedgerId: LedgerId
         EntryId: EntryId
+        HighestSequenceId: int64
     }
 
 type internal LogicalAddress = LogicalAddress of DnsEndPoint
@@ -208,6 +210,7 @@ type internal Metadata =
         CompressionType: CompressionType
         UncompressedMessageSize: int32
         SchemaVersion: SchemaVersion option
+        SequenceId: SequenceId
     }
 
 type MessageKey =
@@ -229,7 +232,8 @@ type internal RawMessage =
     }
 
 type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey, hasBase64EncodedKey: bool,
-                  properties: IReadOnlyDictionary<string, string>, schemaVersion: byte[], getValue: unit -> 'T) =
+                  properties: IReadOnlyDictionary<string, string>, schemaVersion: byte[], sequenceId: SequenceId,
+                  getValue: unit -> 'T) =
     /// Get the unique message ID associated with this message.
     member this.MessageId = messageId
     /// Get the raw payload of the message.
@@ -240,22 +244,24 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
     member this.HasBase64EncodedKey = hasBase64EncodedKey
     /// Return the properties attached to the message.
     member this.Properties = properties
-    // Schema version of the message if the message is produced with schema otherwise null.
-    member this.SchemaVersion = schemaVersion    
+    /// Schema version of the message if the message is produced with schema otherwise null.
+    member this.SchemaVersion = schemaVersion
+    /// Get the sequence id associated with this message
+    member this.SequenceId = sequenceId
     /// Get the de-serialized value of the message, according the configured Schema.
     member this.GetValue() =
         getValue()
     member internal this.WithMessageId messageId =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
     /// Get a new instance of the message with updated data
     member this.WithData data =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
     /// Get a new instance of the message with updated key
     member this.WithKey (key, hasBase64EncodedKey) =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
     /// Get a new instance of the message with updated properties
     member this.WithProperties properties =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
 
 type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 
@@ -300,16 +306,19 @@ type MessageBuilder<'T> =
     val Key: MessageKey option
     val Properties: IReadOnlyDictionary<string, string>
     val DeliverAt: Nullable<int64>
+    val SequenceId: Nullable<SequenceId>
 
     internal new (value : 'T, payload: byte[], key : MessageKey option,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] properties : IReadOnlyDictionary<string, string>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>] deliverAt : Nullable<int64>) =
+            [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>] deliverAt : Nullable<int64>,
+            [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>] sequenceId : Nullable<SequenceId>) =
             {
                 Value = value
                 Key = key
                 Properties = if isNull properties then EmptyProps else properties
                 DeliverAt = deliverAt
                 Payload = payload
+                SequenceId = sequenceId
             }
         
         
@@ -333,6 +342,7 @@ type internal PendingMessage<'T> =
     {
         CreatedAt: DateTime
         SequenceId: SequenceId
+        HighestSequenceId: SequenceId
         Payload: Payload
         Callback : PendingCallback<'T>
     }
@@ -341,12 +351,7 @@ type internal BatchItem<'T> =
     {
         Message: MessageBuilder<'T>
         Tcs : TaskCompletionSource<MessageId>
-    }
-
-type internal PendingBatch =
-    {
         SequenceId: SequenceId
-        CompletionSources : TaskCompletionSource<MessageId> list
     }
 
 type internal PulsarResponseType =

@@ -15,6 +15,7 @@ open System.Timers
 
 type internal PartitionedProducerMessage =
     | Init
+    | LastSequenceId of AsyncReplyChannel<SequenceId>
     | Close of AsyncReplyChannel<ResultOrException<unit>>
     | TickTime
 
@@ -61,13 +62,13 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             producerConfig.CustomMessageRouter.Value
         | _ ->
             failwith "Unknown MessageRoutingMode"
-                
+
     let timer = new Timer(1000.0 * 60.0) // 1 minute
-                
+
     let stopProducer() =
         cleanup(this)
         timer.Close()
-    
+
     let mb = MailboxProcessor<PartitionedProducerMessage>.Start(fun inbox ->
 
         let rec loop () =
@@ -112,7 +113,16 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         this.ConnectionState <- Failed
                         producerCreatedTsc.SetException(ex)
                         stopProducer()
-                    
+                        
+                | LastSequenceId channel ->
+
+                    Log.Logger.LogDebug("{0} LastSequenceId", prefix)
+                    producers
+                    |> Seq.map (fun producer -> producer.LastSequenceId)
+                    |> Seq.max
+                    |> channel.Reply
+                    return! loop ()
+
                 | Close channel ->
 
                     match this.ConnectionState with
@@ -120,12 +130,13 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         channel.Reply <| Ok()
                     | _ ->
                         this.ConnectionState <- Closing
-                        let producersTasks = producers |> Seq.map(fun producer -> task { return! producer.DisposeAsync() })                       
+                        let producersTasks = producers |> Seq.map(fun producer -> task { return! producer.DisposeAsync() })
                         try
                             let! _ = Task.WhenAll producersTasks |> Async.AwaitTask
                             this.ConnectionState <- Closed
                             Log.Logger.LogInformation("{0} closed", prefix)
                             stopProducer()
+                            channel.Reply <| Ok()
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} could not close", prefix)
                             this.ConnectionState <- Failed
@@ -265,7 +276,8 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         member this.NewMessage (value:'T,
             [<Optional; DefaultParameterValue(null:string)>]key:string,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string,string>)>]properties: IReadOnlyDictionary<string, string>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>) =
+            [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>,
+            [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>) =  
             
             keyValueProcessor
             |> Option.map(fun kvp -> kvp.EncodeKeyValue value)
@@ -273,14 +285,17 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             |> Option.defaultWith (fun () ->
                 MessageBuilder(value, schema.Encode(value),
                                 (if String.IsNullOrEmpty(key) then None else Some { PartitionKey = %key; IsBase64Encoded = false }),
-                                properties, deliverAt))
+                                properties, deliverAt, sequenceId))
 
         member this.ProducerId = producerId
 
         member this.Topic = %producerConfig.Topic.CompleteTopicName
+
+        member this.LastSequenceId = mb.PostAndReply(LastSequenceId)
+
+        member this.Name = producerConfig.ProducerName
         
-    interface IAsyncDisposable with
-        
+    interface IAsyncDisposable with        
         member this.DisposeAsync() =
             task {
                 match this.ConnectionState with

@@ -28,6 +28,7 @@ module ConfigurationTests =
                 config.BatchingMaxPublishDelay |> Expect.equal (incorrectDefault "MaxBatchingPublishDelay") (TimeSpan.FromMilliseconds(1.0))
                 config.SendTimeout |> Expect.equal (incorrectDefault "SendTimeout") (TimeSpan.FromSeconds(30.0))
                 config.CompressionType |> Expect.equal (incorrectDefault "CompressionType") (CompressionType.None)
+                config.InitialSequenceId |> Expect.equal (incorrectDefault "InitialSequenceId") (None)
             }
 
         ]
