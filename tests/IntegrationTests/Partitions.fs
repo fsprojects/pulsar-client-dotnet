@@ -309,9 +309,8 @@ let tests =
             Expect.isEmpty "secondDict" secondDict            
             
             Log.Debug("Finished Auto schema works fine with partitioned topic")
-        }
+        }        
         
-        // ignore this test for local environment (or recreate public/deduplication/partitioned before each run)
         testAsync "Deduplication works with partitions" {
 
             Log.Debug("Started Deduplication works with partitions")
@@ -319,7 +318,7 @@ let tests =
             let messagesCount = 12
             let client = getClient()
             let topicName = "public/deduplication/partitioned"
-            let name = "deduplicationPartitions"
+            let name = "deduplicationPartitions" + Guid.NewGuid().ToString("N")
 
             let! producer =
                 client.NewProducer()
@@ -363,6 +362,10 @@ let tests =
             let! messages = consumer.BatchReceiveAsync() |> Async.AwaitTask
             
             Expect.equal "" messagesCount messages.Count
+            
+            do! consumer.AcknowledgeAsync(messages) |> Async.AwaitTask
+            do! Async.Sleep(110)
+            do! consumer.DisposeAsync().AsTask() |> Async.AwaitTask
             
             Log.Debug("Finished Deduplication works with partitions")
         }

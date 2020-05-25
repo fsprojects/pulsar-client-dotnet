@@ -410,7 +410,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
     member this.ConsumerId with get() = consumerId
 
     override this.Equals consumer =
-        consumerId = (consumer :?> ConsumerImpl<'T>).ConsumerId
+        consumerId = (consumer :?> IConsumer<'T>).ConsumerId
 
     override this.GetHashCode () = int consumerId
 
