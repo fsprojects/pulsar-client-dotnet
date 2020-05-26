@@ -40,9 +40,9 @@ type ConsumerStatsImpl(prefix: string) =
     let mutable totalAcksSent: int64 = 0L
     let mutable totalAcksFailed: int64 = 0L
     
-    let mutable receivedMsgsRate: double = 0.0
-    let mutable receivedBytesRate: double = 0.0
-    let mutable intervalDuration: double = 0.0
+    let mutable receivedMsgsRate: float = 0.0
+    let mutable receivedBytesRate: float = 0.0
+    let mutable intervalDuration: float = 0.0
     let mutable incomingMsgs: int = 0
     
     let sw = Stopwatch.StartNew()
@@ -88,7 +88,7 @@ type ConsumerStatsImpl(prefix: string) =
             }
         
         member this.TickTime(incomingMessages) =
-            intervalDuration <- double sw.ElapsedMilliseconds
+            intervalDuration <- float sw.ElapsedMilliseconds
             sw.Restart()
             Log.Logger.LogDebug("{0} TickTime intervalDuration:{1}", prefix, intervalDuration)
             
@@ -110,8 +110,8 @@ type ConsumerStatsImpl(prefix: string) =
             totalAcksSent <- totalAcksSent + numAcksSent
             totalAcksFailed <- totalAcksFailed + numAcksFailed
 
-            receivedMsgsRate <- if intervalDuration > 0.0 then  double numMsgsReceived / intervalDuration * 1_000.0 else 0.0
-            receivedBytesRate <- if intervalDuration > 0.0 then double numBytesReceived / intervalDuration * 1_000.0 else 0.0
+            receivedMsgsRate <- if intervalDuration > 0.0 then  float numMsgsReceived / intervalDuration * 1_000.0 else 0.0
+            receivedBytesRate <- if intervalDuration > 0.0 then float numBytesReceived / intervalDuration * 1_000.0 else 0.0
             incomingMsgs <- incomingMessages
             
             if numMsgsReceived > 0L || numBytesReceived > 0L || numReceiveFailed > 0L

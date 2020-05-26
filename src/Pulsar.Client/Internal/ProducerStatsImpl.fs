@@ -94,7 +94,7 @@ type ProducerStatsImpl(prefix: string) =
             sendBytesRate <- if intervalDuration > 0.0 then float currentNumBytesSent / intervalDuration * 1_000.0 else 0.0
             sendLatencyMin <- currentSendLatencyMin
             sendLatencyMax <- currentSendLatencyMax
-            sendLatencyAverage <- if currentNumAcksReceived > 0L then currentLatencySum / float(currentNumAcksReceived) else 0.0
+            sendLatencyAverage <- if currentNumAcksReceived > 0L then currentLatencySum / float currentNumAcksReceived else 0.0
             totalMsgsSent <- totalMsgsSent + currentNumMsgsSent
             totalBytesSent <- totalBytesSent + currentNumBytesSent
             totalSendFailed <- totalSendFailed + currentNumSendFailed

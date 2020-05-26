@@ -64,6 +64,59 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         | _ ->
             failwith "Unknown MessageRoutingMode"
 
+    let statsReduce (statsArray: ProducerStats array) =
+        let mutable numMsgsSent: int64 = 0L
+        let mutable numBytesSent: int64 = 0L
+        let mutable numSendFailed: int64 = 0L
+        let mutable numAcksReceived: int64 = 0L
+        let mutable sendMsgsRate: float = 0.0
+        let mutable sendBytesRate: float = 0.0
+        let mutable sendLatencyMin: float = Double.MaxValue
+        let mutable sendLatencyMax: float = Double.MinValue
+        let mutable sendLatencySum: float = 0.0
+        let mutable totalMsgsSent: int64 = 0L
+        let mutable totalBytesSent: int64 = 0L
+        let mutable totalSendFailed: int64 = 0L
+        let mutable totalAcksReceived: int64 = 0L
+        let mutable intervalDurationSum: float = 0.0
+        let mutable pendingMsgs: int = 0
+        
+        statsArray |> Array.iter(fun stats ->
+            numMsgsSent <- numMsgsSent + stats.NumMsgsSent
+            numBytesSent <- numBytesSent + stats.NumBytesSent
+            numSendFailed <- numSendFailed + stats.NumSendFailed
+            numAcksReceived <- numAcksReceived + stats.NumAcksReceived
+            sendMsgsRate <- sendMsgsRate + stats.SendMsgsRate
+            sendBytesRate <- sendBytesRate + stats.SendBytesRate
+            sendLatencyMin <- min sendLatencyMin stats.SendLatencyMin
+            sendLatencyMax <- max sendLatencyMax stats.SendLatencyMax
+            sendLatencySum <- sendLatencySum + stats.SendLatencyAverage * float stats.NumAcksReceived
+            totalMsgsSent <- totalMsgsSent + stats.TotalMsgsSent
+            totalBytesSent <- totalBytesSent + stats.TotalBytesSent
+            totalSendFailed <- totalSendFailed + stats.TotalSendFailed
+            totalAcksReceived <- totalAcksReceived + stats.TotalAcksReceived
+            intervalDurationSum <- intervalDurationSum + stats.IntervalDuration
+            pendingMsgs <- pendingMsgs + stats.PendingMsgs
+            )
+        
+        {
+            NumMsgsSent = numMsgsSent
+            NumBytesSent = numBytesSent
+            NumSendFailed = numSendFailed
+            NumAcksReceived = numAcksReceived
+            SendMsgsRate = sendMsgsRate
+            SendBytesRate = sendBytesRate
+            SendLatencyMin = sendLatencyMin
+            SendLatencyMax = sendLatencyMax
+            SendLatencyAverage = if numAcksReceived > 0L then sendLatencySum / float numAcksReceived else 0.0
+            TotalMsgsSent = totalMsgsSent
+            TotalBytesSent = totalBytesSent
+            TotalSendFailed = totalSendFailed
+            TotalAcksReceived = totalAcksReceived
+            IntervalDuration = if statsArray.Length > 0 then intervalDurationSum / float statsArray.Length else 0.0
+            PendingMsgs = pendingMsgs 
+        }
+    
     let timer = new Timer(1000.0 * 60.0) // 1 minute
 
     let stopProducer() =
@@ -201,34 +254,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         |> Seq.map(fun p -> p.GetStatsAsync())
                         |> Task.WhenAll
                         |> Async.AwaitTask
-                    stats
-                    |> Seq.reduce(fun acc stats ->
-                        {
-                            NumMsgsSent = acc.NumMsgsSent + stats.NumMsgsSent 
-                            NumBytesSent = acc.NumBytesSent + stats.NumBytesSent 
-                            NumSendFailed = acc.NumSendFailed + stats.NumSendFailed 
-                            NumAcksReceived = acc.NumAcksReceived + stats.NumAcksReceived 
-                            SendMsgsRate = acc.SendMsgsRate + stats.SendMsgsRate 
-                            SendBytesRate = acc.SendBytesRate + stats.SendBytesRate
-                            SendLatencyMin =
-                                if acc.SendLatencyMin > stats.SendLatencyMin then
-                                    stats.SendLatencyMin
-                                else
-                                    acc.SendLatencyMin
-                            SendLatencyMax =
-                                if acc.SendLatencyMax < stats.SendLatencyMax then
-                                    stats.SendLatencyMax
-                                else
-                                    acc.SendLatencyMax
-                            SendLatencyAverage = Double.NaN
-                            TotalMsgsSent = acc.TotalMsgsSent + stats.TotalMsgsSent 
-                            TotalBytesSent = acc.TotalBytesSent + stats.TotalBytesSent 
-                            TotalSendFailed = acc.TotalSendFailed + stats.TotalSendFailed 
-                            TotalAcksReceived = acc.TotalAcksReceived + stats.TotalAcksReceived
-                            IntervalDuration = max acc.IntervalDuration stats.IntervalDuration
-                            PendingMsgs = acc.PendingMsgs + stats.PendingMsgs
-                        })
-                    |> channel.Reply
+                    statsReduce stats |> channel.Reply
                     return! loop ()
 
             }
