@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Internal
 
+open System.Threading
 open Pulsar.Client.Common
 open System
 open Microsoft.Extensions.Logging
@@ -56,13 +57,13 @@ type ConsumerStatsImpl(prefix: string) =
             currentNumAcksSent <- currentNumAcksSent + int64 numAcks
         member this.IncrementNumAcksFailed() =
             Log.Logger.LogDebug("{0} IncrementNumAcksFailed", prefix)
-            currentNumAcksFailed <- currentNumAcksFailed + 1L
+            Interlocked.Increment(&currentNumAcksFailed) |> ignore
         member this.IncrementNumReceiveFailed() =
             Log.Logger.LogDebug("{0} IncrementNumReceiveFailed", prefix)
-            currentNumReceiveFailed <- currentNumReceiveFailed + 1L
+            Interlocked.Increment(&currentNumReceiveFailed) |> ignore
         member this.IncrementNumBatchReceiveFailed() =
             Log.Logger.LogDebug("{0} IncrementNumBatchReceiveFailed", prefix)
-            currentNumBatchReceiveFailed <- currentNumBatchReceiveFailed + 1L
+            Interlocked.Increment(&currentNumBatchReceiveFailed) |> ignore
         member this.GetStats() =
             Log.Logger.LogDebug("{0} GetStats", prefix)
             {
@@ -93,40 +94,36 @@ type ConsumerStatsImpl(prefix: string) =
             
             numMsgsReceived <- currentNumMsgsReceived
             numBytesReceived <- currentNumBytesReceived
-            numReceiveFailed <- currentNumReceiveFailed
-            numBatchReceiveFailed <- currentNumBatchReceiveFailed
+            numReceiveFailed <- Interlocked.Exchange(&currentNumReceiveFailed, 0L)
+            numBatchReceiveFailed <- Interlocked.Exchange(&currentNumBatchReceiveFailed, 0L) 
             numAcksSent <- currentNumAcksSent
-            numAcksFailed <- currentNumAcksFailed
+            numAcksFailed <- Interlocked.Exchange(&currentNumAcksFailed, 0L) 
             
-            totalMsgsReceived <- totalMsgsReceived + currentNumMsgsReceived
-            totalBytesReceived <- totalBytesReceived + currentNumBytesReceived
-            totalReceiveFailed <- totalReceiveFailed + currentNumReceiveFailed
-            totalBatchReceiveFailed <- totalBatchReceiveFailed + currentNumBatchReceiveFailed
-            totalAcksSent <- totalAcksSent + currentNumAcksSent
-            totalAcksFailed <- totalAcksFailed + currentNumAcksFailed
+            currentNumMsgsReceived <- 0L
+            currentNumBytesReceived <- 0L
+            currentNumAcksSent <- 0L
+            
+            totalMsgsReceived <- totalMsgsReceived + numMsgsReceived
+            totalBytesReceived <- totalBytesReceived + numBytesReceived
+            totalReceiveFailed <- totalReceiveFailed + numReceiveFailed
+            totalBatchReceiveFailed <- totalBatchReceiveFailed + numBatchReceiveFailed
+            totalAcksSent <- totalAcksSent + numAcksSent
+            totalAcksFailed <- totalAcksFailed + numAcksFailed
 
-            receivedMsgsRate <- if intervalDuration > 0.0 then  double currentNumMsgsReceived / intervalDuration * 1_000.0 else 0.0
-            receivedBytesRate <- if intervalDuration > 0.0 then double currentNumBytesReceived / intervalDuration * 1_000.0 else 0.0
+            receivedMsgsRate <- if intervalDuration > 0.0 then  double numMsgsReceived / intervalDuration * 1_000.0 else 0.0
+            receivedBytesRate <- if intervalDuration > 0.0 then double numBytesReceived / intervalDuration * 1_000.0 else 0.0
             incomingMsgs <- incomingMessages
             
-            if currentNumMsgsReceived > 0L || currentNumBytesReceived > 0L || currentNumReceiveFailed > 0L
-               || currentNumAcksSent > 0L || currentNumAcksFailed > 0L then
-                let ackRate = float currentNumAcksSent / intervalDuration * 1_000.0
+            if numMsgsReceived > 0L || numBytesReceived > 0L || numReceiveFailed > 0L
+               || numAcksSent > 0L || numAcksFailed > 0L then
+                let ackRate = float numAcksSent / intervalDuration * 1_000.0
                 Log.Logger.LogInformation(
                     "{0} Prefetched messages: {1} --- Consume throughput received: {2,1:0.00} msg/s --- {3,1:0.00} Mbit/s --- " + 
                     "Ack sent rate: {4,1:0.00} ack/s --- Failed messages: {5} --- batch messages: {6} --- Failed acks: {7} --- " +
                     "Interval: {8,1:0.} ms",
                     prefix, incomingMsgs, receivedMsgsRate, (receivedBytesRate * 8.0 / 1024.0 / 1024.0),
-                    ackRate, currentNumReceiveFailed, currentNumBatchReceiveFailed, currentNumAcksFailed, intervalDuration
+                    ackRate, numReceiveFailed, numBatchReceiveFailed, numAcksFailed, intervalDuration
                     )
-            
-            currentNumMsgsReceived <- 0L
-            currentNumBytesReceived <- 0L
-            currentNumReceiveFailed <- 0L
-            currentNumBatchReceiveFailed <- 0L
-            currentNumAcksSent <- 0L
-            currentNumAcksFailed <- 0L
-
 
     static member internal CONSUMER_STATS_DISABLED = {
         new IConsumerStatsRecorder with
