@@ -15,13 +15,14 @@ open System.Timers
 open System.IO
 open System.Runtime.InteropServices
 
+type SendMessageRequest<'T> = MessageBuilder<'T> * AsyncReplyChannel<TaskCompletionSource<MessageId>>
+
 type internal ProducerMessage<'T> =
     | ConnectionOpened of uint64
     | ConnectionFailed of exn
     | ConnectionClosed of ClientCnx
     | AckReceived of SendReceipt
-    | BeginSendMessage of MessageBuilder<'T> * AsyncReplyChannel<TaskCompletionSource<MessageId>>
-    | SendMessage of PendingMessage<'T>
+    | BeginSendMessage of SendMessageRequest<'T>
     | RecoverChecksumError of SequenceId
     | TopicTerminatedError
     | Close of AsyncReplyChannel<ResultOrException<unit>>
@@ -39,7 +40,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let mutable schemaVersion = None
     let pendingMessages = Queue<PendingMessage<'T>>()
     let compressionCodec = CompressionCodec.create producerConfig.CompressionType
-    let keyValueProcessor = KeyValueProcessor.GetInstance schema    
+    let keyValueProcessor = KeyValueProcessor.GetInstance schema
+    let blockedRequests = Queue<SendMessageRequest<'T>>()
 
     let initialSequenceId: SequenceId = producerConfig.InitialSequenceId |> Option.defaultValue %(-1L)
     let mutable lastSequenceIdPublished = %initialSequenceId
@@ -97,6 +99,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         while pendingMessages.Count > 0 do
             let msg = pendingMessages.Dequeue()
             failPendingMessage msg ex
+        while blockedRequests.Count > 0 do
+            let (_, ch) = blockedRequests.Dequeue()
+            let tcs = TaskCompletionSource()
+            tcs.SetException(ex)
+            ch.Reply(tcs)
         if producerConfig.BatchingEnabled then
             failPendingBatchMessages ex
 
@@ -115,15 +122,31 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         batchTimer.Elapsed.Add(fun _ -> this.Mb.Post SendBatchTick)
         batchTimer.Start()
 
+    let sendMessage (pendingMessage: PendingMessage<'T>) =
+        Log.Logger.LogDebug("{0} sendMessage id={1}", prefix, %pendingMessage.SequenceId)
+        pendingMessages.Enqueue(pendingMessage)
+        match connectionHandler.ConnectionState with
+        | Ready clientCnx ->
+            clientCnx.SendAndForget pendingMessage.Payload
+        | _ ->
+            Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
+    
+    let dequeuePendingMessage () =
+        if (blockedRequests.Count > 0) then
+            blockedRequests.Dequeue()
+            |> BeginSendMessage
+            |> this.Mb.Post
+        pendingMessages.Dequeue()
+    
     let resendMessages () =
         if pendingMessages.Count > 0 then
             Log.Logger.LogInformation("{0} resending {1} pending messages", prefix, pendingMessages.Count)
             while pendingMessages.Count > 0 do
                 let pendingMessage = pendingMessages.Dequeue()
-                this.Mb.Post(SendMessage pendingMessage)
+                sendMessage pendingMessage
         else
             producerCreatedTsc.TrySetResult() |> ignore
-
+            
     let verifyIfLocalBufferIsCorrupted (msg: PendingMessage<'T>) =
         task {
             use stream = MemoryStreamManager.GetStream()
@@ -193,7 +216,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 CreatedAt = DateTime.Now
             }
             lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
-            this.Mb.Post(SendMessage pendingMessage)
+            sendMessage pendingMessage
             
     let canAddToCurrentBatch (msg: MessageBuilder<'T>) =
         batchMessageContainer.HaveEnoughSpace(msg)
@@ -217,7 +240,74 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let updateMaxMessageSize messageSize =
         maxMessageSize <- messageSize
         batchMessageContainer.MaxMessageSize <- messageSize
-
+    
+    
+    let beginSendMessage sendRequest =
+        let (message, channel) = sendRequest
+        if pendingMessages.Count >= producerConfig.MaxPendingMessages then
+            if producerConfig.BlockIfQueueFull then
+                blockedRequests.Enqueue(sendRequest)
+            else
+                let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
+                tcs.SetException(ProducerQueueIsFullError "Producer send queue is full")
+                channel.Reply(tcs)
+        else
+            let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
+            let sequenceId =
+                if message.SequenceId.HasValue then
+                    message.SequenceId.Value
+                else
+                    let oldValue = msgIdGenerator
+                    msgIdGenerator <- msgIdGenerator + %1L
+                    %oldValue                        
+            if canAddToBatch message then
+                let batchItem = { Message = message; Tcs = tcs; SequenceId = sequenceId }
+                if canAddToCurrentBatch message then
+                    // should trigger complete the batch message, new message will add to a new batch and new batch
+                    // sequence id use the new message, so that broker can handle the message duplication
+                    if sequenceId <= lastSequenceIdPushed then
+                        isLastSequenceIdPotentialDuplicated <- true
+                        if sequenceId <= %lastSequenceIdPublished then
+                            Log.Logger.LogWarning("{0} Message with sequence id {1} is definitely a duplicate",
+                                                  prefix, message.SequenceId)
+                        else
+                            Log.Logger.LogInformation("{0} Message with sequence id {1} might be a duplicate but cannot be determined at this time.",
+                                                      prefix, message.SequenceId)
+                        doBatchSendAndAdd batchItem
+                    else
+                        // Should flush the last potential duplicated since can't combine potential duplicated messages
+                        // and non-duplicated messages into a batch.
+                        if isLastSequenceIdPotentialDuplicated then
+                            doBatchSendAndAdd batchItem
+                        else                                    
+                            // handle boundary cases where message being added would exceed
+                            // batch size and/or max message size
+                            if batchMessageContainer.Add(batchItem) then
+                                Log.Logger.LogDebug("{0} Max batch container size exceeded", prefix)
+                                batchMessageAndSend()
+                        isLastSequenceIdPotentialDuplicated <- false
+                else
+                   doBatchSendAndAdd batchItem
+            else
+                let metadata = createMessageMetadata sequenceId message None
+                let encodedMessage = compressionCodec.Encode message.Payload
+                if (encodedMessage.Length > maxMessageSize) then
+                    let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
+                    interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
+                    tcs.SetException(ex)
+                else
+                    let payload = Commands.newSend producerId sequenceId None 1 metadata encodedMessage
+                    let pendingMessage = {
+                        SequenceId = sequenceId
+                        HighestSequenceId = %(-1L)
+                        Payload = payload
+                        Callback = SingleCallback (message, tcs)
+                        CreatedAt = DateTime.Now
+                    }
+                    lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
+                    sendMessage pendingMessage
+            channel.Reply(tcs)
+    
     let stopProducer() =
         sendTimeoutTimer.Stop()
         batchTimer.Stop()
@@ -325,85 +415,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     else
                         return! loop ()
 
-                | ProducerMessage.BeginSendMessage (message, channel) ->
+                | ProducerMessage.BeginSendMessage sendRequest ->
 
-                    Log.Logger.LogDebug("{0} BeginSendMessage", prefix)                    
-                    let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
-                    if pendingMessages.Count >= producerConfig.MaxPendingMessages then
-                        tcs.SetException(ProducerQueueIsFullError "Producer send queue is full")
-                    else
-                        let sequenceId =
-                            if message.SequenceId.HasValue then
-                                message.SequenceId.Value
-                            else
-                                let oldValue = msgIdGenerator
-                                msgIdGenerator <- msgIdGenerator + %1L
-                                %oldValue                        
-                        if canAddToBatch message then
-                            let batchItem = { Message = message; Tcs = tcs; SequenceId = sequenceId }
-                            if canAddToCurrentBatch message then
-                                // should trigger complete the batch message, new message will add to a new batch and new batch
-                                // sequence id use the new message, so that broker can handle the message duplication
-                                if sequenceId <= lastSequenceIdPushed then
-                                    isLastSequenceIdPotentialDuplicated <- true
-                                    if sequenceId <= %lastSequenceIdPublished then
-                                        Log.Logger.LogWarning("{0} Message with sequence id {1} is definitely a duplicate",
-                                                              prefix, message.SequenceId)
-                                    else
-                                        Log.Logger.LogInformation("{0} Message with sequence id {1} might be a duplicate but cannot be determined at this time.",
-                                                                  prefix, message.SequenceId)
-                                    doBatchSendAndAdd batchItem
-                                else
-                                    // Should flush the last potential duplicated since can't combine potential duplicated messages
-                                    // and non-duplicated messages into a batch.
-                                    if isLastSequenceIdPotentialDuplicated then
-                                        doBatchSendAndAdd batchItem
-                                    else                                    
-                                        // handle boundary cases where message being added would exceed
-                                        // batch size and/or max message size
-                                        if batchMessageContainer.Add(batchItem) then
-                                            Log.Logger.LogDebug("{0} Max batch container size exceeded", prefix)
-                                            batchMessageAndSend()
-                                    isLastSequenceIdPotentialDuplicated <- false
-                            else
-                               doBatchSendAndAdd batchItem
-                        else
-                            let metadata = createMessageMetadata sequenceId message None
-                            let encodedMessage = compressionCodec.Encode message.Payload
-                            if (encodedMessage.Length > maxMessageSize) then
-                                let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
-                                interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
-                                tcs.SetException(ex)
-                            else
-                                let payload = Commands.newSend producerId sequenceId None 1 metadata encodedMessage
-                                let pendingMessage = {
-                                    SequenceId = sequenceId
-                                    HighestSequenceId = %(-1L)
-                                    Payload = payload
-                                    Callback = SingleCallback (message, tcs)
-                                    CreatedAt = DateTime.Now
-                                }
-                                lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
-                                this.Mb.Post(SendMessage pendingMessage)
-                    channel.Reply(tcs)
-                    return! loop ()
-
-                | ProducerMessage.SendMessage pendingMessage ->
-
-                    Log.Logger.LogDebug("{0} SendMessage id={1}", prefix, %pendingMessage.SequenceId)
-                    if pendingMessages.Count <= producerConfig.MaxPendingMessages then
-                        pendingMessages.Enqueue(pendingMessage)
-                        match connectionHandler.ConnectionState with
-                        | Ready clientCnx ->
-                            let! success = clientCnx.Send pendingMessage.Payload
-                            if success then
-                                Log.Logger.LogDebug("{0} send complete", prefix)
-                            else
-                                Log.Logger.LogInformation("{0} send failed", prefix)
-                        | _ ->
-                            Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
-                    else
-                        failPendingMessage pendingMessage (ProducerQueueIsFullError "Producer send queue is full.")
+                    Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
+                    beginSendMessage sendRequest
                     return! loop ()
 
                 | ProducerMessage.AckReceived receipt ->
@@ -427,7 +442,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         // Add check `sequenceId >= highestSequenceId` for backward compatibility.
                         if sequenceId >= highestSequenceId || highestSequenceId = exptectedHighestSequenceId then
                             Log.Logger.LogDebug("{0} Received ack for message {1}", prefix, receipt)
-                            pendingMessages.Dequeue() |> ignore
+                            dequeuePendingMessage() |> ignore
                             lastSequenceIdPublished <- Math.Max(lastSequenceIdPublished, %(getHighestSequenceId pendingMessage))
                             match pendingMessage.Callback with
                             | SingleCallback (msg, tcs) ->
@@ -468,7 +483,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             let! corrupted = verifyIfLocalBufferIsCorrupted pendingMessage |> Async.AwaitTask
                             if corrupted then
                                 // remove message from pendingMessages queue and fail callback
-                                pendingMessages.Dequeue() |> ignore
+                                dequeuePendingMessage |> ignore
                                 failPendingMessage pendingMessage (ChecksumException "Checksum failed on corrupt message")
                             else
                                 Log.Logger.LogDebug("{0} Message is not corrupted, retry send-message with sequenceId {1}", prefix, sequenceId)
@@ -541,8 +556,6 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startSendTimeoutTimer()
 
-
-
     member private this.SendMessage (message : MessageBuilder<'T>) =
         let interceptMsg = interceptors.BeforeSend(this, message)
         mb.PostAndAsyncReply(fun channel -> BeginSendMessage (interceptMsg, channel))
@@ -574,15 +587,21 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.SendAndForgetAsync (message: 'T) =
             task {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
-                let! _ = _this.NewMessage message |> this.SendMessage
-                return ()
+                let! tcs = _this.NewMessage message |> this.SendMessage
+                if tcs.Task.IsFaulted then
+                    reraize tcs.Task.Exception.InnerException
+                else
+                    return ()
             }
 
         member this.SendAndForgetAsync (message: MessageBuilder<'T>) =
             task {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
-                let! _ = this.SendMessage message
-                return ()
+                let! tcs = this.SendMessage message
+                if tcs.Task.IsFaulted then
+                    reraize tcs.Task.Exception.InnerException
+                else
+                    return ()
             }
 
         member this.SendAsync (message: 'T) =

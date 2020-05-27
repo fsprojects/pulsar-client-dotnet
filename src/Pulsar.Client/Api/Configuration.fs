@@ -93,6 +93,7 @@ type ProducerConfiguration =
         AutoUpdatePartitions: bool
         HashingScheme: HashingScheme
         InitialSequenceId : SequenceId option
+        BlockIfQueueFull: bool
     }
     member this.BatchingPartitionSwitchFrequencyIntervalMs =
         this.BatchingPartitionSwitchFrequencyByPublishDelay * (int this.BatchingMaxPublishDelay.TotalMilliseconds)
@@ -115,6 +116,7 @@ type ProducerConfiguration =
             AutoUpdatePartitions = true
             HashingScheme = HashingScheme.DotnetStringHash
             InitialSequenceId = Option.None
+            BlockIfQueueFull = false
         }
 
 type ReaderConfiguration =

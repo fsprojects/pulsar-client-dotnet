@@ -128,6 +128,11 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
         else
             ProducerInterceptors(Array.append producerInterceptors.Interceptors interceptors)
             |> this.With
+            
+    member this.BlockIfQueueFull blockIfQueueFull =
+        { config with
+            BlockIfQueueFull = blockIfQueueFull }
+        |> this.With
     
     member this.CreateAsync(): Task<IProducer<'T>> =
         сreateProducerAsync(verify config, schema, producerInterceptors)

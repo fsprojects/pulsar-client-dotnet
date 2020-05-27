@@ -105,7 +105,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     return alreadyCancelledExn
             | _ ->
                 Log.Logger.LogWarning("{0}: no messages available for Batch receive", prefix)
-                return noMoreMessagesExn                                                
+                return noMoreMessagesExn
         }
         
     let completeBatch() =

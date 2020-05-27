@@ -524,6 +524,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     member this.Send payload =
         sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
+        
+    member this.SendAndForget payload =
+        sendMb.Post(SocketMessageWithoutReply payload)
 
     member this.SendAndWaitForReply reqId payload =
         task {

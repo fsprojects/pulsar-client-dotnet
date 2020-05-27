@@ -14,9 +14,9 @@ type IProducer<'T> =
     abstract member SendAsync: message:'T -> Task<MessageId>
     /// Send message with keys and props
     abstract member SendAsync: messageBuilder:MessageBuilder<'T> -> Task<MessageId>
-    /// Complete as soon as message gets in client's internal message queue, don't wait for any confirmations
+    /// Complete as soon as message reaches internal message queue, respect backpressure, but don't await broker confirmation
     abstract member SendAndForgetAsync: message:'T -> Task<unit>
-    /// Complete as soon as message gets in client's internal message queue, don't wait for any confirmations
+    /// Complete as soon as message reaches internal message queue, respect backpressure, but don't await broker confirmation
     abstract member SendAndForgetAsync: messageBuilder:MessageBuilder<'T> -> Task<unit>
     /// Internal client producer id
     abstract member ProducerId: ProducerId
