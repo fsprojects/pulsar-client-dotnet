@@ -20,7 +20,7 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 - [X] Authentication (token, tls)
 - [X] Reader API
 - [X] Proxy Support
-- [ ] Effectively-Once
+- [X] Effectively-Once
 - [X] Schema
 - [X] Consumer seek
 - [ ] Multi-topics consumer
