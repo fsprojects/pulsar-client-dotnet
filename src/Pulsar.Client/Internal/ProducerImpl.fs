@@ -17,6 +17,11 @@ open System.Runtime.InteropServices
 
 type SendMessageRequest<'T> = MessageBuilder<'T> * AsyncReplyChannel<TaskCompletionSource<MessageId>>
 
+type internal TickType =
+    | SendBatchTick
+    | SendTimeoutTick
+    | StatTick
+
 type internal ProducerMessage<'T> =
     | ConnectionOpened of uint64
     | ConnectionFailed of exn
@@ -26,8 +31,8 @@ type internal ProducerMessage<'T> =
     | RecoverChecksumError of SequenceId
     | TopicTerminatedError
     | Close of AsyncReplyChannel<ResultOrException<unit>>
-    | SendBatchTick
-    | SendTimeoutTick
+    | Tick of TickType
+    | GetStats of AsyncReplyChannel<ProducerStats>
     
 type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, lookup: BinaryLookupService, schema: ISchema<'T>,
@@ -60,6 +65,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
     let createProducerTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let sendTimeoutMs = producerConfig.SendTimeout.TotalMilliseconds
+    let stats =
+        if clientConfig.StatsInterval = TimeSpan.Zero then
+            ProducerStatsImpl.PRODUCER_STATS_DISABLED
+        else
+            ProducerStatsImpl(prefix) :> IProducerStatsRecorder
     let connectionHandler =
         ConnectionHandler(prefix,
                           connectionPool,
@@ -84,11 +94,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         match msg.Callback with
         | SingleCallback (message, tcs) ->
             interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
+            stats.IncrementSendFailed()
             tcs.SetException(ex)
         | BatchCallbacks tcss ->
             tcss
             |> Seq.iter (fun (_, message, tcs) ->
                 interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
+                stats.IncrementSendFailed()
                 tcs.SetException(ex))
 
     let failPendingBatchMessages (ex: exn) =
@@ -112,16 +124,24 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         if sendTimeoutMs > 0.0 then
             sendTimeoutTimer.Interval <- sendTimeoutMs
             sendTimeoutTimer.AutoReset <- true
-            sendTimeoutTimer.Elapsed.Add(fun _ -> this.Mb.Post SendTimeoutTick)
+            sendTimeoutTimer.Elapsed.Add(fun _ -> this.Mb.Post(Tick SendTimeoutTick))
             sendTimeoutTimer.Start()
 
     let batchTimer = new Timer()
     let startSendBatchTimer () =
         batchTimer.Interval <- producerConfig.BatchingMaxPublishDelay.TotalMilliseconds
         batchTimer.AutoReset <- true
-        batchTimer.Elapsed.Add(fun _ -> this.Mb.Post SendBatchTick)
+        batchTimer.Elapsed.Add(fun _ -> this.Mb.Post(Tick SendBatchTick))
         batchTimer.Start()
 
+    let statTimer = new Timer()
+    let startStatTimer () =
+        if clientConfig.StatsInterval <> TimeSpan.Zero then
+            statTimer.Interval <- clientConfig.StatsInterval.TotalMilliseconds
+            statTimer.AutoReset <- true
+            statTimer.Elapsed.Add(fun _ -> this.Mb.Post(Tick StatTick))
+            statTimer.Start()
+    
     let sendMessage (pendingMessage: PendingMessage<'T>) =
         Log.Logger.LogDebug("{0} sendMessage id={1}", prefix, %pendingMessage.SequenceId)
         pendingMessages.Enqueue(pendingMessage)
@@ -205,8 +225,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             |> Seq.iter (fun (_, message, tcs) ->
                 let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
                 interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
+                stats.IncrementSendFailed()
                 tcs.SetException(ex))
         else
+            stats.UpdateNumMsgsSent(batchSize, encodedBatchPayload.Length)
             let payload = Commands.newSend producerId lowestSequenceId (Some highestSequenceId) batchSize metadata encodedBatchPayload
             let pendingMessage = {
                 SequenceId = lowestSequenceId
@@ -295,7 +317,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
                     interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
                     tcs.SetException(ex)
+                    stats.IncrementSendFailed()
                 else
+                    stats.UpdateNumMsgsSent(1, encodedMessage.Length)
                     let payload = Commands.newSend producerId sequenceId None 1 metadata encodedMessage
                     let pendingMessage = {
                         SequenceId = sequenceId
@@ -313,6 +337,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         batchTimer.Stop()
         connectionHandler.Close()       
         interceptors.Close()
+        statTimer.Stop()
         cleanup(this)
         Log.Logger.LogInformation("{0} stopped", prefix)
         
@@ -448,12 +473,14 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             | SingleCallback (msg, tcs) ->
                                 let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Individual; TopicName = %"" }
                                 interceptors.OnSendAcknowledgement(this, msg, msgId, null)
+                                stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
                                 tcs.SetResult(msgId)
                             | BatchCallbacks tcss ->
                                 tcss
                                 |> Array.iter (fun (msgId, msg, tcs) ->
                                     let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Cumulative msgId; TopicName = %"" }
                                     interceptors.OnSendAcknowledgement(this, msg, msgId, null)
+                                    stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
                                     tcs.SetResult(msgId))
                         else
                             Log.Logger.LogWarning("{0} Got ack for batch msg error. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
@@ -503,24 +530,30 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         failPendingMessages(TopicTerminatedException("The topic has been terminated"))
                     return! loop ()
 
-                | ProducerMessage.SendBatchTick ->
+                | ProducerMessage.Tick tickType ->
+                    match tickType with
+                    | SendBatchTick -> 
+                        batchMessageAndSend()
 
-                    batchMessageAndSend()
+                    | SendTimeoutTick ->
+                        match connectionHandler.ConnectionState with
+                        | Closed | Terminated -> ()
+                        | _ ->
+                            if pendingMessages.Count > 0 then
+                                let firstMessage = pendingMessages.Peek()
+                                if firstMessage.CreatedAt.AddMilliseconds(sendTimeoutMs) >= DateTime.Now then
+                                    // The diff is less than or equal to zero, meaning that the message has been timed out.
+                                    // Set the callback to timeout on every message, then clear the pending queue.
+                                    Log.Logger.LogInformation("{0} Message send timed out. Failing {1} messages", prefix, pendingMessages.Count)
+                                    let ex = TimeoutException "Could not send message to broker within given timeout"
+                                    failPendingMessages ex
+
+                    | StatTick ->
+                        stats.TickTime(pendingMessages.Count)
                     return! loop ()
 
-                | ProducerMessage.SendTimeoutTick ->
-
-                    match connectionHandler.ConnectionState with
-                    | Closed | Terminated -> ()
-                    | _ ->
-                        if pendingMessages.Count > 0 then
-                            let firstMessage = pendingMessages.Peek()
-                            if firstMessage.CreatedAt.AddMilliseconds(sendTimeoutMs) >= DateTime.Now then
-                                // The diff is less than or equal to zero, meaning that the message has been timed out.
-                                // Set the callback to timeout on every message, then clear the pending queue.
-                                Log.Logger.LogInformation("{0} Message send timed out. Failing {1} messages", prefix, pendingMessages.Count)
-                                let ex = TimeoutException "Could not send message to broker within given timeout"
-                                failPendingMessages ex
+                | ProducerMessage.GetStats channel ->
+                    channel.Reply <| stats.GetStats()
                     return! loop ()
 
                 | ProducerMessage.Close channel ->
@@ -548,13 +581,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         stopProducer()
                         failPendingMessages(AlreadyClosedException("Producer was already closed"))
                         channel.Reply <| Ok()
-
             }
         loop ()
     )
 
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startSendTimeoutTimer()
+    do startStatTimer()
 
     member private this.SendMessage (message : MessageBuilder<'T>) =
         let interceptMsg = interceptors.BeforeSend(this, message)
@@ -639,6 +672,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
         member this.Name = producerConfig.ProducerName
         
+        member this.GetStatsAsync() =
+            mb.PostAndAsyncReply(ProducerMessage.GetStats) |> Async.StartAsTask
+        
     interface IAsyncDisposable with
         
         member this.DisposeAsync() =     
@@ -652,4 +688,5 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     | Ok () -> ()
                     | Error ex -> reraize ex 
                 } |> ValueTask
+            
             

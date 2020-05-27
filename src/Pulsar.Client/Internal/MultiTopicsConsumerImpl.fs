@@ -41,6 +41,7 @@ type internal MultiTopicConsumerMessage<'T> =
     | HasReachedEndOfTheTopic of AsyncReplyChannel<bool>
     | Seek of AsyncReplyChannel<Task> * uint64
     | TickTime
+    | GetStats of AsyncReplyChannel<ConsumerStats>
 
 
 
@@ -68,6 +69,63 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
     let noMoreMessagesExn = Error <| Exception "No more messages available"
 
     let timer = new Timer(1000.0 * 60.0) // 1 minute
+    
+    let statsReduce (statsArray: ConsumerStats array) =
+        let mutable numMsgsReceived: int64 = 0L
+        let mutable numBytesReceived: int64 = 0L
+        let mutable numReceiveFailed: int64 = 0L
+        // should be always 0 for multitopics consumer
+        let mutable numBatchReceiveFailed: int64 = 0L
+        let mutable numAcksSent: int64 = 0L
+        let mutable numAcksFailed: int64 = 0L
+        let mutable totalMsgsReceived: int64 = 0L
+        let mutable totalBytesReceived: int64 = 0L
+        let mutable totalReceiveFailed: int64 = 0L
+        // should be always 0 for multitopics consumer
+        let mutable totalBatchReceiveFailed: int64 = 0L
+        let mutable totalAcksSent: int64 = 0L
+        let mutable totalAcksFailed: int64 = 0L
+        let mutable receivedMsgsRate: float = 0.0
+        let mutable receivedBytesRate: float = 0.0
+        let mutable intervalDurationSum: float = 0.0
+        let mutable incomingMsgs: int = 0
+        
+        statsArray |> Array.iter(fun stats ->
+            numMsgsReceived <- numMsgsReceived + stats.NumMsgsReceived
+            numBytesReceived <- numBytesReceived + stats.NumBytesReceived
+            numReceiveFailed <- numReceiveFailed + stats.NumReceiveFailed
+            numBatchReceiveFailed <- numBatchReceiveFailed + stats.NumBatchReceiveFailed
+            numAcksSent <- numAcksSent + stats.NumAcksSent
+            numAcksFailed <- numAcksFailed + stats.NumAcksFailed
+            totalMsgsReceived <- totalMsgsReceived + stats.TotalMsgsReceived
+            totalBytesReceived <- totalBytesReceived + stats.TotalBytesReceived
+            totalReceiveFailed <- totalReceiveFailed + stats.TotalReceiveFailed
+            totalBatchReceiveFailed <- totalBatchReceiveFailed + stats.TotalBatchReceiveFailed
+            totalAcksSent <- totalAcksSent + stats.TotalAcksSent
+            totalAcksFailed <- totalAcksFailed + stats.TotalAcksFailed
+            receivedMsgsRate <- receivedMsgsRate + stats.ReceivedMsgsRate
+            receivedBytesRate <- receivedBytesRate + stats.ReceivedBytesRate
+            intervalDurationSum <- intervalDurationSum + stats.IntervalDuration
+            incomingMsgs <- incomingMsgs + stats.IncomingMsgs            
+            )
+        {
+            NumMsgsReceived = numMsgsReceived
+            NumBytesReceived = numBytesReceived
+            NumReceiveFailed = numReceiveFailed
+            NumBatchReceiveFailed = numBatchReceiveFailed
+            NumAcksSent = numAcksSent
+            NumAcksFailed = numAcksFailed
+            TotalMsgsReceived = totalMsgsReceived
+            TotalBytesReceived = totalBytesReceived
+            TotalReceiveFailed = totalReceiveFailed
+            TotalBatchReceiveFailed = totalBatchReceiveFailed
+            TotalAcksSent = totalAcksSent
+            TotalAcksFailed = totalAcksFailed
+            ReceivedMsgsRate = receivedMsgsRate
+            ReceivedBytesRate = receivedBytesRate
+            IntervalDuration = if statsArray.Length > 0 then intervalDurationSum / float statsArray.Length else 0.0
+            IncomingMsgs = incomingMsgs
+        }
     
     let getStream (topic: CompleteTopicName) (consumer: ConsumerImpl<'T>) =
         let consumerImp = consumer :> IConsumer<'T>
@@ -391,6 +449,16 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         ()
                         return! loop state
 
+                | GetStats channel ->
+                    
+                    Log.Logger.LogDebug("{0} GetStats", prefix)
+                    let! stats =
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, consumer)) -> consumer.GetStatsAsync())
+                        |> Task.WhenAll
+                        |> Async.AwaitTask
+                    statsReduce stats |> channel.Reply
+                    return! loop state
             }
 
         loop { Stream = AsyncSeq.empty; Enumerator = AsyncSeq.empty.GetEnumerator() }
@@ -548,6 +616,8 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
 
         member this.Name = consumerConfig.ConsumerName
 
+        member this.GetStatsAsync() = mb.PostAndAsyncReply(GetStats) |> Async.StartAsTask
+        
     interface IAsyncDisposable with
         
         member this.DisposeAsync() =
