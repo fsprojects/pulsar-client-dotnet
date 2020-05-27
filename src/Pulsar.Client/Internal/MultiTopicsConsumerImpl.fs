@@ -74,12 +74,14 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
         let mutable numMsgsReceived: int64 = 0L
         let mutable numBytesReceived: int64 = 0L
         let mutable numReceiveFailed: int64 = 0L
+        // should be always 0 for multitopics consumer
         let mutable numBatchReceiveFailed: int64 = 0L
         let mutable numAcksSent: int64 = 0L
         let mutable numAcksFailed: int64 = 0L
         let mutable totalMsgsReceived: int64 = 0L
         let mutable totalBytesReceived: int64 = 0L
         let mutable totalReceiveFailed: int64 = 0L
+        // should be always 0 for multitopics consumer
         let mutable totalBatchReceiveFailed: int64 = 0L
         let mutable totalAcksSent: int64 = 0L
         let mutable totalAcksFailed: int64 = 0L
@@ -161,7 +163,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     return alreadyCancelledExn
             | _ ->
                 Log.Logger.LogWarning("{0}: no messages available for Batch receive", prefix)
-                return noMoreMessagesExn                                                
+                return noMoreMessagesExn
         }
         
     let completeBatch() =

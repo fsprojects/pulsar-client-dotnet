@@ -25,6 +25,7 @@
     <Compile Include="ConsumerInterceptor.fs" />
     <Compile Include="Tls.fs" />
     <Compile Include="Schema.fs" />
+    <Compile Include="BackPressure.fs" />
     <Compile Include="Stats.fs" />
     <None Include="paket.references" />
     <Compile Include="Main.fs" />
