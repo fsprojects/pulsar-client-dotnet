@@ -81,7 +81,7 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
     
     member this.ReceiverQueueSize receiverQueueSize =
         { config with
-            ReceiverQueueSize = receiverQueueSize |> invalidArgIfNotGreaterThanZero "ReceiverQueueSize should be greater than 0."  }
+            ReceiverQueueSize = receiverQueueSize |> invalidArgIfLessThanZero "ReceiverQueueSize can't be negative."  }
         |> this.With
 
     member this.SubscriptionInitialPosition subscriptionInitialPosition =

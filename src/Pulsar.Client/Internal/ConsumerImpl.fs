@@ -951,7 +951,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startStatTimer()
 
-    member private this.Mb with get(): MailboxProcessor<ConsumerMessage<'T>> = mb
+    member internal this.Mb with get(): MailboxProcessor<ConsumerMessage<'T>> = mb
 
     member this.ConsumerId with get() = consumerId
 
@@ -983,14 +983,22 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                        createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
                        interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
         task {
-            let consumer = ConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex,
-                                        startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
-                                        schema, schemaProvider, interceptors, cleanup)
+            let consumer =
+                if consumerConfig.ReceiverQueueSize > 0 then
+                    ConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex,
+                        startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
+                        schema, schemaProvider, interceptors, cleanup)
+                else
+                    ZeroQueueConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex,
+                        startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
+                        schema, schemaProvider, interceptors, cleanup) :> ConsumerImpl<'T>
+
             do! consumer.InitInternal()
             return consumer
         }
 
-    member this.ReceiveFsharpAsync() =
+    abstract member ReceiveFsharpAsync: unit -> Async<ResultOrException<Message<'T>>>
+    default this.ReceiveFsharpAsync() =
         async {
             let exn = connectionHandler.CheckIfActive()
             if not (isNull exn) then
@@ -1135,3 +1143,40 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | Error ex -> reraize ex 
                 } |> ValueTask
 
+
+and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                           partitionIndex: int, startMessageId: MessageId option, lookup: BinaryLookupService,
+                           startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
+                           schemaProvider: MultiVersionSchemaInfoProvider option,
+                           interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
+    
+    inherit ConsumerImpl<'T>(consumerConfig, clientConfig, connectionPool, partitionIndex, startMessageId, lookup,
+                             TimeSpan.Zero, createTopicIfDoesNotExist, schema, schemaProvider, interceptors, cleanup)
+    
+    override this.ReceiveFsharpAsync() =
+        this.Mb.Post(ConsumerMessage.SendFlowPermits 1)
+        base.ReceiveFsharpAsync()
+    
+    interface IConsumer<'T> with
+        override this.ReceiveAsync() =
+            let prefix = sprintf "consumer(%u, %s, %i)" this.ConsumerId consumerConfig.ConsumerName partitionIndex
+
+            task {
+                match! this.ReceiveFsharpAsync() with
+                | Ok msg when msg.MessageId.Type = MessageIdType.Individual ->
+                    return msg
+                | Ok _ ->
+                    Log.Logger.LogError("{0} Closing consumer due to unsupported received batch-message with zero receiver queue size", prefix)
+                    let _ = this.Mb.PostAndReply(ConsumerMessage.Close) 
+                    let exn = 
+                        sprintf "Unsupported Batch message with 0 size receiver queue for [%s]-[%s]"
+                            consumerConfig.SubscriptionName consumerConfig.ConsumerName
+                        |> InvalidMessageException
+                    return reraize exn
+                | Error exn -> return reraize exn
+            }
+        
+        override this.BatchReceiveAsync() =
+            task {
+                return reraize (NotSupportedException "BatchReceiveAsync not supported.")
+            }
