@@ -997,7 +997,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             return consumer
         }
 
-    member this.ReceiveFsharpAsync() =
+    abstract member ReceiveFsharpAsync: unit -> Async<ResultOrException<Message<'T>>>
+    default this.ReceiveFsharpAsync() =
         async {
             let exn = connectionHandler.CheckIfActive()
             if not (isNull exn) then
@@ -1152,13 +1153,15 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
     inherit ConsumerImpl<'T>(consumerConfig, clientConfig, connectionPool, partitionIndex, startMessageId, lookup,
                              TimeSpan.Zero, createTopicIfDoesNotExist, schema, schemaProvider, interceptors, cleanup)
     
-
+    override this.ReceiveFsharpAsync() =
+        this.Mb.Post(ConsumerMessage.SendFlowPermits 1)
+        base.ReceiveFsharpAsync()
+    
     interface IConsumer<'T> with
         override this.ReceiveAsync() =
             let prefix = sprintf "consumer(%u, %s, %i)" this.ConsumerId consumerConfig.ConsumerName partitionIndex
 
             task {
-                this.Mb.Post(ConsumerMessage.SendFlowPermits 1)
                 match! this.ReceiveFsharpAsync() with
                 | Ok msg when msg.MessageId.Type = MessageIdType.Individual ->
                     return msg
@@ -1173,3 +1176,7 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
                 | Error exn -> return reraize exn
             }
         
+        override this.BatchReceiveAsync() =
+            task {
+                return reraize (NotSupportedException "BatchReceiveAsync not supported.")
+            }
