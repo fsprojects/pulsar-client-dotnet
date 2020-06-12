@@ -1,5 +1,6 @@
 ﻿module Pulsar.Client.UnitTests.Common.TopicName
 
+open System.Collections.Generic
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Common
@@ -56,5 +57,21 @@ let tests =
             let topicName = TopicName(input)
 
             topicName.ToString() |> Expect.equal "" input
+        }
+        
+        test "partitioned topic name is preserved" {
+            let input = "persistent://public/default/topic-loop-2-partition-0"
+            let topicName = TopicName(input)
+            topicName.CompleteTopicName |> Expect.equal "" %input
+        }
+        
+        test "topic name in hashSet is properly handled" {
+            let input = "persistent://tenant/namespace/topic"
+            let topicName = TopicName(input)
+            let hs = HashSet<TopicName>()
+            hs.Add(topicName) |> ignore
+            let hs2 = HashSet(hs)
+            hs2.ExceptWith(hs)
+            Expect.isEmpty "" hs2
         }
     ]

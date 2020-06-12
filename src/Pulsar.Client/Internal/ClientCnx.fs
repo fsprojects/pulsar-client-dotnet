@@ -436,7 +436,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let consumerOperations = consumers.[%cmd.ConsumerId]
             consumerOperations.ReachedEndOfTheTopic()
         | XCommandGetTopicsOfNamespaceResponse cmd ->
-            let result = TopicsOfNamespace { Topics = List.ofSeq cmd.Topics }
+            let result = TopicsOfNamespace cmd.Topics
             handleSuccess %cmd.RequestId result
         | XCommandGetLastMessageIdResponse cmd ->
             let result = LastMessageId {

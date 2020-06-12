@@ -31,11 +31,6 @@ type TopicName private (completeTopicName: string, partition: int) =
 
     let isPersistent = completeTopicName.StartsWith("persistent")
     let isPartitioned = partition > -1
-    let completeTopicName =
-        if isPartitioned then
-            completeTopicName + PartitionTopicSuffix + partition.ToString()
-        else
-            completeTopicName
 
     new(topic: string) =
 
@@ -56,7 +51,7 @@ type TopicName private (completeTopicName: string, partition: int) =
                             sprintf "%s://%s/%s/%s" DefaultDomain DefaultTenant DefaultNamespace topic
                         else
                             failwith "Invalid short topic name '" + topic + "', it should be in the format of <tenant>/<namespace>/<topic> or <topic>"
-        TopicName(%completeTopicName, GetPartitionIndex(completeTopicName))
+        TopicName(completeTopicName, GetPartitionIndex(completeTopicName))
 
     member this.CompleteTopicName: CompleteTopicName = %completeTopicName
 
@@ -65,12 +60,31 @@ type TopicName private (completeTopicName: string, partition: int) =
     member this.IsPartitioned = isPartitioned
 
     member this.PartitionIndex = partition
+    
+    member this.NamespaceName =
+        let regexMatch = FullTopicRegex.Match(completeTopicName)
+        regexMatch.Groups.[2].Value + "/" + regexMatch.Groups.[3].Value
+        |> NamespaceName
 
     member this.GetPartition(index: int) =
         if (index = -1 || isPartitioned) then
             this
         else
-            TopicName(completeTopicName, index)
+            let partitionedTopicName = completeTopicName + PartitionTopicSuffix + index.ToString()
+            TopicName(partitionedTopicName, index)
 
+    override this.Equals obj =
+        match obj with
+        | :? TopicName as t -> completeTopicName.Equals(%t.CompleteTopicName)
+        | _ -> false
+
+    override this.GetHashCode () =
+        completeTopicName.GetHashCode()
     override this.ToString() =
         %completeTopicName
+        
+    interface System.IComparable with
+        member x.CompareTo tn = completeTopicName.CompareTo(tn)
+        
+    interface System.IComparable<string> with
+        member x.CompareTo tn = completeTopicName.CompareTo(tn)

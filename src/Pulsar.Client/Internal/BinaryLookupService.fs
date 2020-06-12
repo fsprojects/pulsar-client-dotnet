@@ -61,31 +61,33 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                        else { LogicalAddress = LogicalAddress resultEndpoint; PhysicalAddress = PhysicalAddress resultEndpoint }
         }
 
-    member this.GetTopicsUnderNamespace (ns : NamespaceName, mode : TopicDomain) =
+    member this.GetTopicsUnderNamespace (ns : NamespaceName, isPersistent : bool) =
         task {
             let backoff = Backoff { BackoffConfig.Default with
                                         Initial = TimeSpan.FromMilliseconds(100.0)
                                         MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
                                         Max = TimeSpan.FromMinutes(1.0) }
-            let! result = this.GetTopicsUnderNamespace(resolveEndPoint(), ns, backoff, int config.OperationTimeout.TotalMilliseconds, mode)
+            let! result = this.GetTopicsUnderNamespace(resolveEndPoint(), ns, backoff, int config.OperationTimeout.TotalMilliseconds, isPersistent)
             return result
         }
 
-    member private this.GetTopicsUnderNamespace (endpoint: DnsEndPoint, ns: NamespaceName, backoff: Backoff, remainingTimeMs: int, mode: TopicDomain) =
+    member private this.GetTopicsUnderNamespace (endpoint: DnsEndPoint, ns: NamespaceName, backoff: Backoff,
+                                                 remainingTimeMs: int, isPersistent: bool) =
         async {
             try
                 let! clientCnx = connectionPool.GetBrokerlessConnection endpoint |> Async.AwaitTask
                 let requestId = Generators.getNextRequestId()
-                let payload = Commands.newGetTopicsOfNamespaceRequest ns requestId mode
+                let payload = Commands.newGetTopicsOfNamespaceRequest ns requestId isPersistent
                 let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
-                return (endpoint, response)
+                let result = PulsarResponseType.GetTopicsOfNamespace response
+                return result
             with Flatten ex ->
                 let delay = Math.Min(backoff.Next(), remainingTimeMs)
                 if delay <= 0 then
                     raise (TimeoutException "Could not getTopicsUnderNamespace within configured timeout.")
                 Log.Logger.LogWarning(ex, "GetTopicsUnderNamespace failed will retry in {0} ms", delay)
                 do! Async.Sleep delay
-                return! this.GetTopicsUnderNamespace(endpoint, ns, backoff, remainingTimeMs - delay, mode)
+                return! this.GetTopicsUnderNamespace(endpoint, ns, backoff, remainingTimeMs - delay, isPersistent)
         }
         
     member this.GetSchema(topicName: CompleteTopicName, schemaVersion: SchemaVersion) =

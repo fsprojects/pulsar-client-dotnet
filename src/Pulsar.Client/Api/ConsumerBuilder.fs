@@ -21,18 +21,21 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
         config
         |> checkValue
             (fun c ->
-                c.Topic
-                |> invalidArgIfDefault "Topic name must be set on the consumer builder.")
+                invalidArgIfTrue (
+                    (c.Topics |> Seq.isEmpty) && String.IsNullOrEmpty(c.TopicsPattern)
+                ) "Topic name must be set on the consumer builder")
         |> checkValue
             (fun c ->
                 c.SubscriptionName
-                |> invalidArgIfBlankString "Subscription name must be set on the consumer builder.")
+                |> invalidArgIfBlankString "Subscription name must be set on the consumer builder")
         |> checkValue
             (fun c ->
-                invalidArgIfTrue (
-                    c.ReadCompacted && (not c.Topic.IsPersistent ||
-                        (c.SubscriptionType <> SubscriptionType.Exclusive && c.SubscriptionType <> SubscriptionType.Failover ))
-                ) "Read compacted can only be used with exclusive of failover persistent subscriptions")
+                for topic in c.Topics do
+                    invalidArgIfTrue (
+                        c.ReadCompacted && (not topic.IsPersistent ||
+                            (c.SubscriptionType <> SubscriptionType.Exclusive && c.SubscriptionType <> SubscriptionType.Failover ))
+                    ) "Read compacted can only be used with exclusive of failover persistent subscriptions"
+                c)
         |> checkValue
             (fun c ->
                 invalidArgIfTrue (
@@ -54,19 +57,37 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
     
     member this.Topic topic =
         { config with
-            Topic = topic
-                |> invalidArgIfBlankString "Topic must not be blank."
-                |> fun t -> TopicName(t.Trim()) }
+            Topics = topic
+                |> invalidArgIfBlankString "Topic must not be blank"
+                |> fun t -> seq { TopicName(t.Trim()) }
+                |> Seq.append config.Topics
+                |> Seq.distinct
+                |> Seq.cache }
         |> this.With
 
+    member this.Topics (topics: string seq) =
+        { config with
+            Topics = topics
+                |> invalidArgIfDefault "Topics can't be null"
+                |> Seq.map (fun t -> TopicName(t.Trim()))
+                |> Seq.append config.Topics
+                |> Seq.distinct
+                |> Seq.cache }
+        |> this.With
+        
+    member this.TopicsPattern pattern =
+        { config with
+            TopicsPattern = pattern |> invalidArgIfDefault "TopicsPattern must not be blank" }
+        |> this.With
+    
     member this.ConsumerName name =
         { config with
-            ConsumerName = name |> invalidArgIfBlankString "Consumer name must not be blank." }
+            ConsumerName = name |> invalidArgIfBlankString "Consumer name must not be blank" }
         |> this.With
 
     member this.SubscriptionName subscriptionName =
         { config with
-            SubscriptionName = subscriptionName |> invalidArgIfBlankString "Subscription name must not be blank." }
+            SubscriptionName = subscriptionName |> invalidArgIfBlankString "Subscription name must not be blank" }
         |> this.With        
 
     member this.SubscriptionType subscriptionType =
@@ -81,7 +102,7 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
     
     member this.ReceiverQueueSize receiverQueueSize =
         { config with
-            ReceiverQueueSize = receiverQueueSize |> invalidArgIfNotGreaterThanZero "ReceiverQueueSize should be greater than 0."  }
+            ReceiverQueueSize = receiverQueueSize |> invalidArgIfNotGreaterThanZero "ReceiverQueueSize should be greater than 0"  }
         |> this.With
 
     member this.SubscriptionInitialPosition subscriptionInitialPosition =
@@ -121,14 +142,14 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
             then TimeSpan.FromMilliseconds(DEFAULT_ACK_TIMEOUT_MILLIS_FOR_DEAD_LETTER)
             else config.AckTimeoutTickTime
 
-        let getTopicName() = config.Topic.ToString()
-        let getSubscriptionName() = config.SubscriptionName
-        let createProducer deadLetterTopic =
-            ProducerBuilder(createProducerAsync, schema)
-                .Topic(deadLetterTopic)
-                .EnableBatching(false) // dead letters are sent one by one anyway
-                .CreateAsync()
-        let deadLettersProcessor =
+        let deadLettersProcessor (topic: TopicName) =
+            let getTopicName() = topic.ToString()
+            let getSubscriptionName() = config.SubscriptionName
+            let createProducer deadLetterTopic =
+                ProducerBuilder(createProducerAsync, schema)
+                    .Topic(deadLetterTopic)
+                    .EnableBatching(false) // dead letters are sent one by one anyway
+                    .CreateAsync()
             DeadLettersProcessor(deadLettersPolicy, getTopicName, getSubscriptionName, createProducer) :> IDeadLettersProcessor<'T>
 
         { config with
@@ -140,7 +161,17 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
         { config with
             ResetIncludeHead = true }
         |> this.With
+        
+    member this.AutoUpdatePartitions autoUpdatePartitions =
+        { config with
+            AutoUpdatePartitions = autoUpdatePartitions }
+        |> this.With
 
+    member this.PatternAutoDiscoveryPeriod period =
+        { config with
+            PatternAutoDiscoveryPeriod = period }
+        |> this.With
+    
     member this.BatchReceivePolicy (batchReceivePolicy: BatchReceivePolicy) =
         { config with
             BatchReceivePolicy = batchReceivePolicy

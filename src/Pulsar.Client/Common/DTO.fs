@@ -17,6 +17,7 @@ type internal PartitionedTopicMetadata =
     {
         Partitions: int
     }
+    member this.IsMultiPartitioned with get() = this.Partitions > 0
 
 type SchemaVersion = SchemaVersion of byte[]
 
@@ -35,11 +36,6 @@ type internal LookupTopicResult =
         Redirect: bool
         Authoritative: bool
     }
-
-type internal TopicsOfNamespace =
-    {
-        Topics : string list
-    }    
 
 type KeyValueEncodingType =
     | SEPARATED = 0
@@ -158,22 +154,18 @@ type MessageId =
         static member FromByteArray (data: byte[]) =
             use stream = new MemoryStream(data)
             let msgData = Serializer.Deserialize<MessageIdData>(stream)
-            if msgData.BatchIndex >= 0 then
-                {
-                    LedgerId = %(int64 msgData.ledgerId)
-                    EntryId = %(int64 msgData.entryId)
-                    Type = Cumulative (%msgData.BatchIndex, BatchMessageAcker.NullAcker)
-                    Partition = msgData.Partition
-                    TopicName = %""
-                }
-            else
-                {
-                    LedgerId = %(int64 msgData.ledgerId)
-                    EntryId = %(int64 msgData.entryId)
-                    Type = Individual
-                    Partition = msgData.Partition
-                    TopicName = %""
-                }
+            let msgType =
+                if msgData.BatchIndex >= 0 then
+                    Cumulative (%msgData.BatchIndex, BatchMessageAcker.NullAcker)
+                else
+                    Individual
+            {
+                LedgerId = %(int64 msgData.ledgerId)
+                EntryId = %(int64 msgData.entryId)
+                Type = msgType
+                Partition = msgData.Partition
+                TopicName = %""
+            }
         static member FromByteArrayWithTopic (data: byte[], topicName: string) =
             let initial = MessageId.FromByteArray(data)
             { initial with TopicName = TopicName(topicName).CompleteTopicName }
@@ -358,7 +350,7 @@ type internal PulsarResponseType =
     | PartitionedTopicMetadata of PartitionedTopicMetadata
     | LookupTopicResult of LookupTopicResult
     | ProducerSuccess of ProducerSuccess
-    | TopicsOfNamespace of TopicsOfNamespace
+    | TopicsOfNamespace of string seq
     | LastMessageId of MessageId
     | TopicSchema of TopicSchema option
     | PulsarError

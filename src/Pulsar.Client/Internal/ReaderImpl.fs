@@ -17,7 +17,7 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
 
     let consumerConfig = {
         ConsumerConfiguration<'T>.Default with
-            Topic = readerConfig.Topic
+            Topics = seq { readerConfig.Topic } |> Seq.cache
             SubscriptionName = subscriptionName
             SubscriptionType = SubscriptionType.Exclusive
             SubscriptionMode = SubscriptionMode.NonDurable
@@ -27,7 +27,7 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
             ConsumerName = readerConfig.ReaderName }
 
     let consumer =
-        ConsumerImpl<'T>(consumerConfig, clientConfig, connectionPool, readerConfig.Topic.PartitionIndex,
+        ConsumerImpl<'T>(consumerConfig, clientConfig, readerConfig.Topic, connectionPool, readerConfig.Topic.PartitionIndex,
                      readerConfig.StartMessageId, lookup, readerConfig.StartMessageFromRollbackDuration, true, schema,
                      schemaProvider, ConsumerInterceptors<'T>.Empty, fun _ -> ())
 

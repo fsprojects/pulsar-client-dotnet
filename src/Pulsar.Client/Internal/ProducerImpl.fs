@@ -450,46 +450,51 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                     let sequenceId = receipt.SequenceId
                     let highestSequenceId = receipt.HighestSequenceId
-                    let pendingMessage = pendingMessages.Peek()
-                    let exptectedHighestSequenceId = int64 pendingMessage.HighestSequenceId
-                    let expectedSequenceId = int64 pendingMessage.SequenceId
-                    if sequenceId > expectedSequenceId then
-                        Log.Logger.LogWarning("{0} Got ack for msg {1}. expecting {2} - queue-size: {3}",
-                            prefix, receipt, expectedSequenceId, pendingMessages.Count)
-                        // Force connection closing so that messages can be re-transmitted in a new connection
-                        match connectionHandler.ConnectionState with
-                        | Ready clientCnx -> clientCnx.Close()
-                        | _ -> ()
-                    elif sequenceId < expectedSequenceId then
-                        Log.Logger.LogInformation("{0} Got ack for timed out msg {1} last-seq: {2}",
-                            prefix, receipt, expectedSequenceId)
-                    else
-                        // Add check `sequenceId >= highestSequenceId` for backward compatibility.
-                        if sequenceId >= highestSequenceId || highestSequenceId = exptectedHighestSequenceId then
-                            Log.Logger.LogDebug("{0} Received ack for message {1}", prefix, receipt)
-                            dequeuePendingMessage() |> ignore
-                            lastSequenceIdPublished <- Math.Max(lastSequenceIdPublished, %(getHighestSequenceId pendingMessage))
-                            match pendingMessage.Callback with
-                            | SingleCallback (msg, tcs) ->
-                                let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Individual; TopicName = %"" }
-                                interceptors.OnSendAcknowledgement(this, msg, msgId, null)
-                                stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
-                                tcs.SetResult(msgId)
-                            | BatchCallbacks tcss ->
-                                tcss
-                                |> Array.iter (fun (msgId, msg, tcs) ->
-                                    let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Cumulative msgId; TopicName = %"" }
-                                    interceptors.OnSendAcknowledgement(this, msg, msgId, null)
-                                    stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
-                                    tcs.SetResult(msgId))
-                        else
-                            Log.Logger.LogWarning("{0} Got ack for batch msg error. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
-                                                  prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
-                                                  receipt.SequenceId, receipt.HighestSequenceId, pendingMessages.Count);
+                    if pendingMessages.Count > 0 then
+                        let pendingMessage = pendingMessages.Peek()
+                        let exptectedHighestSequenceId = int64 pendingMessage.HighestSequenceId
+                        let expectedSequenceId = int64 pendingMessage.SequenceId
+                        if sequenceId > expectedSequenceId then
+                            Log.Logger.LogWarning("{0} Got ack for msg. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
+                                prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
+                                receipt.SequenceId, receipt.HighestSequenceId, pendingMessages.Count)
                             // Force connection closing so that messages can be re-transmitted in a new connection
                             match connectionHandler.ConnectionState with
                             | Ready clientCnx -> clientCnx.Close()
                             | _ -> ()
+                        elif sequenceId < expectedSequenceId then
+                            Log.Logger.LogInformation("{0} Got ack for timed out msg. expecting: {1} - {2} - got: {3} - {4}",
+                                prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
+                                receipt.SequenceId, receipt.HighestSequenceId)
+                        else
+                            // Add check `sequenceId >= highestSequenceId` for backward compatibility.
+                            if sequenceId >= highestSequenceId || highestSequenceId = exptectedHighestSequenceId then
+                                Log.Logger.LogDebug("{0} Received ack for message {1}", prefix, receipt)
+                                dequeuePendingMessage() |> ignore
+                                lastSequenceIdPublished <- Math.Max(lastSequenceIdPublished, %(getHighestSequenceId pendingMessage))
+                                match pendingMessage.Callback with
+                                | SingleCallback (msg, tcs) ->
+                                    let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Individual; TopicName = %"" }
+                                    interceptors.OnSendAcknowledgement(this, msg, msgId, null)
+                                    stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
+                                    tcs.SetResult(msgId)
+                                | BatchCallbacks tcss ->
+                                    tcss
+                                    |> Array.iter (fun (msgId, msg, tcs) ->
+                                        let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Cumulative msgId; TopicName = %"" }
+                                        interceptors.OnSendAcknowledgement(this, msg, msgId, null)
+                                        stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
+                                        tcs.SetResult(msgId))
+                            else
+                                Log.Logger.LogWarning("{0} Got ack for batch msg error. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
+                                                      prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
+                                                      receipt.SequenceId, receipt.HighestSequenceId, pendingMessages.Count)
+                                // Force connection closing so that messages can be re-transmitted in a new connection
+                                match connectionHandler.ConnectionState with
+                                | Ready clientCnx -> clientCnx.Close()
+                                | _ -> ()
+                    else
+                        Log.Logger.LogInformation("{0} Got ack for timed out msg {1} - {2}", prefix, sequenceId, highestSequenceId)
                     return! loop ()
 
                 | ProducerMessage.RecoverChecksumError sequenceId ->
@@ -541,7 +546,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         | _ ->
                             if pendingMessages.Count > 0 then
                                 let firstMessage = pendingMessages.Peek()
-                                if firstMessage.CreatedAt.AddMilliseconds(sendTimeoutMs) >= DateTime.Now then
+                                if firstMessage.CreatedAt.AddMilliseconds(sendTimeoutMs) <= DateTime.Now then
                                     // The diff is less than or equal to zero, meaning that the message has been timed out.
                                     // Set the callback to timeout on every message, then clear the pending queue.
                                     Log.Logger.LogInformation("{0} Message send timed out. Failing {1} messages", prefix, pendingMessages.Count)
