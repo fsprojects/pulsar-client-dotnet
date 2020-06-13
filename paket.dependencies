@@ -2,7 +2,6 @@ source https://api.nuget.org/v3/index.json
 storage: none
 framework: netstandard2.0
 
-nuget FSharp.Control.AsyncSeq
 nuget FSharp.UMX
 nuget FSharp.Core
 nuget Microsoft.Extensions.Logging

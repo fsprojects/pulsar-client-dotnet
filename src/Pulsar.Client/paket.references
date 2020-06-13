@@ -12,7 +12,6 @@ zlib.net-mutliplatform
 K4os.Compression.LZ4
 Snappy.Standard
 ZstdNet
-FSharp.Control.AsyncSeq
 System.Text.Json
 Microsoft.Extensions.Caching.Memory
 AvroSchemaGenerator

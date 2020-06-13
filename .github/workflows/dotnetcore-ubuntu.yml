@@ -20,11 +20,11 @@ jobs:
       with:
         dotnet-version: 3.1.100
 
-    - name: Install Paket tool locally
-      run: dotnet tool install paket --tool-path .paket
-      
+    - name: Install dotnet tools locally
+      run: dotnet tool restore
+
     - name: Paket Install
-      run: .paket/paket install
+      run: dotnet paket install
     
     - name: Dotnet Restore
       run: dotnet restore
