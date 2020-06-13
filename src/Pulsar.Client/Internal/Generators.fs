@@ -3,6 +3,7 @@
 open System.Threading
 open Pulsar.Client.Common
 open FSharp.UMX
+open System
 
 let mutable private requestId = 0L
 let mutable private producerId = 0L
@@ -20,3 +21,6 @@ let getNextConsumerId(): ConsumerId =
 
 let getNextClientCnxId(): ClientCnxId =
     % (uint64 <| Interlocked.Increment(&clientCnxId))
+    
+let getRandomName(): string =
+    Guid.NewGuid().ToString().Substring(0, 5)

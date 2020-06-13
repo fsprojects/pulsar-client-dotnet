@@ -4,3 +4,7 @@ Microsoft.NET.Test.Sdk
 YoloDev.Expecto.TestSdk
 FSharp.Core
 Expecto.FsCheck
+Serilog
+Serilog.Extensions.Logging
+Serilog.Enrichers.Thread
+Serilog.Sinks.Console

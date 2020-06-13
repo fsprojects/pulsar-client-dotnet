@@ -181,11 +181,11 @@ let newSeekByTimestamp (consumerId: ConsumerId) (requestId : RequestId) (timesta
     let command = BaseCommand(``type`` = CommandType.Seek, Seek = request)
     command |> serializeSimpleCommand
 
-let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) (mode : TopicDomain) =
+let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) (isPersistent : bool) =
     let mode =
-        match mode with
-        | Persistent -> CommandGetTopicsOfNamespace.Mode.Persistent
-        | NonPersistent -> CommandGetTopicsOfNamespace.Mode.NonPersistent
+        match isPersistent with
+        | true -> CommandGetTopicsOfNamespace.Mode.Persistent
+        | false -> CommandGetTopicsOfNamespace.Mode.NonPersistent
     let request = CommandGetTopicsOfNamespace(Namespace = ns.ToString(), RequestId = uint64(%requestId), mode = mode)
     let command = BaseCommand(``type`` = CommandType.GetTopicsOfNamespace, getTopicsOfNamespace = request)
     command |> serializeSimpleCommand

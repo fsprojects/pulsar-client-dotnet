@@ -23,8 +23,8 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 - [X] Effectively-Once
 - [X] Schema
 - [X] Consumer seek
-- [ ] Multi-topics consumer
-- [ ] Topics regex consumer
+- [X] Multi-topics consumer
+- [X] Topics regex consumer
 - [X] Compacted topics
 - [X] User defined properties producer/consumer
 - [X] Reader hasMessageAvailable

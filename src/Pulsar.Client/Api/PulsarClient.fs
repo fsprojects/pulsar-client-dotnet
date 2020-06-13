@@ -1,6 +1,7 @@
 ﻿namespace Pulsar.Client.Api
 
 open System
+open System.Text.RegularExpressions
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
@@ -47,6 +48,21 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         match this.ClientState with
         | Active ->  ()
         | _ ->  raise <| AlreadyClosedException("Client already closed. State: " + this.ClientState.ToString())
+        
+    let getActiveScmema (schema: ISchema<'T>) (topic:TopicName) =
+        task {
+            let mutable activeSchema = schema
+            if schema.GetType() = autoConsumeStubType then
+                match! lookupService.GetSchema(topic.CompleteTopicName) with
+                | Some schemaData ->
+                    let autoSchema = Schema.GetAutoConsumeSchema schemaData |> box
+                    activeSchema <- autoSchema |> unbox
+                | None ->
+                    ()
+            return activeSchema
+        }
+    
+    let removeConsumer = fun consumer -> this.Mb.Post(RemoveConsumer consumer)
 
     let mb = MailboxProcessor<PulsarClientMessage>.Start(fun inbox ->
 
@@ -112,11 +128,14 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         with get () = Log.Logger
         and set (value) = Log.Logger <- value
 
-    member internal this.SubscribeAsync(consumerConfig, schema, interceptors) =
-        task {
-            checkIfActive()
-            return! this.SingleTopicSubscribeAsync(consumerConfig, schema, interceptors)
-        }
+    member internal this.SubscribeAsync(consumerConfig : ConsumerConfiguration<'T>, schema, interceptors) =
+        checkIfActive()
+        if (consumerConfig.TopicsPattern |> String.IsNullOrEmpty |> not) then
+            this.PatternTopicSubscribeAsync(consumerConfig, schema, interceptors)
+        elif (consumerConfig.Topics |> Seq.length |> (<) 1) then
+            this.MultiTopicSubscribeAsync(consumerConfig, schema, interceptors)
+        else
+            this.SingleTopicSubscribeAsync(consumerConfig, schema, interceptors)
 
     member this.CloseAsync() =
         task {
@@ -159,29 +178,89 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                 return None
         }
 
+    member private this.GetConsumerInitInfo (schema, topic: TopicName) =
+        task {
+            let! schemaProvider = this.PreProcessSchemaBeforeSubscribe(schema, topic.CompleteTopicName)
+            let! metadata = this.GetPartitionedTopicMetadata topic.CompleteTopicName
+            let! activeSchema = getActiveScmema schema topic
+            return {
+                TopicName = topic
+                Schema = activeSchema
+                SchemaProvider = schemaProvider
+                Metadata = metadata
+            }
+        }
+        
+    member private this.GetTopicsByPattern (fakeTopicName: TopicName) (regex: Regex) schema =
+        fun () ->
+            task {
+                let! allNamespaceTopics = lookupService.GetTopicsUnderNamespace(fakeTopicName.NamespaceName, fakeTopicName.IsPersistent) |> Async.AwaitTask
+                let topics =
+                    allNamespaceTopics
+                    |> Seq.filter regex.IsMatch
+                    |> Seq.map TopicName
+                    |> Seq.toArray
+                return topics
+            }
+        
+    member private this.PatternTopicSubscribeAsync (consumerConfig: ConsumerConfiguration<'T>, schema: ISchema<'T>, interceptors: ConsumerInterceptors<'T>) =
+        task {
+            checkIfActive()
+            Log.Logger.LogDebug("PatternTopicSubscribeAsync started")
+            let fakeTopicName = TopicName(consumerConfig.TopicsPattern)
+            let regex = Regex(consumerConfig.TopicsPattern)
+            let getTopicsFun = this.GetTopicsByPattern fakeTopicName regex schema
+            let getConsumerInfoFun = fun topic -> this.GetConsumerInitInfo(schema, topic)
+            let! topics = getTopicsFun()
+            let! consumerInfos =
+                if topics.Length > 0 then
+                    topics
+                    |> Seq.map (fun topic -> this.GetConsumerInitInfo(schema, topic))            
+                    |> Task.WhenAll
+                    |> Async.AwaitTask
+                else
+                    async { return [||] }
+            let! consumer = MultiTopicsConsumerImpl.InitPattern(consumerConfig, config, connectionPool, { InitialTopics = consumerInfos; GetTopics = getTopicsFun; GetConsumerInfo = getConsumerInfoFun },
+                                                             lookupService, interceptors, removeConsumer)
+            mb.Post(AddConsumer consumer)
+            return consumer :> IConsumer<'T>
+        }
+        
+    member private this.MultiTopicSubscribeAsync (consumerConfig: ConsumerConfiguration<'T>, schema: ISchema<'T>, interceptors: ConsumerInterceptors<'T>) =
+        task {
+            checkIfActive()
+            Log.Logger.LogDebug("MultiTopicSubscribeAsync started")
+            let! partitionsForTopis = 
+                consumerConfig.Topics
+                |> Seq.map (fun topic -> this.GetConsumerInitInfo(schema, topic))
+                |> Task.WhenAll            
+            let! consumer = MultiTopicsConsumerImpl.InitMultiTopic(consumerConfig, config, connectionPool, partitionsForTopis,
+                                                             lookupService, interceptors, removeConsumer)
+            mb.Post(AddConsumer consumer)
+            return consumer :> IConsumer<'T>
+        }
+    
     member private this.SingleTopicSubscribeAsync (consumerConfig: ConsumerConfiguration<'T>, schema: ISchema<'T>, interceptors: ConsumerInterceptors<'T>) =
         task {
             checkIfActive()
             Log.Logger.LogDebug("SingleTopicSubscribeAsync started")
-            let! schemaProvider = this.PreProcessSchemaBeforeSubscribe(schema, consumerConfig.Topic.CompleteTopicName)
-            let! metadata = this.GetPartitionedTopicMetadata consumerConfig.Topic.CompleteTopicName
-            let mutable activeSchema = schema
-            if schema.GetType() = autoConsumeStubType then
-                match! lookupService.GetSchema(consumerConfig.Topic.CompleteTopicName) with
-                | Some schemaData ->
-                    let autoSchema = Schema.GetAutoConsumeSchema schemaData |> box
-                    activeSchema <- autoSchema |> unbox
-                | None ->
-                    ()          
-            let removeConsumer = fun consumer -> mb.Post(RemoveConsumer consumer)
-            if (metadata.Partitions > 0)
-            then
-                let! consumer = MultiTopicsConsumerImpl.Init(consumerConfig, config, connectionPool, metadata.Partitions,
-                                                             lookupService, activeSchema, schemaProvider, interceptors, removeConsumer)
+            let topic = consumerConfig.SingleTopic
+            let! schemaProvider = this.PreProcessSchemaBeforeSubscribe(schema, topic.CompleteTopicName)
+            let! metadata = this.GetPartitionedTopicMetadata topic.CompleteTopicName
+            let! activeSchema = getActiveScmema schema topic
+            if metadata.IsMultiPartitioned then
+                let consumerInitInfo = {
+                    TopicName = topic
+                    Schema = activeSchema
+                    SchemaProvider = schemaProvider
+                    Metadata = metadata
+                }                
+                let! consumer = MultiTopicsConsumerImpl.InitPartitioned(consumerConfig, config, connectionPool, consumerInitInfo,
+                                                             lookupService, interceptors, removeConsumer)
                 mb.Post(AddConsumer consumer)
                 return consumer :> IConsumer<'T>
             else
-                let! consumer = ConsumerImpl.Init(consumerConfig, config, connectionPool, -1, None, lookupService, true,
+                let! consumer = ConsumerImpl.Init(consumerConfig, config, consumerConfig.SingleTopic, connectionPool, -1, None, lookupService, true,
                                                   activeSchema, schemaProvider, interceptors, removeConsumer)
                 mb.Post(AddConsumer consumer)
                 return consumer :> IConsumer<'T>
@@ -202,7 +281,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                 | None ->
                     ()                    
             let removeProducer = fun producer -> mb.Post(RemoveProducer producer)
-            if (metadata.Partitions > 0) then
+            if (metadata.IsMultiPartitioned) then
                 let! producer = PartitionedProducerImpl.Init(producerConfig, config, connectionPool, metadata.Partitions,
                                                              lookupService, activeSchema, interceptors, removeProducer)
                 mb.Post(AddProducer producer)
@@ -220,7 +299,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             Log.Logger.LogDebug("CreateReaderAsync started")
             let! metadata = this.GetPartitionedTopicMetadata readerConfig.Topic.CompleteTopicName
             let! schemaProvider = this.PreProcessSchemaBeforeSubscribe(schema, readerConfig.Topic.CompleteTopicName)
-            if (metadata.Partitions > 0)
+            if (metadata.IsMultiPartitioned)
             then
                 return failwith "Topic reader cannot be created on a partitioned topic"
             else
@@ -237,15 +316,18 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
         
     member this.NewProducer() =
         ProducerBuilder(this.CreateProducerAsync, Schema.BYTES())
-        
+
     member this.NewProducer(schema) =
         ProducerBuilder(this.CreateProducerAsync, schema)
-        
+
     member this.NewConsumer() =
         ConsumerBuilder(this.SubscribeAsync, this.CreateProducerAsync, Schema.BYTES())
+
     member this.NewConsumer(schema) =
-        ConsumerBuilder(this.SubscribeAsync, this.CreateProducerAsync, schema)    
+        ConsumerBuilder(this.SubscribeAsync, this.CreateProducerAsync, schema)
+
     member this.NewReader() =
         ReaderBuilder(this.CreateReaderAsync, Schema.BYTES())
+
     member this.NewReader(schema) =
         ReaderBuilder(this.CreateReaderAsync, schema)

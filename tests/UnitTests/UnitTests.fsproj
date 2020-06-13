@@ -28,6 +28,7 @@
     <Compile Include="Internal\UnAckedMessageTrackerTests.fs" />
     <Compile Include="Internal\NegativeAcksTracker.fs" />
     <Compile Include="Internal\SchemaTests.fs" />
+    <Compile Include="Internal\TaskSeq.fs" />
     <Compile Include="Internal\StatsTests.fs" />
     <None Include="paket.references" />
     <Compile Include="Tests.fs" />

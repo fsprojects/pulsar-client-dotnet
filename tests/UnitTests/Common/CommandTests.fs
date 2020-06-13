@@ -206,10 +206,10 @@ module CommandsTests =
             test "newGetTopicsOfNamespaceRequest should return correct frame" {
                 let ns = NamespaceName("public/default")
                 let requestId = %1UL
-                let mode = TopicDomain.Persistent
+                let isPersistent = true
 
                 let totalSize, commandSize, command =
-                    serializeDeserializeSimpleCommand (newGetTopicsOfNamespaceRequest ns requestId mode )
+                    serializeDeserializeSimpleCommand (newGetTopicsOfNamespaceRequest ns requestId isPersistent )
 
                 totalSize |> Expect.equal "" 29
                 commandSize |> Expect.equal "" 25
