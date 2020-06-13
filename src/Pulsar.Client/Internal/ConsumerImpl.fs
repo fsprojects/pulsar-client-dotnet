@@ -350,57 +350,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         incomingMessagesSize <- incomingMessagesSize - msg.Data.LongLength
         msg
     
-    
-    let receiveIndividualMessagesFromBatch (rawMessage: RawMessage) (decompressedPayload: byte[]) schemaDecodeFunction =
-        let batchSize = rawMessage.Metadata.NumMessages
-        let acker = BatchMessageAcker(batchSize)
-        let mutable skippedMessages = 0
-        use stream = new MemoryStream(decompressedPayload)
-        use binaryReader = new BinaryReader(stream)
-        for i in 0..batchSize-1 do
-            Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
-            let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
-            let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
 
-            if isSameEntry(rawMessage.MessageId) && isPriorBatchIndex(%i) then
-                Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1} in batch", prefix, startMessageId)
-                skippedMessages <- skippedMessages + 1
-            else
-                let messageId =
-                    {
-                        rawMessage.MessageId with
-                            Partition = partitionIndex
-                            Type = Cumulative(%i, acker)
-                            TopicName = %""
-                    }
-                let msgKey = singleMessageMetadata.PartitionKey
-                let getValue () =
-                    keyValueProcessor
-                    |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, singleMessagePayload) :?> 'T)
-                    |> Option.defaultWith (fun() -> schemaDecodeFunction singleMessagePayload)
-                let properties =
-                    if singleMessageMetadata.Properties.Count > 0 then
-                                singleMessageMetadata.Properties
-                                |> Seq.map (fun prop -> (prop.Key, prop.Value))
-                                |> readOnlyDict
-                            else
-                                EmptyProps
-                let message = Message (
-                                messageId,
-                                singleMessagePayload,
-                                %msgKey,                        
-                                singleMessageMetadata.PartitionKeyB64Encoded,
-                                properties,
-                                getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                                %(int64 singleMessageMetadata.SequenceId),
-                                getValue
-                            )
-                if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
-                    deadLettersProcessor.AddMessage messageId message
-                enqueueMessage message
-
-        if skippedMessages > 0 then
-            increaseAvailablePermits skippedMessages
     
 
     let hasEnoughMessagesForBatchReceive() =
@@ -549,7 +499,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             elif rawMessage.Metadata.NumMessages > 0 then
                 // handle batch message enqueuing; uncompressed payload has all messages in batch
                 try
-                    receiveIndividualMessagesFromBatch rawMessage payload schemaDecodeFunction
+                    this.receiveIndividualMessagesFromBatch rawMessage payload schemaDecodeFunction
                 with ex ->
                     Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
                     raise <| BatchDeserializationException "Batch reading exception"
@@ -971,6 +921,58 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startStatTimer()
 
+    abstract member receiveIndividualMessagesFromBatch: RawMessage -> byte [] -> (byte [] -> 'T) -> unit
+    default this.receiveIndividualMessagesFromBatch (rawMessage: RawMessage) (decompressedPayload: byte[]) schemaDecodeFunction =
+        let batchSize = rawMessage.Metadata.NumMessages
+        let acker = BatchMessageAcker(batchSize)
+        let mutable skippedMessages = 0
+        use stream = new MemoryStream(decompressedPayload)
+        use binaryReader = new BinaryReader(stream)
+        for i in 0..batchSize-1 do
+            Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
+            let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
+            let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
+
+            if isSameEntry(rawMessage.MessageId) && isPriorBatchIndex(%i) then
+                Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1} in batch", prefix, startMessageId)
+                skippedMessages <- skippedMessages + 1
+            else
+                let messageId =
+                    {
+                        rawMessage.MessageId with
+                            Partition = partitionIndex
+                            Type = Cumulative(%i, acker)
+                            TopicName = %""
+                    }
+                let msgKey = singleMessageMetadata.PartitionKey
+                let getValue () =
+                    keyValueProcessor
+                    |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, singleMessagePayload) :?> 'T)
+                    |> Option.defaultWith (fun() -> schemaDecodeFunction singleMessagePayload)
+                let properties =
+                    if singleMessageMetadata.Properties.Count > 0 then
+                                singleMessageMetadata.Properties
+                                |> Seq.map (fun prop -> (prop.Key, prop.Value))
+                                |> readOnlyDict
+                            else
+                                EmptyProps
+                let message = Message (
+                                messageId,
+                                singleMessagePayload,
+                                %msgKey,                        
+                                singleMessageMetadata.PartitionKeyB64Encoded,
+                                properties,
+                                getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+                                %(int64 singleMessageMetadata.SequenceId),
+                                getValue
+                            )
+                if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
+                    deadLettersProcessor.AddMessage messageId message
+                enqueueMessage message
+
+        if skippedMessages > 0 then
+            increaseAvailablePermits skippedMessages
+    
     member internal this.Mb with get(): MailboxProcessor<ConsumerMessage<'T>> = mb
 
     member this.ConsumerId with get() = consumerId
@@ -1168,33 +1170,33 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                            topicName: TopicName, connectionPool: ConnectionPool,
                            partitionIndex: int, startMessageId: MessageId option, lookup: BinaryLookupService,
-                           startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
+                           _startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
                            schemaProvider: MultiVersionSchemaInfoProvider option,
                            interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
     
     inherit ConsumerImpl<'T>(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, startMessageId, lookup,
                              TimeSpan.Zero, createTopicIfDoesNotExist, schema, schemaProvider, interceptors, cleanup)
     
+    override this.receiveIndividualMessagesFromBatch (_: RawMessage) (_: byte[]) _ =
+        let prefix = sprintf "consumer(%u, %s, %i)" this.ConsumerId consumerConfig.ConsumerName partitionIndex
+        Log.Logger.LogError("{0} Closing consumer due to unsupported received batch-message with zero receiver queue size", prefix)
+        let _ = this.Mb.PostAndReply(ConsumerMessage.Close) 
+        let exn = 
+            sprintf "Unsupported Batch message with 0 size receiver queue for [%s]-[%s]"
+                consumerConfig.SubscriptionName consumerConfig.ConsumerName
+            |> InvalidMessageException
+        raise exn
+        
     override this.ReceiveFsharpAsync() =
         this.Mb.Post(ConsumerMessage.SendFlowPermits 1)
-        base.ReceiveFsharpAsync()
+        base.ReceiveFsharpAsync() 
     
     interface IConsumer<'T> with
         override this.ReceiveAsync() =
-            let prefix = sprintf "consumer(%u, %s, %i)" this.ConsumerId consumerConfig.ConsumerName partitionIndex
-
             task {
                 match! this.ReceiveFsharpAsync() with
-                | Ok msg when msg.MessageId.Type = MessageIdType.Individual ->
+                | Ok msg ->
                     return msg
-                | Ok _ ->
-                    Log.Logger.LogError("{0} Closing consumer due to unsupported received batch-message with zero receiver queue size", prefix)
-                    let _ = this.Mb.PostAndReply(ConsumerMessage.Close) 
-                    let exn = 
-                        sprintf "Unsupported Batch message with 0 size receiver queue for [%s]-[%s]"
-                            consumerConfig.SubscriptionName consumerConfig.ConsumerName
-                        |> InvalidMessageException
-                    return reraize exn
                 | Error exn -> return reraize exn
             }
         
