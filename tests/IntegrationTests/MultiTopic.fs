@@ -11,7 +11,7 @@ open Serilog
 
 [<Tests>]
 let tests =
-    ftestList "basic" [
+    testList "basic" [
         
         testAsync "Two producers and one multiconsumer work fine" {
 

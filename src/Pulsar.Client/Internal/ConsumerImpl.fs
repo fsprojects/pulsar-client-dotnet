@@ -33,7 +33,6 @@ type internal ConsumerMessage<'T> =
     | RedeliverUnacknowledged of RedeliverSet * AsyncReplyChannel<unit>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
     | SeekAsync of SeekData * AsyncReplyChannel<ResultOrException<unit>>
-    | SendFlowPermits of int
     | HasMessageAvailable of AsyncReplyChannel<Task<bool>>
     | ActiveConsumerChanged of bool
     | Close of AsyncReplyChannel<ResultOrException<unit>>
@@ -121,7 +120,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let increaseAvailablePermits delta =
         avalablePermits <- avalablePermits + delta
         if avalablePermits >= receiverQueueRefillThreshold then
-            this.Mb.Post(ConsumerMessage.SendFlowPermits avalablePermits)
+            this.SendFlowPermits avalablePermits
             avalablePermits <- 0
 
     /// Clear the internal receiver queue and returns the message id of what was the 1st message in the queue that was not seen by the application
@@ -499,7 +498,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             elif rawMessage.Metadata.NumMessages > 0 then
                 // handle batch message enqueuing; uncompressed payload has all messages in batch
                 try
-                    this.receiveIndividualMessagesFromBatch rawMessage payload schemaDecodeFunction
+                    this.ReceiveIndividualMessagesFromBatch rawMessage payload schemaDecodeFunction
                 with ex ->
                     Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
                     raise <| BatchDeserializationException "Batch reading exception"
@@ -508,11 +507,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     replyWithMessage waitingChannel <| dequeueMessage()
             else
                 Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
-        
-    
-    let consumerIsReconnectedToBroker() =
-        Log.Logger.LogInformation("{0} subscribed to topic {1}", prefix, topicName)
-        avalablePermits <- 0
 
     let consumerOperations = {
         MessageReceived = fun (rawMessage) -> this.Mb.Post(MessageReceived rawMessage)
@@ -567,10 +561,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         try
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             response |> PulsarResponseType.GetEmpty
-                            consumerIsReconnectedToBroker()
+                            this.ConsumerIsReconnectedToBroker()
                             connectionHandler.ResetBackoff()
+                            let initialFlowCount = consumerConfig.ReceiverQueueSize
                             subscribeTsc.TrySetResult() |> ignore
-                            this.sendFlowPermitsOnConnect()
+                            if initialFlowCount <> 0 then
+                                this.SendFlowPermits initialFlowCount
                         with Flatten ex ->
                             clientCnx.RemoveConsumer consumerId
                             Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
@@ -785,19 +781,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
                     return! loop ()
 
-                | ConsumerMessage.SendFlowPermits numMessages ->
-
-                    Log.Logger.LogDebug("{0} SendFlowPermits {1}", prefix, numMessages)
-                    match connectionHandler.ConnectionState with
-                    | Ready clientCnx ->
-                        let flowCommand = Commands.newFlow consumerId numMessages
-                        let! success = clientCnx.Send flowCommand
-                        if not success then
-                            Log.Logger.LogWarning("{0} failed SendFlowPermits {1}", prefix, numMessages)
-                    | _ ->
-                        Log.Logger.LogWarning("{0} not connected, skipping SendFlowPermits {1}", prefix, numMessages)
-                    return! loop ()
-
                 | ConsumerMessage.ReachedEndOfTheTopic ->
 
                     Log.Logger.LogWarning("{0} ReachedEndOfTheTopic", prefix)
@@ -914,8 +897,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startStatTimer()
 
-    abstract member receiveIndividualMessagesFromBatch: RawMessage -> byte [] -> (byte [] -> 'T) -> unit
-    default this.receiveIndividualMessagesFromBatch (rawMessage: RawMessage) (decompressedPayload: byte[]) schemaDecodeFunction =
+    abstract member ReceiveIndividualMessagesFromBatch: RawMessage -> byte [] -> (byte [] -> 'T) -> unit
+    default this.ReceiveIndividualMessagesFromBatch (rawMessage: RawMessage) (decompressedPayload: byte[]) schemaDecodeFunction =
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
         let mutable skippedMessages = 0
@@ -966,11 +949,24 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         if skippedMessages > 0 then
             increaseAvailablePermits skippedMessages
     
-    abstract member sendFlowPermitsOnConnect: unit -> unit
-    default this.sendFlowPermitsOnConnect() =
-        if consumerConfig.ReceiverQueueSize <> 0 then
-            this.Mb.Post(ConsumerMessage.SendFlowPermits consumerConfig.ReceiverQueueSize)
+    abstract member ConsumerIsReconnectedToBroker: unit -> unit
+    default this.ConsumerIsReconnectedToBroker() =
+        Log.Logger.LogInformation("{0} subscribed to topic {1}", prefix, topicName)
+        avalablePermits <- 0
     
+    member internal this.SendFlowPermits numMessages =
+        async {
+            Log.Logger.LogDebug("{0} SendFlowPermits {1}", prefix, numMessages)
+            match connectionHandler.ConnectionState with
+            | Ready clientCnx ->
+                let flowCommand = Commands.newFlow consumerId numMessages
+                let! success = clientCnx.Send flowCommand
+                if not success then
+                    Log.Logger.LogWarning("{0} failed SendFlowPermits {1}", prefix, numMessages)
+            | _ ->
+                Log.Logger.LogWarning("{0} not connected, skipping SendFlowPermits {1}", prefix, numMessages)
+        } |> Async.StartImmediate
+        
     member internal this.Waiters with get() = waiters
     
     member internal this.Mb with get(): MailboxProcessor<ConsumerMessage<'T>> = mb
@@ -1177,11 +1173,12 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
     inherit ConsumerImpl<'T>(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, startMessageId, lookup,
                              TimeSpan.Zero, createTopicIfDoesNotExist, schema, schemaProvider, interceptors, cleanup)
 
-    override this.sendFlowPermitsOnConnect() =
+    override this.ConsumerIsReconnectedToBroker() =
+        base.ConsumerIsReconnectedToBroker()
         if this.Waiters.Count > 0 then
-            this.Mb.Post(ConsumerMessage.SendFlowPermits this.Waiters.Count)
+            this.SendFlowPermits this.Waiters.Count
         
-    override this.receiveIndividualMessagesFromBatch (_: RawMessage) (_: byte[]) _ =
+    override this.ReceiveIndividualMessagesFromBatch (_: RawMessage) (_: byte[]) _ =
         let prefix = sprintf "consumer(%u, %s, %i)" this.ConsumerId consumerConfig.ConsumerName partitionIndex
         Log.Logger.LogError("{0} Closing consumer due to unsupported received batch-message with zero receiver queue size", prefix)
         let _ = this.Mb.PostAndReply(ConsumerMessage.Close) 
@@ -1192,7 +1189,7 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
         raise exn
         
     override this.ReceiveFsharpAsync() =
-        this.Mb.Post(ConsumerMessage.SendFlowPermits 1)
+        this.SendFlowPermits 1
         base.ReceiveFsharpAsync() 
     
     interface IConsumer<'T> with
