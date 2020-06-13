@@ -23,8 +23,8 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 - [X] Effectively-Once
 - [X] Schema
 - [X] Consumer seek
-- [ ] Multi-topics consumer
-- [ ] Topics regex consumer
+- [X] Multi-topics consumer
+- [X] Topics regex consumer
 - [X] Compacted topics
 - [X] User defined properties producer/consumer
 - [X] Reader hasMessageAvailable
@@ -43,10 +43,8 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 #### Common steps before building
 
  - Fork and clone locally
- - Install Paket dotnet tool:
-   * Globally `dotnet tool install paket -g`
-   * Locally `dotnet tool install paket --tool-path .paket`
- - Install packages: `paket install` or `.paket/paket install` (if installed locally)
+ - Install dotnet tools: `dotnet tool restore`
+ - Install packages: `dotnet paket install`
  - Restore packages: `dotnet restore`
  
 #### MacOS steps before building:
@@ -68,10 +66,8 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
     1. Install pulsar cluster:
         * MacOS guide:
         * `brew tap streamlio/homebrew-formulae`
-        * `brew install streamlio/homebrew-formulae/heron`
         * `brew install streamlio/homebrew-formulae/pulsar`
         * `brew install streamlio/homebrew-formulae/bookkeeper`
-        * `brew services start heron`
         * `brew services start pulsar`
         * `brew services start bookkeeper`
     1. Run commands in `/tests/IntegrationTests/commands.txt`

@@ -1009,8 +1009,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 schema, schemaProvider, interceptors, cleanup)
                 else
                     ZeroQueueConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex,
-                        startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
-                        schema, schemaProvider, interceptors, cleanup) :> ConsumerImpl<'T>
+                                        startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
+                                        schema, schemaProvider, interceptors, cleanup) :> ConsumerImpl<'T>
 
             do! consumer.InitInternal()
             return consumer

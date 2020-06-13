@@ -22,7 +22,7 @@ type internal MultiTopicConnectionState =
     
 type internal PatternInfo<'T> =
     {
-        GetTopics: unit -> Task<TopicName seq>
+        GetTopics: unit -> Task<TopicName[]>
         GetConsumerInfo: TopicName -> Task<ConsumerInitInfo<'T>>
         InitialTopics: ConsumerInitInfo<'T>[]
     }
@@ -39,7 +39,7 @@ type internal BatchAddResponse<'T> =
 
 type internal MultiTopicConsumerMessage<'T> =
     | Init
-    | Receive of AsyncReplyChannel<Async<ResultOrException<Message<'T>>>>
+    | Receive of AsyncReplyChannel<Task<ResultOrException<Message<'T>>>>
     | BatchReceive of AsyncReplyChannel<Async<ResultOrException<Messages<'T>>>> * CancellationToken 
     | BatchReceiveCompleted
     | BatchTimeout of AsyncReplyChannel<ResultOrException<Messages<'T>>> * CancellationToken
@@ -329,7 +329,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
     let rec work ct =
         async {
             let! msgAsync = this.Mb.PostAndAsyncReply(Receive)
-            let! msg = msgAsync
+            let! msg = msgAsync |> Async.AwaitTask
             match! this.Mb.PostAndAsyncReply(fun ch -> AddBatchMessage(ch, msg, ct)) with
             | BatchReady msgs ->
                 Log.Logger.LogDebug("{0} completing batch work. {1} messages", prefix, msgs.Count)
@@ -393,7 +393,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     match unhandleMessage with
                     | Some msg ->
                         unhandleMessage <- None
-                        channel.Reply(async { return msg })
+                        channel.Reply(Task.FromResult msg)
                     | None ->
                         channel.Reply(state.Stream.Next())
                     return! loop state
@@ -564,8 +564,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             if addedTopics.Count > 0 then
                                 Log.Logger.LogInformation("{0} subscribing to {1} new topics", prefix, addedTopics.Count)
                                 let! streams = processAddedTopics addedTopics patternInfo.GetConsumerInfo |> Async.AwaitTask
-                                streams   
-                                |> Seq.iter (fun stream -> state.Stream.AddGenerator stream)
+                                state.Stream.AddGenerators(streams)
                             if removedTopics.Count > 0 then
                                 Log.Logger.LogInformation("{0} removing subscription to {1} old topics", prefix, removedTopics.Count)
                                 let! streams = processRemovedTopics removedTopics |> Async.AwaitTask
@@ -640,15 +639,14 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                     newConsumerTasks
                                     |> Task.WhenAll
                                     |> Async.AwaitTask
-                                let newStream =
+                                let newStreams =
                                     newConsumerResults
                                     |> Seq.map (fun (topic, consumer) ->
                                         let stream = getStream topic.CompleteTopicName consumer
                                         consumers.Add(topic.CompleteTopicName, (consumer :> IConsumer<'T>, stream))
                                         stream
                                         )
-                                newStream
-                                |> Seq.iter (fun stream -> state.Stream.AddGenerator(stream))
+                                state.Stream.AddGenerators(newStreams)
                                 Log.Logger.LogDebug("{0} success create consumers for extended partitions. old: {1}, new: {2}",
                                     prefix, oldConsumersCount, totalConsumersCount )
                                 return! loop state

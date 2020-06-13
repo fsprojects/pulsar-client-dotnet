@@ -199,6 +199,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                     allNamespaceTopics
                     |> Seq.filter regex.IsMatch
                     |> Seq.map TopicName
+                    |> Seq.toArray
                 return topics
             }
         
@@ -212,10 +213,13 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
             let getConsumerInfoFun = fun topic -> this.GetConsumerInitInfo(schema, topic)
             let! topics = getTopicsFun()
             let! consumerInfos =
-                topics
-                |> Seq.map (fun topic -> this.GetConsumerInitInfo(schema, topic))
-                |> Task.WhenAll
-                |> Async.AwaitTask
+                if topics.Length > 0 then
+                    topics
+                    |> Seq.map (fun topic -> this.GetConsumerInitInfo(schema, topic))            
+                    |> Task.WhenAll
+                    |> Async.AwaitTask
+                else
+                    async { return [||] }
             let! consumer = MultiTopicsConsumerImpl.InitPattern(consumerConfig, config, connectionPool, { InitialTopics = consumerInfos; GetTopics = getTopicsFun; GetConsumerInfo = getConsumerInfoFun },
                                                              lookupService, interceptors, removeConsumer)
             mb.Post(AddConsumer consumer)

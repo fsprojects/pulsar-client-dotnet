@@ -11,6 +11,7 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
 open System.Threading.Tasks
 open Pulsar.Client.Common
+open Pulsar.Client.Internal
 open Serilog
 open Pulsar.Client.IntegrationTests.Common
 open FSharp.Control
@@ -131,24 +132,23 @@ let tests =
                     }:> Task)
 
             let getStream (consumer: IConsumer<'T>) =
-                asyncSeq {
-                    while not consumer.HasReachedEndOfTopic do
+                fun () ->
+                    task {
                         let! message = (consumer.ReceiveAsync() |> Async.AwaitTask)
                         do! consumer.AcknowledgeAsync(message.MessageId) |> Async.AwaitTask
-                        yield message
-                }
+                        return message
+                    }
 
             let stream1 = getStream consumer1
             let stream2 = getStream consumer2
-            let resultStream = AsyncSeq.mergeAll([stream1;stream2])
-            let enumerator = resultStream.GetEnumerator()
+            let resultStream = TaskSeq([stream1;stream2])
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
                         for _ in [1..100] do
-                            let! message = enumerator.MoveNext()
-                            let received = Encoding.UTF8.GetString(message.Value.Data)
+                            let! message = resultStream.Next()
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("Some consumer received {1}", received)
                             if allMessages |> Array.contains received |> not then
                                 failwith <| sprintf "Received unexpected message '%s'" received
