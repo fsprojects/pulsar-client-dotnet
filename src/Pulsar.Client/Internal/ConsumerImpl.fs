@@ -569,15 +569,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             response |> PulsarResponseType.GetEmpty
                             consumerIsReconnectedToBroker()
                             connectionHandler.ResetBackoff()
-                            let initialFlowCount = consumerConfig.ReceiverQueueSize
                             subscribeTsc.TrySetResult() |> ignore
-                            if initialFlowCount <> 0 then
-                                let flowCommand = Commands.newFlow consumerId initialFlowCount
-                                let! success = clientCnx.Send flowCommand
-                                if success then
-                                    Log.Logger.LogDebug("{0} initial flow sent {1}", prefix, initialFlowCount)
-                                else
-                                    raise (ConnectionFailedOnSend "FlowCommand")
+                            this.sendFlowPermitsOnConnect()
                         with Flatten ex ->
                             clientCnx.RemoveConsumer consumerId
                             Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
@@ -973,6 +966,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         if skippedMessages > 0 then
             increaseAvailablePermits skippedMessages
     
+    abstract member sendFlowPermitsOnConnect: unit -> unit
+    default this.sendFlowPermitsOnConnect() =
+        if consumerConfig.ReceiverQueueSize <> 0 then
+            this.Mb.Post(ConsumerMessage.SendFlowPermits consumerConfig.ReceiverQueueSize)
+    
+    member internal this.Waiters with get() = waiters
+    
     member internal this.Mb with get(): MailboxProcessor<ConsumerMessage<'T>> = mb
 
     member this.ConsumerId with get() = consumerId
@@ -1176,7 +1176,11 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
     
     inherit ConsumerImpl<'T>(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, startMessageId, lookup,
                              TimeSpan.Zero, createTopicIfDoesNotExist, schema, schemaProvider, interceptors, cleanup)
-    
+
+    override this.sendFlowPermitsOnConnect() =
+        if this.Waiters.Count > 0 then
+            this.Mb.Post(ConsumerMessage.SendFlowPermits this.Waiters.Count)
+        
     override this.receiveIndividualMessagesFromBatch (_: RawMessage) (_: byte[]) _ =
         let prefix = sprintf "consumer(%u, %s, %i)" this.ConsumerId consumerConfig.ConsumerName partitionIndex
         Log.Logger.LogError("{0} Closing consumer due to unsupported received batch-message with zero receiver queue size", prefix)
