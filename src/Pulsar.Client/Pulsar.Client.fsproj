@@ -47,10 +47,10 @@
     <Compile Include="Internal\Log.fs" />
     <Compile Include="Internal\BatchMessageAcker.fs" />
     <Compile Include="Internal\Backoff.fs" />
+    <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Common\TopicName.fs" />
     <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\ServiceUri.fs" />
-    <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Api\BatchReceivePolicy.fs" />
     <Compile Include="Api\KeySharedPolicy.fs" />
     <Compile Include="Api\ISchema.fs" />
@@ -95,6 +95,7 @@
     <Compile Include="Schema\AvroSchema.fs" />
     <Compile Include="Schema\AutoProduceBytesSchema.fs" />
     <Compile Include="Schema\AutoConsumeSchema.fs" />
+    <Compile Include="Internal\TaskSeq.fs" />
     <Compile Include="Internal\BatchMessageContainer.fs" />
     <Compile Include="Internal\Routing.fs" />
     <Compile Include="Internal\UnAckedMessageTracker.fs" />

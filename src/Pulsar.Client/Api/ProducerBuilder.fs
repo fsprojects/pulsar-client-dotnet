@@ -133,6 +133,11 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
         { config with
             BlockIfQueueFull = blockIfQueueFull }
         |> this.With
+        
+    member this.AutoUpdatePartitions autoUpdatePartitions =
+        { config with
+            AutoUpdatePartitions = autoUpdatePartitions }
+        |> this.With
     
     member this.CreateAsync(): Task<IProducer<'T>> =
         сreateProducerAsync(verify config, schema, producerInterceptors)

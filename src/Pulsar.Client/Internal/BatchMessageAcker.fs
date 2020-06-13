@@ -43,3 +43,5 @@ type BatchMessageAcker(batchSize: int) =
 
     interface System.IComparable with
          member x.CompareTo _ = 0
+    interface System.IComparable<BatchMessageAcker> with
+         member x.CompareTo _ = 0

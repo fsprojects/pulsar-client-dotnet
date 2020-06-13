@@ -41,7 +41,16 @@ type internal ConsumerMessage<'T> =
     | StatTick
     | GetStats of AsyncReplyChannel<ConsumerStats>
 
-type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+type internal ConsumerInitInfo<'T> =
+    {
+        TopicName: TopicName
+        Schema: ISchema<'T>
+        SchemaProvider: MultiVersionSchemaInfoProvider option
+        Metadata: PartitionedTopicMetadata
+    }
+
+type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
+                           topicName: TopicName, connectionPool: ConnectionPool,
                            partitionIndex: int, startMessageId: MessageId option, lookup: BinaryLookupService,
                            startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
                            schemaProvider: MultiVersionSchemaInfoProvider option,
@@ -65,7 +74,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let initialStartMessageId = startMessageId
     let mutable incomingMessagesSize = 0L
     let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
-    let deadLettersProcessor = consumerConfig.DeadLettersProcessor
+    let deadLettersProcessor = consumerConfig.DeadLettersProcessor topicName
     let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable
     let stats =
         if clientConfig.StatsInterval = TimeSpan.Zero then
@@ -96,7 +105,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         ConnectionHandler(prefix,
                           connectionPool,
                           lookup,
-                          consumerConfig.Topic.CompleteTopicName,
+                          topicName.CompleteTopicName,
                           (fun _ -> this.Mb.Post(ConsumerMessage.ConnectionOpened)),
                           (fun ex -> this.Mb.Post(ConsumerMessage.ConnectionFailed ex)),
                           Backoff({ BackoffConfig.Default with Initial = TimeSpan.FromMilliseconds(100.0); Max = TimeSpan.FromSeconds(60.0) }))
@@ -203,7 +212,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let negativeAcksRedeliver messages =
         interceptors.OnNegativeAcksSend(this, messages)
-        redeliverMessages messages        
+        redeliverMessages messages
     
     let unAckedMessageTracker =
         if consumerConfig.AckTimeout > TimeSpan.Zero then
@@ -221,7 +230,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let sendAckPayload (cnx: ClientCnx) payload = cnx.Send payload
 
     let acksGroupingTracker =
-        if consumerConfig.Topic.IsPersistent then
+        if topicName.IsPersistent then
             AcknowledgmentsGroupingTracker(prefix, consumerId, consumerConfig.AcknowledgementsGroupTime, getConnectionState, sendAckPayload) :> IAcknowledgmentsGroupingTracker
         else
             AcknowledgmentsGroupingTracker.NonPersistentAcknowledgmentGroupingTracker
@@ -473,7 +482,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             cts.Dispose()
         Log.Logger.LogInformation("{0} stopped", prefix)
 
-    let getDecompressPayload originalMessage =
+    let getDecompressPayload (originalMessage: RawMessage) =
         try
             let compressionCodec = originalMessage.Metadata.CompressionType |> CompressionCodec.create
             let uncompressedPayload = compressionCodec.Decode originalMessage.Metadata.UncompressedMessageSize originalMessage.Payload
@@ -497,7 +506,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 Log.Logger.LogWarning("{0} Unable to discard {1} due to {2}", prefix, msgId, err)
         }
         
-    let handleMessagePayload rawMessage payload msgId hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction =
+    let handleMessagePayload (rawMessage: RawMessage) payload msgId hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction =
         if (acksGroupingTracker.IsDuplicate(msgId)) then
             Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
             increaseAvailablePermits rawMessage.Metadata.NumMessages
@@ -552,7 +561,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         
     
     let consumerIsReconnectedToBroker() =
-        Log.Logger.LogInformation("{0} subscribed to topic {1}", prefix, consumerConfig.Topic)
+        Log.Logger.LogInformation("{0} subscribed to topic {1}", prefix, topicName)
         avalablePermits <- 0
 
     let consumerOperations = {
@@ -572,7 +581,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
-                        Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, consumerConfig.Topic)
+                        Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, topicName)
                         clientCnx.AddConsumer(consumerId, consumerOperations)
                         let requestId = Generators.getNextRequestId()
                         startMessageId <- clearReceiverQueue()
@@ -601,7 +610,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 TimeSpan.Zero
                         let payload =
                             Commands.newSubscribe
-                                consumerConfig.Topic.CompleteTopicName consumerConfig.SubscriptionName
+                                topicName.CompleteTopicName consumerConfig.SubscriptionName
                                 consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
                                 consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted msgIdData isDurable
                                 startMessageRollbackDuration createTopicIfDoesNotExist consumerConfig.KeySharedPolicy schema.SchemaInfo
@@ -622,16 +631,27 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         with Flatten ex ->
                             clientCnx.RemoveConsumer consumerId
                             Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
-                            if (PulsarClientException.isRetriableError ex && DateTime.Now < subscribeTimeout) then
+                            match ex with
+                            | _ when (PulsarClientException.isRetriableError ex && DateTime.Now < subscribeTimeout) ->
                                 connectionHandler.ReconnectLater ex
-                            else
-                                if not subscribeTsc.Task.IsCompleted then
-                                    // unable to create new consumer, fail operation
-                                    connectionHandler.Failed()
-                                    subscribeTsc.SetException(ex)
-                                    stopConsumer()
-                                else
-                                    connectionHandler.ReconnectLater ex
+                            | _ when not subscribeTsc.Task.IsCompleted ->
+                                // unable to create new consumer, fail operation
+                                connectionHandler.Failed()
+                                subscribeTsc.SetException(ex)
+                                stopConsumer()
+                            | TopicDoesNotExistException reason ->
+                                // The topic was deleted after the consumer was created, and we're
+                                // not allowed to recreate the topic. This can happen in few cases:
+                                //  * Regex consumer getting error after topic gets deleted
+                                //  * Regular consumer after topic is manually delete and with
+                                //    auto-topic-creation set to false
+                                // No more retries are needed in this case.
+                                connectionHandler.Failed()
+                                stopConsumer()
+                                Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, reason)
+                            | _ ->
+                                // consumer was subscribed and connected but we got some error, keep trying
+                                connectionHandler.ReconnectLater ex
                     | _ ->
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
                     return! loop ()
@@ -978,18 +998,19 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             return! subscribeTsc.Task
         }
 
-    static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+    static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
+                       topicName: TopicName, connectionPool: ConnectionPool,
                        partitionIndex: int, startMessageId: MessageId option, lookup: BinaryLookupService,
                        createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
                        interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
         task {
             let consumer =
                 if consumerConfig.ReceiverQueueSize > 0 then
-                    ConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex,
-                        startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
-                        schema, schemaProvider, interceptors, cleanup)
+                    ConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex,
+                                startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
+                                schema, schemaProvider, interceptors, cleanup)
                 else
-                    ZeroQueueConsumerImpl(consumerConfig, clientConfig, connectionPool, partitionIndex,
+                    ZeroQueueConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex,
                         startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
                         schema, schemaProvider, interceptors, cleanup) :> ConsumerImpl<'T>
 
@@ -1050,7 +1071,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     stats.IncrementNumAcksFailed()
                     interceptors.OnAcknowledge(this, msgId, exn)
                     raise exn
-                
+
                 mb.Post(Acknowledge(msgId, AckType.Individual))
             }
             
@@ -1105,7 +1126,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 return! wrapPostAndReply <| mb.PostAndAsyncReply(ConsumerMessage.Unsubscribe)
             }
 
-        member this.HasReachedEndOfTopic with get() = hasReachedEndOfTopic
+        member this.HasReachedEndOfTopic = hasReachedEndOfTopic
 
         member this.NegativeAcknowledge msgId =
             task {
@@ -1122,7 +1143,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         
         member this.ConsumerId = consumerId
 
-        member this.Topic with get() = %consumerConfig.Topic.CompleteTopicName
+        member this.Topic = %topicName.CompleteTopicName
 
         member this.Name = consumerConfig.ConsumerName
 
@@ -1144,13 +1165,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 } |> ValueTask
 
 
-and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
+                           topicName: TopicName, connectionPool: ConnectionPool,
                            partitionIndex: int, startMessageId: MessageId option, lookup: BinaryLookupService,
                            startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
                            schemaProvider: MultiVersionSchemaInfoProvider option,
                            interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
     
-    inherit ConsumerImpl<'T>(consumerConfig, clientConfig, connectionPool, partitionIndex, startMessageId, lookup,
+    inherit ConsumerImpl<'T>(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, startMessageId, lookup,
                              TimeSpan.Zero, createTopicIfDoesNotExist, schema, schemaProvider, interceptors, cleanup)
     
     override this.ReceiveFsharpAsync() =

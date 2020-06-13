@@ -83,6 +83,7 @@ let tests =
             let! producer =
                 client.NewProducer()
                     .Topic(topicName)
+                    .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
@@ -90,7 +91,7 @@ let tests =
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .ConsumerName(consumerName)
-                    .AckTimeout(TimeSpan.FromSeconds(1.0))
+                    .AckTimeout(TimeSpan.FromSeconds(2.0))
                     .SubscribeAsync() |> Async.AwaitTask
 
             let producerTask =
@@ -111,7 +112,7 @@ let tests =
                                 failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
                             if (i <= 90) then
                                 do! consumer.AcknowledgeAsync(message.MessageId)
-                        do! Task.Delay(1100)
+                        do! Task.Delay(2100)
                         for i in [91..100] do
                             let! message = consumer.ReceiveAsync()
                             let received = Encoding.UTF8.GetString(message.Data)

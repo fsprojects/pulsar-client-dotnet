@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
+open FSharp.UMX
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open System
@@ -35,7 +36,8 @@ type PulsarClientConfiguration =
 
 type ConsumerConfiguration<'T> =
     {
-        Topic: TopicName
+        Topics: TopicName seq
+        TopicsPattern: string
         ConsumerName: string
         SubscriptionName: string
         SubscriptionType: SubscriptionType
@@ -47,16 +49,19 @@ type ConsumerConfiguration<'T> =
         AckTimeoutTickTime: TimeSpan
         AcknowledgementsGroupTime: TimeSpan
         AutoUpdatePartitions: bool
+        PatternAutoDiscoveryPeriod: TimeSpan
         ReadCompacted: bool
         NegativeAckRedeliveryDelay: TimeSpan
         ResetIncludeHead: bool
-        DeadLettersProcessor : IDeadLettersProcessor<'T>
+        DeadLettersProcessor : TopicName -> IDeadLettersProcessor<'T>
         KeySharedPolicy: KeySharedPolicy option
         BatchReceivePolicy: BatchReceivePolicy
     }
+    member this.SingleTopic with get() = this.Topics |> Seq.head
     static member Default =
         {
-            Topic = Unchecked.defaultof<TopicName>
+            Topics = []
+            TopicsPattern = ""
             ConsumerName = ""
             SubscriptionName = ""
             SubscriptionType = SubscriptionType.Exclusive
@@ -68,10 +73,11 @@ type ConsumerConfiguration<'T> =
             AckTimeoutTickTime = TimeSpan.FromMilliseconds(1000.0)
             AcknowledgementsGroupTime = TimeSpan.FromMilliseconds(100.0)
             AutoUpdatePartitions = true
+            PatternAutoDiscoveryPeriod = TimeSpan.FromMinutes(1.0)
             ReadCompacted = false
             NegativeAckRedeliveryDelay = TimeSpan.FromMinutes(1.0)
             ResetIncludeHead = false
-            DeadLettersProcessor = DeadLettersProcessor<'T>.Disabled
+            DeadLettersProcessor = fun (_) -> DeadLettersProcessor<'T>.Disabled
             KeySharedPolicy = None
             BatchReceivePolicy = BatchReceivePolicy()
         }
