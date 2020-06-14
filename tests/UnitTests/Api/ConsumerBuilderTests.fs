@@ -51,9 +51,9 @@ module ConsumerBuilderTests =
                 let checkReceiverQueueSize receiverQueueSize =
                     builder()
                     |> configure(fun b -> b.ReceiverQueueSize receiverQueueSize)
-                    |> Expect.throwsWithMessage<ArgumentException> "ReceiverQueueSize should be greater than 0"
+                    |> Expect.throwsWithMessage<ArgumentException> "ReceiverQueueSize can't be negative."
 
-                [-1; 0] |> List.iter checkReceiverQueueSize
+                -1 |> checkReceiverQueueSize
             }
 
             test "SubscribeAsync throws an exception if Topic is blank" {

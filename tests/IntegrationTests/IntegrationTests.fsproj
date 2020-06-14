@@ -28,6 +28,7 @@
     <Compile Include="BackPressure.fs" />
     <Compile Include="MultiTopic.fs" />
     <Compile Include="Stats.fs" />
+    <Compile Include="ZeroQueueConsumer.fs" />
     <None Include="paket.references" />
     <Compile Include="Main.fs" />
   </ItemGroup>

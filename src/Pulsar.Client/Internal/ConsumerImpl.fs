@@ -33,7 +33,6 @@ type internal ConsumerMessage<'T> =
     | RedeliverUnacknowledged of RedeliverSet * AsyncReplyChannel<unit>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
     | SeekAsync of SeekData * AsyncReplyChannel<ResultOrException<unit>>
-    | SendFlowPermits of int
     | HasMessageAvailable of AsyncReplyChannel<Task<bool>>
     | ActiveConsumerChanged of bool
     | Close of AsyncReplyChannel<ResultOrException<unit>>
@@ -121,7 +120,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let increaseAvailablePermits delta =
         avalablePermits <- avalablePermits + delta
         if avalablePermits >= receiverQueueRefillThreshold then
-            this.Mb.Post(ConsumerMessage.SendFlowPermits avalablePermits)
+            this.SendFlowPermits avalablePermits
             avalablePermits <- 0
 
     /// Clear the internal receiver queue and returns the message id of what was the 1st message in the queue that was not seen by the application
@@ -350,57 +349,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         incomingMessagesSize <- incomingMessagesSize - msg.Data.LongLength
         msg
     
-    
-    let receiveIndividualMessagesFromBatch (rawMessage: RawMessage) (decompressedPayload: byte[]) schemaDecodeFunction =
-        let batchSize = rawMessage.Metadata.NumMessages
-        let acker = BatchMessageAcker(batchSize)
-        let mutable skippedMessages = 0
-        use stream = new MemoryStream(decompressedPayload)
-        use binaryReader = new BinaryReader(stream)
-        for i in 0..batchSize-1 do
-            Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
-            let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
-            let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
 
-            if isSameEntry(rawMessage.MessageId) && isPriorBatchIndex(%i) then
-                Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1} in batch", prefix, startMessageId)
-                skippedMessages <- skippedMessages + 1
-            else
-                let messageId =
-                    {
-                        rawMessage.MessageId with
-                            Partition = partitionIndex
-                            Type = Cumulative(%i, acker)
-                            TopicName = %""
-                    }
-                let msgKey = singleMessageMetadata.PartitionKey
-                let getValue () =
-                    keyValueProcessor
-                    |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, singleMessagePayload) :?> 'T)
-                    |> Option.defaultWith (fun() -> schemaDecodeFunction singleMessagePayload)
-                let properties =
-                    if singleMessageMetadata.Properties.Count > 0 then
-                                singleMessageMetadata.Properties
-                                |> Seq.map (fun prop -> (prop.Key, prop.Value))
-                                |> readOnlyDict
-                            else
-                                EmptyProps
-                let message = Message (
-                                messageId,
-                                singleMessagePayload,
-                                %msgKey,                        
-                                singleMessageMetadata.PartitionKeyB64Encoded,
-                                properties,
-                                getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                                %(int64 singleMessageMetadata.SequenceId),
-                                getValue
-                            )
-                if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
-                    deadLettersProcessor.AddMessage messageId message
-                enqueueMessage message
-
-        if skippedMessages > 0 then
-            increaseAvailablePermits skippedMessages
     
 
     let hasEnoughMessagesForBatchReceive() =
@@ -549,7 +498,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             elif rawMessage.Metadata.NumMessages > 0 then
                 // handle batch message enqueuing; uncompressed payload has all messages in batch
                 try
-                    receiveIndividualMessagesFromBatch rawMessage payload schemaDecodeFunction
+                    this.ReceiveIndividualMessagesFromBatch rawMessage payload schemaDecodeFunction
                 with ex ->
                     Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
                     raise <| BatchDeserializationException "Batch reading exception"
@@ -558,11 +507,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     replyWithMessage waitingChannel <| dequeueMessage()
             else
                 Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
-        
-    
-    let consumerIsReconnectedToBroker() =
-        Log.Logger.LogInformation("{0} subscribed to topic {1}", prefix, topicName)
-        avalablePermits <- 0
 
     let consumerOperations = {
         MessageReceived = fun (rawMessage) -> this.Mb.Post(MessageReceived rawMessage)
@@ -617,17 +561,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         try
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             response |> PulsarResponseType.GetEmpty
-                            consumerIsReconnectedToBroker()
+                            this.ConsumerIsReconnectedToBroker()
                             connectionHandler.ResetBackoff()
                             let initialFlowCount = consumerConfig.ReceiverQueueSize
                             subscribeTsc.TrySetResult() |> ignore
                             if initialFlowCount <> 0 then
-                                let flowCommand = Commands.newFlow consumerId initialFlowCount
-                                let! success = clientCnx.Send flowCommand
-                                if success then
-                                    Log.Logger.LogDebug("{0} initial flow sent {1}", prefix, initialFlowCount)
-                                else
-                                    raise (ConnectionFailedOnSend "FlowCommand")
+                                this.SendFlowPermits initialFlowCount
                         with Flatten ex ->
                             clientCnx.RemoveConsumer consumerId
                             Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
@@ -842,19 +781,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
                     return! loop ()
 
-                | ConsumerMessage.SendFlowPermits numMessages ->
-
-                    Log.Logger.LogDebug("{0} SendFlowPermits {1}", prefix, numMessages)
-                    match connectionHandler.ConnectionState with
-                    | Ready clientCnx ->
-                        let flowCommand = Commands.newFlow consumerId numMessages
-                        let! success = clientCnx.Send flowCommand
-                        if not success then
-                            Log.Logger.LogWarning("{0} failed SendFlowPermits {1}", prefix, numMessages)
-                    | _ ->
-                        Log.Logger.LogWarning("{0} not connected, skipping SendFlowPermits {1}", prefix, numMessages)
-                    return! loop ()
-
                 | ConsumerMessage.ReachedEndOfTheTopic ->
 
                     Log.Logger.LogWarning("{0} ReachedEndOfTheTopic", prefix)
@@ -971,7 +897,79 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startStatTimer()
 
-    member private this.Mb with get(): MailboxProcessor<ConsumerMessage<'T>> = mb
+    abstract member ReceiveIndividualMessagesFromBatch: RawMessage -> byte [] -> (byte [] -> 'T) -> unit
+    default this.ReceiveIndividualMessagesFromBatch (rawMessage: RawMessage) (decompressedPayload: byte[]) schemaDecodeFunction =
+        let batchSize = rawMessage.Metadata.NumMessages
+        let acker = BatchMessageAcker(batchSize)
+        let mutable skippedMessages = 0
+        use stream = new MemoryStream(decompressedPayload)
+        use binaryReader = new BinaryReader(stream)
+        for i in 0..batchSize-1 do
+            Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
+            let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
+            let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
+
+            if isSameEntry(rawMessage.MessageId) && isPriorBatchIndex(%i) then
+                Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1} in batch", prefix, startMessageId)
+                skippedMessages <- skippedMessages + 1
+            else
+                let messageId =
+                    {
+                        rawMessage.MessageId with
+                            Partition = partitionIndex
+                            Type = Cumulative(%i, acker)
+                            TopicName = %""
+                    }
+                let msgKey = singleMessageMetadata.PartitionKey
+                let getValue () =
+                    keyValueProcessor
+                    |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, singleMessagePayload) :?> 'T)
+                    |> Option.defaultWith (fun() -> schemaDecodeFunction singleMessagePayload)
+                let properties =
+                    if singleMessageMetadata.Properties.Count > 0 then
+                                singleMessageMetadata.Properties
+                                |> Seq.map (fun prop -> (prop.Key, prop.Value))
+                                |> readOnlyDict
+                            else
+                                EmptyProps
+                let message = Message (
+                                messageId,
+                                singleMessagePayload,
+                                %msgKey,                        
+                                singleMessageMetadata.PartitionKeyB64Encoded,
+                                properties,
+                                getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+                                %(int64 singleMessageMetadata.SequenceId),
+                                getValue
+                            )
+                if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
+                    deadLettersProcessor.AddMessage messageId message
+                enqueueMessage message
+
+        if skippedMessages > 0 then
+            increaseAvailablePermits skippedMessages
+    
+    abstract member ConsumerIsReconnectedToBroker: unit -> unit
+    default this.ConsumerIsReconnectedToBroker() =
+        Log.Logger.LogInformation("{0} subscribed to topic {1}", prefix, topicName)
+        avalablePermits <- 0
+    
+    member internal this.SendFlowPermits numMessages =
+        async {
+            Log.Logger.LogDebug("{0} SendFlowPermits {1}", prefix, numMessages)
+            match connectionHandler.ConnectionState with
+            | Ready clientCnx ->
+                let flowCommand = Commands.newFlow consumerId numMessages
+                let! success = clientCnx.Send flowCommand
+                if not success then
+                    Log.Logger.LogWarning("{0} failed SendFlowPermits {1}", prefix, numMessages)
+            | _ ->
+                Log.Logger.LogWarning("{0} not connected, skipping SendFlowPermits {1}", prefix, numMessages)
+        } |> Async.StartImmediate
+        
+    member internal this.Waiters with get() = waiters
+    
+    member internal this.Mb with get(): MailboxProcessor<ConsumerMessage<'T>> = mb
 
     member this.ConsumerId with get() = consumerId
 
@@ -1004,14 +1002,22 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                        createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
                        interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
         task {
-            let consumer = ConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex,
+            let consumer =
+                if consumerConfig.ReceiverQueueSize > 0 then
+                    ConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex,
+                                startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
+                                schema, schemaProvider, interceptors, cleanup)
+                else
+                    ZeroQueueConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex,
                                         startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
-                                        schema, schemaProvider, interceptors, cleanup)
+                                        schema, schemaProvider, interceptors, cleanup) :> ConsumerImpl<'T>
+
             do! consumer.InitInternal()
             return consumer
         }
 
-    member this.ReceiveFsharpAsync() =
+    abstract member ReceiveFsharpAsync: unit -> Async<ResultOrException<Message<'T>>>
+    default this.ReceiveFsharpAsync() =
         async {
             let exn = connectionHandler.CheckIfActive()
             if not (isNull exn) then
@@ -1156,3 +1162,46 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | Error ex -> reraize ex 
                 } |> ValueTask
 
+
+and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
+                           topicName: TopicName, connectionPool: ConnectionPool,
+                           partitionIndex: int, startMessageId: MessageId option, lookup: BinaryLookupService,
+                           startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
+                           schemaProvider: MultiVersionSchemaInfoProvider option,
+                           interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
+    
+    inherit ConsumerImpl<'T>(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, startMessageId, lookup,
+                             startMessageRollbackDuration, createTopicIfDoesNotExist, schema, schemaProvider, interceptors, cleanup)
+
+    override this.ConsumerIsReconnectedToBroker() =
+        base.ConsumerIsReconnectedToBroker()
+        if this.Waiters.Count > 0 then
+            this.SendFlowPermits this.Waiters.Count
+        
+    override this.ReceiveIndividualMessagesFromBatch (_: RawMessage) (_: byte[]) _ =
+        let prefix = sprintf "consumer(%u, %s, %i)" this.ConsumerId consumerConfig.ConsumerName partitionIndex
+        Log.Logger.LogError("{0} Closing consumer due to unsupported received batch-message with zero receiver queue size", prefix)
+        let _ = this.Mb.PostAndReply(ConsumerMessage.Close) 
+        let exn = 
+            sprintf "Unsupported Batch message with 0 size receiver queue for [%s]-[%s]"
+                consumerConfig.SubscriptionName consumerConfig.ConsumerName
+            |> InvalidMessageException
+        raise exn
+        
+    override this.ReceiveFsharpAsync() =
+        this.SendFlowPermits 1
+        base.ReceiveFsharpAsync() 
+    
+    interface IConsumer<'T> with
+        override this.ReceiveAsync() =
+            task {
+                match! this.ReceiveFsharpAsync() with
+                | Ok msg ->
+                    return msg
+                | Error exn -> return reraize exn
+            }
+        
+        override this.BatchReceiveAsync() =
+            task {
+                return raise (NotSupportedException "BatchReceiveAsync not supported.")
+            }
