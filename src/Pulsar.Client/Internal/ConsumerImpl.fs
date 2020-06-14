@@ -1203,5 +1203,5 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
         
         override this.BatchReceiveAsync() =
             task {
-                return reraize (NotSupportedException "BatchReceiveAsync not supported.")
+                return raise (NotSupportedException "BatchReceiveAsync not supported.")
             }

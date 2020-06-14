@@ -18,10 +18,12 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
             let consumerName = "ZeroQueue"
+            let producerName = "Producer4ZeroQueue"
             
             let! producer =
                 client.NewProducer()
                     .Topic(topicName)
+                    .ProducerName(producerName)
                     .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
             
@@ -33,18 +35,16 @@ let tests =
                     .SubscriptionName("test-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
 
-            let messages = generateMessages numberOfMessages consumerName
-            
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! producePredefinedMessages producer messages
+                        do! produceMessages producer numberOfMessages producerName 
                     }:> Task)
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! consumeAndVerifyMessages consumer consumerName messages
+                        do! consumeMessages consumer numberOfMessages consumerName
                     }:> Task)
 
             do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
