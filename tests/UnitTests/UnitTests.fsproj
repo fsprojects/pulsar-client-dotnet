@@ -5,7 +5,7 @@
     <IsPackable>false</IsPackable>
     <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+  <PropertyGroup>
     <NoWarn>3186</NoWarn>
   </PropertyGroup>
   <ItemGroup>
