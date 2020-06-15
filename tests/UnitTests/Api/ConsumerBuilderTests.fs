@@ -47,7 +47,7 @@ module ConsumerBuilderTests =
                 [null; ""; " "] |> List.iter checkConsumerName
             }
 
-            test "ReceiverQueueSize throws an exception for non-positive value" {
+            test "ReceiverQueueSize throws an exception for negative value" {
                 let checkReceiverQueueSize receiverQueueSize =
                     builder()
                     |> configure(fun b -> b.ReceiverQueueSize receiverQueueSize)
@@ -101,5 +101,14 @@ module ConsumerBuilderTests =
                         .ReadCompacted(true)
                         .SubscribeAsync()|> ignore)
                     |> Expect.throwsWithMessage<ArgumentException>  "Read compacted can only be used with exclusive of failover persistent subscriptions"
+            }
+            
+            test "PriorityLevel throws an exception for negative value" {
+                let checkPriorityLevel priorityLevel =
+                    builder()
+                    |> configure(fun b -> b.PriorityLevel priorityLevel)
+                    |> Expect.throwsWithMessage<ArgumentException> "PriorityLevel can't be negative."
+
+                -1 |> checkPriorityLevel
             }
         ]

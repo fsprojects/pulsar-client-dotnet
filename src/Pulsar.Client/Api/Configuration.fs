@@ -56,6 +56,7 @@ type ConsumerConfiguration<'T> =
         DeadLettersProcessor : TopicName -> IDeadLettersProcessor<'T>
         KeySharedPolicy: KeySharedPolicy option
         BatchReceivePolicy: BatchReceivePolicy
+        PriorityLevel: PriorityLevel
     }
     member this.SingleTopic with get() = this.Topics |> Seq.head
     static member Default =
@@ -80,6 +81,7 @@ type ConsumerConfiguration<'T> =
             DeadLettersProcessor = fun (_) -> DeadLettersProcessor<'T>.Disabled
             KeySharedPolicy = None
             BatchReceivePolicy = BatchReceivePolicy()
+            PriorityLevel = %0
         }
 
 type ProducerConfiguration =
