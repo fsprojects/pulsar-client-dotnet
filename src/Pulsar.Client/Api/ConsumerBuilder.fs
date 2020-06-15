@@ -4,6 +4,8 @@ open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open System
 open System.Threading.Tasks
+open FSharp.UMX
+
 
 type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, config: ConsumerConfiguration<'T>, consumerInterceptors: ConsumerInterceptors<'T>, schema: ISchema<'T>) =
 
@@ -192,6 +194,11 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
         else
             ConsumerInterceptors(Array.append consumerInterceptors.Interceptors interceptors)
             |> this.With
+    
+    member this.PriorityLevel (priorityLevel:int) =
+        { config with
+            PriorityLevel = %(priorityLevel |> invalidArgIfLessThanZero "PriorityLevel can't be negative.") }
+        |> this.With
     
     member this.SubscribeAsync(): Task<IConsumer<'T>> =
         createConsumerAsync(verify config, schema, consumerInterceptors)

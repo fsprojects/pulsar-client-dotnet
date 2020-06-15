@@ -9,7 +9,6 @@ open Expecto.Flip
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
 open System.Threading.Tasks
-open FSharp.UMX
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Serilog
@@ -245,64 +244,6 @@ let tests =
             Log.Debug("Finished Consumer seek earliest redelivers all messages")
         }
         
-        testAsync "Failover consumer works fine" {
-
-            Log.Debug("Started Failover consumer works fine")
-            let client = getClient()
-            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let producerName = "failoverProducer"
-            let consumerName1 = "failoverConsumer1"
-            let consumerName2 = "failoverConsumer2"
-            let numberOfMessages = 100
-
-            let! producer =
-                client.NewProducer()
-                    .Topic(topicName)
-                    .ProducerName(producerName)
-                    .CreateAsync() |> Async.AwaitTask
-
-            let! consumer1 =
-                client.NewConsumer()
-                    .Topic(topicName)
-                    .ConsumerName(consumerName1)
-                    .SubscriptionName("test-subscription")
-                    .SubscriptionType(SubscriptionType.Failover)
-                    .SubscribeAsync() |> Async.AwaitTask
-                    
-            let! consumer2 =
-                client.NewConsumer()
-                    .Topic(topicName)
-                    .ConsumerName(consumerName2)
-                    .SubscriptionName("test-subscription")
-                    .SubscriptionType(SubscriptionType.Failover)
-                    .SubscribeAsync() |> Async.AwaitTask
-
-            let producerTask =
-                Task.Run(fun () ->
-                    task {
-                        do! produceMessages producer (numberOfMessages/2) producerName
-                        do! Task.Delay(800)
-                        do! produceMessages producer (numberOfMessages/2) producerName
-                    }:> Task)
-
-            let consumer1Task =
-                Task.Run(fun () ->
-                    task {
-                        do! consumeMessages consumer1 (numberOfMessages/2) consumerName1
-                        do! Task.Delay(100)
-                        do! consumer1.DisposeAsync()
-                    }:> Task)
-            let consumer2Task =
-                Task.Run(fun () ->
-                    task {
-                        do! consumeMessages consumer2 (numberOfMessages/2) consumerName2
-                    }:> Task)
-
-            do! Task.WhenAll(producerTask, consumer1Task, consumer2Task) |> Async.AwaitTask
-
-            Log.Debug("Finished Failover consumer works fine")
-        }
-
         testAsync "Client, producer and consumer can't be accessed after close" {
 
             Log.Debug("Started 'Client, producer and consumer can't be accessed after close'")

@@ -557,7 +557,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 topicName.CompleteTopicName consumerConfig.SubscriptionName
                                 consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
                                 consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted msgIdData isDurable
-                                startMessageRollbackDuration createTopicIfDoesNotExist consumerConfig.KeySharedPolicy schema.SchemaInfo
+                                startMessageRollbackDuration createTopicIfDoesNotExist consumerConfig.KeySharedPolicy
+                                schema.SchemaInfo consumerConfig.PriorityLevel
                         try
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             response |> PulsarResponseType.GetEmpty
