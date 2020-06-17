@@ -1,4 +1,6 @@
 # pulsar-client-dotnet
+![Pulsar.Client](https://github.com/fsharplang-ru/pulsar-client-dotnet/raw/develop/images/pulsar-client-dotnet.png)
+
 [![.NET Core Windows](https://github.com/fsharplang-ru/pulsar-client-dotnet/workflows/.NET%20Core%20Windows/badge.svg)](https://github.com/fsharplang-ru/pulsar-client-dotnet/actions?query=workflow%3A%22.NET+Core+Windows%22)
 [![.NET Core Ubuntu](https://github.com/fsharplang-ru/pulsar-client-dotnet/workflows/.NET%20Core%20Ubuntu/badge.svg)](https://github.com/fsharplang-ru/pulsar-client-dotnet/actions?query=workflow%3A%22.NET+Core+Ubuntu%22)
 
