@@ -154,9 +154,9 @@ let tests =
             Log.Debug("Started Messages with same key always go to the same consumer, when KeyBased batching is enabled")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let consumerName1 = "PartitionedConsumer1"
-            let consumerName2 = "PartitionedConsumer2"
-            let producerName = "PartitionedProducer"
+            let consumerName1 = "BatchedPartitionedConsumer1"
+            let consumerName2 = "BatchedPartitionedConsumer2"
+            let producerName = "BatchedPartitionedProducer"
 
             let! producer =
                 client.NewProducer()
