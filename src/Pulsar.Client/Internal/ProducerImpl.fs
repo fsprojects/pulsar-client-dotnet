@@ -214,10 +214,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let getHighestSequenceId (pendingMessage: PendingMessage<'T>): SequenceId =
         %Math.Max(%pendingMessage.SequenceId, %pendingMessage.HighestSequenceId)
     
-    let processOpSendMsg {OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId } =
+    let processOpSendMsg {OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId; MessageKey = messageKey } =
         let (batchPayload, batchCallbacks) = opSendMsg;
         let batchSize = batchCallbacks.Length
-        let msgBuilder = MessageBuilder(batchPayload, batchPayload, None)
+        let msgBuilder = MessageBuilder(batchPayload, batchPayload, messageKey)
         let metadata = createMessageMetadata lowestSequenceId msgBuilder (Some batchSize)
         let encodedBatchPayload = compressionCodec.Encode msgBuilder.Payload
         if (encodedBatchPayload.Length > maxMessageSize) then

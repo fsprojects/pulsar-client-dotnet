@@ -5,6 +5,7 @@ open Expecto
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
 open System.Threading.Tasks
+open FSharp.UMX
 open Pulsar.Client.Common
 open Serilog
 open Pulsar.Client.IntegrationTests.Common
@@ -22,6 +23,7 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let producerName = "propsTestProducer"
             let consumerName = "propsTestConsumer"
+            let numMessages = 10
 
             let! producer =
                 client.NewProducer()
@@ -40,13 +42,13 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessagesWithProps producer 100 producerName
+                        do! produceMessagesWithProps producer numMessages producerName
                     }:> Task)
 
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessagesWithProps consumer 100 consumerName
+                        do! consumeMessagesWithProps consumer numMessages consumerName
                     }:> Task)
 
             do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
@@ -163,6 +165,7 @@ let tests =
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .BatchBuilder(BatchBuilder.KeyBased)
+                    .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(50.0))
                     .EnableBatching(true)
                     .CreateAsync() |> Async.AwaitTask
 

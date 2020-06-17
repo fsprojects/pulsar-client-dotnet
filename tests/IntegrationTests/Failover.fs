@@ -1,6 +1,7 @@
 ﻿module Pulsar.Client.IntegrationTests.Failover
 
 open System
+open System.Threading
 open Expecto
 open Expecto.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -75,12 +76,14 @@ let tests =
             Log.Debug("Started Failover consumer with PriorityLevel works fine")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let producerName = "failoverProducer"
-            let consumerName1 = "failoverConsumer1" //slave
-            let consumerName2 = "failoverConsumer2" //master
-            let consumerPriority1 = 1 //slave
-            let consumerPriority2 = 0 //master
-            let numberOfMessages = 10
+            let producerName = "priorityProducer"
+            let consumerName1 = "priorityConsumer1" //master
+            let consumerName2 = "priorityConsumer2" //slave
+            let consumerName3 = "priorityConsumer3" //slave
+            let consumerPriority1 = 0 //master
+            let consumerPriority2 = 2 //slave
+            let consumerPriority3 = 1 //slave
+            let numberOfMessages = 10 
 
             let! producer =
                 client.NewProducer()
@@ -106,29 +109,50 @@ let tests =
                     .SubscriptionType(SubscriptionType.Failover)
                     .PriorityLevel(consumerPriority2)
                     .SubscribeAsync() |> Async.AwaitTask
+                    
+            let! consumer3 =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(consumerName3)
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Failover)
+                    .PriorityLevel(consumerPriority3)
+                    .SubscribeAsync() |> Async.AwaitTask
 
+            do! Task.Delay(1000) |> Async.AwaitTask
+            
             let producerTask =
                 Task.Run(fun () ->
                     task {
                         do! produceMessages producer numberOfMessages producerName
                         do! produceMessages producer numberOfMessages producerName
                     }:> Task)
-
-            let consumer2Task =
-                Task.Run(fun () ->
-                    task {
-                        do! consumeMessages consumer2 numberOfMessages consumerName2
-                        do! Task.Delay(100)
-                        do! consumer2.DisposeAsync()
-                    }:> Task)
                 
             let consumer1Task =
                 Task.Run(fun () ->
                     task {
                         do! consumeMessages consumer1 numberOfMessages consumerName1
+                        do! Task.Delay(100)
+                        do! consumer1.DisposeAsync()
+                    }:> Task)
+                
+            
+            let consumer2Task =
+                Task.Run(fun () ->
+                    task {
+                        do! consumeMessages consumer2 numberOfMessages consumerName2
+                        failwith "Wrong consumer to failover"
+                    }:> Task)
+                
+            let consumer3Task =
+                Task.Run(fun () ->
+                    task {
+                        do! consumeMessages consumer3 numberOfMessages consumerName3
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumer1Task, consumer2Task) |> Async.AwaitTask
+            let! failoverTask = Task.WhenAny(consumer2Task, consumer3Task) |> Async.AwaitTask
+            
+            do! Task.WhenAll(producerTask, consumer1Task, failoverTask) |> Async.AwaitTask
 
             Log.Debug("Finished Failover consumer with PriorityLevel works fine")
         }
