@@ -33,6 +33,8 @@
     <WarningsAsErrors>3239;0025</WarningsAsErrors>
     <DebugType>portable</DebugType>
     <NoWarn>3186</NoWarn>
+    <PackageIcon>pulsar-client-dotnet.png</PackageIcon>
+    <PackageIconUrl />
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Avro\Avro.main.csproj" PrivateAssets="all" />
@@ -41,6 +43,10 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
+    <None Include="..\..\images\pulsar-client-dotnet.png">
+      <Pack>True</Pack>
+      <PackagePath />
+    </None>
     <None Include="paket.references" />
     <Compile Include="Common\UMX.fs" />
     <Compile Include="Common\Tools.fs" />
