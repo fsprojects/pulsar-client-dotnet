@@ -149,6 +149,102 @@ let tests =
             Log.Debug("Finished Messages with same key always go to the same consumer")
         }
 
+        testAsync "Messages with same key always go to the same consumer, when KeyBased batching is enabled" {
+
+            Log.Debug("Started Messages with same key always go to the same consumer, when KeyBased batching is enabled")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let consumerName1 = "PartitionedConsumer1"
+            let consumerName2 = "PartitionedConsumer2"
+            let producerName = "PartitionedProducer"
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .BatchBuilder(BatchBuilder.KeyBased)
+                    .EnableBatching(true)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer1 =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.KeyShared)
+                    .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
+                    .ConsumerName(consumerName1)
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let! consumer2 =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.KeyShared)
+                    .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
+                    .ConsumerName(consumerName2)
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        let firstKey = "111111"
+                        let secondKey = "444444"
+                        let getMessageBuilder key i =
+                            producer.NewMessage(Encoding.UTF8.GetBytes(key + "Hello" + i), key)
+                        let! _ = producer.SendAndForgetAsync(getMessageBuilder firstKey "0")
+                        let! _ = producer.SendAndForgetAsync(getMessageBuilder secondKey "0")
+                        let! _ = producer.SendAndForgetAsync(getMessageBuilder firstKey "1")
+                        let! _ = producer.SendAndForgetAsync(getMessageBuilder secondKey "1")
+                        let! _ = producer.SendAndForgetAsync(getMessageBuilder secondKey "2")
+                        let! _ = producer.SendAndForgetAsync(getMessageBuilder firstKey "2")
+                        ()
+                    }:> Task)
+
+            let consumer1Task =
+                Task.Run(fun () ->
+                    task {
+                        let! msg1 = consumer1.ReceiveAsync()
+                        let! msg2 = consumer1.ReceiveAsync()
+                        let! msg3 = consumer1.ReceiveAsync()
+                        let prefix = (string msg1.Key).Substring(0,6)
+                        [msg1;msg2;msg3]
+                            |> List.iteri
+                            (fun i elem ->
+                                let strKey = string elem.Key
+                                let message = Encoding.UTF8.GetString(elem.Data)
+                                if (strKey = prefix && message.StartsWith(prefix) && message.EndsWith(i.ToString())) |> not then
+                                    failwith <| sprintf "Incorrect key %s prefix %s consumer %s" strKey prefix consumerName1
+                                else
+                                    ()
+                            )
+                        Log.Debug("consumer1Task finished")
+                    }:> Task)
+
+            let consumer2Task =
+                Task.Run(fun () ->
+                    task {
+                        let! msg1 = consumer2.ReceiveAsync()
+                        let! msg2 = consumer2.ReceiveAsync()
+                        let! msg3 = consumer2.ReceiveAsync()
+                        let prefix = (string msg1.Key).Substring(0,6)
+                        [msg1;msg2;msg3]
+                            |> List.iteri
+                            (fun i elem ->
+                                let strKey = string elem.Key
+                                let message = Encoding.UTF8.GetString(elem.Data)
+                                if (strKey = prefix && message.StartsWith(prefix) && message.EndsWith(i.ToString())) |> not then
+                                    failwith <| sprintf "Incorrect key %s prefix %s consumer %s" strKey prefix consumerName2
+                                else
+                                    ()
+                            )
+                        Log.Debug("consumer2Task finished")
+                    }:> Task)
+
+            do! Task.WhenAll(producerTask, consumer1Task, consumer2Task) |> Async.AwaitTask
+
+            Log.Debug("Finished Messages with same key always go to the same consumer, when KeyBased batching is enabled")
+        }
+
         // Should be run manually, first with commented consumer, then trigger compaction, then with commented producer
         ptestAsync "Compacting works as expected" {
 
