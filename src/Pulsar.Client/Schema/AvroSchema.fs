@@ -6,22 +6,38 @@ open Avro.Generic
 open Avro.IO
 open Avro.Reflect
 open System.IO
+open Avro.Specific
 open Pulsar.Client.Api
 open AvroSchemaGenerator
 open Pulsar.Client.Common
 
-type internal AvroSchema<'T> private (stringSchema) =
+type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T>, avroWriter: DatumWriter<'T>) =
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
-    let avroSchema = Schema.Parse(stringSchema)
-    let avroWriter = ReflectWriter<'T>(avroSchema)
-    let avroReader = ReflectReader<'T>(avroSchema, avroSchema)
     
-    new () = AvroSchema(typeof<'T>.GetSchema())
+    new () =
+         let tpe = typeof<'T>
+         if typeof<ISpecificRecord>.IsAssignableFrom(tpe) then
+            let avroSchema = downcast tpe.GetField("_SCHEMA").GetValue(null) :Schema
+            let avroWriter = SpecificDatumWriter<'T>(avroSchema)
+            // note afaik for schema evolutions, the writerSchema (first param) should come from the topic
+            // (i.e the schema the value was written in) 
+            let avroReader = SpecificDatumReader<'T>(avroSchema, avroSchema)
+            AvroSchema(avroSchema, avroReader, avroWriter)
+         else
+            let schemaString = tpe.GetSchema()
+            AvroSchema(schemaString)
+
+    new (schemaString) =
+        let avroSchema = Schema.Parse(schemaString)
+        let avroWriter = ReflectWriter<'T>(avroSchema)
+        let avroReader = ReflectReader<'T>(avroSchema, avroSchema)
+        AvroSchema(avroSchema, avroReader, avroWriter)
+        
     override this.SchemaInfo = {
         Name = ""
         Type = SchemaType.AVRO
-        Schema = stringSchema |> Encoding.UTF8.GetBytes
+        Schema = schema.ToString() |> Encoding.UTF8.GetBytes
         Properties = Map.empty
     }
     override this.SupportSchemaVersioning = true
