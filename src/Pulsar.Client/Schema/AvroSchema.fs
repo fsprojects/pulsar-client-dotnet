@@ -20,8 +20,6 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
          if typeof<ISpecificRecord>.IsAssignableFrom(tpe) then
             let avroSchema = downcast tpe.GetField("_SCHEMA").GetValue(null) :Schema
             let avroWriter = SpecificDatumWriter<'T>(avroSchema)
-            // note afaik for schema evolutions, the writerSchema (first param) should come from the topic
-            // (i.e the schema the value was written in) 
             let avroReader = SpecificDatumReader<'T>(avroSchema, avroSchema)
             AvroSchema(avroSchema, avroReader, avroWriter)
          else
@@ -51,7 +49,11 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
         use stream = new MemoryStream(bytes)
         avroReader.Read(Unchecked.defaultof<'T>, BinaryDecoder(stream))        
     override this.GetSpecificSchema stringSchema =
-        AvroSchema(stringSchema) :> ISchema<'T>
+        let writtenSchema = Schema.Parse(stringSchema)
+        if avroReader :? SpecificDatumReader<'T> then
+            AvroSchema(schema, SpecificDatumReader(writtenSchema, schema), avroWriter) :> ISchema<'T>
+        else
+            AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema), avroWriter) :> ISchema<'T>
         
 type internal GenericAvroSchema(topicSchema: TopicSchema) =
     inherit ISchema<GenericRecord>()    
