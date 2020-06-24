@@ -37,6 +37,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" />
     <ProjectReference Include="..\..\src\Pulsar.Client\Pulsar.Client.fsproj" />
+    <ProjectReference Include="..\AvroGenerated\AvroGenerated.csproj" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>

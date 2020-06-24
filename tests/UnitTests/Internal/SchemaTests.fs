@@ -2,6 +2,7 @@ module Pulsar.Client.UnitTests.Internal.SchemaTests
 
 open System
 open System.Collections.Generic
+open AvroGenerated
 open Expecto
 open Expecto.Flip
 open ProtoBuf
@@ -181,6 +182,28 @@ let tests =
                     |> schema.Decode
                 Expect.equal "" input.X output.X
                 Expect.sequenceEqual "" input.Y output.Y
+        }
+        
+        test "Avro schema works fine with Avro generated classes" {
+            let inputs = [ SampleClass(
+                                          value1 = 1L,
+                                          value2 = "some string",
+                                          value3 = SampleEnum.S1,
+                                          value4 = List(["some string list"]),
+                                          value5 = SampleNestedClass( a = 1L, b = "s")
+                                      ) ]
+            for input in inputs do
+                let schema = Schema.AVRO<SampleClass>()
+                let output =
+                    input
+                    |> schema.Encode
+                    |> schema.Decode
+                Expect.equal "" input.value1 output.value1
+                Expect.equal "" input.value2 output.value2
+                Expect.equal "" input.value3 output.value3
+                Expect.sequenceEqual "" input.value4 output.value4
+                Expect.equal "" input.value5.a output.value5.a
+                Expect.equal "" input.value5.b output.value5.b
         }
         
         test "Protobuf schema works fine" {
