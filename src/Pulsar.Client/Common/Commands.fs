@@ -1,5 +1,6 @@
 ﻿module internal Pulsar.Client.Common.Commands
 
+open System.Collections.Generic
 open pulsar.proto
 open FSharp.UMX
 open System
@@ -110,9 +111,13 @@ let newSend (producerId : ProducerId) (sequenceId : SequenceId) (highestSequence
     let command = BaseCommand(``type`` = CommandType.Send, Send = request)
     serializePayloadCommand command msgMetadata payload
 
-let newAck (consumerId : ConsumerId) (ledgerId: LedgerId) (entryId: EntryId) (ackType : AckType) : Payload =
+let newAck (consumerId : ConsumerId) (ledgerId: LedgerId) (entryId: EntryId) (ackType : AckType)
+    (properties: IReadOnlyDictionary<string, int64>) : Payload =
     let request = CommandAck(ConsumerId = %consumerId, ack_type = ackType.ToCommandAckType())
     request.MessageIds.Add(MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId))
+    properties
+    |> Seq.map(fun (KeyValue(key, value)) -> KeyLongValue(Key = key, Value = uint64 value))
+    |> request.Properties.AddRange
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 
@@ -124,10 +129,12 @@ let newErrorAck (consumerId : ConsumerId) (ledgerId: LedgerId) (entryId: EntryId
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 
-let newMultiMessageAck (consumerId : ConsumerId) (messages: seq<LedgerId*EntryId>) : Payload =
+let newMultiMessageAck (consumerId : ConsumerId) (messages: seq<LedgerId*EntryId*int64[]>) : Payload =
     let request = CommandAck(ConsumerId = %consumerId, ack_type = CommandAck.AckType.Individual)
     messages
-    |> Seq.map (fun (ledgerId, entryId) -> MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId))
+    |> Seq.map (fun (ledgerId, entryId, ackSets) ->
+            MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId, AckSets = ackSets)
+        )
     |> request.MessageIds.AddRange
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command

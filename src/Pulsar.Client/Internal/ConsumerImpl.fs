@@ -234,7 +234,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         else
             AcknowledgmentsGroupingTracker.NonPersistentAcknowledgmentGroupingTracker
 
-    let sendAcknowledge (messageId: MessageId) ackType =
+    let sendAcknowledge (messageId: MessageId) ackType properties =
         async {
             match ackType with
             | AckType.Individual ->
@@ -243,20 +243,22 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     unAckedMessageTracker.Remove(messageId) |> ignore
                     stats.IncrementNumAcksSent(1)
                 | Cumulative (_, batch) ->
-                    unAckedMessageTracker.Remove(messageId) |> ignore
-                    stats.IncrementNumAcksSent(batch.GetBatchSize())
+                    let batchSize = batch.GetBatchSize()
+                    for i in 0..batchSize-1 do
+                        unAckedMessageTracker.Remove({messageId with Type = Cumulative(%i, batch)}) |> ignore
+                    stats.IncrementNumAcksSent(batchSize)
                 interceptors.OnAcknowledge(this, messageId, null)
             | AckType.Cumulative ->
                 interceptors.OnAcknowledgeCumulative(this, messageId, null)
                 let count = unAckedMessageTracker.RemoveMessagesTill(messageId)
                 stats.IncrementNumAcksSent(count)
-            do! acksGroupingTracker.AddAcknowledgment(messageId, ackType)
+            do! acksGroupingTracker.AddAcknowledgment(messageId, ackType, properties)
             // Consumer acknowledgment operation immediately succeeds. In any case, if we're not able to send ack to broker,
             // the messages will be re-delivered
             deadLettersProcessor.RemoveMessage messageId
         }
 
-    let markAckForBatchMessage (msgId: MessageId) ackType (batchDetails: BatchDetails) =
+    let markAckForBatchMessage (msgId: MessageId) (batchDetails: BatchDetails) ackType properties =
         let (batchIndex, batchAcker) = batchDetails
         let isAllMsgsAcked =
             match ackType with
@@ -274,7 +276,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             match ackType with
             | AckType.Cumulative ->
                 if not batchAcker.PrevBatchCumulativelyAcked then
-                    sendAcknowledge msgId.PrevBatchMessageId ackType |> Async.StartImmediate
+                    sendAcknowledge msgId.PrevBatchMessageId ackType properties |> Async.StartImmediate
                     Log.Logger.LogDebug("{0} update PrevBatchCumulativelyAcked", prefix)
                     batchAcker.PrevBatchCumulativelyAcked <- true
                 interceptors.OnAcknowledgeCumulative(this, msgId, null)
@@ -284,18 +286,18 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 prefix, ackType, outstandingAcks, batchSize)
             false
 
-    let trySendAcknowledge ackType messageId =
+    let trySendAcknowledge ackType properties messageId =
         async {
             match messageId.Type with
-            | Cumulative batchDetails when not (markAckForBatchMessage messageId ackType batchDetails) ->
+            | Cumulative batchDetails when not (markAckForBatchMessage messageId batchDetails ackType properties) ->
                 // other messages in batch are still pending ack.
                 ()
             | _ ->
-                do! sendAcknowledge messageId ackType
+                do! sendAcknowledge messageId ackType properties
                 Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
         }
 
-    let trySendIndividualAcknowledge = trySendAcknowledge AckType.Individual
+    let trySendIndividualAcknowledge = trySendAcknowledge AckType.Individual EmptyProperties
 
     let isPriorEntryIndex idx =
         match startMessageId with
@@ -334,7 +336,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let getNewIndividualMsgIdWithPartition messageId =
         { messageId with Type = Individual; Partition = partitionIndex; TopicName = %"" }
 
-    let processDeadLetters (messageId : MessageId) =
+    let processPossibleToDLQ (messageId : MessageId) =
         task {
             let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId trySendIndividualAcknowledge
             return deadMessageProcessed
@@ -348,9 +350,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         let msg = incomingMessages.Dequeue()
         incomingMessagesSize <- incomingMessagesSize - msg.Data.LongLength
         msg
-    
-
-    
 
     let hasEnoughMessagesForBatchReceive() =
         let batchReceivePolicy = consumerConfig.BatchReceivePolicy
@@ -684,7 +683,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | ConsumerMessage.Acknowledge (messageId, ackType) ->
 
                     Log.Logger.LogDebug("{0} Acknowledge {1} {2}", prefix, messageId, ackType)
-                    do! trySendAcknowledge ackType messageId
+                    do! trySendAcknowledge ackType EmptyProperties messageId
                     return! loop ()
                     
                 | ConsumerMessage.NegativeAcknowledge messageId ->
@@ -707,12 +706,16 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             for chunk in chunks do
                                 let nonDeadBatch = ResizeArray<MessageId>()
                                 for messageId in chunk do
-                                    let! isDead = processDeadLetters messageId |> Async.AwaitTask
+                                    let! isDead = processPossibleToDLQ messageId |> Async.AwaitTask
                                     if not isDead then
                                         nonDeadBatch.Add messageId
                                 if nonDeadBatch.Count > 0 then
                                     let command = Commands.newRedeliverUnacknowledgedMessages consumerId (
-                                                        Some(nonDeadBatch |> Seq.map (fun msgId -> MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)))
+                                                        nonDeadBatch
+                                                        |> Seq.map (fun msgId ->
+                                                            MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)
+                                                            )
+                                                        |> Some
                                                     )
                                     let! success = clientCnx.Send command
                                     if success then

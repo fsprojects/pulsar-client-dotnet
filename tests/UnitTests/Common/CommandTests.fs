@@ -178,7 +178,7 @@ module CommandsTests =
                 let consumerId = %1UL
 
                 let totalSize, commandSize, command =
-                    serializeDeserializeSimpleCommand (newAck consumerId messageId.LedgerId messageId.EntryId AckType.Individual)
+                    serializeDeserializeSimpleCommand (newAck consumerId messageId.LedgerId messageId.EntryId AckType.Individual EmptyProperties)
 
                 totalSize |> Expect.equal "" 18
                 commandSize |> Expect.equal "" 14

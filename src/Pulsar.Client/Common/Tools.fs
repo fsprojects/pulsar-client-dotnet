@@ -11,6 +11,7 @@ let MemoryStreamManager = RecyclableMemoryStreamManager()
 let MagicNumber = int16 0x0e01
 let RandomGenerator = Random()
 let EmptyProps: IReadOnlyDictionary<string, string> = readOnlyDict []
+let EmptyProperties: IReadOnlyDictionary<string, int64> = readOnlyDict []
 
 // Converts
 
