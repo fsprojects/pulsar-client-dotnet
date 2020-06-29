@@ -53,12 +53,14 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
         if avroReader :? SpecificDatumReader<'T> then
             AvroSchema(schema, SpecificDatumReader(writtenSchema, schema), avroWriter) :> ISchema<'T>
         else
-            //Avro doesnt figure that the written classname might be different from the reader classname
-            //Seems like it might be a bug in ReflectReader, but this works around that
-            let cache = ClassCache()
-            if not (writtenSchema.Fullname.Equals(schema.Fullname)) then
+            if writtenSchema.Fullname <> schema.Fullname then
+                // Avro doesnt figure that the written classname might be different from the reader classname
+                // Seems like it might be a bug in ReflectReader, but this works around that
+                let cache = ClassCache()
                 cache.LoadClassCache(typeof<'T>, writtenSchema);
-            AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema, cache), avroWriter) :> ISchema<'T>
+                AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema, cache), avroWriter) :> ISchema<'T>
+            else
+                AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema), avroWriter) :> ISchema<'T>
         
 type internal GenericAvroSchema(topicSchema: TopicSchema) =
     inherit ISchema<GenericRecord>()    
