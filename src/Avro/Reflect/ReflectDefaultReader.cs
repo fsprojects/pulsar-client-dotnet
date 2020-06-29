@@ -71,6 +71,12 @@ namespace Avro.Reflect
             }
 
             _classCache.LoadClassCache(objType, readerSchema);
+            //bug in avro C# - it makes the assumption that reader and write will be the same FQN which if you are using alias, might not be the case.
+            //Therefore check and register the writer if required. 
+            if (!writerSchema.Fullname.Equals(readerSchema.Fullname))
+            {
+                _classCache.LoadClassCache(objType, writerSchema);
+            }
         }
 
         /// <summary>

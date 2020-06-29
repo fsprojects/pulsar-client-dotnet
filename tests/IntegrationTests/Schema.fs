@@ -2,6 +2,7 @@ module Pulsar.Client.IntegrationTests.Schema
 
 open System.ComponentModel
 open System.ComponentModel.DataAnnotations
+open AvroSchemaGenerator.Attributes
 open Expecto
 open Expecto.Flip
 open ProtoBuf
@@ -19,7 +20,7 @@ type SimpleRecord =
         Age: int
     }
     
-[<CLIMutable>]
+[<CLIMutable; Aliases("SimpleRecord")>]
 type SimpleRecord2 =
     {
         Name: string
