@@ -29,6 +29,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Pulsar.Client.Proto", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Avro.main", "src\Avro\Avro.main.csproj", "{12747DA9-821C-44B7-9228-6AE965BE28C8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvroGenerated", "tests\AvroGenerated\AvroGenerated.csproj", "{5D85B9F0-6CA4-4E4D-A99E-DCC9BD10BFF5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -63,6 +65,8 @@ Global
 		{12747DA9-821C-44B7-9228-6AE965BE28C8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{12747DA9-821C-44B7-9228-6AE965BE28C8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{12747DA9-821C-44B7-9228-6AE965BE28C8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5D85B9F0-6CA4-4E4D-A99E-DCC9BD10BFF5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5D85B9F0-6CA4-4E4D-A99E-DCC9BD10BFF5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -75,6 +79,7 @@ Global
 		{ED95CEE6-3023-4D09-8570-425390D351B3} = {A69013AE-F033-4D8F-8C84-D238F1E7C45B}
 		{07E28F24-6660-4805-BF92-89EEA4711CA2} = {A69013AE-F033-4D8F-8C84-D238F1E7C45B}
 		{12747DA9-821C-44B7-9228-6AE965BE28C8} = {A69013AE-F033-4D8F-8C84-D238F1E7C45B}
+		{5D85B9F0-6CA4-4E4D-A99E-DCC9BD10BFF5} = {57300837-ACF8-47EF-9271-E72D12D5D4A4}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {5F50C1BF-3713-4686-906F-8051FD013D96}

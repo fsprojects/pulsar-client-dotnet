@@ -2,9 +2,9 @@ STORAGE: NONE
 RESTRICTION: == netstandard2.0
 NUGET
   remote: https://api.nuget.org/v3/index.json
-    AvroSchemaGenerator (1.5.3)
+    AvroSchemaGenerator (1.6)
       System.ComponentModel.Annotations (>= 4.7)
-      System.Text.Json (>= 4.7.1)
+      System.Text.Json (>= 4.7.2)
     FSharp.Core (4.7.2)
     FSharp.UMX (1.0)
       FSharp.Core (>= 4.3.4)

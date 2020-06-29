@@ -1,0 +1,16 @@
+﻿{
+  "type": "record",
+  "name": "SampleClass",
+  "namespace": "AvroGenerated",
+  "fields" : [
+    {"name": "value1", "type": "long"},
+    {"name": "value2", "type": ["null", "string"]},
+    {"name": "value3", "type": { "name": "SampleEnum", "type": "enum", "symbols": ["S1", "S2", "S3"]}},
+    {"name": "value4", "type": {"type": "array", "items": "string"}},
+    {"name": "value5", "type": {"name": "SampleNestedClass", "type": "record", "fields" : [
+      {"name": "a", "type": "long"},
+      {"name": "b", "type": "string"}
+    ]
+    }}
+  ]
+}
