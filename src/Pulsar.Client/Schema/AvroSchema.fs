@@ -18,7 +18,7 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
     new () =
          let tpe = typeof<'T>
          if typeof<ISpecificRecord>.IsAssignableFrom(tpe) then
-            let avroSchema = downcast tpe.GetField("_SCHEMA").GetValue(null) :Schema
+            let avroSchema = tpe.GetField("_SCHEMA").GetValue(null) :?> Schema
             let avroWriter = SpecificDatumWriter<'T>(avroSchema)
             let avroReader = SpecificDatumReader<'T>(avroSchema, avroSchema)
             AvroSchema(avroSchema, avroReader, avroWriter)
@@ -57,7 +57,7 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
                 // Avro doesnt figure that the written classname might be different from the reader classname
                 // Seems like it might be a bug in ReflectReader, but this works around that
                 let cache = ClassCache()
-                cache.LoadClassCache(typeof<'T>, writtenSchema);
+                cache.LoadClassCache(typeof<'T>, writtenSchema)
                 AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema, cache), avroWriter) :> ISchema<'T>
             else
                 AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema), avroWriter) :> ISchema<'T>
