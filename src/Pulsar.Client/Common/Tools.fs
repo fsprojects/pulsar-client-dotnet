@@ -1,6 +1,8 @@
 ﻿[<AutoOpen>]
 module internal Pulsar.Client.Common.Tools
 
+open System
+open System.Collections
 open System.Net
 open System
 open Microsoft.IO
@@ -99,3 +101,12 @@ let signSafeMod dividend divisor =
     if modulo < 0
     then modulo + divisor
     else modulo
+    
+let toLongArray (bitSet: BitArray) =
+    let resultArrayLengthLongs = bitSet.Length / 64 + (if bitSet.Length % 64 = 0 then 0 else 1)
+    let resultArray = Array.create (resultArrayLengthLongs * 8) 0uy
+    bitSet.CopyTo(resultArray, 0)
+    resultArray
+    |> Array.chunkBySize 8
+    |> Array.map (fun arr ->
+        BitConverter.ToInt64(arr, 0))

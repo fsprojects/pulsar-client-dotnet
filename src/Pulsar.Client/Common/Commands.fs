@@ -112,9 +112,9 @@ let newSend (producerId : ProducerId) (sequenceId : SequenceId) (highestSequence
     serializePayloadCommand command msgMetadata payload
 
 let newAck (consumerId : ConsumerId) (ledgerId: LedgerId) (entryId: EntryId) (ackType : AckType)
-    (properties: IReadOnlyDictionary<string, int64>) : Payload =
+    (properties: IReadOnlyDictionary<string, int64>) (ackSet: AckSet) : Payload =
     let request = CommandAck(ConsumerId = %consumerId, ack_type = ackType.ToCommandAckType())
-    request.MessageIds.Add(MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId))
+    request.MessageIds.Add(MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId, AckSets = ackSet))
     properties
     |> Seq.map(fun (KeyValue(key, value)) -> KeyLongValue(Key = key, Value = uint64 value))
     |> request.Properties.AddRange
@@ -129,11 +129,11 @@ let newErrorAck (consumerId : ConsumerId) (ledgerId: LedgerId) (entryId: EntryId
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 
-let newMultiMessageAck (consumerId : ConsumerId) (messages: seq<LedgerId*EntryId*int64[]>) : Payload =
+let newMultiMessageAck (consumerId : ConsumerId) (messages: seq<LedgerId*EntryId*AckSet>) : Payload =
     let request = CommandAck(ConsumerId = %consumerId, ack_type = CommandAck.AckType.Individual)
     messages
-    |> Seq.map (fun (ledgerId, entryId, ackSets) ->
-            MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId, AckSets = ackSets)
+    |> Seq.map (fun (ledgerId, entryId, ackSet) ->
+            MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId, AckSets = ackSet)
         )
     |> request.MessageIds.AddRange
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)

@@ -290,8 +290,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         async {
             match messageId.Type with
             | Cumulative batchDetails when not (markAckForBatchMessage messageId batchDetails ackType properties) ->
+                do! acksGroupingTracker.AddBatchIndexAcknowledgment(messageId, ackType, properties)                
                 // other messages in batch are still pending ack.
-                ()
             | _ ->
                 do! sendAcknowledge messageId ackType properties
                 Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)

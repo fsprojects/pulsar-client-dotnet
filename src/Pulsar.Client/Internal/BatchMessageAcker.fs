@@ -4,29 +4,31 @@ open System.Collections
 open FSharp.UMX
 open Pulsar.Client.Common
 
-type BatchMessageAcker(batchSize: int) =
+type BatchMessageAcker internal (batchSize: int) =
     let bitSet = BitArray(batchSize, true)
     let mutable unackedCount = batchSize
 
-    member this.AckIndividual (batchIndex: BatchIndex) =
+    member internal this.AckIndividual (batchIndex: BatchIndex) =
         let previous = bitSet.[%batchIndex]
         if previous then
             bitSet.Set(%batchIndex, false)
             unackedCount <- unackedCount - 1
         unackedCount = 0
 
-    member this.AckGroup (batchIndex: BatchIndex) =
+    member internal this.AckGroup (batchIndex: BatchIndex) =
         for i in 0 .. %batchIndex do
             if bitSet.[i] then
                 bitSet.[i] <- false
                 unackedCount <- unackedCount - 1
         unackedCount = 0
-
+    
+    member internal this.BitSet = bitSet
+    
     // debug purpose
-    member this.GetOutstandingAcks() =
+    member internal this.GetOutstandingAcks() =
         unackedCount
 
-    member this.GetBatchSize() =
+    member internal this.GetBatchSize() =
         batchSize
 
     member val PrevBatchCumulativelyAcked = false with get, set

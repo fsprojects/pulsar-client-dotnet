@@ -112,6 +112,8 @@ type MessageIdType =
     | Individual
     | Cumulative of BatchDetails
 
+type AckSet = int64[]
+
 type MessageId =
     {
         LedgerId: LedgerId
