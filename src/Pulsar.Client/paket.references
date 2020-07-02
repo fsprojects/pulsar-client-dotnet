@@ -15,3 +15,4 @@ ZstdNet
 System.Text.Json
 Microsoft.Extensions.Caching.Memory
 AvroSchemaGenerator
+Apache.Avro
