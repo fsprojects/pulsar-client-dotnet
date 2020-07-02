@@ -52,9 +52,14 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
     
     let prefix = prefix + " GroupingTracker"
 
+    let getAckData (msgId: MessageId) =
+        let (_, acker) = getBatchDetails msgId.Type
+        let ackSet = acker.BitSet |> toLongArray
+        (msgId.LedgerId, msgId.EntryId, ackSet)
+    
     let flush () =
         async {
-            if not cumulativeAckFlushRequired && pendingIndividualAcks.Count = 0 then
+            if not cumulativeAckFlushRequired && pendingIndividualAcks.Count = 0 && pendingIndividualBatchIndexAcks.Count = 0 then
                 return ()
             else
                 let! result =
@@ -65,8 +70,8 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                             if cumulativeAckFlushRequired then
                                 let ackSet =
                                     if lastCumulativeAckIsBatch then
-                                        let (_, batcher) = lastCumulativeAck.Type |> getBatchDetails
-                                        batcher.BitSet |> toLongArray
+                                        let (_, acker) = lastCumulativeAck.Type |> getBatchDetails
+                                        acker.BitSet |> toLongArray
                                     else
                                         null
                                 let payload = Commands.newAck consumerId lastCumulativeAck.LedgerId lastCumulativeAck.EntryId
@@ -74,7 +79,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                 let! ackSuccess = sendAckPayload cnx payload
                                 if ackSuccess then
                                     cumulativeAckFlushRequired <- false
-                                    Log.Logger.LogDebug("{0} cumulativeAckFlush was required newAck completed", prefix)
+                                    Log.Logger.LogDebug("{0} newAck completed, acked {1} cumulatively", prefix, lastCumulativeAck)
                                 success <- ackSuccess
                             let allMultiackMessages = ResizeArray()
                             if success && pendingIndividualAcks.Count > 0 then
@@ -98,21 +103,18 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                                 messageId.LedgerId = prevoiusMessageId.LedgerId &&
                                                  messageId.Partition = prevoiusMessageId.Partition) then
                                                 ()
-                                            else                                            
-                                                let (_, batcher) = getBatchDetails prevoiusMessageId.Type
-                                                let ackSet = batcher.BitSet |> toLongArray
-                                                yield (prevoiusMessageId.LedgerId, prevoiusMessageId.EntryId, ackSet)                                            
+                                            else
+                                                yield getAckData prevoiusMessageId
                                             prevoiusMessageId <- messageId
-                                        let (_, batcher) = getBatchDetails prevoiusMessageId.Type
-                                        let ackSet = batcher.BitSet |> toLongArray
-                                        yield (prevoiusMessageId.LedgerId, prevoiusMessageId.EntryId, ackSet)
+                                        yield getAckData prevoiusMessageId
                                     }
                                 allMultiackMessages.AddRange(messages)
                             if allMultiackMessages.Count > 0 then
                                 let payload = Commands.newMultiMessageAck consumerId allMultiackMessages
                                 let! ackSuccess = sendAckPayload cnx payload
                                 if ackSuccess then
-                                    Log.Logger.LogDebug("{0} newMultiMessageAck completed", prefix)
+                                    Log.Logger.LogDebug("{0} newMultiMessageAck completed, acked {1} messages",
+                                                        prefix, allMultiackMessages.Count)
                                 success <- ackSuccess
                             return success
                         | _ ->
@@ -134,7 +136,9 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                     | _ ->
                         return false
                 }
-            if not result then
+            if result then
+                Log.Logger.LogDebug("{0} Successfully acked {1}", prefix, msgId)
+            else
                 Log.Logger.LogWarning("{0} Cannot doImmediateAck since we're not connected to broker", prefix)
             return ()
         }
@@ -144,10 +148,10 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
             let! result =
                 async {
                     match getState() with
-                    | Ready cnx ->                            
-                        let (index, batcher) = getBatchDetails msgId.Type
+                    | Ready cnx ->
+                        let (index, acker) = getBatchDetails msgId.Type
                         let i = %index
-                        let bitSet = BitArray(batcher.GetBatchSize(), true)                                
+                        let bitSet = BitArray(acker.GetBatchSize(), true)
                         let payload =
                                 match ackType with
                                 | AckType.Individual ->

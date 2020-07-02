@@ -92,4 +92,53 @@ let tests =
             let isDuplicate = ackTracker.IsDuplicate message1
             Expect.isTrue "" isDuplicate
         }
+        
+        testAsync "AddBatchIndexAcknowledgment works" {
+            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let mutable sendPayloadCalledCount = 0
+            let sendPayload cnx payload =
+                async {
+                    sendPayloadCalledCount <- sendPayloadCalledCount + 1
+                    return true
+                }
+            let acker = BatchMessageAcker(3)
+            acker.AckIndividual(%0) |> ignore
+            acker.AckIndividual(%1) |> ignore
+            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Cumulative(%0, acker); Partition = 0; TopicName = %"" }
+            let message2 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Cumulative(%1, acker); Partition = 0; TopicName = %"" }
+
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            do! ackTracker.AddBatchIndexAcknowledgment(message1, AckType.Individual, readOnlyDict [("1", 2L)])
+            do! ackTracker.AddBatchIndexAcknowledgment(message2, AckType.Individual, EmptyProperties)
+            
+            do! Async.Sleep(100)
+            Expect.equal "" 2 sendPayloadCalledCount
+        }
+        
+        testAsync "MixedAcknowledgment works" {
+            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let mutable sendPayloadCalledCount = 0
+            let sendPayload cnx payload =
+                async {
+                    sendPayloadCalledCount <- sendPayloadCalledCount + 1
+                    return true
+                }
+            let acker1 = BatchMessageAcker(2)
+            acker1.AckIndividual(%0) |> ignore
+            acker1.AckIndividual(%1) |> ignore
+            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Cumulative(%0, acker1); Partition = 0; TopicName = %"" }
+            let acker2 = BatchMessageAcker(2)
+            acker2.AckIndividual(%0) |> ignore
+            acker2.AckIndividual(%1) |> ignore
+            let message3 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Cumulative(%0, acker2); Partition = 0; TopicName = %"" }
+            let message4 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Cumulative(%1, acker2); Partition = 0; TopicName = %"" }            
+            
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            do! ackTracker.AddAcknowledgment(message1, AckType.Individual, EmptyProperties)
+            do! ackTracker.AddBatchIndexAcknowledgment(message3, AckType.Individual, EmptyProperties)
+            do! ackTracker.AddBatchIndexAcknowledgment(message4, AckType.Individual, EmptyProperties)
+            
+            do! Async.Sleep(100)
+            Expect.equal "" 1 sendPayloadCalledCount
+        }
     ]

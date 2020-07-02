@@ -16,6 +16,7 @@
     <Compile Include="Common\CommandTests.fs" />
     <Compile Include="Common\NamespaceNameTests.fs" />
     <Compile Include="Common\ExceptionsTests.fs" />
+    <Compile Include="Common\ToolsTests.fs" />
     <Compile Include="Api\ServiceUriTests.fs" />
     <Compile Include="Api\ConfigurationTests.fs" />
     <Compile Include="Api\ConsumerBuilderTests.fs" />
