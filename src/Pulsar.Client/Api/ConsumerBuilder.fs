@@ -16,38 +16,40 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
     let DEFAULT_ACK_TIMEOUT_MILLIS_FOR_DEAD_LETTER = 30000.0
 
     let verify(config : ConsumerConfiguration<'T>) =
-        let checkValue check config =
-            check config |> ignore
-            config
 
         config
-        |> checkValue
-            (fun c ->
-                invalidArgIfTrue (
-                    (c.Topics |> Seq.isEmpty) && String.IsNullOrEmpty(c.TopicsPattern)
-                ) "Topic name must be set on the consumer builder")
-        |> checkValue
+        |> (fun c ->
+                ((c.Topics |> Seq.isEmpty) && String.IsNullOrEmpty(c.TopicsPattern))
+                    |> invalidArgIfTrue "Topic name must be set on the consumer builder"
+                    |> fun _ -> c
+            )
+        |> 
             (fun c ->
                 c.SubscriptionName
-                |> invalidArgIfBlankString "Subscription name must be set on the consumer builder")
-        |> checkValue
+                |> invalidArgIfBlankString "Subscription name must be set on the consumer builder"
+                |> fun _ -> c
+            )
+        |> 
             (fun c ->
-                for topic in c.Topics do
-                    invalidArgIfTrue (
-                        c.ReadCompacted && (not topic.IsPersistent ||
-                            (c.SubscriptionType <> SubscriptionType.Exclusive && c.SubscriptionType <> SubscriptionType.Failover ))
-                    ) "Read compacted can only be used with exclusive of failover persistent subscriptions"
-                c)
-        |> checkValue
-            (fun c ->
-                invalidArgIfTrue (
-                    c.KeySharedPolicy.IsSome && c.SubscriptionType <> SubscriptionType.KeyShared
-                ) "KeySharedPolicy must be set with KeyShared subscription")
-        |> checkValue
-            (fun c ->
-                 invalidArgIfTrue (
-                    c.BatchReceivePolicy.MaxNumMessages > c.ReceiverQueueSize
-                 ) "MaxNumMessages can't be greater than ReceiverQueueSize")
+                c.Topics
+                |> Seq.iter (fun topic ->
+                        (c.ReadCompacted && (not topic.IsPersistent ||
+                            (c.SubscriptionType <> SubscriptionType.Exclusive && c.SubscriptionType <> SubscriptionType.Failover )))
+                        |> invalidArgIfTrue "Read compacted can only be used with exclusive of failover persistent subscriptions"
+                        |> ignore
+                    )
+                c
+            )
+        |> (fun c ->
+                (c.KeySharedPolicy.IsSome && c.SubscriptionType <> SubscriptionType.KeyShared)
+                |> invalidArgIfTrue "KeySharedPolicy must be set with KeyShared subscription"
+                |> fun _ -> c
+            )
+        |> (fun c ->
+                 (c.BatchReceivePolicy.MaxNumMessages > c.ReceiverQueueSize)
+                 |> invalidArgIfTrue "MaxNumMessages can't be greater than ReceiverQueueSize"
+                 |> fun _ -> c
+            )
 
     internal new(createConsumerAsync, сreateProducerAsync, schema) = ConsumerBuilder(createConsumerAsync, сreateProducerAsync, ConsumerConfiguration.Default, ConsumerInterceptors.Empty, schema)
 

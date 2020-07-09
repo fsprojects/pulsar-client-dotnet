@@ -536,7 +536,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             else
                                 match startMessageId with
                                 | None ->
-                                    Log.Logger.LogWarning("{0} Start messageId is missing")
+                                    Log.Logger.LogWarning("{0} Start messageId is missing", prefix)
                                     null
                                 | Some msgId ->
                                     let data = MessageIdData(ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)
