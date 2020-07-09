@@ -179,4 +179,31 @@ let tests =
         testAsync "Check reading from producer messageId with batching" {
             do! checkReadingFromProducerMessageId true |> Async.AwaitTask
         }
+        
+        testAsync "Check StartMessageFromRollbackDuration" {
+            Log.Debug("Started Check StartMessageFromRollbackDuration")
+            let client = getClient()
+            let topicName = "public/retention/" + Guid.NewGuid().ToString("N")
+            let producerName = "readerRollbackDurationProducer"
+            let readerName = "rollbackDurationReader"
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! _ = producer.SendAsync("Hello world" |> Encoding.UTF8.GetBytes) |> Async.AwaitTask
+
+            let! reader =
+                client.NewReader()
+                    .Topic(topicName)
+                    .ReaderName(readerName)
+                    .StartMessageFromRollbackDuration(TimeSpan.FromMinutes(1.0))
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! result = readerLoopRead reader |> Async.AwaitTask
+            Expect.equal "" 1 result.Count
+            Log.Debug("Finished StartMessageFromRollbackDuration")
+        }
     ]
