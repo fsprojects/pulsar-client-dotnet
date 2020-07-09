@@ -701,7 +701,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | SubscriptionType.Shared | SubscriptionType.KeyShared ->
                         match connectionHandler.ConnectionState with
                         | Ready clientCnx ->
-                            let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds);
+                            let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds)
                             let chunks = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
                             for chunk in chunks do
                                 let nonDeadBatch = ResizeArray<MessageId>()
