@@ -19,6 +19,7 @@ nuget Snappy.Standard
 nuget ZstdNet
 nuget AvroSchemaGenerator
 nuget Microsoft.Extensions.Caching.Memory
+nuget Apache.Avro
 
 group Tests
   framework: netcoreapp3.1
@@ -34,6 +35,7 @@ group Tests
   nuget Serilog.Sinks.Console
   nuget Serilog.Enrichers.Thread
   nuget Microsoft.Extensions.DependencyInjection
+  nuget Apache.Avro
 
 group Examples
   framework: netcoreapp3.1

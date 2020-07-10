@@ -7,20 +7,17 @@ open Pulsar.Client.Common
 type ReaderBuilder<'T> private (createReaderAsync, config: ReaderConfiguration, schema: ISchema<'T>) =
 
     let verify(config : ReaderConfiguration) =
-        let checkValue check config =
-            check config |> ignore
-            config
 
         config
-        |> checkValue
-            (fun c ->
+        |> (fun c ->
                 c.Topic
-                |> invalidArgIfDefault "Topic name must be set on the reader builder.")
-        |> checkValue
-            (fun c ->
+                |> invalidArgIfDefault "Topic name must be set on the reader builder."
+                |> fun _ -> c
+            )
+        |> (fun c ->
                 if c.StartMessageId.IsSome && c.StartMessageFromRollbackDuration > TimeSpan.Zero
                     || c.StartMessageId.IsNone && c.StartMessageFromRollbackDuration = TimeSpan.Zero then                
-                    failwith "Start message id or start message from roll back must be specified but they cannot be specified at the same time"
+                    raise <| ArgumentException "Start message id or start message from roll back must be specified but they cannot be specified at the same time"
                 elif c.StartMessageFromRollbackDuration > TimeSpan.Zero then
                     { config with
                         StartMessageId = Some MessageId.Earliest }

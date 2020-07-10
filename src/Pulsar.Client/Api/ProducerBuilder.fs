@@ -8,19 +8,16 @@ open System.Threading.Tasks
 type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfiguration, producerInterceptors: ProducerInterceptors<'T>, schema: ISchema<'T>) =
 
     let verify(config : ProducerConfiguration) =
-        let checkValue check config =
-            check config |> ignore
-            config
-
+        
         config
-        |> checkValue
-            (fun c ->
+        |> (fun c ->
                 c.Topic
-                |> invalidArgIfDefault "Topic name must be set on the producer builder.")
-        |> checkValue
-            (fun c ->
-                c.MessageRoutingMode
-                |> invalidArgIf (fun mode -> mode = MessageRoutingMode.CustomPartition && Option.isNone config.CustomMessageRouter) "Valid router should be set with CustomPartition routing mode.")
+                |> invalidArgIfDefault "Topic name must be set on the producer builder."
+                |> fun _ -> c
+            )
+        |> invalidArgIf (fun c ->
+                c.MessageRoutingMode = MessageRoutingMode.CustomPartition && Option.isNone config.CustomMessageRouter
+            ) "Valid router should be set with CustomPartition routing mode."
 
     internal new(сreateProducerAsync, schema: ISchema<'T>) = ProducerBuilder(сreateProducerAsync, ProducerConfiguration.Default, ProducerInterceptors.Empty, schema)
 
