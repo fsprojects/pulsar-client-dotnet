@@ -39,6 +39,7 @@ type internal ConsumerMessage<'T> =
     | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
     | StatTick
     | GetStats of AsyncReplyChannel<ConsumerStats>
+    | ReconsumeLater of MessageId * AckType * TimeSpan * AsyncReplyChannel<unit>
 
 type internal ConsumerInitInfo<'T> =
     {
@@ -847,6 +848,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     channel.Reply <| stats.GetStats()
                     return! loop ()
                     
+                | ConsumerMessage.ReconsumeLater (msgId, ackType, delayTime, channel) ->
+                    
+                    //TODO
+                    
+                    
+                    return! loop ()
+                    
                 | ConsumerMessage.Close channel ->
 
                     match connectionHandler.ConnectionState with
@@ -1150,7 +1158,32 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.Name = consumerConfig.ConsumerName
 
         member this.GetStatsAsync() =
-            mb.PostAndAsyncReply(ConsumerMessage.GetStats) |> Async.StartAsTask
+            task {
+                return! 
+                    match connectionHandler.ConnectionState with
+                    | Closed | Closing -> raise <| AlreadyClosedException(prefix + "already closed")
+                    | _ -> mb.PostAndAsyncReply(ConsumerMessage.GetStats)
+            }
+            
+        member this.ReconsumeLaterAsync (msgId: MessageId, delayTime: TimeSpan) =
+            task {
+                connectionHandler.CheckIfActive() |> throwIfNotNull
+                return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msgId, AckType.Individual, delayTime, channel))
+            }
+            
+        member this.ReconsumeLaterCumulativeAsync (msgId: MessageId, delayTime: TimeSpan) =
+            task {
+                connectionHandler.CheckIfActive() |> throwIfNotNull
+                return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msgId, AckType.Cumulative, delayTime, channel))
+            }
+        
+        member this.ReconsumeLaterAsync (msgs: Messages<'T>, delayTime: TimeSpan) =
+            task {
+                connectionHandler.CheckIfActive() |> throwIfNotNull
+                for msg in msgs do
+                    do! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg.MessageId, AckType.Individual, delayTime, channel))
+            }
+            
         
     interface IAsyncDisposable with
         

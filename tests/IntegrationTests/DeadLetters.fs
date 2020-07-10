@@ -242,7 +242,7 @@ let tests =
             description |> logTestEnd
         }
 
-        ftestAsync "Some failed batch messages get stored in a configured default letter topic" {
+        ptestAsync "Some failed batch messages get stored in a configured default letter topic" {
 
             let description = "Failed batch stored in a configured dead letter topic"
 

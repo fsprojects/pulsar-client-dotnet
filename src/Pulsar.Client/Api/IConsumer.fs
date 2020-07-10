@@ -41,3 +41,9 @@ type IConsumer<'T> =
     abstract member Name: string
     /// Get statistics for the consumer.
     abstract member GetStatsAsync: unit -> Task<ConsumerStats>
+    /// ReconsumeLater the consumption of Message
+    abstract member ReconsumeLaterAsync: messageId:MessageId * delayTime:TimeSpan -> Task<unit>
+    /// ReconsumeLater the consumption of Messages
+    abstract member ReconsumeLaterAsync: messages:Messages<'T> * delayTime:TimeSpan -> Task<unit>
+    /// ReconsumeLater the reception of all the messages in the stream up to (and including) the provided message.
+    abstract member ReconsumeLaterCumulativeAsync: messageId:MessageId * delayTime:TimeSpan -> Task<unit>

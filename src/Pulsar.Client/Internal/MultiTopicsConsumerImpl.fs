@@ -54,7 +54,9 @@ type internal MultiTopicConsumerMessage<'T> =
     | Seek of AsyncReplyChannel<Task> * uint64
     | PatternTickTime
     | PartitionTickTime
-    | GetStats of AsyncReplyChannel<ConsumerStats>
+    | GetStats of AsyncReplyChannel<Task<ConsumerStats array>>
+    | ReconsumeLater of MessageId * TimeSpan * AsyncReplyChannel<Task<unit>>
+    | ReconsumeLaterCumulative of MessageId * TimeSpan * AsyncReplyChannel<Task<unit>>
 
 type internal TopicAndConsumer<'T> =
     {
@@ -671,12 +673,25 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 | GetStats channel ->
                     
                     Log.Logger.LogDebug("{0} GetStats", prefix)
-                    let! stats =
+                    let statsTask =
                         consumers
                         |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.GetStatsAsync())
                         |> Task.WhenAll
-                        |> Async.AwaitTask
-                    statsReduce stats |> channel.Reply
+                    channel.Reply statsTask
+                    return! loop state
+                    
+                | ReconsumeLater (msgId, delayTime, channel) ->
+                    
+                    Log.Logger.LogDebug("{0} ReconsumeLater", prefix)
+                    let (consumer, _) = consumers.[msgId.TopicName]
+                    channel.Reply(consumer.ReconsumeLaterAsync(msgId, delayTime))
+                    return! loop state
+                    
+                | ReconsumeLaterCumulative (msgId, delayTime, channel) ->
+                    
+                    Log.Logger.LogDebug("{0} ReconsumeLater", prefix)
+                    let (consumer, _) = consumers.[msgId.TopicName]
+                    channel.Reply(consumer.ReconsumeLaterCumulativeAsync(msgId, delayTime))
                     return! loop state
             }
 
@@ -857,7 +872,31 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
 
         member this.Name = consumerConfig.ConsumerName
 
-        member this.GetStatsAsync() = mb.PostAndAsyncReply(GetStats) |> Async.StartAsTask
+        member this.GetStatsAsync() =
+            task {
+                let! allStatsTask = mb.PostAndAsyncReply(GetStats)
+                let! allStats = allStatsTask
+                return allStats |> statsReduce
+            }
+            
+        member this.ReconsumeLaterAsync (msgId: MessageId, delayTime: TimeSpan) =
+            task {
+                let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msgId, delayTime, channel))
+                return! result
+            }
+            
+        member this.ReconsumeLaterCumulativeAsync (msgId: MessageId, delayTime: TimeSpan) =
+            task {
+                let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLaterCumulative(msgId, delayTime, channel))
+                return! result
+            }
+        
+        member this.ReconsumeLaterAsync (msgs: Messages<'T>, delayTime: TimeSpan) =
+            task {
+                for msg in msgs do
+                    let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg.MessageId, delayTime, channel))
+                    return! result
+            }
         
     interface IAsyncDisposable with
         
