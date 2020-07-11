@@ -74,7 +74,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let initialStartMessageId = startMessageId
     let mutable incomingMessagesSize = 0L
     let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
-    let deadLettersProcessor = consumerConfig.DeadLettersProcessor topicName
+    let deadLettersProcessor = consumerConfig.DeadLetterProcessor topicName
     let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable
     let stats =
         if clientConfig.StatsInterval = TimeSpan.Zero then
@@ -1167,19 +1167,38 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             
         member this.ReconsumeLaterAsync (msgId: MessageId, delayTime: TimeSpan) =
             task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
+                if not consumerConfig.RetryEnable then
+                    failwith "ReconsumeLater method not supported"
+                let exn = connectionHandler.CheckIfActive()
+                if not (isNull exn) then
+                    stats.IncrementNumAcksFailed()
+                    interceptors.OnAcknowledge(this, msgId, exn)
+                    raise exn
                 return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msgId, AckType.Individual, delayTime, channel))
             }
             
         member this.ReconsumeLaterCumulativeAsync (msgId: MessageId, delayTime: TimeSpan) =
             task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
+                if not consumerConfig.RetryEnable then
+                    failwith "ReconsumeLater method not supported"
+                let exn = connectionHandler.CheckIfActive()
+                if not (isNull exn) then
+                    stats.IncrementNumAcksFailed()
+                    interceptors.OnAcknowledgeCumulative(this, msgId, exn)
+                    raise exn
                 return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msgId, AckType.Cumulative, delayTime, channel))
             }
         
         member this.ReconsumeLaterAsync (msgs: Messages<'T>, delayTime: TimeSpan) =
             task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
+                if not consumerConfig.RetryEnable then
+                    failwith "ReconsumeLater method not supported"
+                let exn = connectionHandler.CheckIfActive()
+                if not (isNull exn) then
+                    for msg in msgs do
+                        stats.IncrementNumAcksFailed()
+                        interceptors.OnAcknowledge(this, msg.MessageId, exn)
+                    raise exn
                 for msg in msgs do
                     do! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg.MessageId, AckType.Individual, delayTime, channel))
             }

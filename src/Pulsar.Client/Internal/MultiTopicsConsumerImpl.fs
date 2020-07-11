@@ -85,7 +85,6 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
     let mutable unhandleMessage: ResultOrException<Message<'T>> option = None
     
     let alreadyCancelledExn = Error <| Exception "Batch already cancelled"
-    let noMoreMessagesExn = Error <| Exception "No more messages available"
     let partitionsTimer = new Timer(60_000.0) // 1 minute
     let patternTimer = new Timer(consumerConfig.PatternAutoDiscoveryPeriod.TotalMilliseconds)
     
@@ -881,18 +880,24 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
             
         member this.ReconsumeLaterAsync (msgId: MessageId, delayTime: TimeSpan) =
             task {
+                if not consumerConfig.RetryEnable then
+                    failwith "ReconsumeLater method not supported"
                 let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msgId, delayTime, channel))
                 return! result
             }
             
         member this.ReconsumeLaterCumulativeAsync (msgId: MessageId, delayTime: TimeSpan) =
             task {
+                if not consumerConfig.RetryEnable then
+                    failwith "ReconsumeLater method not supported"
                 let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLaterCumulative(msgId, delayTime, channel))
                 return! result
             }
         
         member this.ReconsumeLaterAsync (msgs: Messages<'T>, delayTime: TimeSpan) =
             task {
+                if not consumerConfig.RetryEnable then
+                    failwith "ReconsumeLater method not supported"
                 for msg in msgs do
                     let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg.MessageId, delayTime, channel))
                     return! result

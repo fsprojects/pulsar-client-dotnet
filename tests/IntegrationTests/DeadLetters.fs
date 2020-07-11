@@ -22,7 +22,7 @@ let tests =
         let newGuid = Guid.NewGuid().ToString("N")
         {|
             TopicName = sprintf "public/default/topic-%s" newGuid
-            DeadLettersPolicy = DeadLettersPolicy(0, sprintf "public/default/topic-%s-DLQ" newGuid)
+            DeadLettersPolicy = DeadLetterPolicy(0, sprintf "public/default/topic-%s-DLQ" newGuid)
             SubscriptionName = "dlqSubscription"
             NumberOfMessages = 10
         |}
@@ -61,7 +61,7 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
-                    .DeadLettersPolicy(config.DeadLettersPolicy)
+                    .DeadLetterPolicy(config.DeadLettersPolicy)
                     .SubscribeAsync()
                     |> Async.AwaitTask
 
@@ -130,7 +130,7 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
-                    .DeadLettersPolicy(DeadLettersPolicy(0))
+                    .DeadLetterPolicy(DeadLetterPolicy(0))
                     .SubscribeAsync()
                     |> Async.AwaitTask
 
@@ -199,7 +199,7 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
-                    .DeadLettersPolicy(config.DeadLettersPolicy)
+                    .DeadLetterPolicy(config.DeadLettersPolicy)
                     .SubscribeAsync()
                     |> Async.AwaitTask
 
@@ -273,7 +273,7 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
-                    .DeadLettersPolicy(DeadLettersPolicy(redeliveryCount, config.DeadLettersPolicy.DeadLetterTopic))
+                    .DeadLetterPolicy(DeadLetterPolicy(redeliveryCount, config.DeadLettersPolicy.DeadLetterTopic))
                     .SubscribeAsync()
                     |> Async.AwaitTask
 

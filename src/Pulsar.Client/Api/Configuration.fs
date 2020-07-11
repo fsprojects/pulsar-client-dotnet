@@ -53,10 +53,12 @@ type ConsumerConfiguration<'T> =
         ReadCompacted: bool
         NegativeAckRedeliveryDelay: TimeSpan
         ResetIncludeHead: bool
-        DeadLettersProcessor : TopicName -> IDeadLettersProcessor<'T>
+        DeadLetterProcessor : TopicName -> IDeadLetterProcessor<'T>
+        DeadLetterPolicy: DeadLetterPolicy option
         KeySharedPolicy: KeySharedPolicy option
         BatchReceivePolicy: BatchReceivePolicy
         PriorityLevel: PriorityLevel
+        RetryEnable: bool
     }
     member this.SingleTopic with get() = this.Topics |> Seq.head
     static member Default =
@@ -78,10 +80,12 @@ type ConsumerConfiguration<'T> =
             ReadCompacted = false
             NegativeAckRedeliveryDelay = TimeSpan.FromMinutes(1.0)
             ResetIncludeHead = false
-            DeadLettersProcessor = fun (_) -> DeadLettersProcessor<'T>.Disabled
+            DeadLetterProcessor = fun (_) -> DeadLetterProcessor<'T>.Disabled
+            DeadLetterPolicy = None
             KeySharedPolicy = None
             BatchReceivePolicy = BatchReceivePolicy()
             PriorityLevel = %0
+            RetryEnable = false
         }
 
 type ProducerConfiguration =

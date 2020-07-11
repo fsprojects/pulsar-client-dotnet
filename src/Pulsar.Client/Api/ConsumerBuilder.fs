@@ -15,40 +15,75 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
     [<Literal>]
     let DEFAULT_ACK_TIMEOUT_MILLIS_FOR_DEAD_LETTER = 30000.0
 
+    let deadLettersProcessor (c: ConsumerConfiguration<'T>) (deadLettersPolicy: DeadLetterPolicy) (topic: TopicName)  =
+        let getTopicName () =
+            topic.ToString()
+        let createProducer deadLetterTopic =
+            ProducerBuilder(createProducerAsync, schema)
+                .Topic(deadLetterTopic)
+                .BlockIfQueueFull(false)
+                .EnableBatching(false) // dead letters are sent one by one anyway
+                .CreateAsync()
+        DeadLetterProcessor(deadLettersPolicy, getTopicName, c.SubscriptionName, createProducer) :> IDeadLetterProcessor<'T>
+    
     let verify(config : ConsumerConfiguration<'T>) =
-
         config
-        |> (fun c ->
+        |> invalidArgIf (fun c ->
                 ((c.Topics |> Seq.isEmpty) && String.IsNullOrEmpty(c.TopicsPattern))
-                    |> invalidArgIfTrue "Topic name must be set on the consumer builder"
-                    |> fun _ -> c
-            )
-        |> 
-            (fun c ->
+            ) "Topic name must be set on the consumer builder"
+        |> (fun c ->
                 c.SubscriptionName
                 |> invalidArgIfBlankString "Subscription name must be set on the consumer builder"
                 |> fun _ -> c
             )
-        |> 
-            (fun c ->
+        |> invalidArgIf (fun c ->
                 c.Topics
-                |> Seq.iter (fun topic ->
+                |> Seq.tryFind (fun topic ->
                         (c.ReadCompacted && (not topic.IsPersistent ||
                             (c.SubscriptionType <> SubscriptionType.Exclusive && c.SubscriptionType <> SubscriptionType.Failover )))
-                        |> invalidArgIfTrue "Read compacted can only be used with exclusive of failover persistent subscriptions"
-                        |> ignore
                     )
-                c
-            )
-        |> (fun c ->
+                |> Option.isSome
+            ) "Read compacted can only be used with exclusive of failover persistent subscriptions"
+        |> invalidArgIf (fun c ->
                 (c.KeySharedPolicy.IsSome && c.SubscriptionType <> SubscriptionType.KeyShared)
-                |> invalidArgIfTrue "KeySharedPolicy must be set with KeyShared subscription"
-                |> fun _ -> c
+            ) "KeySharedPolicy must be set with KeyShared subscription"
+        |> invalidArgIf (fun c ->
+                 (c.BatchReceivePolicy.MaxNumMessages > c.ReceiverQueueSize)
+            ) "MaxNumMessages can't be greater than ReceiverQueueSize"
+        |> (fun c ->
+                match c.DeadLetterPolicy with
+                | Some _ when c.AckTimeout= TimeSpan.Zero ->
+                    { c with
+                        AckTimeout = TimeSpan.FromMilliseconds(DEFAULT_ACK_TIMEOUT_MILLIS_FOR_DEAD_LETTER)}
+                | _ ->
+                    c
             )
         |> (fun c ->
-                 (c.BatchReceivePolicy.MaxNumMessages > c.ReceiverQueueSize)
-                 |> invalidArgIfTrue "MaxNumMessages can't be greater than ReceiverQueueSize"
-                 |> fun _ -> c
+                if c.RetryEnable && (c.Topics |> Seq.isEmpty |> not) then
+                    let prefixPart = c.SingleTopic.NamespaceName.ToString() + "/" + c.SubscriptionName
+                    let defaultRetryLetterTopic = prefixPart + RetryMessageUtil.RETRY_GROUP_TOPIC_SUFFIX
+                    let defaultDeadLetterTopic = prefixPart + RetryMessageUtil.DLQ_GROUP_TOPIC_SUFFIX
+                    let newPolicy =
+                        match c.DeadLetterPolicy with
+                        | None ->
+                            DeadLetterPolicy(RetryMessageUtil.MAX_RECONSUMETIMES, defaultDeadLetterTopic, defaultRetryLetterTopic)
+                        | Some policy ->
+                            let isEmptyDL = String.IsNullOrEmpty policy.DeadLetterTopic
+                            let isEmptyRL = String.IsNullOrEmpty policy.RetryLetterTopic
+                            if isEmptyDL && isEmptyRL then
+                                DeadLetterPolicy(policy.MaxRedeliveryCount, defaultDeadLetterTopic, defaultRetryLetterTopic)
+                            elif isEmptyDL then
+                                DeadLetterPolicy(policy.MaxRedeliveryCount, defaultDeadLetterTopic, policy.RetryLetterTopic)
+                            elif isEmptyRL then
+                                DeadLetterPolicy(policy.MaxRedeliveryCount, policy.DeadLetterTopic, defaultRetryLetterTopic)
+                            else
+                                policy
+                    { c with
+                        DeadLetterProcessor = deadLettersProcessor c newPolicy
+                        DeadLetterPolicy = Some newPolicy
+                        Topics = seq { yield! c.Topics; yield TopicName(newPolicy.RetryLetterTopic) } |> Seq.cache }
+                else
+                    c
             )
 
     internal new(createConsumerAsync, сreateProducerAsync, schema) = ConsumerBuilder(createConsumerAsync, сreateProducerAsync, ConsumerConfiguration.Default, ConsumerInterceptors.Empty, schema)
@@ -140,25 +175,10 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
             NegativeAckRedeliveryDelay = negativeAckRedeliveryDelay  }
         |> this.With
 
-    member this.DeadLettersPolicy (deadLettersPolicy: DeadLettersPolicy) =
-        let ackTimeoutTickTime =
-            if config.AckTimeoutTickTime = TimeSpan.Zero
-            then TimeSpan.FromMilliseconds(DEFAULT_ACK_TIMEOUT_MILLIS_FOR_DEAD_LETTER)
-            else config.AckTimeoutTickTime
-
-        let deadLettersProcessor (topic: TopicName) =
-            let getTopicName() = topic.ToString()
-            let getSubscriptionName() = config.SubscriptionName
-            let createProducer deadLetterTopic =
-                ProducerBuilder(createProducerAsync, schema)
-                    .Topic(deadLetterTopic)
-                    .EnableBatching(false) // dead letters are sent one by one anyway
-                    .CreateAsync()
-            DeadLettersProcessor(deadLettersPolicy, getTopicName, getSubscriptionName, createProducer) :> IDeadLettersProcessor<'T>
-
+    member this.DeadLetterPolicy (deadLetterPolicy: DeadLetterPolicy) =
         { config with
-            AckTimeoutTickTime = ackTimeoutTickTime
-            DeadLettersProcessor = deadLettersProcessor }
+            DeadLetterProcessor = deadLettersProcessor config deadLetterPolicy
+            DeadLetterPolicy = Some deadLetterPolicy  }
         |> this.With
 
     member this.StartMessageIdInclusive () =
@@ -192,7 +212,8 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
         |> this.With
 
     member this.Intercept ([<ParamArray>] interceptors: IConsumerInterceptor<'T> array) =
-        if interceptors.Length = 0 then this
+        if interceptors.Length = 0 then
+            this
         else
             ConsumerInterceptors(Array.append consumerInterceptors.Interceptors interceptors)
             |> this.With
@@ -200,6 +221,11 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
     member this.PriorityLevel (priorityLevel:int) =
         { config with
             PriorityLevel = %(priorityLevel |> invalidArgIfLessThanZero "PriorityLevel can't be negative.") }
+        |> this.With
+        
+     member this.EnableRetry retryEnable =
+        { config with
+            RetryEnable = retryEnable }
         |> this.With
     
     member this.SubscribeAsync(): Task<IConsumer<'T>> =

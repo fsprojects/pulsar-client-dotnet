@@ -45,9 +45,6 @@ let throwIf predicate createException arg =
 let invalidArgIf predicate message =
     throwIf predicate (fun() -> ArgumentException(message))
 
-let invalidArgIfTrue =
-    invalidArgIf ((=) true)
-
 let invalidArgIfBlankString =
     invalidArgIf (String.IsNullOrWhiteSpace)
 

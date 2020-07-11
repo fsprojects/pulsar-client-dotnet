@@ -56,6 +56,7 @@
     <Compile Include="Common\TopicName.fs" />
     <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\ServiceUri.fs" />
+    <Compile Include="Common\RetryMessageUtil.fs" />
     <Compile Include="Api\BatchReceivePolicy.fs" />
     <Compile Include="Api\KeySharedPolicy.fs" />
     <Compile Include="Api\ISchema.fs" />

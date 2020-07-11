@@ -4,11 +4,15 @@ open Pulsar.Client.Common
 open System.Runtime.InteropServices
 open System.Threading.Tasks
 
-type DeadLettersPolicy(maxRedeliveryCount : int, [<Optional; DefaultParameterValue(null : string)>] deadLetterTopic : string) =
+type DeadLetterPolicy(maxRedeliveryCount: int
+                       , [<Optional; DefaultParameterValue(null:string)>] deadLetterTopic: string
+                       , [<Optional; DefaultParameterValue(null:string)>] retryLetterTopic: string
+                       ) =
     member __.MaxRedeliveryCount = maxRedeliveryCount
     member __.DeadLetterTopic = deadLetterTopic
+    member __.RetryLetterTopic = retryLetterTopic
 
-type IDeadLettersProcessor<'T> =
+type IDeadLetterProcessor<'T> =
     abstract member ClearMessages: unit -> unit
     abstract member AddMessage: MessageId -> Message<'T> -> unit
     abstract member RemoveMessage: MessageId -> unit

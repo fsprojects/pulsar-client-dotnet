@@ -9,25 +9,28 @@ open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open FSharp.UMX
 
-type internal DeadLettersProcessor<'T>
-    (policy: DeadLettersPolicy,
+type internal DeadLetterProcessor<'T>
+    (policy: DeadLetterPolicy,
      getTopicName: unit -> string,
-     getSubscriptionNameName: unit -> string,
+     subscriptionName: string,
      createProducer: string -> Task<IProducer<'T>>) =
 
     let store = Dictionary<MessageId, Message<'T>>()
-
-    let topicName =
+    let dlTopicName =
         if String.IsNullOrEmpty(policy.DeadLetterTopic) |> not then
             policy.DeadLetterTopic
         else
-            (sprintf "%s-%s-DLQ" (getTopicName()) (getSubscriptionNameName()))
+            (sprintf "%s-%s%s" (getTopicName()) subscriptionName RetryMessageUtil.DLQ_GROUP_TOPIC_SUFFIX)
 
-    let producer: Lazy<Task<IProducer<'T>>> = lazy (
-        createProducer topicName
+    let dlProducer = lazy (
+        createProducer dlTopicName
+    )
+    
+    let rlProducer = lazy (
+        createProducer policy.RetryLetterTopic
     )
 
-    interface IDeadLettersProcessor<'T> with
+    interface IDeadLetterProcessor<'T> with
         member this.ClearMessages() =
             store.Clear()
 
@@ -41,9 +44,9 @@ type internal DeadLettersProcessor<'T>
             task {
                 match store.TryGetValue messageId with
                 | true, message ->
-                    Log.Logger.LogInformation("DeadLetter processing topic: {0}, messageId: {1}", topicName, messageId)
+                    Log.Logger.LogInformation("DeadLetter processing topic: {0}, messageId: {1}", dlTopicName, messageId)
                     try
-                        let! producer = producer.Value
+                        let! producer = dlProducer.Value
                         let key =
                             if String.IsNullOrEmpty(%message.Key) then
                                 Some { PartitionKey = message.Key; IsBase64Encoded =  message.HasBase64EncodedKey  }
@@ -55,7 +58,7 @@ type internal DeadLettersProcessor<'T>
                         return true
                     with
                     | ex ->
-                        Log.Logger.LogError(ex, "Send to dead letter topic exception with topic: {0}, messageId: {1}", topicName, messageId)
+                        Log.Logger.LogError(ex, "Send to dead letter topic exception with topic: {0}, messageId: {1}", dlTopicName, messageId)
                         return false
                 | false, _ ->
                     return false
@@ -64,7 +67,7 @@ type internal DeadLettersProcessor<'T>
         member this.MaxRedeliveryCount = policy.MaxRedeliveryCount |> uint32
 
     static member Disabled = {
-        new IDeadLettersProcessor<'T> with
+        new IDeadLetterProcessor<'T> with
             member this.ClearMessages() = ()
             member this.AddMessage _ _ = ()
             member this.RemoveMessage _ = ()
