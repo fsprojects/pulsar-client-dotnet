@@ -3,7 +3,7 @@ module Pulsar.Client.Common.RetryMessageUtil
 [<Literal>]
 let SYSTEM_PROPERTY_RECONSUMETIMES = "RECONSUMETIMES"
 [<Literal>]
-let SYSTEM_PROPERTY_DELAY_TIME = "DELAY_TIME"
+let SYSTEM_PROPERTY_DELIVER_AT = "DELIVER_AT"
 [<Literal>]
 let SYSTEM_PROPERTY_REAL_TOPIC = "REAL_TOPIC"
 [<Literal>]

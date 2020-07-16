@@ -39,7 +39,7 @@ type internal ConsumerMessage<'T> =
     | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
     | StatTick
     | GetStats of AsyncReplyChannel<ConsumerStats>
-    | ReconsumeLater of MessageId * AckType * TimeSpan * AsyncReplyChannel<unit>
+    | ReconsumeLater of Message<'T> * AckType * int64 * AsyncReplyChannel<unit>
 
 type internal ConsumerInitInfo<'T> =
     {
@@ -296,9 +296,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             | _ ->
                 do! sendAcknowledge messageId ackType properties
                 Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
-        }
-
-    let trySendIndividualAcknowledge = trySendAcknowledge AckType.Individual EmptyProperties
+        } 
 
     let isPriorEntryIndex idx =
         match startMessageId with
@@ -339,7 +337,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let processPossibleToDLQ (messageId : MessageId) =
         task {
-            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages messageId trySendIndividualAcknowledge
+            let acknowledge = trySendAcknowledge AckType.Individual EmptyProperties
+            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages(messageId, acknowledge)
             return deadMessageProcessed
         }
 
@@ -465,7 +464,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     // We need to discard entries that were prior to startMessageId
                     Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                 else
-                    let msgKey = rawMessage.MessageKey                    
+                    let msgKey = rawMessage.MessageKey
                     let getValue () =
                         keyValueProcessor
                         |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, payload) :?> 'T)
@@ -481,7 +480,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                     getValue
                                 )
                     if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
-                        deadLettersProcessor.AddMessage message.MessageId message
+                        deadLettersProcessor.AddMessage(message.MessageId, message)
                     if hasWaitingChannel then
                         let waitingChannel = waiters.Dequeue()
                         if (incomingMessages.Count = 0) then
@@ -848,11 +847,16 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     channel.Reply <| stats.GetStats()
                     return! loop ()
                     
-                | ConsumerMessage.ReconsumeLater (msgId, ackType, delayTime, channel) ->
+                | ConsumerMessage.ReconsumeLater (msg, ackType, deliverAt, channel) ->
                     
-                    //TODO
-                    
-                    
+                    let acknowldege = trySendAcknowledge ackType EmptyProperties
+                    let! success = deadLettersProcessor.ReconsumeLater(msg, deliverAt, acknowldege) |> Async.AwaitTask
+                    if not success then
+                        unAckedMessageTracker.Remove(msg.MessageId) |> ignore
+                        let redeliverSet = RedeliverSet()
+                        redeliverSet.Add(msg.MessageId) |> ignore
+                        redeliverMessages redeliverSet
+                    channel.Reply()
                     return! loop ()
                     
                 | ConsumerMessage.Close channel ->
@@ -955,7 +959,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 getValue
                             )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
-                    deadLettersProcessor.AddMessage messageId message
+                    deadLettersProcessor.AddMessage(messageId, message)
                 enqueueMessage message
 
         if skippedMessages > 0 then
@@ -1165,34 +1169,34 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | _ -> mb.PostAndAsyncReply(ConsumerMessage.GetStats)
             }
             
-        member this.ReconsumeLaterAsync (msgId: MessageId, delayTime: TimeSpan) =
+        member this.ReconsumeLaterAsync (msg: Message<'T>, deliverAt: int64) =
             task {
                 if not consumerConfig.RetryEnable then
-                    failwith "ReconsumeLater method not supported"
+                    failwith "Retry is disabled"
                 let exn = connectionHandler.CheckIfActive()
                 if not (isNull exn) then
                     stats.IncrementNumAcksFailed()
-                    interceptors.OnAcknowledge(this, msgId, exn)
+                    interceptors.OnAcknowledge(this, msg.MessageId, exn)
                     raise exn
-                return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msgId, AckType.Individual, delayTime, channel))
+                return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, AckType.Individual, deliverAt, channel))
             }
             
-        member this.ReconsumeLaterCumulativeAsync (msgId: MessageId, delayTime: TimeSpan) =
+        member this.ReconsumeLaterCumulativeAsync (msg: Message<'T>, deliverAt: int64) =
             task {
                 if not consumerConfig.RetryEnable then
-                    failwith "ReconsumeLater method not supported"
+                    failwith "Retry is disabled"
                 let exn = connectionHandler.CheckIfActive()
                 if not (isNull exn) then
                     stats.IncrementNumAcksFailed()
-                    interceptors.OnAcknowledgeCumulative(this, msgId, exn)
+                    interceptors.OnAcknowledgeCumulative(this, msg.MessageId, exn)
                     raise exn
-                return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msgId, AckType.Cumulative, delayTime, channel))
+                return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, AckType.Cumulative, deliverAt, channel))
             }
         
-        member this.ReconsumeLaterAsync (msgs: Messages<'T>, delayTime: TimeSpan) =
+        member this.ReconsumeLaterAsync (msgs: Messages<'T>, deliverAt: int64) =
             task {
                 if not consumerConfig.RetryEnable then
-                    failwith "ReconsumeLater method not supported"
+                    failwith "Retry is disabled"
                 let exn = connectionHandler.CheckIfActive()
                 if not (isNull exn) then
                     for msg in msgs do
@@ -1200,7 +1204,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         interceptors.OnAcknowledge(this, msg.MessageId, exn)
                     raise exn
                 for msg in msgs do
-                    do! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg.MessageId, AckType.Individual, delayTime, channel))
+                    do! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, AckType.Individual, deliverAt, channel))
             }
             
         

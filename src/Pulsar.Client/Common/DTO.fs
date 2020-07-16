@@ -171,6 +171,12 @@ type MessageId =
         static member FromByteArrayWithTopic (data: byte[], topicName: string) =
             let initial = MessageId.FromByteArray(data)
             { initial with TopicName = TopicName(topicName).CompleteTopicName }
+        override this.ToString() =
+            match this.Type with
+            | Individual ->
+                sprintf "%d:%d:%d" this.LedgerId this.EntryId this.Partition
+            | Cumulative (i, _) ->
+                sprintf "%d:%d:%d:%d" this.LedgerId this.EntryId this.Partition i
 
 
 type internal SendReceipt =

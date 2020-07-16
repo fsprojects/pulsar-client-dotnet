@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
+open System
 open Pulsar.Client.Common
 open System.Runtime.InteropServices
 open System.Threading.Tasks
@@ -14,7 +15,8 @@ type DeadLetterPolicy(maxRedeliveryCount: int
 
 type IDeadLetterProcessor<'T> =
     abstract member ClearMessages: unit -> unit
-    abstract member AddMessage: MessageId -> Message<'T> -> unit
+    abstract member AddMessage: MessageId * Message<'T> -> unit
     abstract member RemoveMessage: MessageId -> unit
-    abstract member ProcessMessages: MessageId -> (MessageId -> Async<unit>) -> Task<bool>
+    abstract member ProcessMessages: MessageId * (MessageId -> Async<unit>) -> Task<bool>
     abstract member MaxRedeliveryCount: uint32
+    abstract member ReconsumeLater: Message<'T> * int64 * (MessageId -> Async<unit>) -> Task<bool>

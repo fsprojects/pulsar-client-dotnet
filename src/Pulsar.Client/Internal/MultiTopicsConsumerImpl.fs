@@ -55,8 +55,8 @@ type internal MultiTopicConsumerMessage<'T> =
     | PatternTickTime
     | PartitionTickTime
     | GetStats of AsyncReplyChannel<Task<ConsumerStats array>>
-    | ReconsumeLater of MessageId * TimeSpan * AsyncReplyChannel<Task<unit>>
-    | ReconsumeLaterCumulative of MessageId * TimeSpan * AsyncReplyChannel<Task<unit>>
+    | ReconsumeLater of Message<'T> * int64 * AsyncReplyChannel<Task<unit>>
+    | ReconsumeLaterCumulative of Message<'T> * int64 * AsyncReplyChannel<Task<unit>>
 
 type internal TopicAndConsumer<'T> =
     {
@@ -679,18 +679,18 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     channel.Reply statsTask
                     return! loop state
                     
-                | ReconsumeLater (msgId, delayTime, channel) ->
+                | ReconsumeLater (msg, deliverAt, channel) ->
                     
                     Log.Logger.LogDebug("{0} ReconsumeLater", prefix)
-                    let (consumer, _) = consumers.[msgId.TopicName]
-                    channel.Reply(consumer.ReconsumeLaterAsync(msgId, delayTime))
+                    let (consumer, _) = consumers.[msg.MessageId.TopicName]
+                    channel.Reply(consumer.ReconsumeLaterAsync(msg, deliverAt))
                     return! loop state
                     
-                | ReconsumeLaterCumulative (msgId, delayTime, channel) ->
+                | ReconsumeLaterCumulative (msg, delayTime, channel) ->
                     
                     Log.Logger.LogDebug("{0} ReconsumeLater", prefix)
-                    let (consumer, _) = consumers.[msgId.TopicName]
-                    channel.Reply(consumer.ReconsumeLaterCumulativeAsync(msgId, delayTime))
+                    let (consumer, _) = consumers.[msg.MessageId.TopicName]
+                    channel.Reply(consumer.ReconsumeLaterCumulativeAsync(msg, delayTime))
                     return! loop state
             }
 
@@ -878,28 +878,28 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 return allStats |> statsReduce
             }
             
-        member this.ReconsumeLaterAsync (msgId: MessageId, delayTime: TimeSpan) =
+        member this.ReconsumeLaterAsync (msg: Message<'T>, deliverAt: int64) =
             task {
                 if not consumerConfig.RetryEnable then
-                    failwith "ReconsumeLater method not supported"
-                let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msgId, delayTime, channel))
+                    failwith "Retry is disabled"
+                let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, deliverAt, channel))
                 return! result
             }
             
-        member this.ReconsumeLaterCumulativeAsync (msgId: MessageId, delayTime: TimeSpan) =
+        member this.ReconsumeLaterCumulativeAsync (msg: Message<'T>, deliverAt: int64) =
             task {
                 if not consumerConfig.RetryEnable then
-                    failwith "ReconsumeLater method not supported"
-                let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLaterCumulative(msgId, delayTime, channel))
+                    failwith "Retry is disabled"
+                let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLaterCumulative(msg, deliverAt, channel))
                 return! result
             }
         
-        member this.ReconsumeLaterAsync (msgs: Messages<'T>, delayTime: TimeSpan) =
+        member this.ReconsumeLaterAsync (msgs: Messages<'T>, deliverAt: int64) =
             task {
                 if not consumerConfig.RetryEnable then
-                    failwith "ReconsumeLater method not supported"
+                    failwith "Retry is disabled"
                 for msg in msgs do
-                    let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg.MessageId, delayTime, channel))
+                    let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, deliverAt, channel))
                     return! result
             }
         
