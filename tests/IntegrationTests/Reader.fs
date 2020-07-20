@@ -191,19 +191,25 @@ let tests =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
+                    .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
-            let! _ = producer.SendAsync("Hello world" |> Encoding.UTF8.GetBytes) |> Async.AwaitTask
+            let! _ = producer.SendAsync("Hello world1" |> Encoding.UTF8.GetBytes) |> Async.AwaitTask
+            do! Async.Sleep(500)
+            let! _ = producer.SendAsync("Hello world2" |> Encoding.UTF8.GetBytes) |> Async.AwaitTask
+            do! Async.Sleep(500)
+            let! _ = producer.SendAsync("Hello world3" |> Encoding.UTF8.GetBytes) |> Async.AwaitTask
+            do! Async.Sleep(500)
 
             let! reader =
                 client.NewReader()
                     .Topic(topicName)
                     .ReaderName(readerName)
-                    .StartMessageFromRollbackDuration(TimeSpan.FromMinutes(1.0))
+                    .StartMessageFromRollbackDuration(TimeSpan.FromSeconds(20.0))
                     .CreateAsync() |> Async.AwaitTask
 
             let! result = readerLoopRead reader |> Async.AwaitTask
-            Expect.equal "" 1 result.Count
+            Expect.equal "" 3 result.Count
             Log.Debug("Finished StartMessageFromRollbackDuration")
         }
     ]

@@ -185,7 +185,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             |> raise
                     else
                         Log.Logger.LogWarning("Could not get connection while GetLastMessageId -- Will try again in {0} ms", nextDelay)    
-                        do! Async.Sleep nextDelay                    
+                        do! Async.Sleep nextDelay
                         return! internalGetLastMessageIdAsync(backoff, remainingTimeMs - nextDelay)
             }
         
@@ -798,7 +798,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     if lastDequeuedMessageId = MessageId.Earliest then
                         // if we are starting from latest, we should seek to the actual last message first.
                         // allow the last one to be read when read head inclusively.
-                        if startMessageId = MessageId.Latest then                            
+                        if startMessageId = MessageId.Latest then
                             let! messageId = getLastMessageIdAsync() |> Async.AwaitTask
                             task {
                                 let! result = this.Mb.PostAndAsyncReply(fun channel -> SeekAsync ((MessageId messageId), channel))
