@@ -16,6 +16,9 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
                 |> fun _ -> c
             )
         |> invalidArgIf (fun c ->
+                c.BatchingEnabled && c.ChunkingEnabled
+            ) "Batching and chunking of messages can't be enabled together"
+        |> invalidArgIf (fun c ->
                 c.MessageRoutingMode = MessageRoutingMode.CustomPartition && Option.isNone config.CustomMessageRouter
             ) "Valid router should be set with CustomPartition routing mode."
 
@@ -57,6 +60,10 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
         { config with BatchingEnabled = enableBatching }
         |> this.With
 
+    member this.EnableChunking enableChunking =
+        { config with ChunkingEnabled = enableChunking }
+        |> this.With
+    
     member this.BatchingMaxMessages batchingMaxMessages =
         { config with
             BatchingMaxMessages =

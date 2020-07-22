@@ -304,8 +304,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let updateMaxMessageSize messageSize =
         maxMessageSize <- messageSize
         batchMessageContainer.MaxMessageSize <- messageSize
-    
-    
+        
     let beginSendMessage sendRequest =
         let (message, channel) = sendRequest
         if pendingMessages.Count >= producerConfig.MaxPendingMessages then

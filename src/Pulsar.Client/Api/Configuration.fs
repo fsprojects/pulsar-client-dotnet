@@ -101,6 +101,7 @@ type ProducerConfiguration =
         MaxPendingMessagesAcrossPartitions: int
         MaxPendingMessages: int
         BatchingEnabled: bool
+        ChunkingEnabled: bool
         BatchingMaxMessages: int
         BatchingMaxBytes: int
         BatchingMaxPublishDelay: TimeSpan
@@ -126,6 +127,7 @@ type ProducerConfiguration =
             MaxPendingMessages = 1000
             MaxPendingMessagesAcrossPartitions = 50000
             BatchingEnabled = true
+            ChunkingEnabled = false
             BatchingMaxMessages = 1000
             BatchingMaxBytes = 128 * 1024 // 128KB
             BatchingMaxPublishDelay = TimeSpan.FromMilliseconds(1.0)
