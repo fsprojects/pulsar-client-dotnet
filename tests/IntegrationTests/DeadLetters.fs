@@ -255,6 +255,7 @@ let tests =
 
             let lBorder = 5
             let uBorder = 6
+            let redeliveryCount = 1
 
             let! producer =
                 createProducer()
@@ -272,7 +273,7 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
-                    .DeadLetterPolicy(DeadLetterPolicy(0, config.DeadLettersPolicy.DeadLetterTopic))
+                    .DeadLetterPolicy(DeadLetterPolicy(redeliveryCount, config.DeadLettersPolicy.DeadLetterTopic))
                     .SubscribeAsync()
                     |> Async.AwaitTask
 
@@ -294,12 +295,13 @@ let tests =
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        for i in 1..config.NumberOfMessages do
-                            let! message = consumer.ReceiveAsync()
-                            if i >= lBorder && i <= uBorder then
-                                do! consumer.NegativeAcknowledge(message.MessageId)
-                            else
-                                do! consumer.AcknowledgeAsync(message.MessageId)
+                        for _ in 0..redeliveryCount do
+                            for i in 1..config.NumberOfMessages do
+                                let! message = consumer.ReceiveAsync()
+                                if i >= lBorder && i <= uBorder then
+                                    do! consumer.NegativeAcknowledge(message.MessageId)
+                                else
+                                    do! consumer.AcknowledgeAsync(message.MessageId)
                     }:> Task)
 
             let dlqConsumerTask =

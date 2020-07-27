@@ -441,6 +441,7 @@ let tests =
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .ConsumerName(consumerName)
+                    .EnableBatchIndexAcknowledgement(true)
                     .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(100.0))
                     .SubscribeAsync() |> Async.AwaitTask
 

@@ -59,6 +59,7 @@ type ConsumerConfiguration<'T> =
         BatchReceivePolicy: BatchReceivePolicy
         PriorityLevel: PriorityLevel
         RetryEnable: bool
+        BatchIndexAcknowledgmentEnabled: bool
     }
     member this.SingleTopic with get() = this.Topics |> Seq.head
     static member Default =
@@ -86,6 +87,7 @@ type ConsumerConfiguration<'T> =
             BatchReceivePolicy = BatchReceivePolicy()
             PriorityLevel = %0
             RetryEnable = false
+            BatchIndexAcknowledgmentEnabled = false
         }
 
 type ProducerConfiguration =

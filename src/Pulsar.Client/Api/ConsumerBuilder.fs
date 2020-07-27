@@ -227,6 +227,11 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
         { config with
             RetryEnable = retryEnable }
         |> this.With
+        
+    member this.EnableBatchIndexAcknowledgement enableBatchIndexAcknowledgement =
+        { config with
+            BatchIndexAcknowledgmentEnabled = enableBatchIndexAcknowledgement }
+        |> this.With
     
     member this.SubscribeAsync(): Task<IConsumer<'T>> =
         createConsumerAsync(verify config, schema, consumerInterceptors)
