@@ -337,6 +337,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | pulsar.proto.CompressionType.Zstd -> Pulsar.Client.Common.CompressionType.ZStd
             | pulsar.proto.CompressionType.Snappy -> Pulsar.Client.Common.CompressionType.Snappy
             | _ -> Pulsar.Client.Common.CompressionType.None
+        
         let medadata = {
             NumMessages = messageMetadata.NumMessagesInBatch
             HasNumMessagesInBatch = messageMetadata.ShouldSerializeNumMessagesInBatch()
@@ -344,6 +345,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             UncompressedMessageSize = messageMetadata.UncompressedSize |> int32
             SchemaVersion = getOptionalSchemaVersion messageMetadata.SchemaVersion
             SequenceId = %(int64 messageMetadata.SequenceId)
+            
         }
 
         {
@@ -361,6 +363,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     |> readOnlyDict
                 else
                     EmptyProps
+            AckSet =
+                if isNull cmd.AckSets then
+                    EmptyAckSet
+                else
+                    fromLongArray cmd.AckSets medadata.NumMessages
         }
 
     let handleCommand xcmd =

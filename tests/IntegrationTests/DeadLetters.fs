@@ -242,7 +242,7 @@ let tests =
             description |> logTestEnd
         }
 
-        ptestAsync "Some failed batch messages get stored in a configured default letter topic" {
+        testAsync "Some failed batch messages get stored in a configured default letter topic" {
 
             let description = "Failed batch stored in a configured dead letter topic"
 
@@ -255,7 +255,6 @@ let tests =
 
             let lBorder = 5
             let uBorder = 6
-            let redeliveryCount = 1
 
             let! producer =
                 createProducer()
@@ -273,7 +272,7 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
-                    .DeadLetterPolicy(DeadLetterPolicy(redeliveryCount, config.DeadLettersPolicy.DeadLetterTopic))
+                    .DeadLetterPolicy(DeadLetterPolicy(0, config.DeadLettersPolicy.DeadLetterTopic))
                     .SubscribeAsync()
                     |> Async.AwaitTask
 
@@ -295,13 +294,12 @@ let tests =
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        for _ in 0..redeliveryCount do
-                            for i in 1..config.NumberOfMessages do
-                                let! message = consumer.ReceiveAsync()
-                                if i >= lBorder && i <= uBorder then
-                                    do! consumer.NegativeAcknowledge(message.MessageId)
-                                else
-                                    do! consumer.AcknowledgeAsync(message.MessageId)
+                        for i in 1..config.NumberOfMessages do
+                            let! message = consumer.ReceiveAsync()
+                            if i >= lBorder && i <= uBorder then
+                                do! consumer.NegativeAcknowledge(message.MessageId)
+                            else
+                                do! consumer.AcknowledgeAsync(message.MessageId)
                     }:> Task)
 
             let dlqConsumerTask =

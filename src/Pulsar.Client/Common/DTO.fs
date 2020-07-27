@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Common
 
+open System.Collections
 open System.Net
 open System
 open pulsar.proto
@@ -229,6 +230,7 @@ type internal RawMessage =
         IsKeyBase64Encoded: bool
         CheckSumValid: bool
         Properties: IReadOnlyDictionary<string, string>
+        AckSet: BitArray
     }
 
 type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey, hasBase64EncodedKey: bool,

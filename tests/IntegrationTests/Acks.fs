@@ -376,6 +376,7 @@ let tests =
             let! producer =
                 client.NewProducer()
                     .Topic(topicName)
+                    .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
@@ -419,6 +420,63 @@ let tests =
             do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
 
             Log.Debug("Finished Negative acks work correctly")
+
+        }
+        
+        testAsync "Negative acks work correctly with batches" {
+
+            Log.Debug("Started Negative acks work correctly with batches")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let consumerName = "BatchNegativeAcksConsumer"
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(100.0))
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .ConsumerName(consumerName)
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(100.0))
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! fastProduceMessages producer 10 ""
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        for i in [1..10] do
+                            let! message = consumer.ReceiveAsync()
+                            let received = Encoding.UTF8.GetString(message.Data)
+                            Log.Debug("{0} received {1}", consumerName, received)
+                            let expected = "Message #" + string i
+                            if received.StartsWith(expected) |> not then
+                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
+                            if (i < 10) then
+                                do! consumer.AcknowledgeAsync(message.MessageId)
+                            else
+                                do! consumer.NegativeAcknowledge(message.MessageId)
+                        for i in [10..10] do
+                            let! message = consumer.ReceiveAsync()
+                            let received = Encoding.UTF8.GetString(message.Data)
+                            Log.Debug("{0} received {1}", consumerName, received)
+                            let expected = "Message #" + string i
+                            if received.StartsWith(expected) |> not then
+                                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
+                            do! consumer.AcknowledgeAsync(message.MessageId)
+                    }:> Task)
+
+            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+
+            Log.Debug("Finished Negative acks work correctly with batches")
 
         }
     ]

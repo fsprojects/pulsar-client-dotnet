@@ -14,6 +14,7 @@ let MagicNumber = int16 0x0e01
 let RandomGenerator = Random()
 let EmptyProps: IReadOnlyDictionary<string, string> = readOnlyDict []
 let EmptyProperties: IReadOnlyDictionary<string, int64> = readOnlyDict []
+let EmptyAckSet = BitArray(0)
 
 // Converts
 
@@ -103,7 +104,18 @@ let toLongArray (bitSet: BitArray) =
     let resultArrayLengthLongs = bitSet.Length / 64 + (if bitSet.Length % 64 = 0 then 0 else 1)
     let resultArray = Array.create (resultArrayLengthLongs * 8) 0uy
     bitSet.CopyTo(resultArray, 0)
-    resultArray
-    |> Array.chunkBySize 8
-    |> Array.map (fun arr ->
-        BitConverter.ToInt64(arr, 0))
+    [|
+        for i in 0..8..resultArray.Length-1 do
+            yield BitConverter.ToInt64(resultArray, i)
+    |]
+    
+let fromLongArray (ackSets: int64[]) (numMessagesInBatch: int) =
+    let bitArray = BitArray(numMessagesInBatch)
+    let mutable index = 0
+    for ackSet in ackSets do
+        let stillToGo = numMessagesInBatch - index
+        let currentLimit = if stillToGo > 64 then 64 else stillToGo 
+        for bitNumber in 1..currentLimit do
+            bitArray.[index] <- (ackSet &&& (1L <<< bitNumber-1)) <> 0L // https://stackoverflow.com/a/4854257/1780648
+            index <- index + 1
+    bitArray

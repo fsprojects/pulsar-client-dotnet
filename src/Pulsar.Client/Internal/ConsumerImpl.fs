@@ -613,7 +613,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         return! loop ()
 
                 | ConsumerMessage.MessageReceived (rawMessage, clientCnx) ->
-
+                    
                     let hasWaitingChannel = waiters.Count > 0
                     let hasWaitingBatchChannel = batchWaiters.Count > 0
                     let msgId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
@@ -927,6 +927,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
             if isSameEntry(rawMessage.MessageId) && isPriorBatchIndex(%i) then
                 Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1} in batch", prefix, startMessageId)
+                skippedMessages <- skippedMessages + 1
+            elif singleMessageMetadata.CompactedOut then
+                // message has been compacted out, so don't send to the user
+                skippedMessages <- skippedMessages + 1
+            elif rawMessage.AckSet.Count > 0 && not rawMessage.AckSet.[i] then
                 skippedMessages <- skippedMessages + 1
             else
                 let messageId =
