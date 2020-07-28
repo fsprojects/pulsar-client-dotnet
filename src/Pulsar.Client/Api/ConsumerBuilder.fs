@@ -228,9 +228,9 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
             RetryEnable = retryEnable }
         |> this.With
         
-    member this.EnableBatchIndexAcknowledgement enableBatchIndexAcknowledgement =
+    member this.EnableBatchIndexAcknowledgment enableBatchIndexAcknowledgment =
         { config with
-            BatchIndexAcknowledgmentEnabled = enableBatchIndexAcknowledgement }
+            BatchIndexAcknowledgmentEnabled = enableBatchIndexAcknowledgment }
         |> this.With
     
     member this.SubscribeAsync(): Task<IConsumer<'T>> =
