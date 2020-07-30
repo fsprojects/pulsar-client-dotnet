@@ -70,6 +70,7 @@
     <Compile Include="Api\DeadLetters.fs" />
     <Compile Include="Api\IConsumerInterceptor.fs" />
     <Compile Include="Api\IProducerInterceptor.fs" />
+    <Compile Include="Api\MessageCrypto.fs" />
     <Compile Include="Internal\DeadLetters.fs" />
     <Compile Include="Internal\ConsumerInterceptors.fs" />
     <Compile Include="Internal\ProducerInterceptors.fs" />
@@ -125,6 +126,9 @@
     <Compile Include="Api\ReaderBuilder.fs" />
     <Compile Include="Api\PulsarClient.fs" />
     <Compile Include="Api\PulsarClientBuilder.fs" />
+    <Compile Include="Crypto\KeyInfo.fs" />
+    <Compile Include="Crypto\ICryptoKeyReader.fs" />
+    <Compile Include="Crypto\MessageCryptoNSec.fs" />
   </ItemGroup>
   <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="ResolveReferences">
     <ItemGroup>

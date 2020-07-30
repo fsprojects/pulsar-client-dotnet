@@ -20,6 +20,8 @@ nuget ZstdNet
 nuget AvroSchemaGenerator
 nuget Microsoft.Extensions.Caching.Memory
 nuget Apache.Avro
+nuget NSec.Cryptography
+nuget PemUtils
 
 group Tests
   framework: netcoreapp3.1

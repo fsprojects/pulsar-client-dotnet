@@ -361,6 +361,10 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
         member this.GetStatsAsync() = mb.PostAndAsyncReply(GetStats) |> Async.StartAsTask
         
+        member this.UpdateEncryptionKeys() =
+            producers
+            |> Seq.iter(fun producer -> producer.UpdateEncryptionKeys())
+        
     interface IAsyncDisposable with        
         member this.DisposeAsync() =
             task {

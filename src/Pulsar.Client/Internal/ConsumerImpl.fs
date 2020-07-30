@@ -431,15 +431,36 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             cts.Dispose()
         Log.Logger.LogInformation("{0} stopped", prefix)
 
-    let getDecompressPayload (originalMessage: RawMessage) =
+    let decryptMessage =
+        match consumerConfig.MessageDecrypt with
+        | Some msgCrypto -> 
+            fun (rawMessage:RawMessage) ->
+                if rawMessage.Metadata.EncryptionKeys.Count = 0 then
+                    rawMessage
+                else
+                    let encryptionKeys =
+                        rawMessage.Metadata.EncryptionKeys
+                        |> Seq.map EncryptionKeys.FromProto
+                        |> Seq.toArray
+                    let encMsg = EncryptedMessage(rawMessage.Payload, encryptionKeys, rawMessage.Metadata.EncryptionParam)
+                    let decryptPayload = msgCrypto.Decrypt(encMsg)
+                    {rawMessage with Payload = decryptPayload}
+        | None -> 
+            Log.Logger.LogDebug("{0} CryptoKeyReader not present, decryption not possible", prefix)
+            fun (rawMessage:RawMessage) ->
+                if rawMessage.Metadata.EncryptionKeys.Count = 0 then
+                    rawMessage
+                else
+                    raise <| CryptoException "Consumer cannot decrypt message"
+    
+    let decompressMessage (rawMessage:RawMessage) =
         try
-            let compressionCodec = originalMessage.Metadata.CompressionType |> CompressionCodec.create
-            let uncompressedPayload = compressionCodec.Decode originalMessage.Metadata.UncompressedMessageSize originalMessage.Payload
-            uncompressedPayload
+            let compressionCodec = rawMessage.Metadata.CompressionType |> CompressionCodec.create
+            let uncompressedPayload = compressionCodec.Decode rawMessage.Metadata.UncompressedMessageSize rawMessage.Payload
+            {rawMessage with Payload = uncompressedPayload}
         with ex ->
-            Log.Logger.LogInformation(ex, "{0} Decompression exception {1}", prefix, originalMessage.MessageId)
+            Log.Logger.LogInformation(ex, "{0} Decompression exception {1}", prefix, rawMessage.MessageId)
             raise <| DecompressionException "Decompression exception"
-
     
     let discardCorruptedMessage (msgId: MessageId) (clientCnx: ClientCnx) error =
         stats.IncrementNumReceiveFailed()
@@ -455,7 +476,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 Log.Logger.LogWarning("{0} Unable to discard {1} due to {2}", prefix, msgId, err)
         }
         
-    let handleMessagePayload (rawMessage: RawMessage) payload msgId hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction =
+    let handleMessagePayload (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction =
         if (acksGroupingTracker.IsDuplicate(msgId)) then
             Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
             increaseAvailablePermits rawMessage.Metadata.NumMessages
@@ -465,6 +486,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     // We need to discard entries that were prior to startMessageId
                     Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
                 else
+                    let payload = rawMessage.Payload
                     let msgKey = rawMessage.MessageKey                    
                     let getValue () =
                         keyValueProcessor
@@ -498,7 +520,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             elif rawMessage.Metadata.NumMessages > 0 then
                 // handle batch message enqueuing; uncompressed payload has all messages in batch
                 try
-                    this.ReceiveIndividualMessagesFromBatch rawMessage payload schemaDecodeFunction
+                    this.ReceiveIndividualMessagesFromBatch rawMessage schemaDecodeFunction
                 with ex ->
                     Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
                     raise <| BatchDeserializationException "Batch reading exception"
@@ -508,6 +530,48 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             else
                 Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
 
+    let handleUndecipheredMessagePayload (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel =
+        if (acksGroupingTracker.IsDuplicate(msgId)) then
+            Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
+            increaseAvailablePermits rawMessage.Metadata.NumMessages
+        else
+            if (rawMessage.Metadata.NumMessages > 0) then
+                if isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
+                    // We need to discard entries that were prior to startMessageId
+                    Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
+                else
+                    let payload = rawMessage.Payload
+                    let msgKey = rawMessage.MessageKey
+                    let getValue () = Unchecked.defaultof<(byte[]->'T)> payload
+                    let message = Message(
+                                    msgId,
+                                    payload,
+                                    %msgKey,
+                                    rawMessage.IsKeyBase64Encoded,
+                                    rawMessage.Properties,
+                                    EncryptionContext.FromMetadata rawMessage.Metadata,
+                                    getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+                                    rawMessage.Metadata.SequenceId,
+                                    getValue
+                                )
+                    if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
+                        deadLettersProcessor.AddMessage message.MessageId message
+                    if hasWaitingChannel then
+                        let waitingChannel = waiters.Dequeue()
+                        if (incomingMessages.Count = 0) then
+                            replyWithMessage waitingChannel message
+                        else
+                            enqueueMessage message
+                            replyWithMessage waitingChannel <| dequeueMessage()       
+                    else
+                        enqueueMessage message
+                        if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                            let cts, ch = batchWaiters.Dequeue()
+                            replyWithBatch (Some cts) ch
+                            
+            else
+                Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
+    
     let consumerOperations = {
         MessageReceived = fun (rawMessage) -> this.Mb.Post(MessageReceived rawMessage)
         ReachedEndOfTheTopic = fun () -> this.Mb.Post(ReachedEndOfTheTopic)
@@ -624,20 +688,36 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     if rawMessage.CheckSumValid then
                         if rawMessage.Payload.Length <= clientCnx.MaxMessageSize then
                             try
-                                let payload = getDecompressPayload rawMessage
+                                let decompressMessage =
+                                    rawMessage
+                                    |> decryptMessage
+                                    |> decompressMessage 
                                 // mutable workaround for unsuppported let! inside let
                                 let mutable schemaDecodeFunction = Unchecked.defaultof<(byte[]->'T)>
                                 if schemaProvider.IsNone || rawMessage.Metadata.SchemaVersion.IsNone then
                                     schemaDecodeFunction <- schema.Decode
                                 else
-                                    let schemaVersion = rawMessage.Metadata.SchemaVersion.Value
+                                    let schemaVersion = decompressMessage.Metadata.SchemaVersion.Value
                                     let! specificSchemaOption = schemaProvider.Value.GetSchemaByVersion(schema, schemaVersion) |> Async.AwaitTask
                                     schemaDecodeFunction <-
                                         match specificSchemaOption with
                                         | Some specificSchema -> specificSchema.Decode
                                         | None -> schema.Decode
-                                handleMessagePayload rawMessage payload msgId hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
+                                handleMessagePayload decompressMessage msgId hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
                             with
+                                | CryptoException _ ->
+                                    match consumerConfig.ConsumerCryptoFailureAction with
+                                    | ConsumerCryptoFailureAction.DISCARD ->
+                                        Log.Logger.LogWarning("{0} {1} Discarding message since decryption failed and config is set to discard", prefix, msgId)
+                                        do! tryDiscard msgId clientCnx CommandAck.ValidationError.DecryptionError
+                                    | ConsumerCryptoFailureAction.FAIL ->
+                                        Log.Logger.LogError("{0} {1} Message delivery failed since unable to decrypt incoming message", prefix, msgId)
+                                        if consumerConfig.AckTimeout <> TimeSpan.Zero then
+                                            unAckedMessageTracker.Add msgId |> ignore
+                                    | ConsumerCryptoFailureAction.CONSUME ->
+                                        Log.Logger.LogWarning("{0} {1} Decryption failed. Consuming encrypted message since config is set to consume.", prefix, msgId)
+                                        handleUndecipheredMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel 
+                                    | _ -> failwith "Unknown ConsumerCryptoFailureAction"
                                 | DecompressionException _ ->
                                     do! tryDiscard msgId clientCnx CommandAck.ValidationError.DecompressionError
                                 | BatchDeserializationException _ ->
@@ -898,12 +978,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startStatTimer()
 
-    abstract member ReceiveIndividualMessagesFromBatch: RawMessage -> byte [] -> (byte [] -> 'T) -> unit
-    default this.ReceiveIndividualMessagesFromBatch (rawMessage: RawMessage) (decompressedPayload: byte[]) schemaDecodeFunction =
+    abstract member ReceiveIndividualMessagesFromBatch: RawMessage -> (byte [] -> 'T) -> unit
+    default this.ReceiveIndividualMessagesFromBatch (rawMessage: RawMessage) schemaDecodeFunction =
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
         let mutable skippedMessages = 0
-        use stream = new MemoryStream(decompressedPayload)
+        use stream = new MemoryStream(rawMessage.Payload)
         use binaryReader = new BinaryReader(stream)
         for i in 0..batchSize-1 do
             Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
@@ -1179,7 +1259,7 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
         if this.Waiters.Count > 0 then
             this.SendFlowPermits this.Waiters.Count
         
-    override this.ReceiveIndividualMessagesFromBatch (_: RawMessage) (_: byte[]) _ =
+    override this.ReceiveIndividualMessagesFromBatch (_: RawMessage) _ =
         let prefix = sprintf "consumer(%u, %s, %i)" this.ConsumerId consumerConfig.ConsumerName partitionIndex
         Log.Logger.LogError("{0} Closing consumer due to unsupported received batch-message with zero receiver queue size", prefix)
         let _ = this.Mb.PostAndReply(ConsumerMessage.Close) 
