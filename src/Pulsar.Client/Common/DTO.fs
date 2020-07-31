@@ -312,6 +312,16 @@ type MessageBuilder<'T> =
                 Payload = payload
                 SequenceId = sequenceId
             }
+            
+    /// Get a new instance of the message with updated properties
+    member this.WithProperties properties =
+        MessageBuilder(this.Value, this.Payload, this.Key, properties, this.DeliverAt, this.SequenceId)
+    /// Get a new instance of the message with updated deliverAt
+    member this.WithDeliverAt deliverAt =
+        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, deliverAt, this.SequenceId)
+    /// Get a new instance of the message with updated sequenceId
+    member this.WithSequenceId sequenceId =
+        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, this.DeliverAt, sequenceId)
         
         
 type internal WriterStream = Stream
