@@ -136,6 +136,11 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
             AutoUpdatePartitions = autoUpdatePartitions }
         |> this.With
     
+    member this.MessageEncryptor messageEncryptor  =
+        { config with
+            MessageEncryptor = Some messageEncryptor }
+        |> this.With
+    
     member this.CreateAsync(): Task<IProducer<'T>> =
         сreateProducerAsync(verify config, schema, producerInterceptors)
 

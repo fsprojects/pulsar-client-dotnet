@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>1.4.3</Version>
+    <Version>1.5.0</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Fix for StartMessageFromRollbackDuration</PackageReleaseNotes>
+    <PackageReleaseNotes>End-to-end Encryption support</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
-    <PackageVersion>1.4.3</PackageVersion>
+    <PackageVersion>1.5.0</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
@@ -71,6 +71,7 @@
     <Compile Include="Api\DeadLetters.fs" />
     <Compile Include="Api\IConsumerInterceptor.fs" />
     <Compile Include="Api\IProducerInterceptor.fs" />
+    <Compile Include="Api\IMessageCrypto.fs" />
     <Compile Include="Internal\DeadLetters.fs" />
     <Compile Include="Internal\ConsumerInterceptors.fs" />
     <Compile Include="Internal\ProducerInterceptors.fs" />
@@ -126,6 +127,8 @@
     <Compile Include="Api\ReaderBuilder.fs" />
     <Compile Include="Api\PulsarClient.fs" />
     <Compile Include="Api\PulsarClientBuilder.fs" />
+    <Compile Include="Crypto\ICryptoKeyReader.fs" />
+    <Compile Include="Crypto\MessageCrypto.fs" />
   </ItemGroup>
   <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="ResolveReferences">
     <ItemGroup>

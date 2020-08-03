@@ -203,6 +203,31 @@ type CompressionType =
     | ZLib = 2
     | ZStd = 3
     | Snappy = 4
+    
+type EncryptionKey(name: string, value: byte [],
+                    [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] metadata: IReadOnlyDictionary<string, string>) =
+    
+    let metadata = if isNull metadata then EmptyMetadata else metadata
+    
+    member this.Name = name
+    member this.Value = value
+    member this.Metadata = metadata
+   
+    static member internal ToProto(encKey: EncryptionKey) =
+        let result = pulsar.proto.EncryptionKeys(Key = encKey.Name, Value = encKey.Value)
+        for KeyValue(k, v) in encKey.Metadata do
+             result.Metadatas.Add(KeyValue(Key = k, Value = v))
+        result
+    
+    static member internal FromProto(encKey: pulsar.proto.EncryptionKeys) =
+        let metadata =
+            if encKey.Metadatas.Count > 0 then
+                encKey.Metadatas
+                |> Seq.map (fun kv -> kv.Key, kv.Value)
+                |> readOnlyDict
+            else
+                EmptyMetadata
+        EncryptionKey(encKey.Key, encKey.Value, metadata)
 
 type internal Metadata =
     {
@@ -212,6 +237,9 @@ type internal Metadata =
         UncompressedMessageSize: int32
         SchemaVersion: SchemaVersion option
         SequenceId: SequenceId
+        EncryptionKeys: EncryptionKey[]
+        EncryptionParam: byte[]
+        EncryptionAlgo: string
     }
 
 type MessageKey =
@@ -233,9 +261,32 @@ type internal RawMessage =
         AckSet: BitArray
     }
 
+type EncryptionContext =
+    {
+        Keys: EncryptionKey[]
+        Param: byte []
+        Algorithm: string
+        CompressionType: CompressionType
+        UncompressedMessageSize: int
+        BatchSize: Nullable<int>
+    }
+    with
+        static member internal FromMetadata(metadata: Metadata) =
+            if metadata.EncryptionKeys.Length > 0 then
+                {
+                    Keys = metadata.EncryptionKeys
+                    Param = metadata.EncryptionParam
+                    Algorithm = metadata.EncryptionAlgo
+                    CompressionType = metadata.CompressionType
+                    UncompressedMessageSize = metadata.UncompressedMessageSize
+                    BatchSize = if metadata.HasNumMessagesInBatch then Nullable(metadata.NumMessages) else Nullable()
+                } |> Some
+            else
+                None
+
 type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey, hasBase64EncodedKey: bool,
-                  properties: IReadOnlyDictionary<string, string>, schemaVersion: byte[], sequenceId: SequenceId,
-                  getValue: unit -> 'T) =
+                  properties: IReadOnlyDictionary<string, string>, encryptionCtx: EncryptionContext option,
+                  schemaVersion: byte[], sequenceId: SequenceId, getValue: unit -> 'T) =
     /// Get the unique message ID associated with this message.
     member this.MessageId = messageId
     /// Get the raw payload of the message.
@@ -250,20 +301,25 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
     member this.SchemaVersion = schemaVersion
     /// Get the sequence id associated with this message
     member this.SequenceId = sequenceId
+    /// EncryptionContext contains encryption and compression information in it using which application can
+    /// decrypt consumed message with encrypted-payload.
+    member this.EncryptionContext = encryptionCtx
     /// Get the de-serialized value of the message, according the configured Schema.
     member this.GetValue() =
         getValue()
+
     member internal this.WithMessageId messageId =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, getValue)
     /// Get a new instance of the message with updated data
     member this.WithData data =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, getValue)
     /// Get a new instance of the message with updated key
     member this.WithKey (key, hasBase64EncodedKey) =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, getValue)
     /// Get a new instance of the message with updated properties
     member this.WithProperties properties =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, getValue)
+     
 
 type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 
@@ -322,6 +378,16 @@ type MessageBuilder<'T> =
                 Payload = payload
                 SequenceId = sequenceId
             }
+            
+    /// Get a new instance of the message with updated properties
+    member this.WithProperties properties =
+        MessageBuilder(this.Value, this.Payload, this.Key, properties, this.DeliverAt, this.SequenceId)
+    /// Get a new instance of the message with updated deliverAt
+    member this.WithDeliverAt deliverAt =
+        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, deliverAt, this.SequenceId)
+    /// Get a new instance of the message with updated sequenceId
+    member this.WithSequenceId sequenceId =
+        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, this.DeliverAt, sequenceId)
         
         
 type internal WriterStream = Stream
@@ -482,4 +548,32 @@ type ConsumerStats = {
     /// The number of prefetched messages at the end of the last interval
     IncomingMsgs: int
 }
+        
+type EncryptedMessage(encPayload: byte [], encryptionKeys: EncryptionKey [],
+                      encryptionAlgo: string, encryptionParam: byte []) =
+    member val EncPayload = encPayload
+    member val EncryptionKeys = encryptionKeys
+    member val EncryptionAlgo = encryptionAlgo
+    member val EncryptionParam = encryptionParam
 
+
+/// The action the producer will take in case of encryption failures.
+type ProducerCryptoFailureAction =
+    /// This is the default option to fail send if crypto operation fails.
+    | FAIL = 0
+    /// Ignore crypto failure and proceed with sending unencrypted messages.
+    | SEND = 1
+
+/// The action a consumer should take when a consumer receives a  message that it cannot decrypt.
+type ConsumerCryptoFailureAction =
+    /// This is the default option to fail consume messages until crypto succeeds.
+    | FAIL = 0
+    /// Message is silently acknowledged and not delivered to the application.
+    | DISCARD = 1
+    /// Deliver the encrypted message to the application. It's the application's responsibility to decrypt the message.
+    ///
+    /// If message is also compressed, decompression will fail. If message contain batch messages, client will not be
+    /// able to retrieve individual messages in the batch.
+    /// Delivered encrypted message contains {@link EncryptionContext} which contains encryption and compression
+    /// information in it using which application can decrypt consumed message payload.
+    | CONSUME = 2

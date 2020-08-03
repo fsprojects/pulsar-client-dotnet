@@ -233,5 +233,15 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
             BatchIndexAcknowledgmentEnabled = enableBatchIndexAcknowledgment }
         |> this.With
     
+    member this.MessageDecryptor messageDecryptor  =
+        { config with
+            MessageDecryptor = Some messageDecryptor }
+        |> this.With
+
+    member this.CryptoFailureAction (action: ConsumerCryptoFailureAction)  =
+        { config with
+            ConsumerCryptoFailureAction = action }
+        |> this.With
+    
     member this.SubscribeAsync(): Task<IConsumer<'T>> =
         createConsumerAsync(verify config, schema, consumerInterceptors)

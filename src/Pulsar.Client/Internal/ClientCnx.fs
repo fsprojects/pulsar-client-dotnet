@@ -337,21 +337,26 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | pulsar.proto.CompressionType.Zstd -> Pulsar.Client.Common.CompressionType.ZStd
             | pulsar.proto.CompressionType.Snappy -> Pulsar.Client.Common.CompressionType.Snappy
             | _ -> Pulsar.Client.Common.CompressionType.None
-        
-        let medadata = {
+        let metadata = {
             NumMessages = messageMetadata.NumMessagesInBatch
             HasNumMessagesInBatch = messageMetadata.ShouldSerializeNumMessagesInBatch()
             CompressionType = messageMetadata.Compression |> mapCompressionType
             UncompressedMessageSize = messageMetadata.UncompressedSize |> int32
             SchemaVersion = getOptionalSchemaVersion messageMetadata.SchemaVersion
             SequenceId = %(int64 messageMetadata.SequenceId)
-            
+            EncryptionKeys =
+                if messageMetadata.EncryptionKeys.Count > 0 then
+                    messageMetadata.EncryptionKeys |> Seq.map EncryptionKey.FromProto |> Seq.toArray
+                else
+                    [||]
+            EncryptionParam = messageMetadata.EncryptionParam
+            EncryptionAlgo = messageMetadata.EncryptionAlgo
         }
 
         {
             MessageId = { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); Type = Individual; Partition = -1; TopicName = %"" }
             RedeliveryCount = cmd.RedeliveryCount
-            Metadata = medadata
+            Metadata = metadata
             Payload = payload
             MessageKey = messageMetadata.PartitionKey
             IsKeyBase64Encoded = messageMetadata.PartitionKeyB64Encoded
@@ -367,7 +372,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 if isNull cmd.AckSets then
                     EmptyAckSet
                 else
-                    fromLongArray cmd.AckSets medadata.NumMessages
+                    fromLongArray cmd.AckSets metadata.NumMessages
         }
 
     let handleCommand xcmd =

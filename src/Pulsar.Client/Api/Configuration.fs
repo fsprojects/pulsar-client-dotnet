@@ -58,6 +58,8 @@ type ConsumerConfiguration<'T> =
         KeySharedPolicy: KeySharedPolicy option
         BatchReceivePolicy: BatchReceivePolicy
         PriorityLevel: PriorityLevel
+        MessageDecryptor: IMessageDecryptor option
+        ConsumerCryptoFailureAction: ConsumerCryptoFailureAction
         RetryEnable: bool
         BatchIndexAcknowledgmentEnabled: bool
     }
@@ -86,6 +88,8 @@ type ConsumerConfiguration<'T> =
             KeySharedPolicy = None
             BatchReceivePolicy = BatchReceivePolicy()
             PriorityLevel = %0
+            MessageDecryptor = None
+            ConsumerCryptoFailureAction = ConsumerCryptoFailureAction.FAIL
             RetryEnable = false
             BatchIndexAcknowledgmentEnabled = false
         }
@@ -110,6 +114,8 @@ type ProducerConfiguration =
         HashingScheme: HashingScheme
         InitialSequenceId : SequenceId option
         BlockIfQueueFull: bool
+        MessageEncryptor: IMessageEncryptor option
+        ProducerCryptoFailureAction: ProducerCryptoFailureAction
     }
     member this.BatchingPartitionSwitchFrequencyIntervalMs =
         this.BatchingPartitionSwitchFrequencyByPublishDelay * (int this.BatchingMaxPublishDelay.TotalMilliseconds)
@@ -133,6 +139,8 @@ type ProducerConfiguration =
             HashingScheme = HashingScheme.DotnetStringHash
             InitialSequenceId = Option.None
             BlockIfQueueFull = false
+            MessageEncryptor = None
+            ProducerCryptoFailureAction = ProducerCryptoFailureAction.FAIL
         }
 
 type ReaderConfiguration =

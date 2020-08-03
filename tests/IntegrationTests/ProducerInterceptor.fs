@@ -37,8 +37,7 @@ type ProducerInterceptorBefore() =
             let msgValue = message.Value |> Encoding.UTF8.GetString    
             let newProp = Dictionary(message.Properties)
             newProp.Add("BeforeSend", msgValue)
-            let key = message.Key |> Option.map (fun k -> %k.PartitionKey) |> Option.defaultValue ""
-            producer.NewMessage(message.Value, key, newProp, message.DeliverAt)
+            message.WithProperties(newProp)
         
         member this.OnSendAcknowledgement(_, _, _, _) = ()
 

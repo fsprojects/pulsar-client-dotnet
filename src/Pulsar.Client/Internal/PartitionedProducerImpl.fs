@@ -360,6 +360,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         member this.Name = producerConfig.ProducerName
 
         member this.GetStatsAsync() = mb.PostAndAsyncReply(GetStats) |> Async.StartAsTask
+
         
     interface IAsyncDisposable with        
         member this.DisposeAsync() =
