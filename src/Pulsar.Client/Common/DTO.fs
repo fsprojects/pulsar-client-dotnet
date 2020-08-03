@@ -195,17 +195,17 @@ type CompressionType =
     | ZStd = 3
     | Snappy = 4
     
-type EncryptionKey(key: string, value: byte [],
+type EncryptionKey(name: string, value: byte [],
                     [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] metadata: IReadOnlyDictionary<string, string>) =
     
     let metadata = if isNull metadata then EmptyMetadata else metadata
     
-    member this.Key = key
+    member this.Name = name
     member this.Value = value
     member this.Metadata = metadata
    
     static member internal ToProto(encKey: EncryptionKey) =
-        let result = pulsar.proto.EncryptionKeys(Key = encKey.Key, Value = encKey.Value)
+        let result = pulsar.proto.EncryptionKeys(Key = encKey.Name, Value = encKey.Value)
         for KeyValue(k, v) in encKey.Metadata do
              result.Metadatas.Add(KeyValue(Key = k, Value = v))
         result

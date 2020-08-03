@@ -82,7 +82,7 @@ type MessageDecryptor(keyReader: ICryptoKeyReader) =
         Log.Logger.LogDebug("MessageDecryptor try decrypt symmetric key")
         let encKey = encryptionKey.Value
         try
-            let privateKey = keyReader.GetPrivateKey(encryptionKey.Key, encryptionKey.Metadata)
+            let privateKey = keyReader.GetPrivateKey(encryptionKey.Name, encryptionKey.Metadata)
             let rsaPrivateKey = parsePrivateKey (privateKey.Key)
             let rsa = RSA.Create()
             rsa.ImportParameters(rsaPrivateKey)
