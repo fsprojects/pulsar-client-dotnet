@@ -57,7 +57,7 @@ type ConsumerConfiguration<'T> =
         KeySharedPolicy: KeySharedPolicy option
         BatchReceivePolicy: BatchReceivePolicy
         PriorityLevel: PriorityLevel
-        MessageDecrypt: IMessageDecrypt option
+        MessageDecryptor: IMessageDecryptor option
         ConsumerCryptoFailureAction: ConsumerCryptoFailureAction
     }
     member this.SingleTopic with get() = this.Topics |> Seq.head
@@ -84,7 +84,7 @@ type ConsumerConfiguration<'T> =
             KeySharedPolicy = None
             BatchReceivePolicy = BatchReceivePolicy()
             PriorityLevel = %0
-            MessageDecrypt = None
+            MessageDecryptor = None
             ConsumerCryptoFailureAction = ConsumerCryptoFailureAction.FAIL
         }
 
@@ -108,7 +108,7 @@ type ProducerConfiguration =
         HashingScheme: HashingScheme
         InitialSequenceId : SequenceId option
         BlockIfQueueFull: bool
-        MessageEncrypt: IMessageEncrypt option
+        MessageEncryptor: IMessageEncryptor option
         ProducerCryptoFailureAction: ProducerCryptoFailureAction
     }
     member this.BatchingPartitionSwitchFrequencyIntervalMs =
@@ -133,7 +133,7 @@ type ProducerConfiguration =
             HashingScheme = HashingScheme.DotnetStringHash
             InitialSequenceId = Option.None
             BlockIfQueueFull = false
-            MessageEncrypt = None
+            MessageEncryptor = None
             ProducerCryptoFailureAction = ProducerCryptoFailureAction.FAIL
         }
 

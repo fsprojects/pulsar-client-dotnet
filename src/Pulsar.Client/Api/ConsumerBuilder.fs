@@ -202,9 +202,9 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
             PriorityLevel = %(priorityLevel |> invalidArgIfLessThanZero "PriorityLevel can't be negative.") }
         |> this.With
     
-    member this.AddMessageDecrypt (messageDecrypt: IMessageDecrypt)  =
+    member this.MessageDecryptor messageDecryptor  =
         { config with
-            MessageDecrypt = Some messageDecrypt }
+            MessageDecryptor = Some messageDecryptor }
         |> this.With
 
     member this.CryptoFailureAction (action: ConsumerCryptoFailureAction)  =

@@ -366,8 +366,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         lastDequeuedMessageId <- msg.MessageId
         increaseAvailablePermits 1
         stats.UpdateNumMsgsReceived(msg.Data.Length)
-        if consumerConfig.AckTimeout <> TimeSpan.Zero then
-            unAckedMessageTracker.Add msg.MessageId |> ignore
+        unAckedMessageTracker.Add msg.MessageId |> ignore
 
     let replyWithBatch (cts: CancellationTokenSource option) (ch: AsyncReplyChannel<ResultOrException<Messages<'T>>>) =
         cts |> Option.iter (fun cts ->
@@ -431,147 +430,122 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             cts.Dispose()
         Log.Logger.LogInformation("{0} stopped", prefix)
 
-    let decryptMessage =
-        match consumerConfig.MessageDecrypt with
-        | Some msgCrypto -> 
-            fun (rawMessage:RawMessage) ->
-                if rawMessage.Metadata.EncryptionKeys.Count = 0 then
-                    rawMessage
-                else
-                    let encryptionKeys =
-                        rawMessage.Metadata.EncryptionKeys
-                        |> Seq.map EncryptionKeys.FromProto
-                        |> Seq.toArray
-                    let encMsg = EncryptedMessage(rawMessage.Payload, encryptionKeys, rawMessage.Metadata.EncryptionParam)
+    let decryptMessage (rawMessage:RawMessage) =
+        if rawMessage.Metadata.EncryptionKeys.Length = 0 then
+            ValueSome rawMessage
+        else
+            try
+                match consumerConfig.MessageDecryptor with
+                | Some msgCrypto -> 
+                    let encryptionKeys = rawMessage.Metadata.EncryptionKeys
+                    let encMsg = EncryptedMessage(rawMessage.Payload, encryptionKeys,
+                                                  rawMessage.Metadata.EncryptionAlgo, rawMessage.Metadata.EncryptionParam)
                     let decryptPayload = msgCrypto.Decrypt(encMsg)
-                    {rawMessage with Payload = decryptPayload}
-        | None -> 
-            Log.Logger.LogDebug("{0} CryptoKeyReader not present, decryption not possible", prefix)
-            fun (rawMessage:RawMessage) ->
-                if rawMessage.Metadata.EncryptionKeys.Count = 0 then
-                    rawMessage
-                else
-                    raise <| CryptoException "Consumer cannot decrypt message"
+                    { rawMessage with Payload = decryptPayload } |> ValueSome
+                | None -> 
+                    raise <| CryptoException "Message is encrypted, but no encryption configured"
+            with ex ->
+                Log.Logger.LogWarning(ex, "{0} Decryption exception {1}", prefix, rawMessage.MessageId)
+                ValueNone
     
-    let decompressMessage (rawMessage:RawMessage) =
+    let decompressMessage (rawMessage: RawMessage) =
         try
             let compressionCodec = rawMessage.Metadata.CompressionType |> CompressionCodec.create
             let uncompressedPayload = compressionCodec.Decode rawMessage.Metadata.UncompressedMessageSize rawMessage.Payload
-            {rawMessage with Payload = uncompressedPayload}
+            { rawMessage with Payload = uncompressedPayload } |> ValueSome
         with ex ->
-            Log.Logger.LogInformation(ex, "{0} Decompression exception {1}", prefix, rawMessage.MessageId)
-            raise <| DecompressionException "Decompression exception"
-    
-    let discardCorruptedMessage (msgId: MessageId) (clientCnx: ClientCnx) error =
-        stats.IncrementNumReceiveFailed()
-        let command = Commands.newErrorAck consumerId msgId.LedgerId msgId.EntryId AckType.Individual error
-        clientCnx.Send command
+            Log.Logger.LogError(ex, "{0} Decompression exception {1}", prefix, rawMessage.MessageId)
+            ValueNone
         
-    let tryDiscard msgId clientCnx err =
+    let discardCorruptedMessage (msgId: MessageId) (clientCnx: ClientCnx) err =
         async {
-            let! discardResult = discardCorruptedMessage msgId clientCnx err
+            let command = Commands.newErrorAck consumerId msgId.LedgerId msgId.EntryId AckType.Individual err
+            let! discardResult = clientCnx.Send command
             if discardResult then
                 Log.Logger.LogInformation("{0} Message {1} was discarded due to {2}", prefix, msgId, err)
             else
                 Log.Logger.LogWarning("{0} Unable to discard {1} due to {2}", prefix, msgId, err)
+            stats.IncrementNumReceiveFailed()
         }
         
-    let handleMessagePayload (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction =
-        if (acksGroupingTracker.IsDuplicate(msgId)) then
-            Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
-            increaseAvailablePermits rawMessage.Metadata.NumMessages
-        else
-            if (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
-                if isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
-                    // We need to discard entries that were prior to startMessageId
-                    Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
-                else
-                    let payload = rawMessage.Payload
-                    let msgKey = rawMessage.MessageKey                    
-                    let getValue () =
-                        keyValueProcessor
-                        |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, payload) :?> 'T)
-                        |> Option.defaultWith (fun () -> schemaDecodeFunction payload)
-                    let message = Message(
-                                    msgId,
-                                    payload,
-                                    %msgKey,
-                                    rawMessage.IsKeyBase64Encoded,
-                                    rawMessage.Properties,
-                                    getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                                    rawMessage.Metadata.SequenceId,
-                                    getValue
-                                )
-                    if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
-                        deadLettersProcessor.AddMessage message.MessageId message
-                    if hasWaitingChannel then
-                        let waitingChannel = waiters.Dequeue()
-                        if (incomingMessages.Count = 0) then
-                            replyWithMessage waitingChannel message
-                        else
-                            enqueueMessage message
-                            replyWithMessage waitingChannel <| dequeueMessage()       
-                    else
-                        enqueueMessage message
-                        if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                            let cts, ch = batchWaiters.Dequeue()
-                            replyWithBatch (Some cts) ch
-                            
-            elif rawMessage.Metadata.NumMessages > 0 then
-                // handle batch message enqueuing; uncompressed payload has all messages in batch
-                try
-                    this.ReceiveIndividualMessagesFromBatch rawMessage schemaDecodeFunction
-                with ex ->
-                    Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
-                    raise <| BatchDeserializationException "Batch reading exception"
-                if hasWaitingChannel && incomingMessages.Count > 0 then
+    let getSchemaDecodeFunction (metadata: Metadata) =
+        async {
+            // mutable workaround for unsuppported let! inside let
+            let mutable schemaDecodeFunction = Unchecked.defaultof<(byte[]->'T)>
+            if schemaProvider.IsNone || metadata.SchemaVersion.IsNone then
+                schemaDecodeFunction <- schema.Decode
+            else
+                let schemaVersion = metadata.SchemaVersion.Value
+                let! specificSchemaOption = schemaProvider.Value.GetSchemaByVersion(schema, schemaVersion) |> Async.AwaitTask
+                schemaDecodeFunction <-
+                    match specificSchemaOption with
+                    | Some specificSchema -> specificSchema.Decode
+                    | None -> schema.Decode
+            return schemaDecodeFunction
+        }
+                
+    let handleMessagePayload (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel
+                                isMessageUndecryptable schemaDecodeFunction =        
+        if isMessageUndecryptable || (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
+            if isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
+                // We need to discard entries that were prior to startMessageId
+                Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
+            else
+                let payload = rawMessage.Payload
+                let msgKey = rawMessage.MessageKey
+                let getValue () =
+                    keyValueProcessor
+                    |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, payload) :?> 'T)
+                    |> Option.defaultWith (fun () -> schemaDecodeFunction payload)
+                let message = Message(
+                                msgId,
+                                payload,
+                                %msgKey,
+                                rawMessage.IsKeyBase64Encoded,
+                                rawMessage.Properties,
+                                EncryptionContext.FromMetadata rawMessage.Metadata,
+                                getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+                                rawMessage.Metadata.SequenceId,
+                                getValue
+                            )
+                if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
+                    deadLettersProcessor.AddMessage message.MessageId message
+                if hasWaitingChannel then
                     let waitingChannel = waiters.Dequeue()
-                    replyWithMessage waitingChannel <| dequeueMessage()
-            else
-                Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
-
-    let handleUndecipheredMessagePayload (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel =
-        if (acksGroupingTracker.IsDuplicate(msgId)) then
-            Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
-            increaseAvailablePermits rawMessage.Metadata.NumMessages
-        else
-            if (rawMessage.Metadata.NumMessages > 0) then
-                if isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
-                    // We need to discard entries that were prior to startMessageId
-                    Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
-                else
-                    let payload = rawMessage.Payload
-                    let msgKey = rawMessage.MessageKey
-                    let getValue () = Unchecked.defaultof<(byte[]->'T)> payload
-                    let message = Message(
-                                    msgId,
-                                    payload,
-                                    %msgKey,
-                                    rawMessage.IsKeyBase64Encoded,
-                                    rawMessage.Properties,
-                                    EncryptionContext.FromMetadata rawMessage.Metadata,
-                                    getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                                    rawMessage.Metadata.SequenceId,
-                                    getValue
-                                )
-                    if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
-                        deadLettersProcessor.AddMessage message.MessageId message
-                    if hasWaitingChannel then
-                        let waitingChannel = waiters.Dequeue()
-                        if (incomingMessages.Count = 0) then
-                            replyWithMessage waitingChannel message
-                        else
-                            enqueueMessage message
-                            replyWithMessage waitingChannel <| dequeueMessage()       
+                    if (incomingMessages.Count = 0) then
+                        replyWithMessage waitingChannel message
                     else
                         enqueueMessage message
-                        if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                            let cts, ch = batchWaiters.Dequeue()
-                            replyWithBatch (Some cts) ch
-                            
-            else
-                Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
+                        replyWithMessage waitingChannel <| dequeueMessage()       
+                else
+                    enqueueMessage message
+                    if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                        let cts, ch = batchWaiters.Dequeue()
+                        replyWithBatch (Some cts) ch
+                        
+        elif rawMessage.Metadata.NumMessages > 0 then
+            // handle batch message enqueuing; uncompressed payload has all messages in batch
+            try
+                this.ReceiveIndividualMessagesFromBatch rawMessage schemaDecodeFunction
+            with ex ->
+                Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
+                raise <| BatchDeserializationException "Batch reading exception"
+            if hasWaitingChannel && incomingMessages.Count > 0 then
+                let waitingChannel = waiters.Dequeue()
+                replyWithMessage waitingChannel <| dequeueMessage()
+        else
+            Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
     
+    let tryHandleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel
+                                isMessageUndecryptable schemaDecodeFunction clientCnx =
+        async {
+            try
+                handleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction
+            with
+            | BatchDeserializationException _ ->
+                do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
+        }
+        
     let consumerOperations = {
         MessageReceived = fun (rawMessage) -> this.Mb.Post(MessageReceived rawMessage)
         ReachedEndOfTheTopic = fun () -> this.Mb.Post(ReachedEndOfTheTopic)
@@ -687,45 +661,38 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                     if rawMessage.CheckSumValid then
                         if rawMessage.Payload.Length <= clientCnx.MaxMessageSize then
-                            try
-                                let decompressMessage =
-                                    rawMessage
-                                    |> decryptMessage
-                                    |> decompressMessage 
-                                // mutable workaround for unsuppported let! inside let
-                                let mutable schemaDecodeFunction = Unchecked.defaultof<(byte[]->'T)>
-                                if schemaProvider.IsNone || rawMessage.Metadata.SchemaVersion.IsNone then
-                                    schemaDecodeFunction <- schema.Decode
-                                else
-                                    let schemaVersion = decompressMessage.Metadata.SchemaVersion.Value
-                                    let! specificSchemaOption = schemaProvider.Value.GetSchemaByVersion(schema, schemaVersion) |> Async.AwaitTask
-                                    schemaDecodeFunction <-
-                                        match specificSchemaOption with
-                                        | Some specificSchema -> specificSchema.Decode
-                                        | None -> schema.Decode
-                                handleMessagePayload decompressMessage msgId hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
-                            with
-                                | CryptoException _ ->
+                            if msgId |> acksGroupingTracker.IsDuplicate |> not then
+                                let! schemaDecodeFunction = getSchemaDecodeFunction rawMessage.Metadata
+                                match decryptMessage rawMessage with
+                                | ValueSome decryptedMessage ->
+                                    match decompressMessage decryptedMessage with
+                                    | ValueSome decompressMessage ->
+                                        do! tryHandleMessagePayload decompressMessage msgId hasWaitingChannel hasWaitingBatchChannel false schemaDecodeFunction clientCnx
+                                    | ValueNone ->
+                                        do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecompressionError
+                                | ValueNone ->
                                     match consumerConfig.ConsumerCryptoFailureAction with
-                                    | ConsumerCryptoFailureAction.DISCARD ->
-                                        Log.Logger.LogWarning("{0} {1} Discarding message since decryption failed and config is set to discard", prefix, msgId)
-                                        do! tryDiscard msgId clientCnx CommandAck.ValidationError.DecryptionError
-                                    | ConsumerCryptoFailureAction.FAIL ->
-                                        Log.Logger.LogError("{0} {1} Message delivery failed since unable to decrypt incoming message", prefix, msgId)
-                                        if consumerConfig.AckTimeout <> TimeSpan.Zero then
-                                            unAckedMessageTracker.Add msgId |> ignore
                                     | ConsumerCryptoFailureAction.CONSUME ->
-                                        Log.Logger.LogWarning("{0} {1} Decryption failed. Consuming encrypted message since config is set to consume.", prefix, msgId)
-                                        handleUndecipheredMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel 
-                                    | _ -> failwith "Unknown ConsumerCryptoFailureAction"
-                                | DecompressionException _ ->
-                                    do! tryDiscard msgId clientCnx CommandAck.ValidationError.DecompressionError
-                                | BatchDeserializationException _ ->
-                                    do! tryDiscard msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
+                                        Log.Logger.LogWarning("{0} {1} Decryption failed. Consuming encrypted message.",
+                                                              prefix, msgId)
+                                        do! tryHandleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel true schemaDecodeFunction clientCnx
+                                    | ConsumerCryptoFailureAction.DISCARD ->
+                                        Log.Logger.LogWarning("{0} {1}. Decryption failed. Discarding encrypted message.",
+                                                              prefix, msgId)
+                                        do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecryptionError
+                                    | ConsumerCryptoFailureAction.FAIL ->
+                                        Log.Logger.LogError("{0} {1}. Decryption failed. Failing encrypted message.",
+                                                                prefix, msgId)
+                                        unAckedMessageTracker.Add msgId |> ignore
+                                    | _ ->
+                                        failwith "Unknown ConsumerCryptoFailureAction"
+                            else
+                                Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
+                                increaseAvailablePermits rawMessage.Metadata.NumMessages
                         else
-                            do! tryDiscard msgId clientCnx CommandAck.ValidationError.UncompressedSizeCorruption
+                            do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.UncompressedSizeCorruption
                     else
-                        do! tryDiscard msgId clientCnx CommandAck.ValidationError.ChecksumMismatch
+                        do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.ChecksumMismatch
                     return! loop ()
 
                 | ConsumerMessage.Receive ch ->
@@ -1019,6 +986,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 %msgKey,                        
                                 singleMessageMetadata.PartitionKeyB64Encoded,
                                 properties,
+                                EncryptionContext.FromMetadata rawMessage.Metadata,
                                 getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
                                 %(int64 singleMessageMetadata.SequenceId),
                                 getValue

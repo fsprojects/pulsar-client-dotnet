@@ -58,5 +58,3 @@ type IProducer<'T> =
     abstract member LastSequenceId : SequenceId
     /// Get the producer name
     abstract member Name: string
-    
-    abstract member UpdateEncryptionKeys: unit -> unit

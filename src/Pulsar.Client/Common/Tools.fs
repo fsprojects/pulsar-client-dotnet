@@ -12,6 +12,8 @@ let MagicNumber = int16 0x0e01
 let RandomGenerator = Random()
 let EmptyProps: IReadOnlyDictionary<string, string> = readOnlyDict []
 
+let EmptyMetadata: IReadOnlyDictionary<string, string> = readOnlyDict []
+
 // Converts
 
 let int32ToBigEndian(num : Int32) =

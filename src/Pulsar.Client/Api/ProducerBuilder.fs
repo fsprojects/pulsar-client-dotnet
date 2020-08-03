@@ -136,9 +136,9 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
             AutoUpdatePartitions = autoUpdatePartitions }
         |> this.With
     
-    member this.AddMessageEncrypt (messageEncrypt: IMessageEncrypt)  =
+    member this.MessageEncryptor messageEncryptor  =
         { config with
-            MessageEncrypt = Some messageEncrypt }
+            MessageEncryptor = Some messageEncryptor }
         |> this.With
     
     member this.CreateAsync(): Task<IProducer<'T>> =

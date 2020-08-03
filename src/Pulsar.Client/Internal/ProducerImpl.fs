@@ -21,7 +21,7 @@ type internal TickType =
     | SendBatchTick
     | SendTimeoutTick
     | StatTick
-    | UpdateEncryptionKeys
+    | UpdateEncryptionKeys of IMessageEncryptor
 
 type internal ProducerMessage<'T> =
     | ConnectionOpened of uint64
@@ -91,18 +91,19 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             KeyBasedBatchMessageContainer(prefix, producerConfig) :> MessageContainer<'T>
         | _ -> failwith "Unknown BatchBuilder type"
 
+    let failMessage (message: MessageBuilder<'T>) (tcs: TaskCompletionSource<MessageId>) (ex: exn) =
+        interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
+        stats.IncrementSendFailed()
+        tcs.SetException(ex)
+    
     let failPendingMessage msg (ex: exn) =
         match msg.Callback with
         | SingleCallback (message, tcs) ->
-            interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
-            stats.IncrementSendFailed()
-            tcs.SetException(ex)
+            failMessage message tcs ex
         | BatchCallbacks tcss ->
             tcss
             |> Seq.iter (fun (_, message, tcs) ->
-                interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
-                stats.IncrementSendFailed()
-                tcs.SetException(ex))
+                failMessage message tcs ex)
 
     let failPendingBatchMessages (ex: exn) =
         if batchMessageContainer.NumMessagesInBatch > 0 then
@@ -145,36 +146,38 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     
     let cryptoTimer = new Timer()
     let startCryptoTimer () =
-        match producerConfig.MessageEncrypt with
-        | Some _ ->
+        match producerConfig.MessageEncryptor with
+        | Some enc ->
             cryptoTimer.Interval <- TimeSpan(hours = 4, minutes = 0, seconds = 0).TotalMilliseconds
             cryptoTimer.AutoReset <- true
-            cryptoTimer.Elapsed.Add(fun _ -> this.Mb.Post(Tick UpdateEncryptionKeys))
+            cryptoTimer.Elapsed.Add(fun _ -> this.Mb.Post(Tick (UpdateEncryptionKeys enc)))
             cryptoTimer.Start()
         | None -> ()
         
     let encrypt =
-        match producerConfig.MessageEncrypt with
+        match producerConfig.MessageEncryptor with
         | Some msgCrypto ->
             fun (msgMetadata: MessageMetadata, payload: byte []) ->
                 try
                     let encMsg = msgCrypto.Encrypt(payload)
-                    encMsg.EncryptionKeys |> Seq.iter (EncryptionKeys.ToProto >> msgMetadata.EncryptionKeys.Add)
+                    encMsg.EncryptionKeys |> Array.iter (EncryptionKey.ToProto >> msgMetadata.EncryptionKeys.Add)
                     msgMetadata.EncryptionAlgo <- encMsg.EncryptionAlgo
                     msgMetadata.EncryptionParam <- encMsg.EncryptionParam
-                    encMsg.EncPayload
+                    Ok encMsg.EncPayload
                 with ex ->
                     match producerConfig.ProducerCryptoFailureAction with
                     | ProducerCryptoFailureAction.SEND ->
-                        Log.Logger.LogInformation(ex, "{0} Producer cannot encrypt message, the message will be sent in clear text", prefix)
-                        payload
+                        Log.Logger.LogWarning(ex,
+                            "{0} Failed to encrypt message. Proceeding with publishing unencrypted message", prefix)
+                        Ok payload
                     | ProducerCryptoFailureAction.FAIL ->
-                        Log.Logger.LogError(ex, "{0} Producer cannot encrypt message", prefix)
-                        raise <| CryptoException ex.Message
+                        Log.Logger.LogError(ex, "{0} Producer cannot encrypt message, failing", prefix)
+                        Error ex
                     | _ -> failwith "Unknown ProducerCryptoFailureAction"
         | None ->
             Log.Logger.LogDebug("{0} CryptoKeyReader not present, encryption not possible", prefix)
-            fun (_, payload) -> payload
+            fun (_, payload) ->
+                Ok payload
     
     let sendMessage (pendingMessage: PendingMessage<'T>) =
         Log.Logger.LogDebug("{0} sendMessage id={1}", prefix, %pendingMessage.SequenceId)
@@ -247,7 +250,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
     let getHighestSequenceId (pendingMessage: PendingMessage<'T>): SequenceId =
         %Math.Max(%pendingMessage.SequenceId, %pendingMessage.HighestSequenceId)
-    
+        
     let processOpSendMsg {OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId; MessageKey = messageKey } =
         let (batchPayload, batchCallbacks) = opSendMsg;
         let batchSize = batchCallbacks.Length
@@ -258,22 +261,26 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             batchCallbacks
             |> Seq.iter (fun (_, message, tcs) ->
                 let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
-                interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
-                stats.IncrementSendFailed()
-                tcs.SetException(ex))
+                failMessage message tcs ex)
         else
-            let encryptedBatchPayload = encrypt(metadata, compressedBatchPayload)
-            stats.UpdateNumMsgsSent(batchSize, compressedBatchPayload.Length)
-            let payload = Commands.newSend producerId lowestSequenceId (Some highestSequenceId) batchSize metadata encryptedBatchPayload
-            let pendingMessage = {
-                SequenceId = lowestSequenceId
-                HighestSequenceId = highestSequenceId
-                Payload = payload
-                Callback = BatchCallbacks batchCallbacks
-                CreatedAt = DateTime.Now
-            }
-            lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
-            sendMessage pendingMessage
+            let encryptResult = encrypt(metadata, compressedBatchPayload)            
+            match encryptResult with
+            | Ok encryptedBatchPayload ->
+                stats.UpdateNumMsgsSent(batchSize, compressedBatchPayload.Length)
+                let payload = Commands.newSend producerId lowestSequenceId (Some highestSequenceId) batchSize metadata encryptedBatchPayload
+                let pendingMessage = {
+                    SequenceId = lowestSequenceId
+                    HighestSequenceId = highestSequenceId
+                    Payload = payload
+                    Callback = BatchCallbacks batchCallbacks
+                    CreatedAt = DateTime.Now
+                }
+                lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
+                sendMessage pendingMessage
+            | Error ex ->
+                batchCallbacks
+                |> Seq.iter (fun (_, message, tcs) ->
+                    failMessage message tcs ex)
             
     let canAddToCurrentBatch (msg: MessageBuilder<'T>) =
         batchMessageContainer.HaveEnoughSpace(msg)
@@ -347,25 +354,27 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                    doBatchSendAndAdd batchItem
             else
                 let metadata = createMessageMetadata sequenceId message None
-                let encodedMessage = compressionCodec.Encode message.Payload
-                if (encodedMessage.Length > maxMessageSize) then
+                let compressedMessage = compressionCodec.Encode message.Payload
+                if (compressedMessage.Length > maxMessageSize) then                    
                     let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
-                    interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
-                    tcs.SetException(ex)
-                    stats.IncrementSendFailed()
+                    failMessage message tcs ex
                 else
-                    let encryptBatchPayload = encrypt(metadata, encodedMessage)
-                    stats.UpdateNumMsgsSent(1, encodedMessage.Length)
-                    let payload = Commands.newSend producerId sequenceId None 1 metadata encryptBatchPayload
-                    let pendingMessage = {
-                        SequenceId = sequenceId
-                        HighestSequenceId = %(-1L)
-                        Payload = payload
-                        Callback = SingleCallback (message, tcs)
-                        CreatedAt = DateTime.Now
-                    }
-                    lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
-                    sendMessage pendingMessage
+                    let encryptResult = encrypt(metadata, compressedMessage)
+                    match encryptResult with
+                    | Ok encryptedPayload ->
+                        stats.UpdateNumMsgsSent(1, compressedMessage.Length)
+                        let payload = Commands.newSend producerId sequenceId None 1 metadata encryptedPayload
+                        let pendingMessage = {
+                            SequenceId = sequenceId
+                            HighestSequenceId = %(-1L)
+                            Payload = payload
+                            Callback = SingleCallback (message, tcs)
+                            CreatedAt = DateTime.Now
+                        }
+                        lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
+                        sendMessage pendingMessage
+                    | Error ex ->
+                        failMessage message tcs ex
             channel.Reply(tcs)
     
     let stopProducer() =
@@ -572,10 +581,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     return! loop ()
 
                 | ProducerMessage.Tick tickType ->
+                    
                     match tickType with
                     | SendBatchTick -> 
                         batchMessageAndSend()
-
                     | SendTimeoutTick ->
                         match connectionHandler.ConnectionState with
                         | Closed | Terminated -> ()
@@ -588,16 +597,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                     Log.Logger.LogInformation("{0} Message send timed out. Failing {1} messages", prefix, pendingMessages.Count)
                                     let ex = TimeoutException "Could not send message to broker within given timeout"
                                     failPendingMessages ex
-
                     | StatTick ->
                         stats.TickTime(pendingMessages.Count)
-
-                    | UpdateEncryptionKeys ->
-                        match producerConfig.MessageEncrypt with
-                        | Some enc ->
-                            Log.Logger.LogDebug("{0} update encryption keys", prefix)
-                            enc.UpdateEncryptionKeys()
-                        | None -> ()
+                    | UpdateEncryptionKeys encryptor ->
+                        try
+                            encryptor.UpdateEncryptionKeys()
+                        with ex ->
+                            Log.Logger.LogError(ex, "{0} Couldn't update encryption keys", prefix)
 
                     return! loop ()
 
@@ -643,7 +649,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         let interceptMsg = interceptors.BeforeSend(this, message)
         mb.PostAndAsyncReply(fun channel -> BeginSendMessage (interceptMsg, channel))
 
-    member private this.Mb with get(): MailboxProcessor<ProducerMessage<'T>> = mb
+    member internal this.Mb with get(): MailboxProcessor<ProducerMessage<'T>> = mb
 
     override this.Equals producer =
         producerId = (producer :?> IProducer<'T>).ProducerId
@@ -724,9 +730,6 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         
         member this.GetStatsAsync() =
             mb.PostAndAsyncReply(ProducerMessage.GetStats) |> Async.StartAsTask
-            
-        member this.UpdateEncryptionKeys() =
-            mb.Post(ProducerMessage.Tick UpdateEncryptionKeys)
         
     interface IAsyncDisposable with
         
