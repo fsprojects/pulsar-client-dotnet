@@ -194,6 +194,31 @@ type CompressionType =
     | ZLib = 2
     | ZStd = 3
     | Snappy = 4
+    
+type EncryptionKey(key: string, value: byte [],
+                    [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] metadata: IReadOnlyDictionary<string, string>) =
+    
+    let metadata = if isNull metadata then EmptyMetadata else metadata
+    
+    member this.Key = key
+    member this.Value = value
+    member this.Metadata = metadata
+   
+    static member internal ToProto(encKey: EncryptionKey) =
+        let result = pulsar.proto.EncryptionKeys(Key = encKey.Key, Value = encKey.Value)
+        for KeyValue(k, v) in encKey.Metadata do
+             result.Metadatas.Add(KeyValue(Key = k, Value = v))
+        result
+    
+    static member internal FromProto(encKey: pulsar.proto.EncryptionKeys) =
+        let metadata =
+            if encKey.Metadatas.Count > 0 then
+                encKey.Metadatas
+                |> Seq.map (fun kv -> kv.Key, kv.Value)
+                |> readOnlyDict
+            else
+                EmptyMetadata
+        EncryptionKey(encKey.Key, encKey.Value, metadata)
 
 type internal Metadata =
     {
@@ -203,7 +228,7 @@ type internal Metadata =
         UncompressedMessageSize: int32
         SchemaVersion: SchemaVersion option
         SequenceId: SequenceId
-        EncryptionKeys: ResizeArray<EncryptionKeys>
+        EncryptionKeys: EncryptionKey[]
         EncryptionParam: byte[]
         EncryptionAlgo: string
     }
@@ -213,47 +238,6 @@ type MessageKey =
         PartitionKey: PartitionKey
         IsBase64Encoded: bool
     }
-
-type EncryptionKey =
-    {
-        KeyValue: byte []
-        Metadata: Dictionary<string, string>
-    }
-    with
-        static member internal FromProto(keyValue: byte[], metadata: ResizeArray<KeyValue>) =
-            let dict = Dictionary<string,string>()
-            if not (isNull metadata) then
-                metadata
-                |> Seq.iter(fun kv -> dict.Add(kv.Key, kv.Value))
-            { KeyValue = keyValue; Metadata = dict }
-
-type EncryptionContext =
-    {
-        Keys: Dictionary<string, EncryptionKey>
-        Param: byte []
-        Algorithm: string
-        CompressionType: CompressionType
-        UncompressedMessageSize: int
-        BatchSize: Nullable<int>
-    }
-    with
-        static member internal FromMetadata(metadata: Metadata) =
-            if metadata.EncryptionKeys.Count > 0 then
-                let keys =
-                    let dict = Dictionary<string, EncryptionKey>()
-                    metadata.EncryptionKeys
-                    |> Seq.iter(fun encKey -> dict.Add(encKey.Key, EncryptionKey.FromProto(encKey.Value, encKey.Metadatas)))
-                    dict
-                {
-                    Keys = keys
-                    Param = metadata.EncryptionParam
-                    Algorithm = metadata.EncryptionAlgo
-                    CompressionType = metadata.CompressionType
-                    UncompressedMessageSize = metadata.UncompressedMessageSize
-                    BatchSize = if metadata.HasNumMessagesInBatch then Nullable<int>(metadata.NumMessages) else Nullable()
-                } |> Some
-            else
-                None
 
 type internal RawMessage =
     {
@@ -266,6 +250,29 @@ type internal RawMessage =
         CheckSumValid: bool
         Properties: IReadOnlyDictionary<string, string>
     }
+
+type EncryptionContext =
+    {
+        Keys: EncryptionKey[]
+        Param: byte []
+        Algorithm: string
+        CompressionType: CompressionType
+        UncompressedMessageSize: int
+        BatchSize: Nullable<int>
+    }
+    with
+        static member internal FromMetadata(metadata: Metadata) =
+            if metadata.EncryptionKeys.Length > 0 then
+                {
+                    Keys = metadata.EncryptionKeys
+                    Param = metadata.EncryptionParam
+                    Algorithm = metadata.EncryptionAlgo
+                    CompressionType = metadata.CompressionType
+                    UncompressedMessageSize = metadata.UncompressedMessageSize
+                    BatchSize = if metadata.HasNumMessagesInBatch then Nullable(metadata.NumMessages) else Nullable()
+                } |> Some
+            else
+                None
 
 type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey, hasBase64EncodedKey: bool,
                   properties: IReadOnlyDictionary<string, string>, encryptionCtx: EncryptionContext option,
@@ -291,20 +298,17 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
     member this.GetValue() =
         getValue()
 
-    internal new (messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue) =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, None, schemaVersion, sequenceId, getValue)
-
     member internal this.WithMessageId messageId =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, getValue)
     /// Get a new instance of the message with updated data
     member this.WithData data =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, getValue)
     /// Get a new instance of the message with updated key
     member this.WithKey (key, hasBase64EncodedKey) =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, getValue)
     /// Get a new instance of the message with updated properties
     member this.WithProperties properties =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, schemaVersion, sequenceId, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, getValue)
      
 
 type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
@@ -524,40 +528,13 @@ type ConsumerStats = {
     /// The number of prefetched messages at the end of the last interval
     IncomingMsgs: int
 }
-
-type EncryptionKeys(key: string, value: byte [], metadatas: Dictionary<string, string>) =
-    member val Key = key
-    member val Value = value
-    member val Metadata = metadatas
-    
-    new(key: string, value: byte []) =
-        EncryptionKeys(key, value, Dictionary<string, string>())
-
-    static member internal ToProto(encKey: EncryptionKeys) =
-        let result = pulsar.proto.EncryptionKeys(Key = encKey.Key, Value = encKey.Value)
-        if not (isNull encKey.Metadata) then
-            encKey.Metadata
-            |> Seq.cast<KeyValue>
-            |> Seq.iter result.Metadatas.Add
-        result
-    
-    static member internal FromProto(encKey: pulsar.proto.EncryptionKeys) =
-        let result = EncryptionKeys(encKey.Key, encKey.Value)
-        if not (isNull encKey.Metadatas) then
-            encKey.Metadatas
-            |> Seq.iter(fun kv -> result.Metadata.Add(kv.Key, kv.Value))
-        result
-
         
-type EncryptedMessage(encPayload: byte [], encryptionKeys: EncryptionKeys [],
+type EncryptedMessage(encPayload: byte [], encryptionKeys: EncryptionKey [],
                       encryptionAlgo: string, encryptionParam: byte []) =
     member val EncPayload = encPayload
     member val EncryptionKeys = encryptionKeys
     member val EncryptionAlgo = encryptionAlgo
     member val EncryptionParam = encryptionParam
-    
-    new(encPayload: byte [], encryptionKeys: EncryptionKeys [], encryptionParam: byte []) =
-        EncryptedMessage(encPayload, encryptionKeys, "", encryptionParam)
 
 
 /// The action the producer will take in case of encryption failures.

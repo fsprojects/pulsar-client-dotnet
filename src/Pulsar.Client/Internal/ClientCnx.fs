@@ -5,6 +5,7 @@ open System.Collections.Generic
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Microsoft.Extensions.Logging
 open System.Threading.Tasks
+open Pulsar.Client.Common
 open pulsar.proto
 open System
 open FSharp.UMX
@@ -344,7 +345,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             UncompressedMessageSize = messageMetadata.UncompressedSize |> int32
             SchemaVersion = getOptionalSchemaVersion messageMetadata.SchemaVersion
             SequenceId = %(int64 messageMetadata.SequenceId)
-            EncryptionKeys = messageMetadata.EncryptionKeys
+            EncryptionKeys =
+                if messageMetadata.EncryptionKeys.Count > 0 then
+                    messageMetadata.EncryptionKeys |> Seq.map EncryptionKey.FromProto |> Seq.toArray
+                else
+                    [||]
             EncryptionParam = messageMetadata.EncryptionParam
             EncryptionAlgo = messageMetadata.EncryptionAlgo
         }
