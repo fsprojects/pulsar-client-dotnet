@@ -39,8 +39,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                            partitionIndex: int, lookup: BinaryLookupService, schema: ISchema<'T>,
                            interceptors: ProducerInterceptors<'T>, cleanup: ProducerImpl<'T> -> unit) as this =
     let _this = this :> IProducer<'T>
-    let producerId = Generators.getNextProducerId()    
-    let prefix = sprintf "producer(%u, %s, %i)" %producerId producerConfig.ProducerName partitionIndex
+    let producerId = Generators.getNextProducerId()
+    let mutable producerName = producerConfig.ProducerName
+    let prefix = sprintf "producer(%u, %s, %i)" %producerId producerName partitionIndex
     let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
     let mutable schemaVersion = None
@@ -98,8 +99,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     
     let failPendingMessage msg (ex: exn) =
         match msg.Callback with
-        | SingleCallback (message, tcs) ->
-            failMessage message tcs ex
+        | SingleCallback (chunkDetails, message, tcs) ->
+            if chunkDetails.IsNone || chunkDetails.Value.IsLast then
+                failMessage message tcs ex
         | BatchCallbacks tcss ->
             tcss
             |> Seq.iter (fun (_, message, tcs) ->
@@ -157,7 +159,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let encrypt =
         match producerConfig.MessageEncryptor with
         | Some msgCrypto ->
-            fun (msgMetadata: MessageMetadata, payload: byte []) ->
+            fun (msgMetadata: MessageMetadata) (payload: byte []) ->
                 try
                     let encMsg = msgCrypto.Encrypt(payload)
                     encMsg.EncryptionKeys |> Array.iter (EncryptionKey.ToProto >> msgMetadata.EncryptionKeys.Add)
@@ -176,7 +178,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     | _ -> failwith "Unknown ProducerCryptoFailureAction"
         | None ->
             Log.Logger.LogDebug("{0} CryptoKeyReader not present, encryption not possible", prefix)
-            fun (_, payload) ->
+            fun _ payload ->
                 Ok payload
     
     let sendMessage (pendingMessage: PendingMessage<'T>) =
@@ -263,7 +265,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
                 failMessage message tcs ex)
         else
-            let encryptResult = encrypt(metadata, compressedBatchPayload)            
+            let encryptResult = encrypt metadata compressedBatchPayload
             match encryptResult with
             | Ok encryptedBatchPayload ->
                 stats.UpdateNumMsgsSent(batchSize, compressedBatchPayload.Length)
@@ -305,16 +307,21 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         maxMessageSize <- messageSize
         batchMessageContainer.MaxMessageSize <- messageSize
         
-    let beginSendMessage sendRequest =
-        let (message, channel) = sendRequest
-        if pendingMessages.Count >= producerConfig.MaxPendingMessages then
+    let canEnqueueRequest (channel: AsyncReplyChannel<TaskCompletionSource<MessageId>>) sendRequest msgCount =
+        if pendingMessages.Count + msgCount > producerConfig.MaxPendingMessages then
             if producerConfig.BlockIfQueueFull then
                 blockedRequests.Enqueue(sendRequest)
             else
                 let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
                 tcs.SetException(ProducerQueueIsFullError "Producer send queue is full")
                 channel.Reply(tcs)
+            false
         else
+            true
+        
+    let beginSendMessage sendRequest =
+        let (message, channel) = sendRequest
+        if canEnqueueRequest channel sendRequest 1 then
             let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
             let sequenceId =
                 if message.SequenceId.HasValue then
@@ -322,7 +329,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 else
                     let oldValue = msgIdGenerator
                     msgIdGenerator <- msgIdGenerator + %1L
-                    %oldValue                        
+                    %oldValue
             if canAddToBatch message then
                 let batchItem = { Message = message; Tcs = tcs; SequenceId = sequenceId }
                 if canAddToCurrentBatch message then
@@ -352,28 +359,53 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 else
                    doBatchSendAndAdd batchItem
             else
-                let metadata = createMessageMetadata sequenceId message None
-                let compressedMessage = compressionCodec.Encode message.Payload
-                if (compressedMessage.Length > maxMessageSize) then                    
+                let compressedPayload = compressionCodec.Encode message.Payload
+                if (compressedPayload.Length > maxMessageSize) then
                     let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
                     failMessage message tcs ex
                 else
-                    let encryptResult = encrypt(metadata, compressedMessage)
-                    match encryptResult with
-                    | Ok encryptedPayload ->
-                        stats.UpdateNumMsgsSent(1, compressedMessage.Length)
-                        let payload = Commands.newSend producerId sequenceId None 1 metadata encryptedPayload
-                        let pendingMessage = {
-                            SequenceId = sequenceId
-                            HighestSequenceId = %(-1L)
-                            Payload = payload
-                            Callback = SingleCallback (message, tcs)
-                            CreatedAt = DateTime.Now
-                        }
-                        lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
-                        sendMessage pendingMessage
-                    | Error ex ->
-                        failMessage message tcs ex
+                    let totalChunks =
+                        Math.Max(1, compressedPayload.Length) / maxMessageSize
+                            + (if Math.Max(1, compressedPayload.Length) % maxMessageSize = 0 then 0 else 1)
+                    let mutable readStartIndex = 0
+                    let mutable chunkError = false
+                    let mutable chunkId = 0
+                    let uuid = if totalChunks > 1 then sprintf "%s-%d" producerName sequenceId else ""                    
+                    while chunkId < totalChunks && not chunkError do
+                        let metadata = createMessageMetadata sequenceId message None
+                        let chunkPayload = 
+                            if totalChunks > 1 && producerConfig.Topic.IsPersistent then
+                                metadata.Uuid <- uuid
+                                metadata.ChunkId <- chunkId
+                                metadata.NumChunksFromMsg <- totalChunks
+                                metadata.TotalChunkMsgSize <- compressedPayload.Length
+                                Array.sub compressedPayload readStartIndex (Math.Min(maxMessageSize, compressedPayload.Length - readStartIndex))
+                            else
+                                compressedPayload
+                        let encryptResult = encrypt metadata chunkPayload
+                        match encryptResult with
+                        | Ok encryptedPayload ->
+                            stats.UpdateNumMsgsSent(1, chunkPayload.Length)
+                            let payload = Commands.newSend producerId sequenceId None 1 metadata encryptedPayload
+                            let chunkDetails =
+                                if totalChunks > 1 then
+                                    Some { TotalChunks = totalChunks; ChunkId = chunkId  }
+                                else
+                                    None
+                            let pendingMessage = {
+                                SequenceId = sequenceId
+                                HighestSequenceId = %(-1L)
+                                Payload = payload
+                                Callback = SingleCallback (chunkDetails, message, tcs)
+                                CreatedAt = DateTime.Now
+                            }
+                            lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
+                            sendMessage pendingMessage
+                            chunkId <- chunkId + 1
+                            readStartIndex <- chunkId * maxMessageSize
+                        | Error ex ->
+                            chunkError <- true
+                            failMessage message tcs ex
             channel.Reply(tcs)
     
     let stopProducer() =
@@ -412,7 +444,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                               producerId requestId schema.SchemaInfo epoch
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             let success = response |> PulsarResponseType.GetProducerSuccess
-
+                            if String.IsNullOrEmpty producerName then
+                                producerName <- success.GeneratedProducerName
                             Log.Logger.LogInformation("{0} registered with name {1}", prefix, success.GeneratedProducerName)
                             schemaVersion <- success.SchemaVersion
                             connectionHandler.ResetBackoff()    
@@ -517,11 +550,12 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 dequeuePendingMessage() |> ignore
                                 lastSequenceIdPublished <- Math.Max(lastSequenceIdPublished, %(getHighestSequenceId pendingMessage))
                                 match pendingMessage.Callback with
-                                | SingleCallback (msg, tcs) ->
-                                    let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Individual; TopicName = %"" }
-                                    interceptors.OnSendAcknowledgement(this, msg, msgId, null)
-                                    stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
-                                    tcs.SetResult(msgId)
+                                | SingleCallback (chunkDetail, msg, tcs) ->
+                                    if chunkDetail.IsNone || chunkDetail.Value.IsLast then
+                                        let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Individual; TopicName = %"" }
+                                        interceptors.OnSendAcknowledgement(this, msg, msgId, null)
+                                        stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
+                                        tcs.SetResult(msgId)
                                 | BatchCallbacks tcss ->
                                     tcss
                                     |> Array.iter (fun (msgId, msg, tcs) ->

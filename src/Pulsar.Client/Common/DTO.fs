@@ -400,7 +400,16 @@ type internal Connection =
     }
 type internal RedeliverSet = HashSet<MessageId>
 
-type internal SingleCallback<'T> = MessageBuilder<'T> * TaskCompletionSource<MessageId>
+type ChunkDetails =
+    {
+        TotalChunks: int
+        ChunkId: int
+    }
+    with
+        member this.IsLast =
+            this.ChunkId = this.TotalChunks - 1
+
+type internal SingleCallback<'T> = ChunkDetails option * MessageBuilder<'T> * TaskCompletionSource<MessageId>
 type internal BatchCallback<'T> = BatchDetails * MessageBuilder<'T> * TaskCompletionSource<MessageId>
 type internal PendingCallback<'T> = 
     | SingleCallback of SingleCallback<'T>

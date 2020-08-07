@@ -485,7 +485,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         }
                 
     let handleMessagePayload (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel
-                                isMessageUndecryptable schemaDecodeFunction =        
+                                isMessageUndecryptable schemaDecodeFunction =
         if acksGroupingTracker.IsDuplicate msgId then
             Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
             increaseAvailablePermits rawMessage.Metadata.NumMessages

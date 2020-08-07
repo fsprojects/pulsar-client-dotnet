@@ -15,7 +15,7 @@ type internal CompressionCodec =
 
 module internal CompressionCodec =
 
-    let private zlib isEncode (capacity : int) (bytes : byte[]) =
+    let private zlib isEncode capacity (bytes : byte[]) =
         use ms = MemoryStreamManager.GetStream(null, capacity)
         use zlib =
             if isEncode then
@@ -30,26 +30,26 @@ module internal CompressionCodec =
     let private decodeZLib = zlib false
 
     let private encodeLZ4 (bytes : byte[]) =
-        let target = ArrayPool.Shared.Rent (LZ4Codec.MaximumOutputSize bytes.Length)
+        let target = LZ4Codec.MaximumOutputSize bytes.Length |> ArrayPool.Shared.Rent
         let count = LZ4Codec.Encode(bytes, 0, bytes.Length, target, 0, target.Length)
         target |> Array.take count
 
-    let private decodeLZ4 (uncompressedSize : int) (bytes : byte[]) =
-        let target = Array.zeroCreate<byte>(uncompressedSize)
+    let private decodeLZ4 uncompressedSize (bytes : byte[]) =
+        let target = Array.zeroCreate uncompressedSize
         LZ4Codec.Decode(bytes, 0, bytes.Length, target, 0, target.Length) |> ignore
         target
 
     let private encodeSnappy = SnappyCodec.Compress
 
-    let private decodeSnappy (uncompressedSize : int) (bytes : byte[]) =
-        let target = Array.zeroCreate<byte>(uncompressedSize)
+    let private decodeSnappy uncompressedSize (bytes : byte[]) =
+        let target = Array.zeroCreate uncompressedSize
         SnappyCodec.Uncompress(bytes, 0, bytes.Length, target, 0) |> ignore
         target
 
     let private encodeZStd () =
         let zstd = new Compressor()
         fun (bytes: byte[]) ->
-            bytes |> zstd.Wrap
+            zstd.Wrap(bytes)
 
     let private decodeZStd () =
         let zstd = new Decompressor()
