@@ -47,7 +47,6 @@ jobs:
         cd tests/compose/standalone
         docker-compose ps
         docker-compose logs init
-        docker-compose logs initTls
 
     - name: Run Integration Tests
       timeout-minutes: 2

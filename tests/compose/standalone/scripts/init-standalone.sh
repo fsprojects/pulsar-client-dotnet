@@ -4,7 +4,6 @@ bin/apply-config-from-env.py conf/client.conf
 
 sleep 5
 
-bin/pulsar-admin namespaces create public/default
 bin/pulsar-admin namespaces create public/retention
 bin/pulsar-admin namespaces create public/deduplication
 bin/pulsar-admin namespaces set-retention public/retention --time 3h --size 1G
