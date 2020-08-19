@@ -9,7 +9,7 @@ open System.Text
 [<Tests>]
 let tests =
 
-    let createCodec codecType = codecType |> CompressionCodec.create
+    let createCodec codecType = codecType |> CompressionCodec.get
 
     let encoding = Encoding.UTF8
 
@@ -32,7 +32,7 @@ let tests =
     let testDecode compressionType encodedBytes =
         let uncompressedSize = helloNone.Length
         let codec = compressionType |> createCodec
-        let decoded = encodedBytes |> codec.Decode uncompressedSize |> getString
+        let decoded = codec.Decode(uncompressedSize, encodedBytes) |> getString
         decoded |> Expect.equal "" hello
 
     testList "CompressionCodec" [

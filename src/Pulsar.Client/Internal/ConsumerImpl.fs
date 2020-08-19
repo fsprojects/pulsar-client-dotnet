@@ -19,6 +19,10 @@ type internal ParseResult<'T> =
     | ParseOk of struct(byte[]*'T)
     | ParseError of CommandAck.ValidationError
     
+type internal ConsumerTickType =
+    | StatTick
+    | ChunkTick
+    
 type internal ConsumerMessage<'T> =
     | ConnectionOpened
     | ConnectionFailed of exn
@@ -37,7 +41,7 @@ type internal ConsumerMessage<'T> =
     | ActiveConsumerChanged of bool
     | Close of AsyncReplyChannel<ResultOrException<unit>>
     | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
-    | StatTick
+    | Tick of ConsumerTickType
     | GetStats of AsyncReplyChannel<ConsumerStats>
     | ReconsumeLater of Message<'T> * AckType * int64 * AsyncReplyChannel<unit>
 
@@ -83,12 +87,20 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             ConsumerStatsImpl(prefix) :> IConsumerStatsRecorder
     
     let statTimer = new Timer()
+    let chunkTimer = new Timer()
     let startStatTimer () =
         if clientConfig.StatsInterval <> TimeSpan.Zero then
             statTimer.Interval <- clientConfig.StatsInterval.TotalMilliseconds
             statTimer.AutoReset <- true
-            statTimer.Elapsed.Add(fun _ -> this.Mb.Post(StatTick))
+            statTimer.Elapsed.Add(fun _ -> this.Mb.Post(Tick StatTick))
             statTimer.Start()
+    
+    let startChunkTimer () =
+        if consumerConfig.ExpireTimeOfIncompleteChunkedMessage <> TimeSpan.Zero then
+            chunkTimer.Interval <- consumerConfig.ExpireTimeOfIncompleteChunkedMessage.TotalMilliseconds
+            chunkTimer.AutoReset <- true
+            chunkTimer.Elapsed.Add(fun _ -> this.Mb.Post(Tick ChunkTick))
+            chunkTimer.Start()
     
     let keyValueProcessor = KeyValueProcessor.GetInstance schema
 
@@ -208,7 +220,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let unAckedMessageRedeliver messages =
         interceptors.OnAckTimeoutSend(this, messages)
-        redeliverMessages messages        
+        redeliverMessages messages
 
     let negativeAcksRedeliver messages =
         interceptors.OnNegativeAcksSend(this, messages)
@@ -225,7 +237,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             UnAckedMessageTracker.UNACKED_MESSAGE_TRACKER_DISABLED
 
     let negativeAcksTracker = NegativeAcksTracker(prefix, consumerConfig.NegativeAckRedeliveryDelay, negativeAcksRedeliver)
-
+    
     let getConnectionState() = connectionHandler.ConnectionState
     let sendAckPayload (cnx: ClientCnx) payload = cnx.Send payload
 
@@ -235,6 +247,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         else
             AcknowledgmentsGroupingTracker.NonPersistentAcknowledgmentGroupingTracker
 
+    let trackMessage msgId =
+        unAckedMessageTracker.Add msgId |> ignore
+    
     let sendAcknowledge (messageId: MessageId) ackType properties =
         async {
             match ackType with
@@ -259,6 +274,29 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             deadLettersProcessor.RemoveMessage messageId
         }
 
+    let ackOrTrack msgId autoAck =
+        if autoAck then
+            Log.Logger.LogInformation("{0} Removing chunk message-id {1}", prefix, msgId)
+            sendAcknowledge msgId AckType.Individual EmptyProperties |> Async.StartImmediate
+        else
+            trackMessage msgId
+            
+    let chunkedMessageTracker = ChunkedMessageTracker(prefix, consumerConfig.MaxPendingChuckedMessage,
+                                                      consumerConfig.AutoAckOldestChunkedMessageOnQueueFull,
+                                                      consumerConfig.ExpireTimeOfIncompleteChunkedMessage,
+                                                      ackOrTrack)
+    
+    let addChunksToRedeliverSet (redeliverSet: RedeliverSet) =
+        for msgId in redeliverSet do
+            match chunkedMessageTracker.GetUnackedMessageIds msgId with
+            | true, chunkIds ->
+                for chunkMsgId in chunkIds do
+                    redeliverSet.Add chunkMsgId |> ignore
+                chunkedMessageTracker.RemoveUnackedMessageIds msgId
+            | _ ->
+                ()
+        redeliverSet
+    
     let markAckForBatchMessage (msgId: MessageId) (batchDetails: BatchDetails) ackType properties =
         let (batchIndex, batchAcker) = batchDetails
         let isAllMsgsAcked =
@@ -366,7 +404,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         lastDequeuedMessageId <- msg.MessageId
         increaseAvailablePermits 1
         stats.UpdateNumMsgsReceived(msg.Data.Length)
-        unAckedMessageTracker.Add msg.MessageId |> ignore
+        trackMessage msg.MessageId
 
     let replyWithBatch (cts: CancellationTokenSource option) (ch: AsyncReplyChannel<ResultOrException<Messages<'T>>>) =
         cts |> Option.iter (fun cts ->
@@ -432,7 +470,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let decryptMessage (rawMessage:RawMessage) =
         if rawMessage.Metadata.EncryptionKeys.Length = 0 then
-            ValueSome rawMessage
+            Ok rawMessage
         else
             try
                 match consumerConfig.MessageDecryptor with
@@ -441,21 +479,21 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let encMsg = EncryptedMessage(rawMessage.Payload, encryptionKeys,
                                                   rawMessage.Metadata.EncryptionAlgo, rawMessage.Metadata.EncryptionParam)
                     let decryptPayload = msgCrypto.Decrypt(encMsg)
-                    { rawMessage with Payload = decryptPayload } |> ValueSome
+                    { rawMessage with Payload = decryptPayload } |> Ok
                 | None -> 
                     raise <| CryptoException "Message is encrypted, but no encryption configured"
             with ex ->
                 Log.Logger.LogWarning(ex, "{0} Decryption exception {1}", prefix, rawMessage.MessageId)
-                ValueNone
+                Error ex
     
     let decompressMessage (rawMessage: RawMessage) =
         try
-            let compressionCodec = rawMessage.Metadata.CompressionType |> CompressionCodec.create
-            let uncompressedPayload = compressionCodec.Decode rawMessage.Metadata.UncompressedMessageSize rawMessage.Payload
-            { rawMessage with Payload = uncompressedPayload } |> ValueSome
+            let compressionCodec = rawMessage.Metadata.CompressionType |> CompressionCodec.get
+            let uncompressedPayload = compressionCodec.Decode(rawMessage.Metadata.UncompressedMessageSize, rawMessage.Payload)
+            { rawMessage with Payload = uncompressedPayload } |> Ok
         with ex ->
             Log.Logger.LogError(ex, "{0} Decompression exception {1}", prefix, rawMessage.MessageId)
-            ValueNone
+            Error ex
         
     let discardCorruptedMessage (msgId: MessageId) (clientCnx: ClientCnx) err =
         async {
@@ -483,50 +521,80 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | None -> schema.Decode
             return schemaDecodeFunction
         }
-                
+           
+    let processMessageChunk (rawMessage: RawMessage) =
+        match chunkedMessageTracker.GetContext(rawMessage.Metadata) with
+        | Ok chunkedContext ->
+            let compressionCodec = rawMessage.Metadata.CompressionType |> CompressionCodec.get
+            match chunkedMessageTracker.MessageReceived(rawMessage, chunkedContext, compressionCodec) with
+            | Some uncompressedPayload ->
+                Some uncompressedPayload
+            | None ->
+                increaseAvailablePermits 1
+                None
+        | Error error ->
+            // discard message if chunk is out-of-order
+            Log.Logger.LogWarning("{0} {1} msgId = {2}", prefix, error, rawMessage.MessageId)
+            increaseAvailablePermits 1
+            if consumerConfig.ExpireTimeOfIncompleteChunkedMessage > TimeSpan.Zero &&
+                DateTime.UtcNow > rawMessage.Metadata.PublishTime.Add(consumerConfig.ExpireTimeOfIncompleteChunkedMessage) then
+                sendAcknowledge rawMessage.MessageId AckType.Individual EmptyProperties |> Async.StartImmediate
+            else
+                trackMessage rawMessage.MessageId
+            None
+            
+    let handleSingleMessagePayload (rawMessage: RawMessage) msgId payload hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction =
+        if isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
+            // We need to discard entries that were prior to startMessageId
+            Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
+        else
+            let msgKey = rawMessage.MessageKey
+            let getValue () =
+                keyValueProcessor
+                |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, payload) :?> 'T)
+                |> Option.defaultWith (fun () -> schemaDecodeFunction payload)
+            let message = Message(
+                            msgId,
+                            payload,
+                            %msgKey,
+                            rawMessage.IsKeyBase64Encoded,
+                            rawMessage.Properties,
+                            EncryptionContext.FromMetadata rawMessage.Metadata,
+                            getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+                            rawMessage.Metadata.SequenceId,
+                            getValue
+                        )
+            if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
+                deadLettersProcessor.AddMessage(message.MessageId, message)
+            if hasWaitingChannel then
+                let waitingChannel = waiters.Dequeue()
+                if (incomingMessages.Count = 0) then
+                    replyWithMessage waitingChannel message
+                else
+                    enqueueMessage message
+                    replyWithMessage waitingChannel <| dequeueMessage()
+            else
+                enqueueMessage message
+                if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                    let cts, ch = batchWaiters.Dequeue()
+                    replyWithBatch (Some cts) ch
+            
     let handleMessagePayload (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel
-                                isMessageUndecryptable schemaDecodeFunction =
+                                isMessageUndecryptable isChunkedMessage schemaDecodeFunction =
         if acksGroupingTracker.IsDuplicate msgId then
             Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
             increaseAvailablePermits rawMessage.Metadata.NumMessages
         else
             if isMessageUndecryptable || (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
-                if isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
-                    // We need to discard entries that were prior to startMessageId
-                    Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
+                // right now, chunked messages are only supported by non-shared subscription
+                if isChunkedMessage then
+                    match processMessageChunk rawMessage with
+                    | Some chunkedPayload ->
+                        handleSingleMessagePayload rawMessage msgId chunkedPayload hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
+                    | None ->
+                        ()
                 else
-                    let payload = rawMessage.Payload
-                    let msgKey = rawMessage.MessageKey
-                    let getValue () =
-                        keyValueProcessor
-                        |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, payload) :?> 'T)
-                        |> Option.defaultWith (fun () -> schemaDecodeFunction payload)
-                    let message = Message(
-                                    msgId,
-                                    payload,
-                                    %msgKey,
-                                    rawMessage.IsKeyBase64Encoded,
-                                    rawMessage.Properties,
-                                    EncryptionContext.FromMetadata rawMessage.Metadata,
-                                    getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                                    rawMessage.Metadata.SequenceId,
-                                    getValue
-                                )
-                    if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
-                        deadLettersProcessor.AddMessage(message.MessageId, message)
-                    if hasWaitingChannel then
-                        let waitingChannel = waiters.Dequeue()
-                        if (incomingMessages.Count = 0) then
-                            replyWithMessage waitingChannel message
-                        else
-                            enqueueMessage message
-                            replyWithMessage waitingChannel <| dequeueMessage()       
-                    else
-                        enqueueMessage message
-                        if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                            let cts, ch = batchWaiters.Dequeue()
-                            replyWithBatch (Some cts) ch
-                            
+                    handleSingleMessagePayload rawMessage msgId rawMessage.Payload hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
             elif rawMessage.Metadata.NumMessages > 0 then
                 // handle batch message enqueuing; uncompressed payload has all messages in batch
                 try
@@ -541,14 +609,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
     
     let tryHandleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel
-                                isMessageUndecryptable schemaDecodeFunction clientCnx =
-        async {
-            try
-                handleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction
-            with
-            | BatchDeserializationException _ ->
-                do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
-        }
+                                isMessageUndecryptable isChunkedMessage schemaDecodeFunction clientCnx =
+        try
+            handleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel
+                isMessageUndecryptable isChunkedMessage schemaDecodeFunction
+            async.Return ()
+        with
+        | BatchDeserializationException _ ->
+            discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
+        
         
     let consumerOperations = {
         MessageReceived = fun (rawMessage) -> this.Mb.Post(MessageReceived rawMessage)
@@ -664,37 +733,42 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         prefix, msgId, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
 
                     if rawMessage.CheckSumValid then
-                        if rawMessage.Payload.Length <= clientCnx.MaxMessageSize then
-                            if msgId |> acksGroupingTracker.IsDuplicate |> not then
-                                let! schemaDecodeFunction = getSchemaDecodeFunction rawMessage.Metadata
-                                match decryptMessage rawMessage with
-                                | ValueSome decryptedMessage ->
+                        if msgId |> acksGroupingTracker.IsDuplicate |> not then
+                            let! schemaDecodeFunction = getSchemaDecodeFunction rawMessage.Metadata
+                            let isChunked = rawMessage.Metadata.NumChunks > 1 && consumerConfig.SubscriptionType <> SubscriptionType.Shared
+                            match decryptMessage rawMessage with
+                            | Ok decryptedMessage ->
+                                if decryptedMessage.Payload.Length <= clientCnx.MaxMessageSize then
                                     match decompressMessage decryptedMessage with
-                                    | ValueSome decompressMessage ->
-                                        do! tryHandleMessagePayload decompressMessage msgId hasWaitingChannel hasWaitingBatchChannel false schemaDecodeFunction clientCnx
-                                    | ValueNone ->
+                                    | Ok decompressMessage ->
+                                        do! tryHandleMessagePayload
+                                                decompressMessage msgId hasWaitingChannel hasWaitingBatchChannel false
+                                                isChunked schemaDecodeFunction clientCnx
+                                    | Error _ ->
                                         do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecompressionError
-                                | ValueNone ->
-                                    match consumerConfig.ConsumerCryptoFailureAction with
-                                    | ConsumerCryptoFailureAction.CONSUME ->
-                                        Log.Logger.LogWarning("{0} {1} Decryption failed. Consuming encrypted message.",
-                                                              prefix, msgId)
-                                        do! tryHandleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel true schemaDecodeFunction clientCnx
-                                    | ConsumerCryptoFailureAction.DISCARD ->
-                                        Log.Logger.LogWarning("{0} {1}. Decryption failed. Discarding encrypted message.",
-                                                              prefix, msgId)
-                                        do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecryptionError
-                                    | ConsumerCryptoFailureAction.FAIL ->
-                                        Log.Logger.LogError("{0} {1}. Decryption failed. Failing encrypted message.",
-                                                                prefix, msgId)
-                                        unAckedMessageTracker.Add msgId |> ignore
-                                    | _ ->
-                                        failwith "Unknown ConsumerCryptoFailureAction"
-                            else
-                                Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
-                                increaseAvailablePermits rawMessage.Metadata.NumMessages
+                                else
+                                    do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.UncompressedSizeCorruption
+                            | Error _ ->
+                                match consumerConfig.ConsumerCryptoFailureAction with
+                                | ConsumerCryptoFailureAction.CONSUME ->
+                                    Log.Logger.LogWarning("{0} {1} Decryption failed. Consuming encrypted message.",
+                                                          prefix, msgId)
+                                    do! tryHandleMessagePayload
+                                            rawMessage msgId hasWaitingChannel hasWaitingBatchChannel true
+                                            isChunked schemaDecodeFunction clientCnx
+                                | ConsumerCryptoFailureAction.DISCARD ->
+                                    Log.Logger.LogWarning("{0} {1}. Decryption failed. Discarding encrypted message.",
+                                                          prefix, msgId)
+                                    do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecryptionError
+                                | ConsumerCryptoFailureAction.FAIL ->
+                                    Log.Logger.LogError("{0} {1}. Decryption failed. Failing encrypted message.",
+                                                            prefix, msgId)
+                                    trackMessage msgId
+                                | _ ->
+                                    failwith "Unknown ConsumerCryptoFailureAction"
                         else
-                            do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.UncompressedSizeCorruption
+                            Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
+                            increaseAvailablePermits rawMessage.Metadata.NumMessages
                     else
                         do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.ChecksumMismatch
                     return! loop ()
@@ -753,7 +827,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | SubscriptionType.Shared | SubscriptionType.KeyShared ->
                         match connectionHandler.ConnectionState with
                         | Ready clientCnx ->
-                            let messagesFromQueue = removeExpiredMessagesFromQueue(messageIds)
+                            let messageIds = addChunksToRedeliverSet messageIds
+                            let messagesFromQueue = removeExpiredMessagesFromQueue messageIds
                             let chunks = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
                             for chunk in chunks do
                                 let nonDeadBatch = ResizeArray<MessageId>()
@@ -889,9 +964,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogInformation("{0} ActiveConsumerChanged isActive={1}", prefix, isActive)
                     return! loop ()
                         
-                | ConsumerMessage.StatTick ->
+                | ConsumerMessage.Tick tick ->
                     
-                    stats.TickTime(incomingMessages.Count)
+                    match tick with
+                    | StatTick ->
+                        stats.TickTime(incomingMessages.Count)
+                    | ChunkTick ->
+                        chunkedMessageTracker.RemoveExpireIncompleteChunkedMessages()
                     return! loop()
                     
                 | ConsumerMessage.GetStats channel ->
@@ -964,6 +1043,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     )
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startStatTimer()
+    do startChunkTimer()
 
     abstract member ReceiveIndividualMessagesFromBatch: RawMessage -> (byte [] -> 'T) -> unit
     default this.ReceiveIndividualMessagesFromBatch (rawMessage: RawMessage) schemaDecodeFunction =
@@ -1062,7 +1142,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         consumerId = (consumer :?> IConsumer<'T>).ConsumerId
 
     override this.GetHashCode () = int consumerId
-    
     
     member this.InitInternal() =
         task {

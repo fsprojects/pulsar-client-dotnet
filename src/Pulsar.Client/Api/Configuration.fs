@@ -62,6 +62,9 @@ type ConsumerConfiguration<'T> =
         ConsumerCryptoFailureAction: ConsumerCryptoFailureAction
         RetryEnable: bool
         BatchIndexAcknowledgmentEnabled: bool
+        MaxPendingChuckedMessage: int
+        AutoAckOldestChunkedMessageOnQueueFull: bool
+        ExpireTimeOfIncompleteChunkedMessage: TimeSpan
     }
     member this.SingleTopic with get() = this.Topics |> Seq.head
     static member Default =
@@ -92,6 +95,9 @@ type ConsumerConfiguration<'T> =
             ConsumerCryptoFailureAction = ConsumerCryptoFailureAction.FAIL
             RetryEnable = false
             BatchIndexAcknowledgmentEnabled = false
+            MaxPendingChuckedMessage = 10
+            AutoAckOldestChunkedMessageOnQueueFull = false
+            ExpireTimeOfIncompleteChunkedMessage = TimeSpan.FromSeconds(60.0)
         }
 
 type ProducerConfiguration =

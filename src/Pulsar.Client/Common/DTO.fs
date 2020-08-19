@@ -231,12 +231,17 @@ type EncryptionKey(name: string, value: byte [],
 
 type internal Metadata =
     {
-        NumMessages: int
+        NumMessages: int 
+        NumChunks: int
+        TotalChunkMsgSize: int
         HasNumMessagesInBatch: bool
         CompressionType: CompressionType
         UncompressedMessageSize: int32
         SchemaVersion: SchemaVersion option
         SequenceId: SequenceId
+        ChunkId: ChunkId
+        Uuid: Uuid
+        PublishTime: DateTime
         EncryptionKeys: EncryptionKey[]
         EncryptionParam: byte[]
         EncryptionAlgo: string
@@ -250,7 +255,7 @@ type MessageKey =
 
 type internal RawMessage =
     {
-        MessageId: MessageId    
+        MessageId: MessageId
         Metadata: Metadata
         RedeliveryCount: uint32
         Payload: byte[]

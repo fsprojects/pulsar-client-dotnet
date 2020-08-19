@@ -103,6 +103,8 @@
     <Compile Include="Schema\AutoProduceBytesSchema.fs" />
     <Compile Include="Schema\AutoConsumeSchema.fs" />
     <Compile Include="Internal\TaskSeq.fs" />
+    <Compile Include="Internal\Compression .fs" />
+    <Compile Include="Internal\ChunkedMessageTracker.fs" />
     <Compile Include="Internal\BatchMessageContainer.fs" />
     <Compile Include="Internal\Routing.fs" />
     <Compile Include="Internal\UnAckedMessageTracker.fs" />
@@ -114,7 +116,6 @@
     <Compile Include="Internal\BinaryLookupService.fs" />
     <Compile Include="Internal\ConnectionHandler.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTracker.fs" />
-    <Compile Include="Internal\Compression .fs" />
     <Compile Include="Internal\ProducerImpl.fs" />
     <Compile Include="Internal\ConsumerImpl.fs" />
     <Compile Include="Internal\ReaderImpl.fs" />

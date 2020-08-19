@@ -17,7 +17,7 @@ open System.Runtime.InteropServices
 
 type SendMessageRequest<'T> = MessageBuilder<'T> * AsyncReplyChannel<TaskCompletionSource<MessageId>>
 
-type internal TickType =
+type internal ProducerTickType =
     | SendBatchTick
     | SendTimeoutTick
     | StatTick
@@ -32,7 +32,7 @@ type internal ProducerMessage<'T> =
     | RecoverChecksumError of SequenceId
     | TopicTerminatedError
     | Close of AsyncReplyChannel<ResultOrException<unit>>
-    | Tick of TickType
+    | Tick of ProducerTickType
     | GetStats of AsyncReplyChannel<ProducerStats>
     
 type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
@@ -46,7 +46,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
     let mutable schemaVersion = None
     let pendingMessages = Queue<PendingMessage<'T>>()
-    let compressionCodec = CompressionCodec.create producerConfig.CompressionType
+    let compressionCodec = CompressionCodec.get producerConfig.CompressionType
     let keyValueProcessor = KeyValueProcessor.GetInstance schema
     let blockedRequests = Queue<SendMessageRequest<'T>>()
 

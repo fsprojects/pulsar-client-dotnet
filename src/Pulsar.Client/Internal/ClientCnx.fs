@@ -339,11 +339,16 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | _ -> Pulsar.Client.Common.CompressionType.None
         let metadata = {
             NumMessages = messageMetadata.NumMessagesInBatch
+            NumChunks = messageMetadata.NumChunksFromMsg
+            TotalChunkMsgSize = messageMetadata.TotalChunkMsgSize
             HasNumMessagesInBatch = messageMetadata.ShouldSerializeNumMessagesInBatch()
             CompressionType = messageMetadata.Compression |> mapCompressionType
             UncompressedMessageSize = messageMetadata.UncompressedSize |> int32
             SchemaVersion = getOptionalSchemaVersion messageMetadata.SchemaVersion
             SequenceId = %(int64 messageMetadata.SequenceId)
+            ChunkId = %(int messageMetadata.ChunkId)
+            PublishTime = %(int64 messageMetadata.PublishTime) |> Tools.convertToDateTime
+            Uuid = %messageMetadata.Uuid
             EncryptionKeys =
                 if messageMetadata.EncryptionKeys.Count > 0 then
                     messageMetadata.EncryptionKeys |> Seq.map EncryptionKey.FromProto |> Seq.toArray

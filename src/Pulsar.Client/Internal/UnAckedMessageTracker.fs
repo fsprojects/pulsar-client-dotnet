@@ -6,7 +6,7 @@ open System.Collections.Generic
 open Microsoft.Extensions.Logging
 open System.Timers
 
-type internal TrackerMessage =
+type internal UnackedTrackerMessage =
     | Add of (MessageId*AsyncReplyChannel<bool>)
     | Remove of (MessageId*AsyncReplyChannel<bool>)
     | RemoveMessagesTill of (MessageId*AsyncReplyChannel<int>)
@@ -29,32 +29,33 @@ type internal UnAckedMessageTracker(prefix: string,
 
     let messageIdPartitionMap = SortedDictionary<MessageId, RedeliverSet>()
     let timePartitions = Queue<RedeliverSet>()
-    let prefix = prefix + " Tracker"
+    let currentPartition = RedeliverSet()
+    let prefix = prefix + " UnackedTracker"
 
     let fillTimePartions() =
         let stepsCount = Math.Ceiling(ackTimeout.TotalMilliseconds / tickDuration.TotalMilliseconds) |> int
         for _ in [1..stepsCount] do
             timePartitions.Enqueue(RedeliverSet())
 
-    let mb = MailboxProcessor<TrackerMessage>.Start(fun inbox ->
-        let rec loop (state: RedeliverSet)  =
+    let mb = MailboxProcessor<UnackedTrackerMessage>.Start(fun inbox ->
+        let rec loop ()  =
             async {
                 let! message = inbox.Receive()
                 match message with
 
-                | TrackerMessage.Add (msgId, channel) ->
+                | UnackedTrackerMessage.Add (msgId, channel) ->
 
                     Log.Logger.LogDebug("{0} Adding message {1}", prefix, msgId)
                     if messageIdPartitionMap.ContainsKey msgId then
                         channel.Reply(false)
                         Log.Logger.LogWarning("{0} Duplicate message add {1}", prefix, msgId)
                     else
-                        messageIdPartitionMap.Add(msgId, state)
-                        state.Add(msgId) |> ignore
+                        messageIdPartitionMap.Add(msgId, currentPartition)
+                        currentPartition.Add(msgId) |> ignore
                         channel.Reply(true)
-                    return! loop state
+                    return! loop ()
 
-                | TrackerMessage.Remove (msgId, channel) ->
+                | UnackedTrackerMessage.Remove (msgId, channel) ->
 
                     Log.Logger.LogDebug("{0} Removing message {1}", prefix, msgId)
                     let mutable targetState: RedeliverSet = null
@@ -65,39 +66,42 @@ type internal UnAckedMessageTracker(prefix: string,
                     else
                         Log.Logger.LogWarning("{0} Unexisting message remove {1}", prefix, msgId)
                         channel.Reply(false)
-                    return! loop state
+                    return! loop ()
 
-                | TrackerMessage.RemoveMessagesTill (msgId, channel) ->
+                | UnackedTrackerMessage.RemoveMessagesTill (msgId, channel) ->
 
                     Log.Logger.LogDebug("{0} RemoveMessagesTill {1}", prefix, msgId)
-                    messageIdPartitionMap.Keys
+                    let keysToRemove = 
+                        messageIdPartitionMap.Keys
                         |> Seq.takeWhile (fun key -> key <= msgId)
-                        |> Seq.toArray
-                        |> Seq.map (fun key ->
-                              let targetState = messageIdPartitionMap.[key]
-                              targetState.Remove(key) |> ignore
-                              messageIdPartitionMap.Remove(key) |> ignore)
-                        |> Seq.length
-                        |> channel.Reply
-                    return! loop state
+                        |> Seq.toArray // materialize before removal operations
+                    for key in keysToRemove do
+                        let targetState = messageIdPartitionMap.[key]
+                        targetState.Remove(key) |> ignore
+                        messageIdPartitionMap.Remove(key) |> ignore
+                    channel.Reply keysToRemove.Length
+                    return! loop ()
 
                 | TickTime ->
 
-                    timePartitions.Enqueue(state)
+                    timePartitions.Enqueue(currentPartition)
                     let timedOutMessages = timePartitions.Dequeue()
                     if timedOutMessages.Count > 0 then
                         Log.Logger.LogWarning("{0} {1} messages have timed-out", prefix, timedOutMessages.Count)
                         for msgId in timedOutMessages do
                             messageIdPartitionMap.Remove(msgId) |> ignore
                         redeliverUnacknowledgedMessages timedOutMessages
-                    return! loop (RedeliverSet())
+                    currentPartition.Clear()
+                    return! loop ()
 
                 | Clear ->
 
                     Log.Logger.LogDebug("{0} Clear", prefix)
                     messageIdPartitionMap.Clear()
-                    timePartitions |> Seq.iter (fun partition -> partition.Clear())
-                    return! loop (RedeliverSet())
+                    for partition in timePartitions do
+                        partition.Clear()
+                    currentPartition.Clear()
+                    return! loop ()
 
                 | Stop ->
 
@@ -105,7 +109,7 @@ type internal UnAckedMessageTracker(prefix: string,
                     messageIdPartitionMap.Clear()
                     timePartitions.Clear()
             }
-        loop (RedeliverSet())
+        loop ()
     )
 
     let timer =
@@ -124,13 +128,15 @@ type internal UnAckedMessageTracker(prefix: string,
 
     interface IUnAckedMessageTracker with
         member this.Clear() =
-            mb.Post TrackerMessage.Clear
+            mb.Post UnackedTrackerMessage.Clear
         member this.Add(msgId) =
-            mb.PostAndReply (fun channel -> TrackerMessage.Add (msgId, channel))
+            mb.PostAndReply (fun channel -> UnackedTrackerMessage.Add (msgId, channel))
         member this.Remove(msgId) =
-            mb.PostAndReply (fun channel -> TrackerMessage.Remove (msgId, channel))
+            mb.PostAndReply (fun channel -> UnackedTrackerMessage.Remove (msgId, channel))
         member this.RemoveMessagesTill(msgId) =
-            mb.PostAndReply (fun channel -> TrackerMessage.RemoveMessagesTill (msgId, channel))
+            mb.PostAndReply (fun channel -> UnackedTrackerMessage.RemoveMessagesTill (msgId, channel))
+           
+        
         member this.Close() =
             timer.Dispose()
             mb.Post Stop
