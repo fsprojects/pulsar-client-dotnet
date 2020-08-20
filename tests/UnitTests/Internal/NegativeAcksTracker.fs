@@ -27,7 +27,7 @@ let tests =
                 tsc.SetResult(length)
                 
             let tracker = NegativeAcksTracker("", TimeSpan.FromMilliseconds(100.0), redeliver, getScheduler)
-            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %"" }
+            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %""; ChunkMessageIds = None }
             let msgId2 = { msgId1 with EntryId = %2L }
             let msgId3 = { msgId1 with EntryId = %3L }
             
@@ -56,7 +56,7 @@ let tests =
                 tcs.TrySetResult length |> ignore
 
             let tracker = NegativeAcksTracker("", TimeSpan.FromMilliseconds(100.0), redeliver, getScheduler)
-            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %"" }
+            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %""; ChunkMessageIds = None }
             let msgId2 = { msgId1 with EntryId = %2L }
             let msgId3 = { msgId1 with EntryId = %3L }
             

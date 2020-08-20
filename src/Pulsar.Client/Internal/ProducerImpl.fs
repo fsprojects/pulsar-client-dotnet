@@ -389,7 +389,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             let payload = Commands.newSend producerId sequenceId None 1 metadata encryptedPayload
                             let chunkDetails =
                                 if totalChunks > 1 then
-                                    Some { TotalChunks = totalChunks; ChunkId = chunkId  }
+                                    Some { TotalChunks = totalChunks; ChunkId = chunkId; MessageIds = Array.zeroCreate totalChunks }
                                 else
                                     None
                             let pendingMessage = {
@@ -550,16 +550,35 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 dequeuePendingMessage() |> ignore
                                 lastSequenceIdPublished <- Math.Max(lastSequenceIdPublished, %(getHighestSequenceId pendingMessage))
                                 match pendingMessage.Callback with
-                                | SingleCallback (chunkDetail, msg, tcs) ->
-                                    if chunkDetail.IsNone || chunkDetail.Value.IsLast then
-                                        let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Individual; TopicName = %"" }
+                                | SingleCallback (chunkDetailOption, msg, tcs) ->
+                                    if chunkDetailOption.IsNone || chunkDetailOption.Value.IsLast then
+                                        let msgId =
+                                            match chunkDetailOption with
+                                            | Some chunkDetail ->
+                                                let currentMsgId =
+                                                    { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
+                                                      Type = Individual; TopicName = %""; ChunkMessageIds = Some chunkDetail.MessageIds }
+                                                chunkDetail.MessageIds.[chunkDetail.ChunkId] <- currentMsgId
+                                                currentMsgId
+                                            | None ->
+                                                { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
+                                                    Type = Individual; TopicName = %""; ChunkMessageIds = None }
                                         interceptors.OnSendAcknowledgement(this, msg, msgId, null)
                                         stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
                                         tcs.SetResult(msgId)
+                                    else
+                                        // updating messageIds array
+                                        let chunkDetail = chunkDetailOption.Value
+                                        let currentMsgId =
+                                                    { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
+                                                      Type = Individual; TopicName = %""; ChunkMessageIds = None }
+                                        chunkDetail.MessageIds.[chunkDetail.ChunkId] <- currentMsgId
+                                        
                                 | BatchCallbacks tcss ->
                                     tcss
                                     |> Array.iter (fun (msgId, msg, tcs) ->
-                                        let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex; Type = Cumulative msgId; TopicName = %"" }
+                                        let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex
+                                                      Type = Cumulative msgId; TopicName = %""; ChunkMessageIds = None }
                                         interceptors.OnSendAcknowledgement(this, msg, msgId, null)
                                         stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
                                         tcs.SetResult(msgId))

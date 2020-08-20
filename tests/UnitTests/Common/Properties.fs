@@ -17,6 +17,7 @@ type MessageIdGen() =
                    Type = Cumulative (%index, BatchMessageAcker.NullAcker)
                    Partition = partition
                    TopicName = %""
+                   ChunkMessageIds = None
                }
            | None ->
                {
@@ -25,6 +26,7 @@ type MessageIdGen() =
                    Type = Individual
                    Partition = partition
                    TopicName = %""
+                   ChunkMessageIds = None
                }
        let getInt = Arb.generate<int> |> Gen.filter(fun i -> i >= -1)
        let batchIndex = Arb.generate<int> |> Gen.filter(fun i -> i >= 0) |> Gen.optionOf

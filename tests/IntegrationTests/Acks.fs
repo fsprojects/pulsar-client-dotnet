@@ -433,7 +433,7 @@ let tests =
             let! producer =
                 client.NewProducer()
                     .Topic(topicName)
-                    .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(100.0))
+                    .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(150.0))
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
@@ -442,7 +442,7 @@ let tests =
                     .SubscriptionName("test-subscription")
                     .ConsumerName(consumerName)
                     .EnableBatchIndexAcknowledgment(true)
-                    .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(100.0))
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(150.0))
                     .SubscribeAsync() |> Async.AwaitTask
 
             let producerTask =

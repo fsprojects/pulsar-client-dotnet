@@ -8,12 +8,6 @@ open Pulsar.Client.Common
 open FSharp.UMX
 open Microsoft.Extensions.Logging
 
-//type internal ChunkedTrackerMessage =
-//    | TrackChunkedMessageIds of MessageId * MessageId[]
-//    | GetUnackedChunkedMessageIds of MessageId * AsyncReplyChannel<MessageId[]>
-//    | StopTrackingChunkedMessageIds of MessageId
-
-
 type internal ChunkedMessageCtx(totalChunksCount: int, totalChunksSize: int) =
     let chunkedMessageIds = Array.zeroCreate totalChunksCount
     let chunkedMsgBuffer = ArrayPool.Shared.Rent totalChunksSize
@@ -40,7 +34,6 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
                                     ackOrTrack) =
     let chunkedMessagesMap = Dictionary()
     let pendingChunkedMessageUuidQueue = LinkedList()
-    let unAckedChunkedMessageIdSequenceMap = Dictionary<MessageId, MessageId[]>()
     let prefix = prefix + " ChunkedMessageTracker"
      
     let removeChunkedMessage msgUuid (ctx: ChunkedMessageCtx) autoAck =
@@ -52,23 +45,10 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
         
     let removeOldestPendingChunkedMessage() =
         let firstPendingMsgUuid = pendingChunkedMessageUuidQueue.First.Value
+        Log.Logger.LogInformation("{0} RemoveOldestPendingChunkedMessage {1}", prefix, firstPendingMsgUuid)
         let ctx = chunkedMessagesMap.[firstPendingMsgUuid]
         pendingChunkedMessageUuidQueue.RemoveFirst()
         removeChunkedMessage firstPendingMsgUuid ctx autoAckOldestChunkedMessageOnQueueFull
-        
-//    let mb = MailboxProcessor<ChunkedTrackerMessage>.Start(fun inbox ->
-//        let rec loop ()  =
-//            async {
-//                let! message = inbox.Receive()
-//                match message with
-//
-//                | TrackChunkedMessageIds (msgId, msgIds) ->
-//                    unAckedChunkedMessageIdSequenceMap.[msgId] <- msgIds
-//                    return! loop ()
-//            }
-//        loop()
-//    )
-//    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
         
     member this.GetContext (metadata: Metadata) =
         if metadata.ChunkId = %0 then
@@ -91,17 +71,16 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
             | _ ->
                 Error <| sprintf "Received unexpected chunk uuid = %A, chunkId = %A, total-chunks = %A"
                             metadata.Uuid metadata.ChunkId metadata.NumChunks
-    member this.MessageReceived (rawMessage, ctx: ChunkedMessageCtx, codec: ICompressionCodec) =
+    member this.MessageReceived (rawMessage, msgId: MessageId, ctx: ChunkedMessageCtx, codec: ICompressionCodec) =
         ctx.MessageReceived rawMessage
         // if final chunk is not received yet then release payload and return
         if %rawMessage.Metadata.ChunkId = rawMessage.Metadata.NumChunks - 1 then
             chunkedMessagesMap.Remove rawMessage.Metadata.Uuid |> ignore
-            //mb.Post <| TrackChunkedMessageIds(rawMessage.MessageId, ctx.ChunkedMessageIds)
-            unAckedChunkedMessageIdSequenceMap.[rawMessage.MessageId] <- ctx.ChunkedMessageIds
             pendingChunkedMessageUuidQueue.Remove rawMessage.Metadata.Uuid |> ignore
             let decompressedPayload = ctx.Decompress(rawMessage.Metadata.UncompressedMessageSize, codec)
+            let chunkMsgIds = Some ctx.ChunkedMessageIds
             ctx.Dispose()
-            Some decompressedPayload
+            Some (decompressedPayload, { msgId with ChunkMessageIds = chunkMsgIds } )
         else
             None
         
@@ -113,9 +92,3 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
                 pendingChunkedMessageUuidQueue.RemoveFirst()
                 removeChunkedMessage firstMsgUuid ctx true
                 this.RemoveExpireIncompleteChunkedMessages()
-                
-    member this.GetUnackedMessageIds msgId =
-        unAckedChunkedMessageIdSequenceMap.TryGetValue msgId
-        
-    member this.RemoveUnackedMessageIds msgId =
-         unAckedChunkedMessageIdSequenceMap.Remove(msgId) |> ignore

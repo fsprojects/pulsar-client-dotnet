@@ -122,6 +122,7 @@ type MessageId =
         Type: MessageIdType
         Partition: int
         TopicName: CompleteTopicName
+        ChunkMessageIds: MessageId[] option
     }
     with
         static member Earliest =
@@ -131,6 +132,7 @@ type MessageId =
                 Type = Individual
                 Partition = %(-1)
                 TopicName = %""
+                ChunkMessageIds = None
             }
         static member Latest =
             {
@@ -139,6 +141,7 @@ type MessageId =
                 Type = Individual
                 Partition = %(-1)
                 TopicName = %""
+                ChunkMessageIds = None
             }
         member internal this.PrevBatchMessageId
             with get() = { this with EntryId = this.EntryId - %1L; Type = Individual }
@@ -168,6 +171,7 @@ type MessageId =
                 Type = msgType
                 Partition = msgData.Partition
                 TopicName = %""
+                ChunkMessageIds = None
             }
         static member FromByteArrayWithTopic (data: byte[], topicName: string) =
             let initial = MessageId.FromByteArray(data)
@@ -409,6 +413,7 @@ type ChunkDetails =
     {
         TotalChunks: int
         ChunkId: int
+        MessageIds: MessageId[]
     }
     with
         member this.IsLast =

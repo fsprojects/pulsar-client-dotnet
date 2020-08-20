@@ -29,7 +29,7 @@ type internal UnAckedMessageTracker(prefix: string,
 
     let messageIdPartitionMap = SortedDictionary<MessageId, RedeliverSet>()
     let timePartitions = Queue<RedeliverSet>()
-    let currentPartition = RedeliverSet()
+    let mutable currentPartition = RedeliverSet()
     let prefix = prefix + " UnackedTracker"
 
     let fillTimePartions() =
@@ -88,10 +88,18 @@ type internal UnAckedMessageTracker(prefix: string,
                     let timedOutMessages = timePartitions.Dequeue()
                     if timedOutMessages.Count > 0 then
                         Log.Logger.LogWarning("{0} {1} messages have timed-out", prefix, timedOutMessages.Count)
+                        let possibleChunksMsgIds = ResizeArray()
                         for msgId in timedOutMessages do
                             messageIdPartitionMap.Remove(msgId) |> ignore
+                            match msgId.ChunkMessageIds with
+                            | Some msgIds ->
+                                possibleChunksMsgIds.AddRange msgIds
+                            | None ->
+                                ()
+                        for possibleChunkMsgId in possibleChunksMsgIds do
+                            timedOutMessages.Add possibleChunkMsgId |> ignore
                         redeliverUnacknowledgedMessages timedOutMessages
-                    currentPartition.Clear()
+                    currentPartition <- RedeliverSet()
                     return! loop ()
 
                 | Clear ->
@@ -108,6 +116,7 @@ type internal UnAckedMessageTracker(prefix: string,
                     Log.Logger.LogDebug("{0} Stop", prefix)
                     messageIdPartitionMap.Clear()
                     timePartitions.Clear()
+                    currentPartition.Clear()
             }
         loop ()
     )
@@ -124,7 +133,8 @@ type internal UnAckedMessageTracker(prefix: string,
         | Some getScheduler ->
             getScheduler(fun _ -> mb.Post TickTime)
     
-    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
+    do mb.Error.Add(fun ex ->
+        Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
 
     interface IUnAckedMessageTracker with
         member this.Clear() =

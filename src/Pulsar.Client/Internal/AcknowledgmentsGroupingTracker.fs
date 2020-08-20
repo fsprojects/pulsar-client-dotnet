@@ -86,9 +86,16 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                 let messages =
                                     seq {
                                         while pendingIndividualAcks.Count > 0 do
-                                            let message = pendingIndividualAcks.Min
-                                            pendingIndividualAcks.Remove(message) |> ignore
-                                            yield (message.LedgerId, message.EntryId, null)
+                                            let messageId = pendingIndividualAcks.Min
+                                            pendingIndividualAcks.Remove(messageId) |> ignore
+                                            // if messageId is checked then all the chunked related to that msg also processed so, ack all of
+                                            // them
+                                            match messageId.ChunkMessageIds with
+                                            | Some messageIds ->
+                                                for chunkedMessageId in messageIds do
+                                                    yield (chunkedMessageId.LedgerId, chunkedMessageId.EntryId, null)
+                                            | None ->
+                                                yield (messageId.LedgerId, messageId.EntryId, null)
                                     }
                                 allMultiackMessages.AddRange(messages)
                             if success && pendingIndividualBatchIndexAcks.Count > 0 then

@@ -359,7 +359,15 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         }
 
         {
-            MessageId = { LedgerId = %(int64 cmd.MessageId.ledgerId); EntryId = %(int64 cmd.MessageId.entryId); Type = Individual; Partition = -1; TopicName = %"" }
+            MessageId =
+                {
+                    LedgerId = %(int64 cmd.MessageId.ledgerId)
+                    EntryId = %(int64 cmd.MessageId.entryId)
+                    Type = Individual
+                    Partition = -1
+                    TopicName = %""
+                    ChunkMessageIds = None
+                }
             RedeliveryCount = cmd.RedeliveryCount
             Metadata = metadata
             Payload = payload
@@ -464,7 +472,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     | index when index >= 0  -> Cumulative(%index, BatchMessageAcker.NullAcker)
                     | _ -> Individual
                 Partition = cmd.LastMessageId.Partition
-                TopicName = %"" }
+                TopicName = %""
+                ChunkMessageIds = None
+            }
             handleSuccess %cmd.RequestId result
         | XCommandActiveConsumerChange cmd ->
             let consumerOperations = consumers.[%cmd.ConsumerId]

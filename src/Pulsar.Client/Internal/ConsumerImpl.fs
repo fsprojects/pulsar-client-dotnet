@@ -286,17 +286,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                                       consumerConfig.ExpireTimeOfIncompleteChunkedMessage,
                                                       ackOrTrack)
     
-    let addChunksToRedeliverSet (redeliverSet: RedeliverSet) =
-        for msgId in redeliverSet do
-            match chunkedMessageTracker.GetUnackedMessageIds msgId with
-            | true, chunkIds ->
-                for chunkMsgId in chunkIds do
-                    redeliverSet.Add chunkMsgId |> ignore
-                chunkedMessageTracker.RemoveUnackedMessageIds msgId
-            | _ ->
-                ()
-        redeliverSet
-    
     let markAckForBatchMessage (msgId: MessageId) (batchDetails: BatchDetails) ackType properties =
         let (batchIndex, batchAcker) = batchDetails
         let isAllMsgsAcked =
@@ -522,13 +511,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             return schemaDecodeFunction
         }
            
-    let processMessageChunk (rawMessage: RawMessage) =
+    let processMessageChunk (rawMessage: RawMessage) msgId =
         match chunkedMessageTracker.GetContext(rawMessage.Metadata) with
         | Ok chunkedContext ->
             let compressionCodec = rawMessage.Metadata.CompressionType |> CompressionCodec.get
-            match chunkedMessageTracker.MessageReceived(rawMessage, chunkedContext, compressionCodec) with
-            | Some uncompressedPayload ->
-                Some uncompressedPayload
+            match chunkedMessageTracker.MessageReceived(rawMessage, msgId, chunkedContext, compressionCodec) with
+            | Some payloadAndMessageId ->
+                Some payloadAndMessageId
             | None ->
                 increaseAvailablePermits 1
                 None
@@ -588,9 +577,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             if isMessageUndecryptable || (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
                 // right now, chunked messages are only supported by non-shared subscription
                 if isChunkedMessage then
-                    match processMessageChunk rawMessage with
-                    | Some chunkedPayload ->
-                        handleSingleMessagePayload rawMessage msgId chunkedPayload hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
+                    match processMessageChunk rawMessage msgId with
+                    | Some (chunkedPayload, msgIdWithChunk) ->
+                        handleSingleMessagePayload rawMessage msgIdWithChunk chunkedPayload hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
                     | None ->
                         ()
                 else
@@ -827,7 +816,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | SubscriptionType.Shared | SubscriptionType.KeyShared ->
                         match connectionHandler.ConnectionState with
                         | Ready clientCnx ->
-                            let messageIds = addChunksToRedeliverSet messageIds
                             let messagesFromQueue = removeExpiredMessagesFromQueue messageIds
                             let chunks = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
                             for chunk in chunks do
