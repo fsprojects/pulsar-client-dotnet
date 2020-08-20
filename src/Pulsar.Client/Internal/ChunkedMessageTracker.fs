@@ -36,19 +36,20 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
     let pendingChunkedMessageUuidQueue = LinkedList()
     let prefix = prefix + " ChunkedMessageTracker"
      
-    let removeChunkedMessage msgUuid (ctx: ChunkedMessageCtx) autoAck =
+    let removeChunkMessage msgUuid (ctx: ChunkedMessageCtx) autoAck =
         // clean up pending chunked Message
         chunkedMessagesMap.Remove msgUuid |> ignore
         for msgId in ctx.ChunkedMessageIds do
-            ackOrTrack msgId autoAck
+            if box msgId |> isNull |> not then
+                ackOrTrack msgId autoAck
         ctx.Dispose()
         
     let removeOldestPendingChunkedMessage() =
         let firstPendingMsgUuid = pendingChunkedMessageUuidQueue.First.Value
-        Log.Logger.LogInformation("{0} RemoveOldestPendingChunkedMessage {1}", prefix, firstPendingMsgUuid)
+        Log.Logger.LogWarning("{0} RemoveOldestPendingChunkedMessage {1}", prefix, firstPendingMsgUuid)
         let ctx = chunkedMessagesMap.[firstPendingMsgUuid]
         pendingChunkedMessageUuidQueue.RemoveFirst()
-        removeChunkedMessage firstPendingMsgUuid ctx autoAckOldestChunkedMessageOnQueueFull
+        removeChunkMessage firstPendingMsgUuid ctx autoAckOldestChunkedMessageOnQueueFull
         
     member this.GetContext (metadata: Metadata) =
         if metadata.ChunkId = %0 then
@@ -89,6 +90,7 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
             let firstMsgUuid = pendingChunkedMessageUuidQueue.First.Value
             let ctx = chunkedMessagesMap.[firstMsgUuid]
             if DateTime.Now > ctx.ReceivedTime.Add(expireTimeOfIncompleteChunkedMessage) then
+                Log.Logger.LogWarning("{0} RemoveExpireIncompleteChunkedMessages {1}", prefix, pendingChunkedMessageUuidQueue.First.Value)
                 pendingChunkedMessageUuidQueue.RemoveFirst()
-                removeChunkedMessage firstMsgUuid ctx true
+                removeChunkMessage firstMsgUuid ctx true
                 this.RemoveExpireIncompleteChunkedMessages()
