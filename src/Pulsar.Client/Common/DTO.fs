@@ -400,7 +400,7 @@ type MessageBuilder<'T> =
         
         
 type internal WriterStream = Stream
-type internal Payload = WriterStream -> Task
+type internal Payload = WriterStream -> Task<unit>
 type internal Connection =
     {
         Input: PipeReader

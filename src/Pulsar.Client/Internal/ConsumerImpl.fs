@@ -281,7 +281,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         else
             trackMessage msgId
             
-    let chunkedMessageTracker = ChunkedMessageTracker(prefix, consumerConfig.MaxPendingChuckedMessage,
+    let chunkedMessageTracker = ChunkedMessageTracker(prefix, consumerConfig.MaxPendingChunkedMessage,
                                                       consumerConfig.AutoAckOldestChunkedMessageOnQueueFull,
                                                       consumerConfig.ExpireTimeOfIncompleteChunkedMessage,
                                                       ackOrTrack)

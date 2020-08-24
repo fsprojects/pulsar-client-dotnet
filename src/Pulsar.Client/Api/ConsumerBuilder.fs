@@ -233,6 +233,21 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
             BatchIndexAcknowledgmentEnabled = enableBatchIndexAcknowledgment }
         |> this.With
     
+    member this.MaxPendingChunkedMessage maxPendingChunkedMessage =
+        { config with
+            MaxPendingChunkedMessage = maxPendingChunkedMessage }
+        |> this.With
+        
+    member this.AutoAckOldestChunkedMessageOnQueueFull autoAckOldestChunkedMessageOnQueueFull =
+        { config with
+            AutoAckOldestChunkedMessageOnQueueFull = autoAckOldestChunkedMessageOnQueueFull }
+        |> this.With
+        
+    member this.ExpireTimeOfIncompleteChunkedMessage expireTimeOfIncompleteChunkedMessage =
+        { config with
+            ExpireTimeOfIncompleteChunkedMessage = expireTimeOfIncompleteChunkedMessage }
+        |> this.With
+    
     member this.MessageDecryptor messageDecryptor  =
         { config with
             MessageDecryptor = Some messageDecryptor }

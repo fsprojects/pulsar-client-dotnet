@@ -27,6 +27,7 @@
     <Compile Include="Schema.fs" />
     <Compile Include="BackPressure.fs" />
     <Compile Include="MultiTopic.fs" />
+    <Compile Include="Chunks.fs" />
     <Compile Include="Stats.fs" />
     <Compile Include="ZeroQueueConsumer.fs" />
     <Compile Include="Failover.fs" />

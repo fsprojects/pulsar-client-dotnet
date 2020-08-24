@@ -360,7 +360,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                    doBatchSendAndAdd batchItem
             else
                 let compressedPayload = compressionCodec.Encode message.Payload
-                if (compressedPayload.Length > maxMessageSize) then
+                if compressedPayload.Length > maxMessageSize && not producerConfig.ChunkingEnabled then
                     let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
                     failMessage message tcs ex
                 else
@@ -370,11 +370,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     let mutable readStartIndex = 0
                     let mutable chunkError = false
                     let mutable chunkId = 0
-                    let uuid = if totalChunks > 1 then sprintf "%s-%d" producerName sequenceId else ""                    
+                    let isChunked = totalChunks > 1
+                    let uuid = if isChunked then sprintf "%s-%d" producerName sequenceId else ""
+                    let messageIds = if isChunked then Array.zeroCreate totalChunks else Array.empty
                     while chunkId < totalChunks && not chunkError do
                         let metadata = createMessageMetadata sequenceId message None
                         let chunkPayload = 
-                            if totalChunks > 1 && producerConfig.Topic.IsPersistent then
+                            if isChunked && producerConfig.Topic.IsPersistent then
                                 metadata.Uuid <- uuid
                                 metadata.ChunkId <- chunkId
                                 metadata.NumChunksFromMsg <- totalChunks
@@ -388,8 +390,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             stats.UpdateNumMsgsSent(1, chunkPayload.Length)
                             let payload = Commands.newSend producerId sequenceId None 1 metadata encryptedPayload
                             let chunkDetails =
-                                if totalChunks > 1 then
-                                    Some { TotalChunks = totalChunks; ChunkId = chunkId; MessageIds = Array.zeroCreate totalChunks }
+                                if isChunked then
+                                    Some { TotalChunks = totalChunks; ChunkId = chunkId; MessageIds = messageIds }
                                 else
                                     None
                             let pendingMessage = {
@@ -550,29 +552,28 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 dequeuePendingMessage() |> ignore
                                 lastSequenceIdPublished <- Math.Max(lastSequenceIdPublished, %(getHighestSequenceId pendingMessage))
                                 match pendingMessage.Callback with
-                                | SingleCallback (chunkDetailOption, msg, tcs) ->
-                                    if chunkDetailOption.IsNone || chunkDetailOption.Value.IsLast then
-                                        let msgId =
-                                            match chunkDetailOption with
+                                | SingleCallback (chunkDetailsOption, msg, tcs) ->
+                                    if chunkDetailsOption.IsNone || chunkDetailsOption.Value.IsLast then
+                                        let currentMessageId =
+                                            { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
+                                                Type = Individual; TopicName = %""; ChunkMessageIds = None }
+                                        let msgId = 
+                                            match chunkDetailsOption with
                                             | Some chunkDetail ->
-                                                let currentMsgId =
-                                                    { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
-                                                      Type = Individual; TopicName = %""; ChunkMessageIds = Some chunkDetail.MessageIds }
-                                                chunkDetail.MessageIds.[chunkDetail.ChunkId] <- currentMsgId
-                                                currentMsgId
+                                                chunkDetail.MessageIds.[chunkDetail.ChunkId] <- currentMessageId
+                                                { currentMessageId with ChunkMessageIds = Some chunkDetail.MessageIds }
                                             | None ->
-                                                { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
-                                                    Type = Individual; TopicName = %""; ChunkMessageIds = None }
+                                                currentMessageId
                                         interceptors.OnSendAcknowledgement(this, msg, msgId, null)
                                         stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
                                         tcs.SetResult(msgId)
                                     else
                                         // updating messageIds array
-                                        let chunkDetail = chunkDetailOption.Value
+                                        let chunkDetails = chunkDetailsOption.Value
                                         let currentMsgId =
                                                     { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
                                                       Type = Individual; TopicName = %""; ChunkMessageIds = None }
-                                        chunkDetail.MessageIds.[chunkDetail.ChunkId] <- currentMsgId
+                                        chunkDetails.MessageIds.[chunkDetails.ChunkId] <- currentMsgId
                                         
                                 | BatchCallbacks tcss ->
                                     tcss

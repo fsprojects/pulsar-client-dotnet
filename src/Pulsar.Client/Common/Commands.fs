@@ -1,6 +1,7 @@
 ﻿module internal Pulsar.Client.Common.Commands
 
 open System.Collections.Generic
+open System.Threading.Tasks
 open pulsar.proto
 open FSharp.UMX
 open System
@@ -13,89 +14,98 @@ open Pulsar.Client.Internal
 open Pulsar.Client
 open Pulsar.Client.Api
 open Pulsar.Client.Common
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 type CommandType = BaseCommand.Type
 
 [<Literal>]
 let DEFAULT_MAX_MESSAGE_SIZE = 5_242_880 //5 * 1024 * 1024
 
+
+let private processSimpleCommand (command : BaseCommand) (stream: Stream) (binaryWriter: BinaryWriter) (output: Stream) =
+    // write fake totalLength
+    for i in 1..4 do
+        stream.WriteByte(0uy)
+
+    // write commandPayload
+    Serializer.SerializeWithLengthPrefix(stream, command, PrefixStyle.Fixed32BigEndian)
+    let frameSize = int stream.Length
+
+    let totalSize = frameSize - 4
+
+    //write total size and command size
+    stream.Seek(0L,SeekOrigin.Begin) |> ignore
+    binaryWriter.Write(int32ToBigEndian totalSize)
+    stream.Seek(0L, SeekOrigin.Begin) |> ignore
+
+    Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
+    stream.CopyToAsync(output)
+    
+let private processComplexCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[])
+                                    (stream: Stream) (binaryWriter: BinaryWriter) (output: Stream) =
+    // write fake totalLength
+    for i in 1..4 do
+        stream.WriteByte(0uy)
+
+    // write commandPayload
+    Serializer.SerializeWithLengthPrefix(stream, command, PrefixStyle.Fixed32BigEndian)
+
+    let stream1Size = int stream.Length
+
+    // write magic number 0x0e01
+    stream.WriteByte(14uy)
+    stream.WriteByte(1uy)
+
+    // write fake CRC sum and fake metadata length
+    for i in 1..4 do
+        stream.WriteByte(0uy)
+
+    // write metadata
+    Serializer.SerializeWithLengthPrefix(stream, metadata, PrefixStyle.Fixed32BigEndian)
+    let stream2Size = int stream.Length
+    let totalMetadataSize = stream2Size - stream1Size - 6
+
+    // write payload
+    stream.Write(payload, 0, payload.Length)
+
+    let frameSize = int stream.Length
+    let totalSize = frameSize - 4
+    let payloadSize = frameSize - stream2Size
+
+    let crcStart = stream1Size + 2
+    let crcPayloadStart = crcStart + 4
+
+    //write CRC
+    stream.Seek(int64 crcPayloadStart, SeekOrigin.Begin) |> ignore
+    let crc = int32 <| CRC32C.Get(0u, stream, totalMetadataSize + payloadSize)
+    stream.Seek(int64 crcStart, SeekOrigin.Begin) |> ignore
+    binaryWriter.Write(int32ToBigEndian crc)
+
+    //write total size and command size
+    stream.Seek(0L, SeekOrigin.Begin) |> ignore
+    binaryWriter.Write(int32ToBigEndian totalSize)
+
+    stream.Seek(0L, SeekOrigin.Begin) |> ignore
+
+    Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
+    stream.CopyToAsync(output)
+
 let serializeSimpleCommand(command : BaseCommand) =
     fun (output: Stream) ->
-        use stream = MemoryStreamManager.GetStream()
-
-        // write fake totalLength
-        for i in 1..4 do
-            stream.WriteByte(0uy)
-
-        // write commandPayload
-        Serializer.SerializeWithLengthPrefix(stream, command, PrefixStyle.Fixed32BigEndian)
-        let frameSize = int stream.Length
-
-        let totalSize = frameSize - 4
-
-        //write total size and command size
-        stream.Seek(0L,SeekOrigin.Begin) |> ignore
-        use binaryWriter = new BinaryWriter(stream)
-        binaryWriter.Write(int32ToBigEndian totalSize)
-        stream.Seek(0L, SeekOrigin.Begin) |> ignore
-
-        Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
-        stream.CopyToAsync(output)
+        task {
+            use stream = MemoryStreamManager.GetStream()
+            use binaryWriter = new BinaryWriter(stream)
+            return! processSimpleCommand command stream binaryWriter output
+        }
+        
 
 let serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[]) =
     fun (output: Stream) ->
-        use stream = MemoryStreamManager.GetStream()
-
-        // write fake totalLength
-        for i in 1..4 do
-            stream.WriteByte(0uy)
-
-        // write commandPayload
-        Serializer.SerializeWithLengthPrefix(stream, command, PrefixStyle.Fixed32BigEndian)
-
-        let stream1Size = int stream.Length
-
-        // write magic number 0x0e01
-        stream.WriteByte(14uy)
-        stream.WriteByte(1uy)
-
-        // write fake CRC sum and fake metadata length
-        for i in 1..4 do
-            stream.WriteByte(0uy)
-
-        // write metadata
-        Serializer.SerializeWithLengthPrefix(stream, metadata, PrefixStyle.Fixed32BigEndian)
-        let stream2Size = int stream.Length
-        let totalMetadataSize = stream2Size - stream1Size - 6
-
-        // write payload
-        stream.Write(payload, 0, payload.Length)
-
-        let frameSize = int stream.Length
-        let totalSize = frameSize - 4
-        let payloadSize = frameSize - stream2Size
-
-        let crcStart = stream1Size + 2
-        let crcPayloadStart = crcStart + 4
-
-        // write missing sizes
-        use binaryWriter = new BinaryWriter(stream)
-
-        //write CRC
-        stream.Seek(int64 crcPayloadStart, SeekOrigin.Begin) |> ignore
-        let crc = int32 <| CRC32C.Get(0u, stream, totalMetadataSize + payloadSize)
-        stream.Seek(int64 crcStart, SeekOrigin.Begin) |> ignore
-        binaryWriter.Write(int32ToBigEndian crc)
-
-        //write total size and command size
-        stream.Seek(0L, SeekOrigin.Begin) |> ignore
-        binaryWriter.Write(int32ToBigEndian totalSize)
-
-        stream.Seek(0L, SeekOrigin.Begin) |> ignore
-
-        Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
-        stream.CopyToAsync(output)
-
+        task {
+            use stream = MemoryStreamManager.GetStream()
+            use binaryWriter = new BinaryWriter(stream)
+            return! processComplexCommand command metadata payload stream binaryWriter output
+        }
 let newPartitionMetadataRequest(topicName : CompleteTopicName) (requestId : RequestId) : Payload =
     let request = CommandPartitionedTopicMetadata(Topic = %topicName, RequestId = %requestId)
     let command = BaseCommand(``type`` = CommandType.PartitionedMetadata, partitionMetadata = request)

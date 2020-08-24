@@ -62,7 +62,7 @@ type ConsumerConfiguration<'T> =
         ConsumerCryptoFailureAction: ConsumerCryptoFailureAction
         RetryEnable: bool
         BatchIndexAcknowledgmentEnabled: bool
-        MaxPendingChuckedMessage: int
+        MaxPendingChunkedMessage: int
         AutoAckOldestChunkedMessageOnQueueFull: bool
         ExpireTimeOfIncompleteChunkedMessage: TimeSpan
     }
@@ -95,7 +95,7 @@ type ConsumerConfiguration<'T> =
             ConsumerCryptoFailureAction = ConsumerCryptoFailureAction.FAIL
             RetryEnable = false
             BatchIndexAcknowledgmentEnabled = false
-            MaxPendingChuckedMessage = 10
+            MaxPendingChunkedMessage = 10
             AutoAckOldestChunkedMessageOnQueueFull = false
             ExpireTimeOfIncompleteChunkedMessage = TimeSpan.FromSeconds(60.0)
         }
