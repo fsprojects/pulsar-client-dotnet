@@ -89,7 +89,7 @@ module ConsumerBuilderTests =
                             .SubscriptionType(subscription)
                             .ReadCompacted(true)
                             .SubscribeAsync()|> ignore)
-                        |> Expect.throwsWithMessage<ArgumentException>  "Read compacted can only be used with exclusive of failover persistent subscriptions"
+                        |> Expect.throwsWithMessage<ArgumentException>  "Read compacted can only be used with exclusive or failover persistent subscriptions"
                 [SubscriptionType.Shared; SubscriptionType.KeyShared] |> List.iter checkReadCompacted
             }
 
@@ -100,7 +100,7 @@ module ConsumerBuilderTests =
                         .SubscriptionName("test-subscription")
                         .ReadCompacted(true)
                         .SubscribeAsync()|> ignore)
-                    |> Expect.throwsWithMessage<ArgumentException>  "Read compacted can only be used with exclusive of failover persistent subscriptions"
+                    |> Expect.throwsWithMessage<ArgumentException>  "Read compacted can only be used with exclusive or failover persistent subscriptions"
             }
             
             test "PriorityLevel throws an exception for negative value" {

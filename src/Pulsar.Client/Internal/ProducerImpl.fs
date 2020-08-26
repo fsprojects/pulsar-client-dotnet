@@ -232,11 +232,16 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 ProducerName = producerConfig.ProducerName,
                 UncompressedSize = (message.Payload.Length |> uint32)
             )
+        if message.Payload.Length = 0 then
+            metadata.NullValue <- true
         if protoCompressionType <> pulsar.proto.CompressionType.None then
             metadata.Compression <- protoCompressionType
-        if message.Key.IsSome then
-            metadata.PartitionKey <- %message.Key.Value.PartitionKey
-            metadata.PartitionKeyB64Encoded <- message.Key.Value.IsBase64Encoded
+        match message.Key with
+        | Some key ->
+            metadata.PartitionKey <- %key.PartitionKey
+            metadata.PartitionKeyB64Encoded <- key.IsBase64Encoded
+        | None ->
+            metadata.NullPartitionKey <- true
         if message.Properties.Count > 0 then
             for property in message.Properties do
                 metadata.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
@@ -245,9 +250,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         if message.DeliverAt.HasValue then
             metadata.DeliverAtTime <- message.DeliverAt.Value
         match schemaVersion with
-        | Some (SchemaVersion sv) -> metadata.SchemaVersion <- sv
-        | _ -> ()
-
+        | Some (SchemaVersion sv) ->
+            metadata.SchemaVersion <- sv
+        | None ->
+            ()
         metadata
 
     let getHighestSequenceId (pendingMessage: PendingMessage<'T>): SequenceId =
@@ -767,7 +773,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>) =
             keyValueProcessor
             |> Option.map(fun kvp -> kvp.EncodeKeyValue value)
-            |> Option.map(fun struct(k, v) -> MessageBuilder(value, v, Some { PartitionKey = %k; IsBase64Encoded = true }, properties, deliverAt))
+            |> Option.map(fun struct(k, v) ->
+                                MessageBuilder(value, v,
+                                    (if String.IsNullOrEmpty(k) then None else Some { PartitionKey = %k; IsBase64Encoded = true }),
+                                    properties, deliverAt, sequenceId))
             |> Option.defaultWith (fun () ->
                 MessageBuilder(value, schema.Encode(value),
                                 (if String.IsNullOrEmpty(key) then None else Some { PartitionKey = %key; IsBase64Encoded = false }),

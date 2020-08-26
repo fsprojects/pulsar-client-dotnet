@@ -94,9 +94,9 @@ type internal KeyValueSchema =
 
 type internal KeyValueSchema<'K,'V>(keySchema: ISchema<'K>, valueSchema: ISchema<'V>, kvType: KeyValueEncodingType) =
     inherit ISchema<KeyValuePair<'K,'V>>()
-    member this.KeyValueEncodingType = kvType    
-    member this.KeySchema = keySchema    
-    member this.ValueSchema = valueSchema    
+    member this.KeyValueEncodingType = kvType
+    member this.KeySchema = keySchema
+    member this.ValueSchema = valueSchema
     member this.Decode (keyBytes, valueBytes) =
         let k = keySchema.Decode(keyBytes)
         let v = valueSchema.Decode(valueBytes)
@@ -140,8 +140,9 @@ type internal KeyValueProcessor<'K,'V>(schema: KeyValueSchema<'K,'V>) =
             if isNull value then
                 raise <| SchemaSerializationException "Need Non-Null key"
             let (KeyValue(k, v)) = value :?> KeyValuePair<'K,'V>
-            let strKey = schema.KeySchema.Encode(k) |> Convert.ToBase64String
+            let keyBytes = schema.KeySchema.Encode(k)
             let content = schema.ValueSchema.Encode(v)
+            let strKey = if isNull keyBytes then null else keyBytes |> Convert.ToBase64String
             struct(strKey, content)            
         member this.DecodeKeyValue(strKey: string, content) =
             let keyBytes = strKey |> Convert.FromBase64String

@@ -73,6 +73,19 @@ type ReaderBuilder<'T> private (createReaderAsync, config: ReaderConfiguration, 
             StartMessageFromRollbackDuration = rollbackDuration }
         |> this.With
 
+    member this.MessageDecryptor messageDecryptor  =
+        { config with
+            MessageDecryptor = Some messageDecryptor }
+        |> this.With
+    
+    member this.KeyHashRange ([<ParamArray>] ranges) =
+        { config with
+            KeySharedPolicy =
+                let policy = KeySharedPolicy.KeySharedPolicySticky ranges
+                policy.Validate()
+                policy :> KeySharedPolicy |> Some }
+        |> this.With
+    
     member this.CreateAsync(): Task<IReader<'T>> =
         createReaderAsync(verify config, schema)
 

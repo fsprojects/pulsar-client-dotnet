@@ -1,13 +1,14 @@
 module Pulsar.Client.IntegrationTests.Chunks
 
+open Pulsar.Client.Common
+
+#nowarn "25"
 
 open System
-open System.Text
 open Expecto
 open Expecto.Flip
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
-open Pulsar.Client.Common
 open Pulsar.Client.IntegrationTests.Common
 open Serilog
 
@@ -27,6 +28,7 @@ let tests =
                     .ProducerName(name)
                     .EnableBatching(false)
                     .EnableChunking(true)
+                    .CompressionType(CompressionType.Snappy)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
@@ -96,13 +98,13 @@ let tests =
             payload1.[8_000_000] <- 1uy
             payload2.[0] <- 1uy
             payload2.[9_000_000] <- 1uy
-            let! [|msgId1; msgId2|] =
+            let! [| msgId1; msgId2 |] =
                 [| producer1.NewMessage(payload1)|> producer1.SendAsync
                    producer2.NewMessage(payload2)|> producer2.SendAsync |]
                 |> Task.WhenAll
                 |> Async.AwaitTask
                  
-            let! [|msg1;msg2|] =
+            let! [| msg1; msg2 |] =
                 [| task {
                        let! msg = consumer.ReceiveAsync()
                        do! consumer.AcknowledgeAsync(msg.MessageId)
@@ -118,9 +120,9 @@ let tests =
             
             let [ one; two ] = 
                 if msg1.Data.[0] = 0uy then
-                    [msg1;msg2]
+                    [ msg1; msg2 ]
                 else
-                    [msg2;msg1]
+                    [ msg2; msg1 ]
             Expect.equal "" msgId1 one.MessageId
             Expect.equal "" msgId2 two.MessageId
             Expect.equal "" one.Data.[1] 1uy

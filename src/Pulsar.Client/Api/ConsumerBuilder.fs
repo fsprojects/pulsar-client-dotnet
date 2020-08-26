@@ -43,7 +43,7 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
                             (c.SubscriptionType <> SubscriptionType.Exclusive && c.SubscriptionType <> SubscriptionType.Failover )))
                     )
                 |> Option.isSome
-            ) "Read compacted can only be used with exclusive of failover persistent subscriptions"
+            ) "Read compacted can only be used with exclusive or failover persistent subscriptions"
         |> invalidArgIf (fun c ->
                 (c.KeySharedPolicy.IsSome && c.SubscriptionType <> SubscriptionType.KeyShared)
             ) "KeySharedPolicy must be set with KeyShared subscription"

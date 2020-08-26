@@ -24,7 +24,9 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
             ReceiverQueueSize = readerConfig.ReceiverQueueSize
             ReadCompacted = readerConfig.ReadCompacted
             ResetIncludeHead = readerConfig.ResetIncludeHead
-            ConsumerName = readerConfig.ReaderName }
+            ConsumerName = readerConfig.ReaderName
+            KeySharedPolicy = readerConfig.KeySharedPolicy
+            MessageDecryptor = readerConfig.MessageDecryptor }
 
     let consumer =
         ConsumerImpl<'T>(consumerConfig, clientConfig, readerConfig.Topic, connectionPool, readerConfig.Topic.PartitionIndex,

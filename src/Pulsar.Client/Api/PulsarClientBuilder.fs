@@ -68,6 +68,19 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
                 StatsInterval = interval |> invalidArgIf (fun arg ->
                 arg <> TimeSpan.Zero && arg < TimeSpan.FromSeconds(float MIN_STATS_INTERVAL_SECONDS)) (sprintf "Stats interval should be greater than %i s" MIN_STATS_INTERVAL_SECONDS) }
 
+    member this.ListenerName name =
+        PulsarClientBuilder
+            { config with
+                ListenerName =
+                    name
+                    |> invalidArgIfBlankString "Param listenerName must not be blank."
+                    |> (fun name -> name.Trim()) }
+            
+    member this.MaxLookupRedirects maxLookupRedirects =
+        PulsarClientBuilder
+            { config with
+                MaxLookupRedirects = maxLookupRedirects }
+            
     member this.Build() =
         config
         |> verify

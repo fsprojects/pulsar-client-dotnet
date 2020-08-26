@@ -166,8 +166,10 @@ let newPong () : Payload =
     let command = BaseCommand(``type`` = CommandType.Pong, Pong = request)
     command |> serializeSimpleCommand
 
-let newLookup (topicName : CompleteTopicName) (requestId : RequestId) (authoritative : bool) =
-    let request = CommandLookupTopic(Topic = %topicName, Authoritative = authoritative, RequestId = uint64(%requestId))
+let newLookup (topicName : CompleteTopicName) (requestId : RequestId) (authoritative : bool) (listenerName: string) =
+    let request = CommandLookupTopic(Topic = %topicName, Authoritative = authoritative, RequestId = uint64(%requestId))    
+    if listenerName |> String.IsNullOrEmpty |> not then
+        request.AdvertisedListenerName <- listenerName
     let command = BaseCommand(``type`` = CommandType.Lookup, lookupTopic = request)
     command |> serializeSimpleCommand
 
@@ -230,9 +232,10 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
     match keySharedPolicy with
     | Some keySharedPolicy ->
         let meta = KeySharedMeta()
+        meta.allowOutOfOrderDelivery <- keySharedPolicy.AllowOutOfOrderDelivery
         match keySharedPolicy with
         | :? KeySharedPolicyAutoSplit ->
-            meta.keySharedMode <- KeySharedMode.AutoSplit            
+            meta.keySharedMode <- KeySharedMode.AutoSplit
         | :? KeySharedPolicySticky as policy ->
             meta.keySharedMode <- KeySharedMode.Sticky
             for range in policy.Ranges do

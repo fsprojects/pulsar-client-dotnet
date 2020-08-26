@@ -86,19 +86,17 @@ type internal UnAckedMessageTracker(prefix: string,
 
                     timePartitions.Enqueue(currentPartition)
                     let timedOutMessages = timePartitions.Dequeue()
+                    let messagesToRedeliver = HashSet<MessageId>()
                     if timedOutMessages.Count > 0 then
                         Log.Logger.LogWarning("{0} {1} messages have timed-out", prefix, timedOutMessages.Count)
-                        let possibleChunksMsgIds = ResizeArray()
                         for msgId in timedOutMessages do
                             messageIdPartitionMap.Remove(msgId) |> ignore
                             match msgId.ChunkMessageIds with
                             | Some msgIds ->
-                                possibleChunksMsgIds.AddRange msgIds
+                                msgIds |> Array.iter (messagesToRedeliver.Add >> ignore)
                             | None ->
-                                ()
-                        for possibleChunkMsgId in possibleChunksMsgIds do
-                            timedOutMessages.Add possibleChunkMsgId |> ignore
-                        redeliverUnacknowledgedMessages timedOutMessages
+                                messagesToRedeliver.Add(msgId) |> ignore
+                        redeliverUnacknowledgedMessages messagesToRedeliver
                     currentPartition <- RedeliverSet()
                     return! loop ()
 

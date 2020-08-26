@@ -384,7 +384,7 @@ type MessageBuilder<'T> =
                 Key = key
                 Properties = if isNull properties then EmptyProps else properties
                 DeliverAt = deliverAt
-                Payload = payload
+                Payload = if isNull payload then [||] else payload
                 SequenceId = sequenceId
             }
             

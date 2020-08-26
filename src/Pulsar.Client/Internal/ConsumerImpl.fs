@@ -446,6 +446,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         connectionHandler.Close()      
         interceptors.Close()
         statTimer.Stop()
+        chunkTimer.Stop()
         cleanup(this)
         while waiters.Count > 0 do
             let waitingChannel = waiters.Dequeue()
@@ -706,8 +707,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | ConsumerMessage.ConnectionFailed ex ->
 
                     Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
-                    if (DateTime.Now > subscribeTimeout && subscribeTsc.TrySetException(ex)) then
-                        Log.Logger.LogInformation("{0} creation failed", prefix)
+                    let nonRetriableError = ex |> PulsarClientException.isRetriableError |> not
+                    let timeout = DateTime.Now > subscribeTimeout
+                    if ((nonRetriableError || timeout) && subscribeTsc.TrySetException(ex)) then
+                        Log.Logger.LogInformation("{0} creation failed {1}", prefix,
+                                                  if nonRetriableError then "with unretriableError" else "after timeout")
                         connectionHandler.Failed()
                         stopConsumer()
                     else

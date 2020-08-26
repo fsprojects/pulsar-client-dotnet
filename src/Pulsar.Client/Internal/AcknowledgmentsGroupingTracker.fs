@@ -88,8 +88,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                         while pendingIndividualAcks.Count > 0 do
                                             let messageId = pendingIndividualAcks.Min
                                             pendingIndividualAcks.Remove(messageId) |> ignore
-                                            // if messageId is checked then all the chunked related to that msg also processed so, ack all of
-                                            // them
+                                            // if messageId is chunked then all the chunked related to that msg also processed so, ack all of them
                                             match messageId.ChunkMessageIds with
                                             | Some messageIds ->
                                                 for chunkedMessageId in messageIds do
@@ -208,12 +207,12 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                         return! loop ()
                     else
                         // Individual ack
-                        if pendingIndividualAcks.Add(msgId) then
+                        if pendingIndividualAcks.Add msgId then
                             if pendingIndividualAcks.Count >= MAX_ACK_GROUP_SIZE then
                                 do! flush ()
                                 Log.Logger.LogWarning("{0} messageId {1} MAX_ACK_GROUP_SIZE reached and flushed", prefix, msgId)
                         else
-                            Log.Logger.LogWarning("{0} messageId {1} has already been added", prefix, msgId)
+                            Log.Logger.LogWarning("{0} messageId {1} has already been added to the ack tracker", prefix, msgId)
                         channel.Reply()
                         return! loop ()
                         

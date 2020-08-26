@@ -20,9 +20,10 @@ type internal NegativeAcksTracker(prefix: string,
     let nackDelay = if negativeAckRedeliveryDelay > MIN_NACK_DELAY then negativeAckRedeliveryDelay else MIN_NACK_DELAY
     let timerIntervalms = nackDelay.TotalMilliseconds / 3.0
     let prefix = prefix + " NegativeTracker"
+    let state = SortedDictionary<MessageId, DateTime>()
 
     let mb = MailboxProcessor<NegativeAcksTrackerMessage>.Start(fun inbox ->
-        let rec loop (state: SortedDictionary<MessageId, DateTime>)  =
+        let rec loop ()  =
             async {
                 let! message = inbox.Receive()
                 match message with
@@ -36,30 +37,34 @@ type internal NegativeAcksTracker(prefix: string,
                     else
                         Log.Logger.LogWarning("{0} Duplicate message add {1}", prefix, msgId)
                         channel.Reply(false)
-                    return! loop state
+                    return! loop ()
 
                 | TickTime ->
 
                     if state.Count > 0 then
-                        let result = HashSet<MessageId>()
+                        let messagesToRedeliver = HashSet<MessageId>()
                         for KeyValue(messageId, expirationDate) in state do
                             if expirationDate < DateTime.Now then
-                                result.Add(messageId) |> ignore
-                        if result.Count > 0 then
-                            for itemToRemove in result do
-                                state.Remove(itemToRemove) |> ignore
-                            Log.Logger.LogDebug("{0} Redelivering {1} messages", prefix, result.Count)
-                            redeliverUnacknowledgedMessages result
+                                match messageId.ChunkMessageIds with
+                                | Some msgIds ->
+                                    msgIds |> Array.iter (messagesToRedeliver.Add >> ignore)
+                                | None ->
+                                    messagesToRedeliver.Add(messageId) |> ignore
+                        if messagesToRedeliver.Count > 0 then
+                            for msgId in messagesToRedeliver do
+                                state.Remove(msgId) |> ignore
+                            Log.Logger.LogDebug("{0} Redelivering {1} messages", prefix, messagesToRedeliver.Count)
+                            redeliverUnacknowledgedMessages messagesToRedeliver
                     else
                         ()
-                    return! loop state
+                    return! loop ()
 
                 | Stop ->
 
                     Log.Logger.LogDebug("{0} Stop", prefix)
                     state.Clear()
             }
-        loop (SortedDictionary<MessageId, DateTime>())
+        loop ()
     )
 
     let timer =

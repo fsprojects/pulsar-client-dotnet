@@ -19,6 +19,8 @@ type PulsarClientConfiguration =
         TlsTrustCertificate: X509Certificate2
         Authentication: Authentication
         TlsProtocols: SslProtocols
+        ListenerName: string
+        MaxLookupRedirects: int
     }
     static member Default =
         {
@@ -32,6 +34,8 @@ type PulsarClientConfiguration =
             TlsTrustCertificate = null
             Authentication = Authentication.AuthenticationDisabled
             TlsProtocols = SslProtocols.None
+            ListenerName = ""
+            MaxLookupRedirects = 20
         }
 
 type ConsumerConfiguration<'T> =
@@ -161,6 +165,8 @@ type ReaderConfiguration =
         ReaderName: string
         ResetIncludeHead: bool
         StartMessageFromRollbackDuration: TimeSpan
+        MessageDecryptor: IMessageDecryptor option
+        KeySharedPolicy: KeySharedPolicy option
     }
     static member Default =
         {
@@ -172,4 +178,6 @@ type ReaderConfiguration =
             ReaderName = ""
             ResetIncludeHead = false
             StartMessageFromRollbackDuration = TimeSpan.Zero
+            MessageDecryptor = None
+            KeySharedPolicy = None
         }

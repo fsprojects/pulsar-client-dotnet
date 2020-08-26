@@ -1,6 +1,7 @@
 ﻿namespace Pulsar.Client.Api
 
 open System
+open System.Runtime.InteropServices
 
 type Range (starts: int, ends: int) =
     do
@@ -10,8 +11,8 @@ type Range (starts: int, ends: int) =
     member this.End = ends
             
     member this.Intersect (range: Range) =
-        let starts = if range.Start > this.Start then range.Start else this.Start
-        let ends = if range.End < this.End then range.End else this.End
+        let starts = Math.Max(range.Start,this.Start)
+        let ends = Math.Min(range.End, this.End)
         if ends >= starts then
             Some <| Range(starts, ends)
         else
@@ -21,15 +22,18 @@ type Range (starts: int, ends: int) =
         sprintf "[%i, %i]" starts ends    
 
 [<AbstractClass>]
-type KeySharedPolicy internal () =
+type KeySharedPolicy internal (allowOutOfOrderDelivery) =
     abstract member Validate: unit -> unit    
     static member DEFAULT_HASH_RANGE_SIZE = 2 <<< 15
+    member this.AllowOutOfOrderDelivery = allowOutOfOrderDelivery
+    static member KeySharedPolicySticky(ranges: Range[],
+                                        [<Optional; DefaultParameterValue(false)>] allowOutOfOrderDelivery: bool) =
+        KeySharedPolicySticky(ranges, allowOutOfOrderDelivery)
+    static member KeySharedPolicyAutoSplit([<Optional; DefaultParameterValue(false)>] allowOutOfOrderDelivery: bool) =
+        KeySharedPolicyAutoSplit(allowOutOfOrderDelivery)
     
-    static member KeySharedPolicySticky(ranges: Range[]) = KeySharedPolicySticky(ranges)
-    static member KeySharedPolicyAutoSplit() = KeySharedPolicyAutoSplit()
-    
-and KeySharedPolicySticky internal (ranges: Range[]) =
-    inherit KeySharedPolicy()
+and KeySharedPolicySticky internal (ranges: Range[], allowOutOfOrderDelivery: bool) =
+    inherit KeySharedPolicy(allowOutOfOrderDelivery)
     override this.Validate() =
         if (isNull ranges) || (ranges.Length = 0) then
             raise <| ArgumentException("Ranges for KeyShared policy must not be empty.")
@@ -42,7 +46,7 @@ and KeySharedPolicySticky internal (ranges: Range[]) =
                                                " and " + range2.ToString())
     member this.Ranges = ranges
     
-and KeySharedPolicyAutoSplit internal () =
-    inherit KeySharedPolicy()
+and KeySharedPolicyAutoSplit internal (allowOutOfOrderDelivery: bool) =
+    inherit KeySharedPolicy(allowOutOfOrderDelivery)
     
     override this.Validate() = ()

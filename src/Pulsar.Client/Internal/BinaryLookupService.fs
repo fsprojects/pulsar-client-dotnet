@@ -33,13 +33,16 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
         }
 
     member this.GetBroker(topicName: CompleteTopicName) =
-        this.FindBroker(resolveEndPoint(), false, topicName)
+        this.FindBroker(resolveEndPoint(), false, topicName, 0)
 
-    member private this.FindBroker(endpoint: DnsEndPoint, autoritative: bool, topicName: CompleteTopicName) =
+    member private this.FindBroker(endpoint: DnsEndPoint, autoritative: bool, topicName: CompleteTopicName,
+                                   redirectCount: int) =
         task {
+            if config.MaxLookupRedirects > 0 && redirectCount > config.MaxLookupRedirects then
+                raise (LookupException <| "Too many redirects: " + string redirectCount)
             let! clientCnx = connectionPool.GetBrokerlessConnection endpoint
             let requestId = Generators.getNextRequestId()
-            let payload = Commands.newLookup topicName requestId autoritative
+            let payload = Commands.newLookup topicName requestId autoritative config.ListenerName
             let! response = clientCnx.SendAndWaitForReply requestId payload
             let lookupTopicResult = PulsarResponseType.GetLookupTopicResult response
             // (1) build response broker-address
@@ -53,7 +56,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
             // (2) redirect to given address if response is: redirect
             if lookupTopicResult.Redirect then
                 Log.Logger.LogDebug("Redirecting to {0} topicName {1}", resultEndpoint, topicName)
-                return!  this.FindBroker(resultEndpoint, lookupTopicResult.Authoritative, topicName)
+                return!  this.FindBroker(resultEndpoint, lookupTopicResult.Authoritative, topicName, redirectCount + 1)
             else
                 // (3) received correct broker to connect
                 return if lookupTopicResult.Proxy

@@ -53,6 +53,8 @@ module PulsarClientException =
         | NotSupportedException _
         | ChecksumException _
         | CryptoException _
+        | ProducerBusyException _
+        | ConsumerBusyException _
              -> false
         | _ -> true
 

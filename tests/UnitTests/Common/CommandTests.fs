@@ -194,7 +194,7 @@ module CommandsTests =
                 let authoritative = true
 
                 let totalSize, commandSize, command =
-                    serializeDeserializeSimpleCommand (newLookup topicName requestId authoritative )
+                    serializeDeserializeSimpleCommand (newLookup topicName requestId authoritative "" )
 
                 totalSize |> Expect.equal "" 25
                 commandSize |> Expect.equal "" 21
