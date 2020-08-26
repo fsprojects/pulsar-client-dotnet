@@ -341,7 +341,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             [<Optional; DefaultParameterValue(null:string)>]key:string,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>]properties: IReadOnlyDictionary<string, string>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>) =  
+            [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>) =
             
             keyValueProcessor
             |> Option.map(fun kvp -> kvp.EncodeKeyValue value)
@@ -362,7 +362,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         member this.GetStatsAsync() = mb.PostAndAsyncReply(GetStats) |> Async.StartAsTask
 
         
-    interface IAsyncDisposable with        
+    interface IAsyncDisposable with
         member this.DisposeAsync() =
             task {
                 match this.ConnectionState with

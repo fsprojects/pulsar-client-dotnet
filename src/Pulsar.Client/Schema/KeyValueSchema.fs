@@ -143,7 +143,7 @@ type internal KeyValueProcessor<'K,'V>(schema: KeyValueSchema<'K,'V>) =
             let keyBytes = schema.KeySchema.Encode(k)
             let content = schema.ValueSchema.Encode(v)
             let strKey = if isNull keyBytes then null else keyBytes |> Convert.ToBase64String
-            struct(strKey, content)            
+            struct(strKey, content)
         member this.DecodeKeyValue(strKey: string, content) =
             let keyBytes = strKey |> Convert.FromBase64String
             schema.Decode(keyBytes, content) |> box                

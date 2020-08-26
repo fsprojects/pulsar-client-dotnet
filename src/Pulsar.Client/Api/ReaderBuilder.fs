@@ -36,14 +36,14 @@ type ReaderBuilder<'T> private (createReaderAsync, config: ReaderConfiguration, 
                 |> fun t -> TopicName(t.Trim()) }
         |> this.With
 
-    member this.StartMessageId messageId =        
+    member this.StartMessageId messageId =
         { config with
             StartMessageId = messageId
                 |> invalidArgIfDefault "MessageId can't be null"
                 |> Some }
         |> this.With
 
-    member this.StartMessageIdInclusive (startMessageIdInclusive: bool) =        
+    member this.StartMessageIdInclusive (startMessageIdInclusive: bool) =
         { config with
             ResetIncludeHead = startMessageIdInclusive }
         |> this.With
@@ -53,7 +53,7 @@ type ReaderBuilder<'T> private (createReaderAsync, config: ReaderConfiguration, 
             ReadCompacted = readCompacted }
         |> this.With
 
-    member this.SubscriptionRolePrefix subscriptionRolePrefix =    
+    member this.SubscriptionRolePrefix subscriptionRolePrefix =
         { config with
             SubscriptionRolePrefix = subscriptionRolePrefix }
         |> this.With

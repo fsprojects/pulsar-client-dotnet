@@ -86,8 +86,8 @@ type internal UnAckedMessageTracker(prefix: string,
 
                     timePartitions.Enqueue(currentPartition)
                     let timedOutMessages = timePartitions.Dequeue()
-                    let messagesToRedeliver = HashSet<MessageId>()
                     if timedOutMessages.Count > 0 then
+                        let messagesToRedeliver = HashSet<MessageId>()
                         Log.Logger.LogWarning("{0} {1} messages have timed-out", prefix, timedOutMessages.Count)
                         for msgId in timedOutMessages do
                             messageIdPartitionMap.Remove(msgId) |> ignore
