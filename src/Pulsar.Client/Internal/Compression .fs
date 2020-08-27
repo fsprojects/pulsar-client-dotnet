@@ -64,14 +64,15 @@ module internal CompressionCodec =
                 target
 
     type ZstdCompression() =
-        let zstdCompressor = new Compressor()
-        let zstdDecompressor = new Decompressor()
         interface ICompressionCodec with
             member this.Encode bytes =
+                use zstdCompressor = new Compressor()
                 zstdCompressor.Wrap bytes
             member this.Decode (uncompressedSize, bytes) =
+                use zstdDecompressor = new Decompressor()
                 zstdDecompressor.Unwrap(bytes, uncompressedSize)
             member this.Decode (uncompressedSize, bytes, payloadLength) =
+                use zstdDecompressor = new Decompressor()
                 zstdDecompressor.Unwrap(new ArraySegment<byte>(bytes, 0, payloadLength), uncompressedSize)
     
     let zlibCompression = lazy(ZLibCompression() :> ICompressionCodec)

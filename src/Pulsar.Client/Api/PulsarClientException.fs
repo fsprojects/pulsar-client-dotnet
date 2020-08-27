@@ -28,6 +28,8 @@ exception ProducerBlockedQuotaExceededException of string
 exception ChecksumException of string
 exception CryptoException of string
 exception TopicDoesNotExistException of string
+exception ConsumerAssignException of string
+exception NotAllowedException of string
 
 // custom exception
 exception ConnectionFailedOnSend of string

@@ -306,6 +306,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | ServerError.TopicTerminatedError -> TopicTerminatedException errorMsg
         | ServerError.IncompatibleSchema -> IncompatibleSchemaException errorMsg
         | ServerError.TopicNotFound -> TopicDoesNotExistException errorMsg
+        | ServerError.ConsumerAssignError -> ConsumerAssignException errorMsg
+        | ServerError.NotAllowedError -> NotAllowedException errorMsg
         | _ -> Exception errorMsg
 
     let handleError requestId error msg =

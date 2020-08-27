@@ -3088,6 +3088,7 @@ namespace pulsar.proto
         ConsumerAssignError = 19,
         TransactionCoordinatorNotFound = 20,
         InvalidTxnStatus = 21,
+        NotAllowedError = 22,
     }
 
     [global::ProtoBuf.ProtoContract()]
