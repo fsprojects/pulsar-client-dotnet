@@ -6,13 +6,13 @@ version: '2.1'
 services:
   standalone:
     hostname: standalone
-    image: apachepulsar/pulsar-test-latest-version:latest
+    image: apachepulsar/pulsar:latest
     ports:
       - "6650:6650"
-    command: bin/run-standalone.sh
+    command: bin/pulsar standalone
 
   init:
-    image: apachepulsar/pulsar-test-latest-version:latest
+    image: apachepulsar/pulsar:latest
     volumes:
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone.sh:/pulsar/bin/init-standalone.sh
