@@ -6,13 +6,13 @@ version: '2.1'
 services:
   standalone:
     hostname: standalone
-    image: apachepulsar/pulsar:2.6.0
+    image: apachepulsar/pulsar:latest
     ports:
       - "6650:6650"
     command: bin/pulsar standalone
 
   init:
-    image: apachepulsar/pulsar:2.6.0
+    image: apachepulsar/pulsar:latest
     volumes:
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone.sh:/pulsar/bin/init-standalone.sh
@@ -22,12 +22,13 @@ services:
 
   standaloneTls:
     hostname: standaloneTls
-    image: apachepulsar/pulsar:2.6.0
+    image: apachepulsar/pulsar-test-latest-version:latest
     ports:
       - "6651:6651"
-    volumes:
-      - ../../ssl:/pulsar/ssl
-    command: bin/pulsar standalone -nfw
+    command: >
+      bash -c "bin/set_python_version.sh &&
+               bin/apply-config-from-env.py conf/standalone.conf &&
+               bin/pulsar standalone -nfw"
     environment:
       PULSAR_PREFIX_brokerServicePortTls: 6651
       PULSAR_PREFIX_webServicePortTls: 8443
@@ -37,19 +38,18 @@ services:
       PULSAR_PREFIX_maxMessageSize: 10500000
       PULSAR_PREFIX_nettyMaxFrameSizeBytes: 10500000
       superUserRoles: admin
-      brokerClientTlsEnabled: "true"
       brokerClientAuthenticationPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
       brokerClientAuthenticationParameters: tlsCertFile:/pulsar/ssl/admin.cert.pem,tlsKeyFile:/pulsar/ssl/admin.key-pk8.pem
-      brokerClientTrustCertsFilePath: /pulsar/ssl/certs/ca.cert.pem
       authenticationEnabled: "true"
       authenticationProviders: org.apache.pulsar.broker.authentication.AuthenticationProviderTls
       authorizationEnabled: "true"
       authorizationProvider: org.apache.pulsar.broker.authorization.PulsarAuthorizationProvider
+      clientAuthenticationPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
+      clientAuthenticationParameters: tlsCertFile:/pulsar/ssl/admin.cert.pem,tlsKeyFile:/pulsar/ssl/admin.key-pk8.pem
 
   initTls:
-    image: apachepulsar/pulsar:2.6.0
+    image: apachepulsar/pulsar-test-latest-version:latest
     volumes:
-      - ../../ssl:/pulsar/ssl
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone-tls.sh:/pulsar/bin/init-standalone-tls.sh
     command: bin/wait-for-it.sh standaloneTls:8443 -t 120 -- bin/init-standalone-tls.sh
