@@ -14,4 +14,5 @@ bin/pulsar-admin topics create-partitioned-topic persistent://public/default/par
 bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned3 --partitions 3
 bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned4 --partitions 2
 bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned5 --partitions 2
+bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned6 --partitions 2
 bin/pulsar-admin topics create-partitioned-topic persistent://public/deduplication/partitioned --partitions 3

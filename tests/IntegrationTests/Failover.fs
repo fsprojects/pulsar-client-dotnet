@@ -75,7 +75,7 @@ let tests =
 
             Log.Debug("Started Failover consumer with PriorityLevel works fine")
             let client = getClient()
-            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName = "public/default/partitioned6"
             let producerName = "priorityProducer"
             let consumerName1 = "priorityConsumer1" //master
             let consumerName2 = "priorityConsumer2" //slave
