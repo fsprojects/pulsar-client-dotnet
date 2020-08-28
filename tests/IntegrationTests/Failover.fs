@@ -121,17 +121,19 @@ let tests =
 
             do! Task.Delay(1000) |> Async.AwaitTask
             
+            let messages1 = generateMessages 10 (producerName + "1")
+            let messages2 = generateMessages 10 (producerName + "2")
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer numberOfMessages producerName
-                        do! produceMessages producer numberOfMessages producerName
+                        do! producePredefinedMessages producer messages1
+                        do! producePredefinedMessages producer messages2
                     }:> Task)
                 
             let consumer1Task =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages consumer1 numberOfMessages consumerName1
+                        do! consumeAndVerifyMessages consumer1 consumerName1 messages1
                         do! Task.Delay(100)
                         do! consumer1.DisposeAsync()
                     }:> Task)
@@ -140,14 +142,14 @@ let tests =
             let consumer2Task =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages consumer2 numberOfMessages consumerName2
+                        do! consumeAndVerifyMessages consumer2 consumerName2 messages2
                         failwith "Wrong consumer to failover"
                     }:> Task)
                 
             let consumer3Task =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages consumer3 numberOfMessages consumerName3
+                        do! consumeAndVerifyMessages consumer3 consumerName3 messages2
                     }:> Task)
 
             let! failoverTask = Task.WhenAny(consumer2Task, consumer3Task) |> Async.AwaitTask
