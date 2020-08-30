@@ -39,8 +39,11 @@ let tests =
                     .SubscribeAsync() |> Async.AwaitTask
 
             let payload = Array.zeroCreate 10_000_000
+            Random().NextBytes(payload)
+            payload.[0] <- 0uy
             payload.[1] <- 1uy
             payload.[8_000_000] <- 1uy
+            payload.[9_000_000] <- 0uy
             let! msgId =
                 producer.NewMessage(payload)
                 |> producer.SendAsync
@@ -51,10 +54,10 @@ let tests =
                 |> Async.AwaitTask
             
             Expect.equal "" msgId msg.MessageId
-            Expect.equal "" msg.Data.[1] 1uy
-            Expect.equal "" msg.Data.[8_000_000] 1uy
-            Expect.equal "" msg.Data.[0] 0uy
-            Expect.equal "" msg.Data.[9_000_000] 0uy
+            Expect.equal "" 1uy msg.Data.[1] 
+            Expect.equal "" 1uy msg.Data.[8_000_000] 
+            Expect.equal "" 0uy msg.Data.[0] 
+            Expect.equal "" 0uy msg.Data.[9_000_000] 
         
             do! consumer.UnsubscribeAsync() |> Async.AwaitTask
             do! Async.Sleep 100
@@ -62,7 +65,7 @@ let tests =
         }
         
         testAsync "Two parallel chunks-message delivered successfully with short queue" {
-            Log.Debug("Ended Two parallel chunks-message delivered successfully with short queue")
+            Log.Debug("Started Two parallel chunks-message delivered successfully with short queue")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let name = "parallelChunks"
@@ -125,14 +128,14 @@ let tests =
                     [ msg2; msg1 ]
             Expect.equal "" msgId1 one.MessageId
             Expect.equal "" msgId2 two.MessageId
-            Expect.equal "" one.Data.[1] 1uy
-            Expect.equal "" one.Data.[8_000_000] 1uy
-            Expect.equal "" one.Data.[0] 0uy
-            Expect.equal "" one.Data.[9_000_000] 0uy
-            Expect.equal "" two.Data.[1] 0uy
-            Expect.equal "" two.Data.[8_000_000] 0uy
-            Expect.equal "" two.Data.[0] 1uy
-            Expect.equal "" two.Data.[9_000_000] 1uy
+            Expect.equal "" 1uy one.Data.[1]
+            Expect.equal "" 1uy one.Data.[8_000_000]
+            Expect.equal "" 0uy one.Data.[0]
+            Expect.equal "" 0uy one.Data.[9_000_000]
+            Expect.equal "" 0uy two.Data.[1]
+            Expect.equal "" 0uy two.Data.[8_000_000]
+            Expect.equal "" 1uy two.Data.[0]
+            Expect.equal "" 1uy two.Data.[9_000_000]
          
             do! consumer.UnsubscribeAsync() |> Async.AwaitTask
             do! Async.Sleep 100

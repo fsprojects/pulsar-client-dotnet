@@ -6,13 +6,19 @@ version: '2.1'
 services:
   standalone:
     hostname: standalone
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:2.6.0
     ports:
       - "6650:6650"
-    command: bin/pulsar standalone
+    command: >
+      bash -c "bin/set_python_version.sh &&
+               bin/apply-config-from-env.py conf/standalone.conf &&
+               bin/pulsar standalone"
+    environment:
+      PULSAR_PREFIX_acknowledgmentAtBatchIndexLevelEnabled: "true"
+      PULSAR_PREFIX_nettyMaxFrameSizeBytes: 5253120
 
   init:
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:2.6.0
     volumes:
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone.sh:/pulsar/bin/init-standalone.sh

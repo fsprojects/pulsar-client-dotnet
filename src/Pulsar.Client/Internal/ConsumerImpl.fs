@@ -443,7 +443,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         acksGroupingTracker.Close()
         clearDeadLetters()
         negativeAcksTracker.Close()
-        connectionHandler.Close()      
+        connectionHandler.Close()
         interceptors.Close()
         statTimer.Stop()
         chunkTimer.Stop()
@@ -476,14 +476,17 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 Log.Logger.LogWarning(ex, "{0} Decryption exception {1}", prefix, rawMessage.MessageId)
                 Error ex
     
-    let decompressMessage (rawMessage: RawMessage) =
-        try
-            let compressionCodec = rawMessage.Metadata.CompressionType |> CompressionCodec.get
-            let uncompressedPayload = compressionCodec.Decode(rawMessage.Metadata.UncompressedMessageSize, rawMessage.Payload)
-            { rawMessage with Payload = uncompressedPayload } |> Ok
-        with ex ->
-            Log.Logger.LogError(ex, "{0} Decompression exception {1}", prefix, rawMessage.MessageId)
-            Error ex
+    let decompressMessage (rawMessage: RawMessage) isChunked =
+        if isChunked then
+            Ok rawMessage
+        else
+            try
+                let compressionCodec = rawMessage.Metadata.CompressionType |> CompressionCodec.get
+                let uncompressedPayload = compressionCodec.Decode(rawMessage.Metadata.UncompressedMessageSize, rawMessage.Payload)
+                Ok { rawMessage with Payload = uncompressedPayload }
+            with ex ->
+                Log.Logger.LogError(ex, "{0} Decompression exception {1}", prefix, rawMessage.MessageId)
+                Error ex
         
     let discardCorruptedMessage (msgId: MessageId) (clientCnx: ClientCnx) err =
         async {
@@ -732,10 +735,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             match decryptMessage rawMessage with
                             | Ok decryptedMessage ->
                                 if decryptedMessage.Payload.Length <= clientCnx.MaxMessageSize then
-                                    match decompressMessage decryptedMessage with
-                                    | Ok decompressMessage ->
+                                    match decompressMessage decryptedMessage isChunked with
+                                    | Ok decompressedMessage ->
                                         do! tryHandleMessagePayload
-                                                decompressMessage msgId hasWaitingChannel hasWaitingBatchChannel false
+                                                decompressedMessage msgId hasWaitingChannel hasWaitingBatchChannel false
                                                 isChunked schemaDecodeFunction clientCnx
                                     | Error _ ->
                                         do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecompressionError
