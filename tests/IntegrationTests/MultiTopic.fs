@@ -160,11 +160,14 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        while true do
-                            do! Task.Delay(5000)    
-                            let time = DateTime.Now.ToShortTimeString()
-                            let! msgId = producer.SendAsync(time |> Encoding.UTF8.GetBytes)
-                            Log.Logger.Information("{0} sent: {1}", msgId, time)
+                            while true do
+                                do! Task.Delay(5000)    
+                                let time = DateTime.Now.ToShortTimeString()
+                                try
+                                    let! msgId = producer.SendAsync(time |> Encoding.UTF8.GetBytes)
+                                    Log.Logger.Information("{0} sent: {1}", msgId, time)
+                                with Flatten ex ->
+                                    Log.Logger.Error(ex, "{0} failed: {1}", "Sending", time)
                     }:> Task)
 
             let consumerTask =

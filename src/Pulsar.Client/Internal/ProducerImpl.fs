@@ -197,13 +197,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             |> this.Mb.Post
         pendingMessages.Dequeue()
     
-    let resendMessages () =
+    let resendMessages (clientCnx: ClientCnx) =
         if pendingMessages.Count > 0 then
             Log.Logger.LogInformation("{0} resending {1} pending messages", prefix, pendingMessages.Count)
-            while pendingMessages.Count > 0 do
-                let pendingMessage = pendingMessages.Dequeue()
-                sendMessage pendingMessage
+            for pendingMessage in pendingMessages do
+                clientCnx.SendAndForget pendingMessage.Payload
         else
+            Log.Logger.LogDebug("{0} No pending messages to resend", prefix)
             producerCreatedTsc.TrySetResult() |> ignore
             
     let verifyIfLocalBufferIsCorrupted (msg: PendingMessage<'T>) =
@@ -468,7 +468,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             if producerConfig.BatchingEnabled then
                                 startSendBatchTimer()
 
-                            resendMessages()
+                            resendMessages clientCnx
                         with Flatten ex ->
                             clientCnx.RemoveProducer producerId
                             Log.Logger.LogError(ex, "{0} Failed to create", prefix)
@@ -623,7 +623,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 failPendingMessage pendingMessage (ChecksumException "Checksum failed on corrupt message")
                             else
                                 Log.Logger.LogDebug("{0} Message is not corrupted, retry send-message with sequenceId {1}", prefix, sequenceId)
-                                resendMessages()
+                                match connectionHandler.ConnectionState with
+                                | Ready clientCnx -> resendMessages clientCnx
+                                | _ -> Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
+                                
                         else
                             Log.Logger.LogDebug("{0} Corrupt message is already timed out {1}", prefix, sequenceId)
                     else
