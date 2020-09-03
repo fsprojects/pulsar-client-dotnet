@@ -26,7 +26,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         :?> ProtocolVersion[]
         |> Array.last
 
-    let connections = ConcurrentDictionary<LogicalAddress, Lazy<Task<ClientCnx>>>()
+    let connections = ConcurrentDictionary<bool*LogicalAddress, Lazy<Task<ClientCnx>>>()
 
     // from https://github.com/mgravell/Pipelines.Sockets.Unofficial/blob/master/src/Pipelines.Sockets.Unofficial/SocketConnection.Connect.cs
     let getSocket (endpoint: DnsEndPoint) =
@@ -165,7 +165,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
 
             let initialConnectionTsc = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
             let unregisterClientCnx (broker: Broker) =
-                connections.TryRemove(broker.LogicalAddress) |> ignore
+                connections.TryRemove((brokerless, broker.LogicalAddress)) |> ignore
             let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, brokerless, initialConnectionTsc, unregisterClientCnx)
             let proxyToBroker = if physicalAddress = logicalAddress then None else Some logicalAddress
             let authenticationDataProvider = config.Authentication.GetAuthData(physicalAddress.Host);
@@ -181,11 +181,11 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         }
 
     member this.GetConnection (broker: Broker, maxMessageSize: int, brokerless: bool) =
-        let t = connections.GetOrAdd(broker.LogicalAddress, fun(address) ->
+        let t = connections.GetOrAdd((brokerless, broker.LogicalAddress), fun(_) ->
                 lazy connect(broker, maxMessageSize, brokerless)).Value
         if t.IsFaulted then
             Log.Logger.LogInformation("Removing faulted task to {0}", broker)
-            connections.TryRemove(broker.LogicalAddress) |> ignore
+            connections.TryRemove((brokerless, broker.LogicalAddress)) |> ignore
         t
             
     member this.GetBrokerlessConnection (address: DnsEndPoint) =
