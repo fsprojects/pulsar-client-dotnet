@@ -153,13 +153,11 @@
       <HintPath>packages\protobuf-net.Core.3.0.29\lib\net461\protobuf-net.Core.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="Pulsar.Client, Version=1.6.0.0, Culture=neutral, PublicKeyToken=null">
-      <HintPath>packages\Pulsar.Client.1.6.0\lib\netstandard2.0\Pulsar.Client.dll</HintPath>
-      <Private>True</Private>
+    <Reference Include="Pulsar.Client, Version=1.6.2.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>packages\Pulsar.Client.1.6.2\lib\netstandard2.0\Pulsar.Client.dll</HintPath>
     </Reference>
-    <Reference Include="Pulsar.Client.Proto, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
-      <HintPath>packages\Pulsar.Client.1.6.0\lib\netstandard2.0\Pulsar.Client.Proto.dll</HintPath>
-      <Private>True</Private>
+    <Reference Include="Pulsar.Client.Proto, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>packages\Pulsar.Client.1.6.2\lib\netstandard2.0\Pulsar.Client.Proto.dll</HintPath>
     </Reference>
     <Reference Include="Snappy.Standard, Version=0.2.0.0, Culture=neutral, PublicKeyToken=null">
       <HintPath>..\..\packages\Snappy.Standard.0.2.0\lib\netstandard1.6\Snappy.Standard.dll</HintPath>
@@ -323,7 +321,6 @@
     <Compile Include="TlsAuthentication.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="app.config" />
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
