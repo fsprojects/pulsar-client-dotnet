@@ -115,6 +115,7 @@ type MessageIdType =
 
 type AckSet = int64[]
 
+[<CustomEquality; CustomComparison>]
 type MessageId =
     {
         LedgerId: LedgerId
@@ -182,7 +183,51 @@ type MessageId =
                 sprintf "%d:%d:%d" this.LedgerId this.EntryId this.Partition
             | Cumulative (i, _) ->
                 sprintf "%d:%d:%d:%d" this.LedgerId this.EntryId this.Partition i
-
+        override this.Equals(other) =
+            match other with
+            | :? MessageId as m ->
+                m.LedgerId = this.LedgerId && m.EntryId = this.EntryId && m.Partition = this.Partition &&
+                    m.Type = this.Type
+            | _ -> false
+            
+        override this.GetHashCode() =
+            match this.Type with
+            | Individual ->
+                (31 * ((int this.LedgerId) + 31 * (int this.EntryId)) + this.Partition)
+            | Cumulative (batchIndex, _) ->
+                (31 * ((int this.LedgerId) + 31 * (int this.EntryId)) + (31 * this.Partition) + %batchIndex)
+                
+        interface IComparable<MessageId> with
+            member this.CompareTo(other) =
+                if this.LedgerId > other.LedgerId then
+                    1
+                elif this.LedgerId = other.LedgerId then
+                    if this.EntryId > other.EntryId then
+                        1
+                    elif this.EntryId = other.EntryId then
+                        if this.Type > other.Type then
+                            1
+                        elif this.Type = other.Type then
+                            if this.Partition > other.Partition then
+                                1
+                            elif this.Partition = other.Partition then
+                                0
+                            else
+                                -1
+                        else
+                            -1
+                    else
+                        -1
+                else
+                    -1
+                    
+        interface IComparable with
+            member this.CompareTo(other) =
+                match other with
+                | :? MessageId as m ->
+                    (this :> IComparable<MessageId>).CompareTo(m)
+                | _ ->
+                    failwith <| "Can't compare MessageId with another type: " + other.GetType().FullName
 
 type internal SendReceipt =
     {

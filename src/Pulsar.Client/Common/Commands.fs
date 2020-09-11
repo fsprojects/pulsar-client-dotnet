@@ -176,8 +176,10 @@ let newLookup (topicName : CompleteTopicName) (requestId : RequestId) (authorita
 let newProducer (topicName : CompleteTopicName) (producerName: string) (producerId : ProducerId) (requestId : RequestId)
                 (schemaInfo: SchemaInfo) (epoch: uint64) =
     let schema = getProtoSchema schemaInfo
-    let request = CommandProducer(Topic = %topicName, ProducerId = %producerId, RequestId = %requestId, ProducerName = producerName,
+    let request = CommandProducer(Topic = %topicName, ProducerId = %producerId, RequestId = %requestId,
                                   Epoch = epoch)
+    if producerName |> String.IsNullOrEmpty |> not then
+        request.ProducerName <- producerName
     if schema.``type`` <> Schema.Type.None then
         request.Schema <- schema
     let command = BaseCommand(``type`` = CommandType.Producer, Producer = request)

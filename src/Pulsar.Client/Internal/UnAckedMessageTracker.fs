@@ -64,7 +64,7 @@ type internal UnAckedMessageTracker(prefix: string,
                         messageIdPartitionMap.Remove(msgId) |> ignore
                         channel.Reply(true)
                     else
-                        Log.Logger.LogWarning("{0} Unexisting message remove {1}", prefix, msgId)
+                        Log.Logger.LogDebug("{0} Unexisting message remove {1}", prefix, msgId)
                         channel.Reply(false)
                     return! loop ()
 

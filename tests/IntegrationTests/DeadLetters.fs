@@ -23,7 +23,7 @@ let tests =
         {|
             TopicName = sprintf "public/default/topic-%s" newGuid
             DeadLettersPolicy = DeadLetterPolicy(0, sprintf "public/default/topic-%s-DLQ" newGuid)
-            SubscriptionName = "dlqSubscription"
+            SubscriptionName = "test-subscription"
             NumberOfMessages = 10
         |}
 
@@ -32,7 +32,7 @@ let tests =
         {|
             TopicName = topic
             DeadLettersPolicy = DeadLetterPolicy(0, sprintf "%s-DLQ" topic)
-            SubscriptionName = "dlqPartitionedSubscription"
+            SubscriptionName = "test-subscription"
             NumberOfMessages = 10
         |}
 
@@ -112,7 +112,7 @@ let tests =
 
             description |> logTestEnd
         }
-
+        
         testAsync "Partitioned topic failed messages stored in a configured dead letter topic" {
 
             let description = "Failed messages in a partitioned topic are stored in a configured dead letter topic"
@@ -138,7 +138,8 @@ let tests =
                     .Topic(config.TopicName)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
-                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(100.0))
+                    .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .DeadLetterPolicy(config.DeadLettersPolicy)
                     .SubscribeAsync()
                     |> Async.AwaitTask
@@ -148,14 +149,17 @@ let tests =
                     .ConsumerName(dlqConsumerName)
                     .Topic(config.DeadLettersPolicy.DeadLetterTopic)
                     .SubscriptionName(config.SubscriptionName)
+                    .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .SubscriptionType(SubscriptionType.Shared)
                     .SubscribeAsync()
                     |> Async.AwaitTask
 
+            let messages = generateMessages config.NumberOfMessages producerName
+            
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer config.NumberOfMessages producerName
+                        do! producePredefinedMessages producer messages
                     }:> Task)
 
             let consumerTask =
@@ -167,7 +171,7 @@ let tests =
             let dlqConsumerTask =
                 Task.Run(fun () ->
                     task {
-                        do! consumeMessages dlqConsumer config.NumberOfMessages dlqConsumerName
+                        do! consumeAndVerifyMessages dlqConsumer dlqConsumerName messages
                     }:> Task)
 
             let tasks =
@@ -178,6 +182,7 @@ let tests =
                 |]
 
             do! Task.WhenAll(tasks) |> Async.AwaitTask
+            do! Async.Sleep(110) // wait for acks
 
             description |> logTestEnd
         }
