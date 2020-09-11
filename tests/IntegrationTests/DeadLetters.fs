@@ -27,6 +27,15 @@ let tests =
             NumberOfMessages = 10
         |}
 
+    let getTestConfigForPartitionedTopic() =
+        let topic = "public/default/partitioned-dl-test"
+        {|
+            TopicName = topic
+            DeadLettersPolicy = DeadLetterPolicy(0, sprintf "%s-DLQ" topic)
+            SubscriptionName = "dlqPartitionedSubscription"
+            NumberOfMessages = 10
+        |}
+
     let receiveAndAckNegative (consumer: IConsumer<'T>) number =
         task {
             for _ in 1..number do
@@ -42,6 +51,75 @@ let tests =
             description |> logTestStart
 
             let config = getTestConfig()
+            let producerName = "configuredProducer"
+            let consumerName = "configuredConsumer"
+            let dlqConsumerName = "configuredDLQConsumer"
+
+            let! producer =
+                createProducer()
+                    .ProducerName(producerName)
+                    .Topic(config.TopicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+                    |> Async.AwaitTask
+
+            let! consumer =
+                createConsumer()
+                    .ConsumerName(consumerName)
+                    .Topic(config.TopicName)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
+                    .DeadLetterPolicy(config.DeadLettersPolicy)
+                    .SubscribeAsync()
+                    |> Async.AwaitTask
+
+            let! dlqConsumer =
+                createConsumer()
+                    .ConsumerName(dlqConsumerName)
+                    .Topic(config.DeadLettersPolicy.DeadLetterTopic)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscribeAsync()
+                    |> Async.AwaitTask
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! produceMessages producer config.NumberOfMessages producerName
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! receiveAndAckNegative consumer config.NumberOfMessages
+                    }:> Task)
+
+            let dlqConsumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! consumeMessages dlqConsumer config.NumberOfMessages dlqConsumerName
+                    }:> Task)
+
+            let tasks =
+                [|
+                    producerTask
+                    consumerTask
+                    dlqConsumerTask
+                |]
+
+            do! Task.WhenAll(tasks) |> Async.AwaitTask
+
+            description |> logTestEnd
+        }
+
+        testAsync "Partitioned topic failed messages stored in a configured dead letter topic" {
+
+            let description = "Failed messages in a partitioned topic are stored in a configured dead letter topic"
+
+            description |> logTestStart
+
+            let config = getTestConfigForPartitionedTopic()
             let producerName = "configuredProducer"
             let consumerName = "configuredConsumer"
             let dlqConsumerName = "configuredDLQConsumer"
