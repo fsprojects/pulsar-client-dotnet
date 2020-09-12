@@ -85,3 +85,6 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
         config
         |> verify
         |> PulsarClient
+        
+    member this.Configuration =
+        config

@@ -151,5 +151,5 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
     member this.CreateAsync(): Task<IProducer<'T>> =
         сreateProducerAsync(verify config, schema, producerInterceptors)
 
-    override this.ToString() =
-        config.ToString()
+    member this.Configuration =
+        config

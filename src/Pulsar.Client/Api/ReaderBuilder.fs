@@ -89,3 +89,6 @@ type ReaderBuilder<'T> private (createReaderAsync, config: ReaderConfiguration, 
     member this.CreateAsync(): Task<IReader<'T>> =
         createReaderAsync(verify config, schema)
 
+    member this.Configuration =
+        config
+

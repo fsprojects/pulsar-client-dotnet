@@ -260,3 +260,6 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
     
     member this.SubscribeAsync(): Task<IConsumer<'T>> =
         createConsumerAsync(verify config, schema, consumerInterceptors)
+        
+    member this.Configuration =
+        config
