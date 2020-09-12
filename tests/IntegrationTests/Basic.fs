@@ -18,7 +18,7 @@ open Pulsar.Client.IntegrationTests.Common
 [<Tests>]
 let tests =
 
-    testList "basic" [
+    testList "Basic" [
         testAsync "Send and receive 100 messages concurrently works fine in default configuration" {
 
             Log.Debug("Started Send and receive 100 messages concurrently works fine in default configuration")

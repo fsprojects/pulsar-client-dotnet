@@ -10,7 +10,7 @@ open Pulsar.Client.IntegrationTests.Common
 [<Tests>]
 let tests =
 
-    testList "flow" [
+    testList "Flow" [
 
         testAsync "Send and receive 100 messages concurrently works fine with small receiver queue size" {
 

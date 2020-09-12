@@ -73,7 +73,7 @@ let tests =
     let sendNonBatchedMessages() = sendMessages false
     let sendBatchedMessages() = sendMessages true
 
-    testList "compression" [
+    testList "Compression" [
         testAsync "Send and receive single compressed message using all implemented compression codecs" {
             do! sendNonBatchedMessages()
         }

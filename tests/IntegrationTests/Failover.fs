@@ -12,7 +12,7 @@ open Serilog
 
 [<Tests>]
 let tests =
-    testList "Failover consumer test list" [ 
+    testList "Failover" [ 
 
         testAsync "Failover consumer works fine" {
 

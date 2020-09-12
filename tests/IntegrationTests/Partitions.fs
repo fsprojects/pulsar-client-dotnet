@@ -27,7 +27,7 @@ type SimpleRecord =
 [<Tests>]
 let tests =
 
-    testList "partitions" [
+    testList "Partitions" [
 
         testAsync "Single producer and single consumer with 3 partitions" {
 
@@ -51,7 +51,7 @@ let tests =
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .SubscribeAsync() |> Async.AwaitTask
 
-            let messages = generateMessages 100 producerName
+            let messages = generateMessages 10 producerName
 
             let producerTask =
                 Task.Run(fun () ->
@@ -115,8 +115,8 @@ let tests =
                     .ConsumerName(consumerName2)
                     .SubscribeAsync() |> Async.AwaitTask
 
-            let messages1 = generateMessages 50 producerName1
-            let messages2 = generateMessages 50 producerName2
+            let messages1 = generateMessages 5 producerName1
+            let messages2 = generateMessages 5 producerName2
             let allMessages =  [| yield! messages1; yield! messages2 |]
 
             let producerTask1 =
@@ -146,7 +146,7 @@ let tests =
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        for _ in [1..100] do
+                        for _ in [1..10] do
                             let! message = resultStream.Next()
                             let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("Some consumer received {1}", received)

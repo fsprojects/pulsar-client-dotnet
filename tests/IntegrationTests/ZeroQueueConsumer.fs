@@ -10,7 +10,7 @@ open Serilog
 
 [<Tests>]
 let tests =
-    testList "ZeroQueueConsumer test list" [ 
+    testList "ZeroQueueConsumer" [ 
         testAsync "ZeroQueueConsumer work fine" {
             
             Log.Debug("Started ZeroQueueConsumer work fine")

@@ -14,7 +14,7 @@ open Serilog
 
 [<Tests>]
 let tests =
-    testList "basic" [
+    testList "Chunks" [
         
         testAsync "Two chunks-message delivered successfully" {
             Log.Debug("Started Two chunks-message delivered successfully")

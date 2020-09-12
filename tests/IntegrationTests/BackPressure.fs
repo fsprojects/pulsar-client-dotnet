@@ -10,7 +10,7 @@ open System
 [<Tests>]
 let tests =
 
-    testList "schema" [
+    testList "Backpressure" [
 
         testAsync "Default backpressure throws" {
             let client = getClient()

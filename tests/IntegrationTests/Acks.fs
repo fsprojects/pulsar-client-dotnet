@@ -16,7 +16,7 @@ open Pulsar.Client.IntegrationTests.Common
 [<Tests>]
 let tests =
 
-    testList "acks" [
+    testList "Acks" [
 
         testAsync "Messages get redelivered if ackTimeout is set" {
 

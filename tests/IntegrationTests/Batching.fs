@@ -16,7 +16,7 @@ open System.Text
 let tests =
 
 
-    testList "batching" [
+    testList "Batching" [
 
         testAsync "Batch get sended if batch size exceeds" {
 

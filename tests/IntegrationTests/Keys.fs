@@ -14,7 +14,7 @@ open FSharp.Control
 [<Tests>]
 let tests =
 
-    testList "keys" [
+    testList "Keys" [
 
         testAsync "Keys and properties are propertly passed" {
 
