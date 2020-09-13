@@ -1,0 +1,87 @@
+﻿apiVersion: v1
+kind: Service
+metadata:
+  name: bookkeeper
+  namespace: pulsartest
+  labels:
+    component: bookkeeper
+spec:
+  ports:
+    - name: bookie
+      port: 3181
+    - name: http
+      port: 8000
+  clusterIP: None
+  selector:
+    component: bookkeeper
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bookkeeper
+  namespace: pulsartest
+  labels:
+    component: bookkeeper
+spec:
+  serviceName: bookkeeper
+  replicas: 3
+  selector:
+    matchLabels:
+      component: bookkeeper
+  template:
+    metadata:
+      labels:
+        component: bookkeeper
+    spec:
+      initContainers:
+      - name: pulsar-bookkeeper-verify-clusterid
+        image: apachepulsar/pulsar-all:2.6.1
+        command: ["sh", "-c"]
+        args:
+          - >
+            bin/apply-config-from-env.py conf/bookkeeper.conf;
+            until bin/bookkeeper shell whatisinstanceid; do
+              sleep 3;
+            done;
+        env:
+          - name: zkServers
+            value: zookeeper:2181
+      containers:
+      - name: bookkeeper
+        image: apachepulsar/pulsar-all:2.6.1
+        livenessProbe:
+          httpGet:
+            path: /api/v1/bookie/state
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          failureThreshold: 60
+        readinessProbe:
+          httpGet:
+            path: /api/v1/bookie/is_ready
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          failureThreshold: 30
+        command: ["sh", "-c"]
+        args:
+          - >
+            bin/bookkeeper shell bookieformat -nonInteractive -force -deleteCookie;
+            bin/apply-config-from-env.py conf/bookkeeper.conf;
+            bin/pulsar bookie;
+        env:
+        - name: zkServers
+          value: zookeeper:2181
+        - name: httpServerEnabled
+          value: "true"
+        - name: httpServerPort
+          value: "8000"
+        - name: useHostNameAsBookieID
+          value: "true"
+        ports:
+        - name: bookie
+          containerPort: 3181
+        - name: http
+          containerPort: 8000

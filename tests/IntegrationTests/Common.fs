@@ -1,6 +1,7 @@
 module Pulsar.Client.IntegrationTests.Common
 
 open System
+open System.Collections.Generic
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
@@ -12,9 +13,13 @@ open Microsoft.Extensions.DependencyInjection
 open Serilog.Sinks.SystemConsole.Themes
 open FSharp.UMX
 
+let minikubeIp =
+    let variable = System.Environment.GetEnvironmentVariable("MINIKUBE_IP")
+    if isNull variable then "127.0.0.1"
+    else variable
 
-[<Literal>]
-let pulsarAddress = "pulsar://127.0.0.1:6650"
+let pulsarAddress = sprintf "pulsar://%s:30002" minikubeIp
+
 
 #if !NOTLS
 [<Literal>]
@@ -31,7 +36,7 @@ let sslUser1 = AuthenticationFactory.tls(@"../ssl/user1.pfx")
 let configureLogging() =
     Log.Logger <-
         LoggerConfiguration()
-            .MinimumLevel.Warning()
+            .MinimumLevel.Information()
             .WriteTo.Console(theme = AnsiConsoleTheme.Code, outputTemplate="[{Timestamp:HH:mm:ss.fff} {Level:u3} {ThreadId}] {Message:lj}{NewLine}{Exception}")
             .Enrich.FromLogContext()
             .Enrich.WithThreadId()

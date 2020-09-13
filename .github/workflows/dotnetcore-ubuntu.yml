@@ -10,11 +10,22 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Up standalone docker-composer
+    - name: Setup minikube
+      uses: opsgang/ga-setup-minikube@v0.1.1
+      with:
+        minikube-version: 1.4.0
+        k8s-version: 1.15.1
+        
+    - name: Init cluster
       run: |
-        cd tests/compose/standalone
-        docker-compose up -d
-
+        minikube config set vm-driver docker
+        minikube config set kubernetes-version v1.15.1
+        minikube start
+        minikube update-context
+        kubectl cluster-info
+        kubectl get pods -n kube-system
+        minikube ip
+        
     - name: Setup .NET Core
       uses: actions/setup-dotnet@v1
       with:
@@ -42,14 +53,14 @@ jobs:
         cd tests/UnitTests
         dotnet run -c Release --no-build
 
-    - name: docker-compose status
-      run: |
-        cd tests/compose/standalone
-        docker-compose ps
-        docker-compose logs init
+#    - name: docker-compose status
+#      run: |
+#        cd tests/compose/standalone
+#        docker-compose ps
+#        docker-compose logs init
 
-    - name: Run Integration Tests
-      timeout-minutes: 2
-      run: |
-        cd tests/IntegrationTests
-        dotnet run --no-spinner --debug
+#    - name: Run Integration Tests
+#      timeout-minutes: 2
+#      run: |
+#        cd tests/IntegrationTests
+#        dotnet run --no-spinner --debug

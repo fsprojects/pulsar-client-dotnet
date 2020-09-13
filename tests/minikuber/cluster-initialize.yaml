@@ -1,0 +1,84 @@
+﻿apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bookkeeper-cluster-initialize
+  namespace: pulsartest
+  labels:
+    component: bookkeeper-cluster-initialize
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: wait-zookeeper-ready
+          image: apachepulsar/pulsar-all:2.6.1
+          command: ["sh", "-c"]
+          args:
+            - >
+              until nslookup zookeeper; do
+                sleep 3;
+              done;
+      containers:
+        - name: bookkeeper-cluster-initialize
+          image: apachepulsar/pulsar-all:2.6.1
+          command: ["sh", "-c"]
+          args:
+            - >
+              bin/apply-config-from-env.py conf/bookkeeper.conf;
+              if bin/bookkeeper shell whatisinstanceid; then
+                  echo "bookkeeper cluster already initialized";
+              else
+                  bin/bookkeeper shell initnewcluster;
+              fi
+          env:
+            - name: zkServers
+              value: zookeeper:2181
+      restartPolicy: Never
+
+---
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pulsar-cluster-initialize
+  namespace: pulsartest
+  labels:
+    component: pulsar-cluster-initialize
+spec:
+  template:
+    spec:
+      initContainers:
+      - name: wait-zookeeper-ready
+        image: apachepulsar/pulsar-all:2.6.1
+        command: ["sh", "-c"]
+        args:
+          - >
+            until bin/pulsar zookeeper-shell -server zookeeper:2181 ls /; do
+              echo "user provided zookeepers ${zkServers} are unreachable... check in 3 seconds ..." && sleep 3;
+            done;
+      - name: pulsar-bookkeeper-verify-clusterid
+        image: apachepulsar/pulsar-all:2.6.1
+        command: ["sh", "-c"]
+        args:
+          - >
+            bin/apply-config-from-env.py conf/bookkeeper.conf;
+            until bin/bookkeeper shell whatisinstanceid; do
+              sleep 3;
+            done;
+        env:
+          - name: zkServers
+            value: zookeeper:2181
+      containers:
+        - name: pulsar-cluster-initialize
+          image: apachepulsar/pulsar-all:2.6.1
+          command: ["sh", "-c"]
+          args:
+            - >
+              bin/pulsar initialize-cluster-metadata \
+                --cluster pulsartest \
+                --zookeeper zookeeper.pulsartest.svc.cluster.local:2181 \
+                --configuration-store zookeeper.pulsartest.svc.cluster.local:2181 \
+                --web-service-url http://broker.pulsartest.svc.cluster.local:8080/ \
+                --web-service-url-tls https://broker.pulsartest.svc.cluster.local:8443/ \
+                --broker-service-url pulsar://broker.pulsartest.svc.cluster.local:6650/ \
+                --broker-service-url-tls pulsar+ssl://broker.pulsartest.svc.cluster.local:6651/ || true;
+      restartPolicy: Never

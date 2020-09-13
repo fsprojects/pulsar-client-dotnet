@@ -1,0 +1,69 @@
+﻿apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: pulsartest
+  labels:
+    component: zookeeper
+spec:
+  selector:
+    component: zookeeper
+  ports:
+    - name: follower
+      port: 2888
+    - name: leader-election
+      port: 3888
+    - name: client
+      port: 2181
+  clusterIP: None
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: zookeeper
+  namespace: pulsartest
+  labels:
+    component: zookeeper
+spec:
+  containers:
+    - name: zookeeper
+      image: apachepulsar/pulsar-all:2.6.1
+      ports:
+        - name: client
+          containerPort: 2181
+        - name: follower
+          containerPort: 2888
+        - name: leader-election
+          containerPort: 3888
+      command: ["sh", "-c"]
+      args:
+        - >
+          cat conf/zookeeper.conf;
+          bin/apply-config-from-env.py conf/zookeeper.conf;
+          bin/generate-zookeeper-config.sh conf/zookeeper.conf;
+          bin/pulsar zookeeper;
+      env:
+        - name: ZOOKEEPER_SERVERS
+          value: zookeeper.pulsartest.svc.cluster.local
+      readinessProbe:
+        exec:
+          command:
+            - bin/pulsar-zookeeper-ruok.sh
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        failureThreshold: 10
+      livenessProbe:
+        exec:
+          command:
+            - bin/pulsar-zookeeper-ruok.sh
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        failureThreshold: 10
+      startupProbe:
+        exec:
+          command:
+            - bin/pulsar-zookeeper-ruok.sh
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        failureThreshold: 30
