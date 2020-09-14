@@ -50,6 +50,18 @@ spec:
             sleep 10;
             brokerServiceNumber="$(nslookup -timeout=10 broker | grep Name | wc -l)";
           done;
+    - name: wait-bookkeeper-ready
+      image: apachepulsar/pulsar-all:2.6.1
+      command: ["sh", "-c"]
+      args:
+        - >-
+          set -e;
+          brokerServiceNumber="$(nslookup -timeout=10 bookkeeper | grep Name | wc -l)";
+          until [ ${brokerServiceNumber} -ge 1 ]; do
+            echo "pulsar bookkeeper isn't initialized yet ... check in 10 seconds ...";
+            sleep 10;
+            brokerServiceNumber="$(nslookup -timeout=10 bookkeeper | grep Name | wc -l)";
+          done;
   containers:
     - name: proxy
       image: apachepulsar/pulsar-all:2.6.1
