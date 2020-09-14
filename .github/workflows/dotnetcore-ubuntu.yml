@@ -61,3 +61,12 @@ jobs:
         cd tests/IntegrationTests
         export MINIKUBE_IP=$(minikube ip)
         dotnet run --no-spinner --debug
+      continue-on-error: true
+
+    - name: logs
+      run: |
+        kubectl logs pod/broker
+        kubectl logs pod/bookkeeper-0
+        kubectl logs pod/bookkeeper-1
+        
+        
