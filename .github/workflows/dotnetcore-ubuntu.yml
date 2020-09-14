@@ -22,29 +22,29 @@ jobs:
         kubectl apply -f . -n pulsartest
 
     - name: Setup .NET Core
-     uses: actions/setup-dotnet@v1
-     with:
-       dotnet-version: 3.1.100
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 3.1.100
     
     - name: Install dotnet tools locally
-     run: dotnet tool restore
+      run: dotnet tool restore
     
     - name: Paket Install
-     run: dotnet paket install
+      run: dotnet paket install
     
     - name: Dotnet Restore
-     run: dotnet restore
+      run: dotnet restore
     
     - name: Dotnet Build Release
-     run: dotnet build -c Release --no-restore
+      run: dotnet build -c Release --no-restore
     
     - name: Apt-get Install Snappy & ZSTD
-     run: |
+      run: |
        sudo apt-get install -y libsnappy-dev
        sudo apt-get install -y libzstd-dev
     
     - name: Run Unit Tests
-     run: |
+      run: |
        cd tests/UnitTests
        dotnet run -c Release --no-build
 
