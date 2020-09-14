@@ -53,7 +53,7 @@ jobs:
       run: echo $MINIKUBE_IP
       
     - name: Wait proxy
-      uses: cygnetdigitial/wait_for_response@v2
+      uses: nev7n/wait_for_response@v1
       with:
         url: 'http://$MINIKUBE_IP:30001/status.html'
         responseCode: '200'
