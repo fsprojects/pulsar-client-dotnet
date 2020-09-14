@@ -49,6 +49,17 @@ jobs:
         cd tests/UnitTests
         dotnet run -c Release --no-build
 
+    - name: Check $MINIKUBE_IP
+      run: echo $MINIKUBE_IP
+      
+    - name: Wait proxy
+      uses: cygnetdigitial/wait_for_response@v2
+      with:
+        url: 'http://$MINIKUBE_IP:30001/status.html'
+        responseCode: '200'
+        timeout: 2000
+        interval: 1000
+
     - name: kubectl status
       run: |
         kubectl get pod -n pulsartest
