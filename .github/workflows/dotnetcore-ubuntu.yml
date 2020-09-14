@@ -17,48 +17,50 @@ jobs:
       run: |
         kubectl cluster-info
         kubectl get pods -n kube-system
-        export MINIKUBE_IP=$(minikube ip)
         cd tests/minikuber
         kubectl create namespace pulsartest
         kubectl apply -f . -n pulsartest
 
-    - name: Setup .NET Core
-      uses: actions/setup-dotnet@v1
-      with:
-        dotnet-version: 3.1.100
+#     - name: Setup .NET Core
+#       uses: actions/setup-dotnet@v1
+#       with:
+#         dotnet-version: 3.1.100
 
-    - name: Install dotnet tools locally
-      run: dotnet tool restore
+#     - name: Install dotnet tools locally
+#       run: dotnet tool restore
 
-    - name: Paket Install
-      run: dotnet paket install
+#     - name: Paket Install
+#       run: dotnet paket install
     
-    - name: Dotnet Restore
-      run: dotnet restore
+#     - name: Dotnet Restore
+#       run: dotnet restore
     
-    - name: Dotnet Build Release
-      run: dotnet build -c Release --no-restore
+#     - name: Dotnet Build Release
+#       run: dotnet build -c Release --no-restore
     
-    - name: Apt-get Install Snappy & ZSTD
-      run: |
-        sudo apt-get install -y libsnappy-dev
-        sudo apt-get install -y libzstd-dev
+#     - name: Apt-get Install Snappy & ZSTD
+#       run: |
+#         sudo apt-get install -y libsnappy-dev
+#         sudo apt-get install -y libzstd-dev
     
-    - name: Run Unit Tests
-      run: |
-        cd tests/UnitTests
-        dotnet run -c Release --no-build
+#     - name: Run Unit Tests
+#       run: |
+#         cd tests/UnitTests
+#         dotnet run -c Release --no-build
 
     - name: Check $MINIKUBE_IP
-      run: echo $MINIKUBE_IP
+      run: |
+        minikube ip
+        export MINIKUBE_IP=$(minikube ip)
+        echo $MINIKUBE_IP
       
     - name: Wait proxy
       uses: nev7n/wait_for_response@v1
       with:
         url: 'http://$MINIKUBE_IP:30001/status.html'
         responseCode: '200'
-        timeout: 2000
-        interval: 1000
+        timeout: 5000
+        interval: 500
 
     - name: kubectl status
       run: |
