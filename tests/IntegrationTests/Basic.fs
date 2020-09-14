@@ -82,7 +82,7 @@ let tests =
             Log.Debug("Finished send 100 messages and then receiving them works fine when retention is set on namespace")
         }
 
-        testAsync "Full roundtrip (emulate Request-Response behaviour)" {
+        ftestAsync "Full roundtrip (emulate Request-Response behaviour)" {
 
             Log.Debug("Started Full roundtrip (emulate Request-Response behaviour)")
             let client = getClient()
@@ -145,7 +145,7 @@ let tests =
             Log.Debug("Finished Full roundtrip (emulate Request-Response behaviour)")
         }
 
-        testAsync "Concurrent send and receive work fine" {
+        ftestAsync "Concurrent send and receive work fine" {
 
             Log.Debug("Started Concurrent send and receive work fine")
             let client = getClient()
@@ -203,7 +203,7 @@ let tests =
             Log.Debug("Finished Concurrent send and receive work fine")
         }
 
-        testAsync "Consumer seek earliest redelivers all messages" {
+        ftestAsync "Consumer seek earliest redelivers all messages" {
 
             Log.Debug("Started Consumer seek earliest redelivers all messages")
             let client = getClient()
@@ -244,7 +244,7 @@ let tests =
             Log.Debug("Finished Consumer seek earliest redelivers all messages")
         }
         
-        testAsync "Client, producer and consumer can't be accessed after close" {
+        ftestAsync "Client, producer and consumer can't be accessed after close" {
 
             Log.Debug("Started 'Client, producer and consumer can't be accessed after close'")
 

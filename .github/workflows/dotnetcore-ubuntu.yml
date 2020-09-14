@@ -55,12 +55,9 @@ jobs:
         echo $MINIKUBE_IP
         tests/compose/standalone/scripts/wait-for-it.sh $MINIKUBE_IP:30001 -t 12000 -- kubectl get pod -n pulsartest
 
-    - name: kubectl status
+    - name: Run Integration Tests
+      timeout-minutes: 2
       run: |
-        kubectl get pod -n pulsartest
-
-#    - name: Run Integration Tests
-#      timeout-minutes: 2
-#      run: |
-#        cd tests/IntegrationTests
-#        dotnet run --no-spinner --debug
+        cd tests/IntegrationTests
+        export MINIKUBE_IP=$(minikube ip)
+        dotnet run --no-spinner --debug
