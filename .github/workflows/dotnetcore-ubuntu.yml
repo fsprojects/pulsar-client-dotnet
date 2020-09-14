@@ -53,7 +53,7 @@ jobs:
         minikube ip
         export MINIKUBE_IP=$(minikube ip)
         echo $MINIKUBE_IP
-        tests/compose/standalone/scripts/wait-for-it.sh $MINIKUBE_IP:30001 -t 120 -- kubectl get pod -n pulsartest
+        tests/compose/standalone/scripts/wait-for-it.sh $MINIKUBE_IP:30001 -t 12000 -- kubectl get pod -n pulsartest
 
     - name: kubectl status
       run: |
