@@ -26,6 +26,7 @@ let tests =
             EncryptionKeys = [||]
             EncryptionParam = [||]
             EncryptionAlgo = ""
+            OrderingKey = [||]
         }
         
     let testRawMessage =

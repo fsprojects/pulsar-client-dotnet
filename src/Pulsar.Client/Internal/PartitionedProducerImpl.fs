@@ -341,15 +341,11 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             [<Optional; DefaultParameterValue(null:string)>]key:string,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>]properties: IReadOnlyDictionary<string, string>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>) =
-            
-            keyValueProcessor
-            |> Option.map(fun kvp -> kvp.EncodeKeyValue value)
-            |> Option.map(fun struct(k, v) -> MessageBuilder(value, v, Some { PartitionKey = %k; IsBase64Encoded = true }, properties, deliverAt))
-            |> Option.defaultWith (fun () ->
-                MessageBuilder(value, schema.Encode(value),
-                                (if String.IsNullOrEmpty(key) then None else Some { PartitionKey = %key; IsBase64Encoded = false }),
-                                properties, deliverAt, sequenceId))
+            [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>,
+            [<Optional; DefaultParameterValue(null:byte[])>]keyBytes:byte[],
+            [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[]) =
+            ProducerImpl.NewMessage(keyValueProcessor, schema, value, key, properties,
+                                    deliverAt, sequenceId, keyBytes, orderingKey)
 
         member this.ProducerId = producerId
 

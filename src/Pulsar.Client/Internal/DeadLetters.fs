@@ -91,7 +91,7 @@ type internal DeadLetterProcessor<'T>
                     try
                         let! rlProducer = rlProducer.Value
                         let key = getOptionalKey message
-                        let msg = MessageBuilder(message.GetValue(), message.Data, key, propertiesMap, Nullable deliverAt)
+                        let msg = MessageBuilder(message.GetValue(), message.Data, key, propertiesMap, deliverAt)
                         let! _ = rlProducer.SendAsync(msg)
                         do! acknowledge message.MessageId
                         return true

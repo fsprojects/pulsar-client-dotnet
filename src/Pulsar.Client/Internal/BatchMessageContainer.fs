@@ -29,6 +29,11 @@ module internal BatchHelpers =
                     smm.PartitionKeyB64Encoded <- key.IsBase64Encoded
                 | _ ->
                     ()
+                match message.OrderingKey with
+                | Some orderingKey ->
+                    smm.OrderingKey <- orderingKey
+                | _ ->
+                    ()
                 if message.Properties.Count > 0 then
                     for property in message.Properties do
                         smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
@@ -44,7 +49,8 @@ type internal OpSendMsgWrapper<'T> = {
     OpSendMsg: OpSendMsg<'T>
     LowestSequenceId: SequenceId
     HighestSequenceId: SequenceId
-    MessageKey: MessageKey option
+    PartitionKey: MessageKey option
+    OrderingKey: byte[] option
 }
 
 [<AbstractClass>]
@@ -96,7 +102,8 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
             OpSendMsg = makeBatch batchItems
             LowestSequenceId = lowestSequenceId
             HighestSequenceId = highestSequenceId
-            MessageKey = None
+            PartitionKey = batchItems.[0].Message.Key
+            OrderingKey = batchItems.[0].Message.OrderingKey
         }
     override this.CreateOpSendMsgs () =
         raise <| NotSupportedException()
@@ -115,11 +122,21 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
     let prefix = prefix + " KeyBasedBatcher"
     let keyBatchItems = Dictionary<MessageKey option, ResizeArray<BatchItem<'T>>>()
     
+    let getKey (msg: MessageBuilder<'T>) =
+        match msg.OrderingKey with
+        | Some orderingKey -> 
+            {
+                PartitionKey = %Convert.ToBase64String(orderingKey)
+                IsBase64Encoded = true
+            } |> Some
+        | None ->
+            msg.Key
+    
     override this.Add batchItem =
         Log.Logger.LogDebug("{0} add message to batch, num messages in batch so far is {1}", prefix, this.NumMessagesInBatch)
         this.CurrentBatchSizeBytes <- this.CurrentBatchSizeBytes + batchItem.Message.Payload.Length
         this.NumMessagesInBatch <- this.NumMessagesInBatch + 1
-        let key = batchItem.Message.Key
+        let key = batchItem.Message |> getKey
         match keyBatchItems.TryGetValue key with
         | true, items ->
             items.Add(batchItem)
@@ -132,14 +149,15 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
         raise <| NotSupportedException()
     override this.CreateOpSendMsgs () =
         keyBatchItems
-        |> Seq.map (fun (KeyValue(key, batchItems)) ->
+        |> Seq.map (fun (KeyValue(_, batchItems)) ->
             let lowestSequenceId = batchItems.[0].SequenceId
             let highestSequenceId = batchItems.[batchItems.Count - 1].SequenceId
             {
                 OpSendMsg = makeBatch batchItems
                 LowestSequenceId = lowestSequenceId
                 HighestSequenceId = highestSequenceId
-                MessageKey = key
+                PartitionKey = batchItems.[0].Message.Key
+                OrderingKey = batchItems.[0].Message.OrderingKey
             })
     override this.Clear() =
         keyBatchItems.Clear()

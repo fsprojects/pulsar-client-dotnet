@@ -555,6 +555,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             EncryptionContext.FromMetadata rawMessage.Metadata,
                             getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
                             rawMessage.Metadata.SequenceId,
+                            rawMessage.Metadata.OrderingKey,
                             getValue
                         )
             if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
@@ -1083,12 +1084,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 let message = Message (
                                 messageId,
                                 singleMessagePayload,
-                                %msgKey,                        
+                                %msgKey,
                                 singleMessageMetadata.PartitionKeyB64Encoded,
                                 properties,
                                 EncryptionContext.FromMetadata rawMessage.Metadata,
                                 getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
                                 %(int64 singleMessageMetadata.SequenceId),
+                                singleMessageMetadata.OrderingKey,
                                 getValue
                             )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then

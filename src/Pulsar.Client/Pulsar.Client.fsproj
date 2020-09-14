@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>1.6.3</Version>
+    <Version>1.7.0</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Fix for deadletter logic in partitioned topics</PackageReleaseNotes>
+    <PackageReleaseNotes>Ordering keys and key bytes support</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
-    <PackageVersion>1.6.3</PackageVersion>
+    <PackageVersion>1.7.0</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>

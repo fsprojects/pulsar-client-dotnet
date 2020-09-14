@@ -222,7 +222,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         }
         
     let canAddToBatch (message : MessageBuilder<'T>) =
-        producerConfig.BatchingEnabled && not message.DeliverAt.HasValue
+        producerConfig.BatchingEnabled && message.DeliverAt.IsNone
 
     let createMessageMetadata (sequenceId: SequenceId) (message : MessageBuilder<'a>) (numMessagesInBatch: int option) =
         let metadata =
@@ -247,11 +247,19 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 metadata.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
         if numMessagesInBatch.IsSome then
             metadata.NumMessagesInBatch <- numMessagesInBatch.Value
-        if message.DeliverAt.HasValue then
-            metadata.DeliverAtTime <- message.DeliverAt.Value
+        match message.DeliverAt with
+        | Some deliverAt ->
+            metadata.DeliverAtTime <- deliverAt
+        | None ->
+            ()
         match schemaVersion with
         | Some (SchemaVersion sv) ->
             metadata.SchemaVersion <- sv
+        | None ->
+            ()
+        match message.OrderingKey with
+        | Some orderingKey ->
+            metadata.OrderingKey <- orderingKey
         | None ->
             ()
         metadata
@@ -259,10 +267,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let getHighestSequenceId (pendingMessage: PendingMessage<'T>): SequenceId =
         %Math.Max(%pendingMessage.SequenceId, %pendingMessage.HighestSequenceId)
         
-    let processOpSendMsg {OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId; MessageKey = messageKey } =
+    let processOpSendMsg {OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId;
+                          PartitionKey = partitionKey; OrderingKey = orderingKey } =
         let (batchPayload, batchCallbacks) = opSendMsg;
         let batchSize = batchCallbacks.Length
-        let msgBuilder = MessageBuilder(batchPayload, batchPayload, messageKey)
+        let msgBuilder = MessageBuilder(batchPayload, batchPayload, partitionKey, ?orderingKey = orderingKey)
         let metadata = createMessageMetadata lowestSequenceId msgBuilder (Some batchSize)
         let compressedBatchPayload = compressionCodec.Encode msgBuilder.Payload
         if (compressedBatchPayload.Length > maxMessageSize) then
@@ -330,9 +339,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         if canEnqueueRequest channel sendRequest 1 then
             let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
             let sequenceId =
-                if message.SequenceId.HasValue then
-                    message.SequenceId.Value
-                else
+                match message.SequenceId with
+                | Some seqId ->
+                    seqId
+                | None ->
                     let oldValue = msgIdGenerator
                     msgIdGenerator <- msgIdGenerator + %1L
                     %oldValue
@@ -733,6 +743,36 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             do! producer.InitInternal()
             return producer
         }
+    static member NewMessage<'T> (keyValueProcessor: IKeyValueProcessor option, schema: ISchema<'T>,
+            value:'T,
+            key:string,
+            properties: IReadOnlyDictionary<string, string>,
+            deliverAt:Nullable<int64>,
+            sequenceId:Nullable<SequenceId>,
+            keyBytes:byte[],
+            orderingKey:byte[]) =
+            keyValueProcessor
+            |> Option.map(fun kvp -> kvp.EncodeKeyValue value)
+            |> Option.map(fun struct(k, v) ->
+                MessageBuilder(value, v,
+                    (if String.IsNullOrEmpty(k) then None else Some { PartitionKey = %k; IsBase64Encoded = true }),
+                    ?properties0 = (properties |> Option.ofObj),
+                    ?deliverAt = (deliverAt |> Option.ofNullable),
+                    ?sequenceId = (sequenceId |> Option.ofNullable),
+                    ?orderingKey = (orderingKey |> Option.ofObj)))
+            |> Option.defaultWith (fun () ->
+                let keyObj =
+                    if String.IsNullOrEmpty(key) && (isNull keyBytes || keyBytes.Length = 0) then
+                        None
+                    elif String.IsNullOrEmpty(key) |> not then
+                        Some { PartitionKey = %key; IsBase64Encoded = false }
+                    else
+                        Some { PartitionKey = %Convert.ToBase64String(keyBytes); IsBase64Encoded = true }
+                MessageBuilder(value, schema.Encode(value), keyObj,
+                    ?properties0 = (properties |> Option.ofObj),
+                    ?deliverAt = (deliverAt |> Option.ofNullable),
+                    ?sequenceId = (sequenceId |> Option.ofNullable),
+                    ?orderingKey = (orderingKey |> Option.ofObj)))
 
     interface IProducer<'T> with
         member this.SendAndForgetAsync (message: 'T) =
@@ -773,17 +813,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             [<Optional; DefaultParameterValue(null:string)>]key:string,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>]properties: IReadOnlyDictionary<string, string>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>) =
-            keyValueProcessor
-            |> Option.map(fun kvp -> kvp.EncodeKeyValue value)
-            |> Option.map(fun struct(k, v) ->
-                                MessageBuilder(value, v,
-                                    (if String.IsNullOrEmpty(k) then None else Some { PartitionKey = %k; IsBase64Encoded = true }),
-                                    properties, deliverAt, sequenceId))
-            |> Option.defaultWith (fun () ->
-                MessageBuilder(value, schema.Encode(value),
-                                (if String.IsNullOrEmpty(key) then None else Some { PartitionKey = %key; IsBase64Encoded = false }),
-                                properties, deliverAt, sequenceId))
+            [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>,
+            [<Optional; DefaultParameterValue(null:byte[])>]keyBytes:byte[],
+            [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[]) =
+            ProducerImpl.NewMessage(keyValueProcessor, schema, value, key, properties,
+                                    deliverAt, sequenceId, keyBytes, orderingKey)
                 
         member this.ProducerId = producerId
 

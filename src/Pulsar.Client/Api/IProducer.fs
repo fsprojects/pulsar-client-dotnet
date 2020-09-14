@@ -49,6 +49,8 @@ type IProducer<'T> =
         * [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>]properties: IReadOnlyDictionary<string, string>
         * [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>
         * [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>
+        * [<Optional; DefaultParameterValue(null:byte[])>]keyBytes:byte[]
+        * [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[]
         -> MessageBuilder<'T>
     /// The last sequence id that was published by this producer.
     /// This represent either the automatically assigned
