@@ -26,6 +26,11 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
         | (Result.Ok serviceUri) ->
             PulsarClientBuilder { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls }
         | (Result.Error message) -> invalidArg null message
+        
+    member this.OperationTimeout operationTimeout =
+        PulsarClientBuilder
+            { config with
+                OperationTimeout = operationTimeout }
 
     member this.MaxNumberOfRejectedRequestPerConnection num =
         PulsarClientBuilder
