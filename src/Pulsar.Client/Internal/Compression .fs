@@ -26,8 +26,8 @@ module internal CompressionCodec =
                     new ZOutputStream(ms, zlibConst.Z_DEFAULT_COMPRESSION)
                 else
                     new ZOutputStream(ms)
+            zlib.FlushMode <- zlibConst.Z_SYNC_FLUSH
             zlib.Write(bytes, 0, payloadLength)
-            zlib.finish()
             ms.ToArray()
         
         interface ICompressionCodec with

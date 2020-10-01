@@ -19,7 +19,7 @@ let tests =
 
     let hello = "Hello"
     let helloNone = hello |> getBytes
-    let helloZLib = System.Convert.FromBase64String "eJzzSM3JyQcABYwB9Q=="
+    let helloZLib = System.Convert.FromBase64String "eJzySM3JyQcAAAD//w=="
     let helloLZ4 = System.Convert.FromBase64String "UEhlbGxv"
     let helloSnappy = System.Convert.FromBase64String "BRBIZWxsbw=="
     let helloZStd = System.Convert.FromBase64String "KLUv/SAFKQAASGVsbG8="
