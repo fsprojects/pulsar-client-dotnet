@@ -251,7 +251,7 @@ NUGET
       protobuf-net.Core (>= 3.0.29)
       System.ServiceModel.Primitives (>= 4.7)
     protobuf-net.Core (3.0.29)
-    Pulsar.Client (1.7.1)
+    Pulsar.Client (1.7.2)
       Apache.Avro (>= 1.10)
       AvroSchemaGenerator (>= 1.6)
       FSharp.Core (>= 4.7.2)
