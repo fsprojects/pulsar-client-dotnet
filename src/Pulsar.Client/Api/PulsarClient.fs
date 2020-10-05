@@ -116,7 +116,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                         return! loop ()
                 | Stop ->
                     this.ClientState <- Closed
-                    connectionPool.Close()
+                    do! connectionPool.CloseAsync() |> Async.AwaitTask
                     Log.Logger.LogInformation("Pulsar client stopped")
             }
         loop ()

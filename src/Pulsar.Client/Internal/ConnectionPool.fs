@@ -26,7 +26,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         :?> ProtocolVersion[]
         |> Array.last
 
-    let connections = ConcurrentDictionary<bool*LogicalAddress, Lazy<Task<ClientCnx>>>()
+    let connections = ConcurrentDictionary<bool*LogicalAddress, Task<ClientCnx>>()
 
     // from https://github.com/mgravell/Pipelines.Sockets.Unofficial/blob/master/src/Pipelines.Sockets.Unofficial/SocketConnection.Connect.cs
     let getSocket (endpoint: DnsEndPoint) =
@@ -182,7 +182,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
 
     member this.GetConnection (broker: Broker, maxMessageSize: int, brokerless: bool) =
         let t = connections.GetOrAdd((brokerless, broker.LogicalAddress), fun(_) ->
-                lazy connect(broker, maxMessageSize, brokerless)).Value
+                connect(broker, maxMessageSize, brokerless))
         if t.IsFaulted then
             Log.Logger.LogInformation("Removing faulted task to {0}", broker)
             connections.TryRemove((brokerless, broker.LogicalAddress)) |> ignore
@@ -192,7 +192,13 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address },
                            Commands.DEFAULT_MAX_MESSAGE_SIZE, true)
 
-    member this.Close() =
-        connections
-        |> Seq.map (fun kv -> kv.Value.Value.Result)
-        |> Seq.iter (fun clientCnx -> clientCnx.Dispose())
+    member this.CloseAsync() =
+        task {
+            for KeyValue(_, connectionTask) in connections do
+                try
+                    let! cnx = connectionTask
+                    cnx.Dispose()
+                with ex ->
+                    Log.Logger.LogError(ex, "Couldn't get connection on close")
+                    ()
+        }
