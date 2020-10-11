@@ -188,7 +188,7 @@ let tests =
             Log.Debug("Finished Eternal loop to test cluster modifications removal/addition")
         }
         
-        ftestAsync "Subscribe to new topic" {
+        testAsync "Subscribe to new topic" {
     
             let subscriptionName = "testPulsar"
             let topicPattern = sprintf "persistent://public/default/%s-*" (Guid.NewGuid().ToString("N"))

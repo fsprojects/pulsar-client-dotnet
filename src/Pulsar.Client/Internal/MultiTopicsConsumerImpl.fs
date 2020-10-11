@@ -252,7 +252,11 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     consumerResults
                     |> Seq.map (fun topicAndConsumer ->
                         let stream = getStream topicAndConsumer.TopicName.CompleteTopicName topicAndConsumer.Consumer
-                        consumers.Add(topicAndConsumer.TopicName.CompleteTopicName, (topicAndConsumer.Consumer :> IConsumer<'T>, stream))
+                        Log.Logger.LogInformation("{0} add {1} to consumers", prefix, topicAndConsumer.TopicName.CompleteTopicName)
+                        if consumers.ContainsKey(topicAndConsumer.TopicName.CompleteTopicName) then
+                            Log.Logger.LogWarning("{0} consumers already contains {1}", prefix, topicAndConsumer.TopicName.CompleteTopicName)
+                        else
+                            consumers.Add(topicAndConsumer.TopicName.CompleteTopicName, (topicAndConsumer.Consumer :> IConsumer<'T>, stream))
                         stream
                         )
             }, consumersTasks
