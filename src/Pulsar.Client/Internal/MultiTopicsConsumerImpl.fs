@@ -146,11 +146,12 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
         }
     
     let getStream (topic: CompleteTopicName) (consumer: ConsumerImpl<'T>) =
-        Log.Logger.LogDebug("{0} getStream 0", topic)
+        Log.Logger.LogDebug("{0} getStream", topic)
         let consumerImp = consumer :> IConsumer<'T>
         fun () ->
             task {
                 if consumerImp.HasReachedEndOfTopic then
+                    Log.Logger.LogWarning("{0} topic was terminated", topic)
                     do! Task.Delay(Timeout.Infinite) // infinite delay for terminated topic
                 let! message = consumer.ReceiveFsharpAsync()
                 return
@@ -243,6 +244,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             }                                        
                     )
                 |> Seq.collect id
+                |> Seq.cache
             task {
                 let! consumerResults = consumersTasks |> Task.WhenAll
                 allTopics.UnionWith newTopics
@@ -252,13 +254,10 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     consumerResults
                     |> Seq.map (fun topicAndConsumer ->
                         let stream = getStream topicAndConsumer.TopicName.CompleteTopicName topicAndConsumer.Consumer
-                        Log.Logger.LogInformation("{0} add {1} to consumers", prefix, topicAndConsumer.TopicName.CompleteTopicName)
-                        if consumers.ContainsKey(topicAndConsumer.TopicName.CompleteTopicName) then
-                            Log.Logger.LogWarning("{0} consumers already contains {1}", prefix, topicAndConsumer.TopicName.CompleteTopicName)
-                        else
-                            consumers.Add(topicAndConsumer.TopicName.CompleteTopicName, (topicAndConsumer.Consumer :> IConsumer<'T>, stream))
+                        consumers.Add(topicAndConsumer.TopicName.CompleteTopicName, (topicAndConsumer.Consumer :> IConsumer<'T>, stream))
                         stream
                         )
+                    |> Seq.cache
             }, consumersTasks
         else
             Task.FromResult(Seq.empty), Seq.empty

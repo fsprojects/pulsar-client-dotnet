@@ -205,7 +205,7 @@ let tests =
             let! consumer =
                 client.NewConsumer()
                     .TopicsPattern(topicPattern)
-                    .PatternAutoDiscoveryPeriod(TimeSpan.FromSeconds(5.0))
+                    .PatternAutoDiscoveryPeriod(TimeSpan.FromSeconds(4.0))
                     .SubscriptionName(subscriptionName)
                     .SubscribeAsync() |> Async.AwaitTask
 
@@ -235,7 +235,7 @@ let tests =
                     .Topic(topic2)
                     .CreateAsync() |> Async.AwaitTask
 
-            do! Async.Sleep(1000 * 11)
+            do! Async.Sleep(5000)
 
             let send2 =
                 Task.Run(fun () ->
