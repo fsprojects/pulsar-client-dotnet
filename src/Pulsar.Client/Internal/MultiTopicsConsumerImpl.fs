@@ -185,6 +185,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                           None, lookup, true, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider, interceptors, fun _ -> ())
                     return { IsPartitioned = true; TopicName = partitionedTopic; Consumer = result }
                 })
+            |> Seq.cache
         task {
             let! consumerResults = consumersTasks |> Task.WhenAll
             allTopics.Add consumerInitInfo.TopicName |> ignore
@@ -196,6 +197,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     consumers.Add(topicAndConsumer.TopicName.CompleteTopicName, (topicAndConsumer.Consumer :> IConsumer<'T>, stream))
                     stream
                     )
+                |> Seq.cache
         }, consumersTasks
     
     let multiInit (consumerInitInfos: ConsumerInitInfo<'T>[]) createTopicIfDoesNotExist =
@@ -304,7 +306,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     })
                 )
             |> Seq.collect id
-        
+            |> Seq.cache
         task {
             try
                 let! allRemovedTopics =
@@ -315,8 +317,8 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         consumers.Remove(removedTopicPartition) |> ignore
                         allTopics.Remove(removedTopic) |> ignore
                         partitionedTopics.Remove(removedTopic) |> ignore
-                        stream
-                    )
+                        stream)
+                    |> Seq.cache
             with Flatten ex ->
                 Log.Logger.LogError(ex, "{0} could not processRemovedTopics fully", prefix)
                 return consumersTasks
@@ -326,8 +328,8 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         consumers.Remove(removedTopicPartition) |> ignore
                         allTopics.Remove(removedTopic) |> ignore
                         partitionedTopics.Remove(removedTopic) |> ignore
-                        stream
-                    )
+                        stream)
+                    |> Seq.cache
         }
     
     let rec work ct =
