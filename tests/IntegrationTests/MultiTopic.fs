@@ -187,4 +187,67 @@ let tests =
 
             Log.Debug("Finished Eternal loop to test cluster modifications removal/addition")
         }
+        
+        testAsync "Subscribe to new topic" {
+    
+            let subscriptionName = "testPulsar"
+            let topicPattern = sprintf "persistent://public/default/%s-*" (Guid.NewGuid().ToString("N"))
+            let topic1 = topicPattern.Replace("*", "1")
+            let topic2 = topicPattern.Replace("*", "2")
+
+            let client = getClient()
+
+            let! producer1 =
+                client.NewProducer()
+                    .Topic(topic1)
+                    .CreateAsync() |> Async.AwaitTask
+                    
+            let! consumer =
+                client.NewConsumer()
+                    .TopicsPattern(topicPattern)
+                    .PatternAutoDiscoveryPeriod(TimeSpan.FromSeconds(4.0))
+                    .SubscriptionName(subscriptionName)
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let send1 =
+                Task.Run(fun () ->
+                    task {
+                        for i in [1..10] do
+                            let msgStr = sprintf "Message #%i Sent to %s on %s" i topic1 (DateTime.Now.ToLongTimeString())
+                            let! _ = producer1.SendAsync(msgStr |> Encoding.UTF8.GetBytes)
+                            ()
+                    } :> Task
+                )
+            
+            let receiveAll =
+                Task.Run(fun () ->
+                        task {
+                            for i in [1..20] do
+                                let! message = consumer.ReceiveAsync()
+                                do! consumer.AcknowledgeAsync(message.MessageId)
+                        } :> Task
+                    )
+
+            do! Task.WhenAll(send1) |> Async.AwaitTask
+            
+            let! producer2 =
+                client.NewProducer()
+                    .Topic(topic2)
+                    .CreateAsync() |> Async.AwaitTask
+
+            do! Async.Sleep(5000)
+
+            let send2 =
+                Task.Run(fun () ->
+                    task {
+                        for i in [1..10] do
+                            let msgStr = sprintf "Message #%i Sent to %s on %s" i topic2 (DateTime.Now.ToLongTimeString())
+                            let! _ = producer2.SendAsync(msgStr |> Encoding.UTF8.GetBytes)
+                            ()
+                    } :> Task
+                )
+            do! Task.WhenAll(send2, receiveAll) |> Async.AwaitTask
+            
+            Log.Debug("Finished Subscribe to new topic")
+    }
 ]
