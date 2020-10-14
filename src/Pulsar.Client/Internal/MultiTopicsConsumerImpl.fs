@@ -1,6 +1,5 @@
 ﻿namespace Pulsar.Client.Api
 
-open System.Text.RegularExpressions
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
 open FSharp.UMX
@@ -11,7 +10,6 @@ open Pulsar.Client.Common
 open Microsoft.Extensions.Logging
 open System.Threading
 open System.Timers
-open Pulsar.Client.Schema
 
 type internal MultiTopicConnectionState =
     | Uninitialized
@@ -216,7 +214,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
             let receiverQueueSize = Math.Min(consumerConfig.ReceiverQueueSize, consumerConfig.MaxTotalReceiverQueueSizeAcrossPartitions / totalConsumersCount)
             let consumersTasks =
                 consumerInitInfos
-                |> Seq.map
+                |> Seq.collect
                     (fun consumerInitInfo ->
                         if consumerInitInfo.Metadata.IsMultiPartitioned then
                             let topic = consumerInitInfo.TopicName
@@ -243,9 +241,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                                           None, lookup, createTopicIfDoesNotExist, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider, interceptors, fun _ -> ())
                                     return { IsPartitioned = false; TopicName = consumerInitInfo.TopicName; Consumer = result }
                                 }
-                            }                                        
-                    )
-                |> Seq.collect id
+                            })
                 |> Seq.cache
             task {
                 let! consumerResults = consumersTasks |> Task.WhenAll
@@ -257,8 +253,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     |> Seq.map (fun topicAndConsumer ->
                         let stream = getStream topicAndConsumer.TopicName.CompleteTopicName topicAndConsumer.Consumer
                         consumers.Add(topicAndConsumer.TopicName.CompleteTopicName, (topicAndConsumer.Consumer :> IConsumer<'T>, stream))
-                        stream
-                        )
+                        stream)
                     |> Seq.cache
             }, consumersTasks
         else
@@ -289,7 +284,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
     let processRemovedTopics (topicsToRemove: TopicName seq) =
         let consumersTasks =
             topicsToRemove
-            |> Seq.map(fun topicToRemove ->
+            |> Seq.collect(fun topicToRemove ->
                     consumers
                     |> Seq.filter(fun (KeyValue(topic, _)) ->
                         let t: string = %topic
@@ -298,14 +293,12 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             if lastIndexOfPartition > 0 then
                                 %t.Substring(0, lastIndexOfPartition)
                             else
-                                %t
-                    )
+                                %t)
                     |> Seq.map(fun (KeyValue(topic, (consumer, stream))) -> task {
                         do! consumer.DisposeAsync()
                         return topicToRemove, topic, stream
                     })
                 )
-            |> Seq.collect id
             |> Seq.cache
         task {
             try
@@ -615,8 +608,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                                             prefix, oldPartitionsCount, newPartitionsCount, topic)
                                         false
                                     else
-                                        false
-                                )
+                                        false)
                             |> Seq.toArray
                         if topicsToUpdate.Length > 0 then
                             Log.Logger.LogInformation("{0} adding subscription to {1} new partitions", prefix, topicsToUpdate.Length)
@@ -650,8 +642,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                     |> Seq.map (fun (topic, consumer) ->
                                         let stream = getStream topic.CompleteTopicName consumer
                                         consumers.Add(topic.CompleteTopicName, (consumer :> IConsumer<'T>, stream))
-                                        stream
-                                        )
+                                        stream)
                                 state.Stream.AddGenerators(newStreams)
                                 Log.Logger.LogDebug("{0} success create consumers for extended partitions. old: {1}, new: {2}",
                                     prefix, oldConsumersCount, totalConsumersCount )
