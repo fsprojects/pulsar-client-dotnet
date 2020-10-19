@@ -1,62 +1,67 @@
 namespace Pulsar.Client.Api
 
-exception InvalidServiceURL
-exception InvalidConfigurationException of string
-exception NotFoundException of string
-exception TimeoutException of string
-exception IncompatibleSchemaException of string
-exception LookupException of string
-exception TooManyRequestsException of string
-exception ConnectException of string
-exception AlreadyClosedException of string
-exception TopicTerminatedException of string
-exception AuthenticationException of string
-exception AuthorizationException of string
-exception GettingAuthenticationDataException of string
-exception UnsupportedAuthenticationException of string
-exception BrokerPersistenceException of string
-exception BrokerMetadataException of string
-exception ProducerBusyException of string
-exception ConsumerBusyException of string
-exception NotConnectedException of string
-exception InvalidMessageException of string
-exception InvalidTopicNameException of string
-exception NotSupportedException of string
-exception ProducerQueueIsFullError of string
-exception ProducerBlockedQuotaExceededError of string
-exception ProducerBlockedQuotaExceededException of string
-exception ChecksumException of string
-exception CryptoException of string
-exception TopicDoesNotExistException of string
-exception ConsumerAssignException of string
-exception NotAllowedException of string
+open System
+
+type InvalidConfigurationException(msg) = inherit Exception(msg)
+type NotFoundException(msg) = inherit Exception(msg)
+type TimeoutException(msg) = inherit Exception(msg)
+type IncompatibleSchemaException(msg) = inherit Exception(msg)
+type LookupException(msg) = inherit Exception(msg)
+type TooManyRequestsException(msg) = inherit Exception(msg)
+type ConnectException(msg) = inherit Exception(msg)
+type AlreadyClosedException(msg) = inherit Exception(msg)
+type TopicTerminatedException(msg) = inherit Exception(msg)
+type AuthenticationException(msg) = inherit Exception(msg)
+type AuthorizationException(msg) = inherit Exception(msg)
+type GettingAuthenticationDataException(msg) = inherit Exception(msg)
+type UnsupportedAuthenticationException(msg) = inherit Exception(msg)
+type BrokerPersistenceException(msg) = inherit Exception(msg)
+type BrokerMetadataException(msg) = inherit Exception(msg)
+type ProducerBusyException(msg) = inherit Exception(msg)
+type ConsumerBusyException(msg) = inherit Exception(msg)
+type NotConnectedException(msg) = inherit Exception(msg)
+type InvalidMessageException(msg) = inherit Exception(msg)
+type InvalidTopicNameException(msg) = inherit Exception(msg)
+type NotSupportedException(msg) = inherit Exception(msg)
+type ProducerQueueIsFullError(msg) = inherit Exception(msg)
+type ProducerBlockedQuotaExceededError(msg) = inherit Exception(msg)
+type ProducerBlockedQuotaExceededException(msg) = inherit Exception(msg)
+type ChecksumException(msg) = inherit Exception(msg)
+type CryptoException(msg) = inherit Exception(msg)
+type TopicDoesNotExistException(msg) = inherit Exception(msg)
+type ConsumerAssignException(msg) = inherit Exception(msg)
+type NotAllowedException(msg) = inherit Exception(msg)
+type UnsupportedVersionException(msg) = inherit Exception(msg)
+type SubscriptionNotFoundException(msg) = inherit Exception(msg)
+type ConsumerNotFoundException(msg) = inherit Exception(msg)
+type TransactionCoordinatorNotFoundException(msg) = inherit Exception(msg)
+type InvalidTxnStatusException(msg) = inherit Exception(msg)
+
 
 // custom exception
-exception ConnectionFailedOnSend of string
+type ConnectionFailedOnSend(msg) = inherit Exception(msg)
 exception MaxMessageSizeChanged of int
-exception SchemaSerializationException of string
-
-exception DecompressionException of string
-exception BatchDeserializationException of string
+type SchemaSerializationException(msg) = inherit Exception(msg)
+type DecompressionException(msg) = inherit Exception(msg)
+type BatchDeserializationException (msg) = inherit Exception(msg)
 
 module PulsarClientException =
-    let isRetriableError ex =
+    let isRetriableError (ex: exn) =
         match ex with
-        | TooManyRequestsException _
-        | AuthorizationException _
-        | InvalidServiceURL _
-        | InvalidConfigurationException _
-        | NotFoundException _
-        | IncompatibleSchemaException _
-        | TopicDoesNotExistException _
-        | UnsupportedAuthenticationException _
-        | InvalidMessageException _
-        | InvalidTopicNameException _
-        | NotSupportedException _
-        | ChecksumException _
-        | CryptoException _
-        | ProducerBusyException _
-        | ConsumerBusyException _
+        | :? TooManyRequestsException
+        | :? AuthorizationException
+        | :? InvalidConfigurationException
+        | :? NotFoundException
+        | :? IncompatibleSchemaException
+        | :? TopicDoesNotExistException
+        | :? UnsupportedAuthenticationException
+        | :? InvalidMessageException
+        | :? InvalidTopicNameException
+        | :? NotSupportedException
+        | :? ChecksumException
+        | :? CryptoException
+        | :? ProducerBusyException
+        | :? ConsumerBusyException
              -> false
         | _ -> true
 

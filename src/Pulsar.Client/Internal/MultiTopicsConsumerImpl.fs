@@ -165,7 +165,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
         patternTimer.Close()
         while batchWaiters.Count > 0 do
             let _, batchWaitingChannel = batchWaiters.Dequeue()
-            batchWaitingChannel.Reply(async{ return Error (AlreadyClosedException("Consumer is already closed"))})
+            batchWaitingChannel.Reply(async{ return Error (AlreadyClosedException("Consumer is already closed") :> exn)})
 
     let singleInit (consumerInitInfo: ConsumerInitInfo<'T>) =
         let topic = consumerInitInfo.TopicName

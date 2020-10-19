@@ -450,10 +450,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         cleanup(this)
         while waiters.Count > 0 do
             let waitingChannel = waiters.Dequeue()
-            waitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed")))
+            waitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed") :> exn))
         while batchWaiters.Count > 0 do
             let cts, batchWaitingChannel = batchWaiters.Dequeue()
-            batchWaitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed")))
+            batchWaitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed") :> exn))
             cts.Cancel()
             cts.Dispose()
         Log.Logger.LogInformation("{0} stopped", prefix)
@@ -609,7 +609,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 isMessageUndecryptable isChunkedMessage schemaDecodeFunction
             async.Return ()
         with
-        | BatchDeserializationException _ ->
+        | :? BatchDeserializationException ->
             discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
         
         
@@ -684,7 +684,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 connectionHandler.Failed()
                                 subscribeTsc.SetException(ex)
                                 stopConsumer()
-                            | TopicDoesNotExistException reason ->
+                            | :? TopicDoesNotExistException ->
                                 // The topic was deleted after the consumer was created, and we're
                                 // not allowed to recreate the topic. This can happen in few cases:
                                 //  * Regex consumer getting error after topic gets deleted
@@ -693,7 +693,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 // No more retries are needed in this case.
                                 connectionHandler.Failed()
                                 stopConsumer()
-                                Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, reason)
+                                Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
                             | _ ->
                                 // consumer was subscribed and connected but we got some error, keep trying
                                 connectionHandler.ReconnectLater ex
@@ -904,7 +904,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
                             channel.Reply <| Error ex
                     | _ ->
-                        channel.Reply <| Error(NotConnectedException "Not connected to broker")
+                        channel.Reply <| Error ((NotConnectedException "Not connected to broker") :> exn)
                         Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
                     return! loop ()
 
@@ -1032,7 +1032,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             channel.Reply <| Error ex
                     | _ ->
                         Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
-                        channel.Reply <| Error(NotConnectedException "Not connected to broker")
+                        channel.Reply <| Error((NotConnectedException "Not connected to broker") :> exn)
                         return! loop ()
             }
         loop ()

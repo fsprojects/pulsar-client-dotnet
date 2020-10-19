@@ -293,22 +293,29 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     let getPulsarClientException error errorMsg =
         match error with
-        | ServerError.AuthenticationError -> AuthenticationException errorMsg
-        | ServerError.AuthorizationError -> AuthorizationException errorMsg
-        | ServerError.ProducerBusy -> ProducerBusyException errorMsg
-        | ServerError.ConsumerBusy -> ConsumerBusyException errorMsg
-        | ServerError.MetadataError -> BrokerMetadataException errorMsg
-        | ServerError.PersistenceError -> BrokerPersistenceException errorMsg
-        | ServerError.ServiceNotReady -> LookupException errorMsg
-        | ServerError.TooManyRequests -> TooManyRequestsException errorMsg
-        | ServerError.ProducerBlockedQuotaExceededError -> ProducerBlockedQuotaExceededError errorMsg
-        | ServerError.ProducerBlockedQuotaExceededException -> ProducerBlockedQuotaExceededException errorMsg
-        | ServerError.TopicTerminatedError -> TopicTerminatedException errorMsg
-        | ServerError.IncompatibleSchema -> IncompatibleSchemaException errorMsg
-        | ServerError.TopicNotFound -> TopicDoesNotExistException errorMsg
-        | ServerError.ConsumerAssignError -> ConsumerAssignException errorMsg
-        | ServerError.NotAllowedError -> NotAllowedException errorMsg
-        | _ -> Exception errorMsg
+        | ServerError.MetadataError -> BrokerMetadataException errorMsg :> exn
+        | ServerError.PersistenceError -> BrokerPersistenceException errorMsg :> exn
+        | ServerError.AuthenticationError -> AuthenticationException errorMsg :> exn
+        | ServerError.AuthorizationError -> AuthorizationException errorMsg :> exn
+        | ServerError.ConsumerBusy -> ConsumerBusyException errorMsg :> exn
+        | ServerError.ServiceNotReady -> LookupException errorMsg :> exn
+        | ServerError.ProducerBlockedQuotaExceededError -> ProducerBlockedQuotaExceededError errorMsg :> exn
+        | ServerError.ProducerBlockedQuotaExceededException -> ProducerBlockedQuotaExceededException errorMsg :> exn
+        | ServerError.ChecksumError -> ChecksumException errorMsg :> exn
+        | ServerError.UnsupportedVersionError -> UnsupportedVersionException errorMsg :> exn
+        | ServerError.TopicNotFound -> TopicDoesNotExistException errorMsg :> exn
+        | ServerError.SubscriptionNotFound -> SubscriptionNotFoundException errorMsg :> exn
+        | ServerError.ConsumerNotFound -> ConsumerNotFoundException errorMsg :> exn
+        | ServerError.TooManyRequests -> TooManyRequestsException errorMsg :> exn
+        | ServerError.TopicTerminatedError -> TopicTerminatedException errorMsg :> exn
+        | ServerError.ProducerBusy -> ProducerBusyException errorMsg :> exn
+        | ServerError.InvalidTopicName -> InvalidTopicNameException errorMsg :> exn
+        | ServerError.IncompatibleSchema -> IncompatibleSchemaException errorMsg :> exn
+        | ServerError.ConsumerAssignError -> ConsumerAssignException errorMsg :> exn
+        | ServerError.TransactionCoordinatorNotFound -> TransactionCoordinatorNotFoundException errorMsg :> exn
+        | ServerError.InvalidTxnStatus -> InvalidTxnStatusException errorMsg :> exn
+        | ServerError.NotAllowedError -> NotAllowedException errorMsg :> exn
+        | _ -> exn errorMsg
 
     let handleError requestId error msg =
         let exc = getPulsarClientException error msg

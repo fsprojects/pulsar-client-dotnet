@@ -62,7 +62,7 @@ type internal ConnectionHandler( parentPrefix: string,
                                 | MaxMessageSizeChanged newSize ->
                                     Log.Logger.LogInformation("{0} MaxMessageSizeChanged to {1}", prefix, newSize)
                                     maxMessageSize <- newSize
-                                    this.Mb.Post(GrabCnx)                                
+                                    this.Mb.Post(GrabCnx)
                                 | _ ->
                                     Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
                                     connectionFailed ex
@@ -146,9 +146,9 @@ type internal ConnectionHandler( parentPrefix: string,
     member this.CheckIfActive() =
         match this.ConnectionState with
         | Ready _ | Connecting -> null
-        | Closing | Closed -> AlreadyClosedException(prefix + "already closed")
-        | Terminated -> AlreadyClosedException(prefix + " topic was terminated")
-        | Failed | Uninitialized -> NotConnectedException(prefix + " not connected")
+        | Closing | Closed -> AlreadyClosedException(prefix + "already closed") :> exn
+        | Terminated -> AlreadyClosedException(prefix + " topic was terminated") :> exn
+        | Failed | Uninitialized -> NotConnectedException(prefix + " not connected") :> exn
         
     member this.Close() =
         mb.Post(Close)

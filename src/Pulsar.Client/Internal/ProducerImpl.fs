@@ -483,24 +483,24 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             clientCnx.RemoveProducer producerId
                             Log.Logger.LogError(ex, "{0} Failed to create", prefix)
                             match ex with                            
-                            | TopicDoesNotExistException reason ->
+                            | :? TopicDoesNotExistException ->
                                 match connectionHandler.ConnectionState with
                                 | Failed ->
-                                    Log.Logger.LogWarning("{0} Topic doesn't exist exception {1}", prefix, reason)
+                                    Log.Logger.LogWarning("{0} Topic doesn't exist exception {1}", prefix, ex.Message)
                                     this.Mb.PostAndAsyncReply(ProducerMessage.Close) |> ignore
                                     producerCreatedTsc.TrySetException(ex) |> ignore
                                 | _ -> ()
-                            | ProducerBlockedQuotaExceededException reason ->
-                                Log.Logger.LogWarning("{0} Topic backlog quota exceeded. {1}", prefix, reason)
+                            | :? ProducerBlockedQuotaExceededException ->
+                                Log.Logger.LogWarning("{0} Topic backlog quota exceeded. {1}", prefix, ex.Message)
                                 failPendingMessages(ex)
-                            | ProducerBlockedQuotaExceededError reason ->
-                                Log.Logger.LogWarning("{0} is blocked on creation because backlog exceeded. {1}", prefix, reason)
+                            | :? ProducerBlockedQuotaExceededError ->
+                                Log.Logger.LogWarning("{0} is blocked on creation because backlog exceeded. {1}", prefix, ex.Message)
                             | _ ->
                                 ()
 
                             match ex with
-                            | TopicTerminatedException reason ->
-                                Log.Logger.LogWarning("{0} is terminated. {1}", prefix, reason)
+                            | :? TopicTerminatedException ->
+                                Log.Logger.LogWarning("{0} is terminated. {1}", prefix, ex.Message)
                                 connectionHandler.Terminate()
                                 failPendingMessages(ex)
                                 producerCreatedTsc.TrySetException(ex) |> ignore
