@@ -84,13 +84,13 @@ let convertToDateTime (msTimestamp: int64) =
 
 // Mix
 
-let asyncDelay delay work =
+let asyncDelay (delay: int) work =
     async {
-        do! Async.Sleep delay
+        do! Async.Sleep delay 
         work()
     } |> Async.StartImmediate
     
-let asyncCancellableDelay delay work ct =
+let asyncCancellableDelay (delay: int) work ct =
     Async.StartImmediate(async {
         do! Async.Sleep delay
         work()
