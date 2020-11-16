@@ -84,17 +84,17 @@ let convertToDateTime (msTimestamp: int64) =
 
 // Mix
 
-let asyncDelay (delay: int) work =
+let asyncDelay (delay: TimeSpan) work =
     async {
         do! Async.Sleep delay 
         work()
     } |> Async.StartImmediate
-    
-let asyncCancellableDelay (delay: int) work ct =
-    Async.StartImmediate(async {
-        do! Async.Sleep delay
+
+let asyncDelayMs (delay: int) work =
+    async {
+        do! Async.Sleep delay 
         work()
-    }, ct)
+    } |> Async.StartImmediate
 
 let signSafeMod dividend divisor =
     let modulo = dividend % divisor
@@ -121,3 +121,9 @@ let fromLongArray (ackSets: int64[]) (numMessagesInBatch: int) =
             bitArray.[index] <- (ackSet &&& (1L <<< bitNumber-1)) <> 0L // https://stackoverflow.com/a/4854257/1780648
             index <- index + 1
     bitArray
+    
+let tryPeek (queue: Queue<'T>) =
+    if queue.Count > 0 then
+        queue.Peek() |> Some
+    else
+        None

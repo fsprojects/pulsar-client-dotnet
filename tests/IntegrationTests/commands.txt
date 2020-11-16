@@ -15,5 +15,10 @@ bin/pulsar-admin topics create-partitioned-topic persistent://public/deduplicati
 // for TLS testing
 kubectl cp certs\ca.cert.pem pulsar/pulsar-broker-786d5756bf-tx5wd:/pulsar/conf/ca.cert.pem
 
+// to start minikube
+minikube start --profile=pulsar --vm-driver=hyperv --hyperv-virtual-switch=kubevs --disk-size=45gb --cpus 4 --memory 8192
+
 // for time sync
  minikube ssh -- sudo date -u $((get-date).AddHours(-3).AddSeconds(7).ToString("MMddHHmmyyyy.ss"))
+ 
+ 

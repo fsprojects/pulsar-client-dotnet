@@ -54,7 +54,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                     let index = tasks.IndexOf(completedTask)
                     if index > 0 then
                         tasks.[index] <- generators.[index]()
-                    else                        
+                    else
                         Log.Logger.LogWarning("TaskSeq: generator was removed, but task has completed")
                     if tasks.Count > 1 && waitingQueue.Count > 0 then
                         let channel = waitingQueue.Dequeue()

@@ -1,6 +1,7 @@
 ﻿namespace Pulsar.Client.Api
 
 open System
+open System.Threading
 open System.Threading.Tasks
 open Pulsar.Client.Common
 
@@ -9,8 +10,12 @@ type IConsumer<'T> =
 
     /// Receive a single message, wait asynchronously if no message is ready.
     abstract member ReceiveAsync: unit -> Task<Message<'T>>
+    /// Receive a single message, wait asynchronously if no message is ready, can be cancelled.
+    abstract member ReceiveAsync: CancellationToken -> Task<Message<'T>>
     /// Retrieves messages when has enough messages or wait timeout and completes with received messages.
     abstract member BatchReceiveAsync: unit -> Task<Messages<'T>>
+    /// Retrieves messages when has enough messages or wait timeout and completes with received messages, can be cancelled.
+    abstract member BatchReceiveAsync: CancellationToken -> Task<Messages<'T>>
     /// Asynchronously acknowledge the consumption of a single message
     abstract member AcknowledgeAsync: messageId:MessageId -> Task<unit>
     /// Asynchronously acknowledge the consumption of Messages

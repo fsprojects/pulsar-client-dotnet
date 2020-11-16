@@ -1,6 +1,7 @@
 ﻿namespace Pulsar.Client.Internal
 
 open System.Collections
+open System.Text
 open FSharp.UMX
 open Pulsar.Client.Common
 
@@ -41,7 +42,16 @@ type BatchMessageAcker internal (batchSize: int) =
 
     override this.GetHashCode () = 0
 
-    override this.ToString() = "UnackedCount: " + unackedCount.ToString()
+    override this.ToString() =
+        let sb1 = StringBuilder()
+        for i in 0..bitSet.Length-1 do
+            sb1.Append(if bitSet.[i] then '1' else '0') |> ignore
+        let sb2 = StringBuilder()
+        sb2.Append("BatchMessageAcker{")
+            .Append("batchSize=").Append(batchSize)
+            .Append(", bitSet=").Append(sb1)
+            .Append(", prevBatchCumulativelyAcked=").Append(this.PrevBatchCumulativelyAcked)
+            .Append("}").ToString()
 
     interface System.IComparable with
          member x.CompareTo _ = 0

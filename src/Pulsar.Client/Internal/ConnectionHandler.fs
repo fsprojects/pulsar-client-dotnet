@@ -80,7 +80,7 @@ type internal ConnectionHandler( parentPrefix: string,
                             prefix, topic, this.ConnectionState, delay)
                         this.ConnectionState <- Connecting
                         epoch <- epoch + 1UL
-                        asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
+                        asyncDelayMs delay (fun() -> this.Mb.Post GrabCnx)
                     else
                         Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
                     return! loop ()
@@ -97,7 +97,7 @@ type internal ConnectionHandler( parentPrefix: string,
                                 prefix, topic, this.ConnectionState, delay)
                             this.ConnectionState <- Connecting
                             epoch <- epoch + 1UL
-                            asyncDelay delay (fun() -> this.Mb.Post(GrabCnx))
+                            asyncDelayMs delay (fun() -> this.Mb.Post GrabCnx)
                         else
                             Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
                     return! loop ()

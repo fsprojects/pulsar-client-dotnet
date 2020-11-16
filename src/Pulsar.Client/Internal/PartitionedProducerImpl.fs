@@ -155,7 +155,6 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         this.ConnectionState <- Ready
                         Log.Logger.LogInformation("{0} created", prefix)
                         producerCreatedTsc.SetResult()
-                        return! loop ()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not create", prefix)
                         do! producerTasks
@@ -167,6 +166,9 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         this.ConnectionState <- Failed
                         producerCreatedTsc.SetException(ex)
                         stopProducer()
+                        
+                    if this.ConnectionState <> Failed then
+                        return! loop ()
                         
                 | LastSequenceId channel ->
 
