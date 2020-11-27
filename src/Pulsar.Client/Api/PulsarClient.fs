@@ -260,8 +260,8 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                 mb.Post(AddConsumer consumer)
                 return consumer :> IConsumer<'T>
             else
-                let! consumer = ConsumerImpl.Init(consumerConfig, config, consumerConfig.SingleTopic, connectionPool, -1, None, lookupService, true,
-                                                  activeSchema, schemaProvider, interceptors, removeConsumer)
+                let! consumer = ConsumerImpl.Init(consumerConfig, config, consumerConfig.SingleTopic, connectionPool, -1, false,
+                                                  None, lookupService, true, activeSchema, schemaProvider, interceptors, removeConsumer)
                 mb.Post(AddConsumer consumer)
                 return consumer :> IConsumer<'T>
         }

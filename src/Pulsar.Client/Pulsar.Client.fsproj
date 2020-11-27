@@ -62,7 +62,7 @@
     <Compile Include="Api\ISchema.fs" />
     <Compile Include="Api\PulsarClientException.fs" />
     <Compile Include="Common\Commands.fs" />
-    <Compile Include="Common\Batch.fs" />
+    <Compile Include="Common\ConsumerBase.fs" />
     <Compile Include="Api\AuthenticationDataProvider.fs" />
     <Compile Include="Api\Authentication.fs" />
     <Compile Include="Api\IMessageRouter.fs" />

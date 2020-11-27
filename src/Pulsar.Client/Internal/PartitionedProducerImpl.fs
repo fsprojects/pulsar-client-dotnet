@@ -122,6 +122,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
     let stopProducer() =
         cleanup(this)
         timer.Close()
+        Log.Logger.LogInformation("{0} stopped", prefix)
 
     let mb = MailboxProcessor<PartitionedProducerMessage>.Start(fun inbox ->
 
@@ -234,14 +235,15 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                                     prefix, numPartitions, partitionedTopicNames.Length )
                                 numPartitions <- partitionedTopicNames.Length
                             with Flatten ex ->
+                                Log.Logger.LogWarning(ex, "{0} fail create producers for extended partitions. old: {1}, new: {2}",
+                                    prefix, numPartitions, partitionedTopicNames.Length )
                                 do! producerTasks
                                     |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
                                     |> Seq.map (fun t -> task { return! t.Result.DisposeAsync() })
                                     |> Task.WhenAll
                                     |> Async.AwaitTask
                                     |> Async.Ignore
-                                Log.Logger.LogWarning(ex, "{0} fail create producers for extended partitions. old: {1}, new: {2}",
-                                    prefix, numPartitions, partitionedTopicNames.Length )
+                                Log.Logger.LogInformation("{0} disposed partially created producers", prefix)
                         else
                             Log.Logger.LogError("{0} not support shrink topic partitions. old: {1}, new: {2}",
                                 prefix, numPartitions, partitionedTopicNames.Length )

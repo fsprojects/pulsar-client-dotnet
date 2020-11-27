@@ -8,11 +8,12 @@ open Microsoft.Extensions.Logging
 type internal TaskGenerator<'T> = unit -> Task<'T>
 
 type internal TaskSeqMessage<'T> =
-    | RestartNext of AsyncReplyChannel<Task<Task<'T>>>
+    | WhenAnyTask of AsyncReplyChannel<Task<Task<'T>>>
     | Next of AsyncReplyChannel<Task<Task<'T>>>
     | NextComplete of Task<'T>
     | AddGenerators of TaskGenerator<'T> seq
     | RemoveGenerator of TaskGenerator<'T>
+    | RestartCompletedTasks
 
 type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
     let tasks = ResizeArray<Task<'T>>()
@@ -28,9 +29,9 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
             async {
                 let! msg = inbox.Receive()
                 match msg with
-                | RestartNext channel ->
+                | WhenAnyTask channel ->
                     
-                    Log.Logger.LogTrace("TaskSeq.RestartNext nextWaiting:{0}", nextWaiting)
+                    Log.Logger.LogTrace("TaskSeq.WhenAnyTask nextWaiting:{0}", nextWaiting)
                     tasks |> Task.WhenAny |> channel.Reply
                     return! loop ()
                 
@@ -62,6 +63,14 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                     else
                         nextWaiting <- false
                     return! loop ()
+                    
+                | RestartCompletedTasks ->
+                    
+                    Log.Logger.LogTrace("TaskSeq.RestartCompleted nextWaiting:{0}", nextWaiting)
+                    for index in 0..tasks.Count-1 do
+                        if tasks.[index].IsCompleted then
+                            tasks.[index] <- generators.[index]()
+                    return! loop()
                     
                 | AddGenerators newGenerators ->
                     
@@ -104,7 +113,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
 
     member private this.RestartNext() =
         async {
-            let! whenAnyTask = mb.PostAndAsyncReply(RestartNext)
+            let! whenAnyTask = mb.PostAndAsyncReply(WhenAnyTask)
             let! completedTask = whenAnyTask |> Async.AwaitTask
             Log.Logger.LogTrace("TaskSeq.RestartNext {0}", completedTask.Status) 
             if completedTask.IsCanceled then
@@ -132,3 +141,6 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
         
     member this.RemoveGenerator generator =
         mb.Post(RemoveGenerator generator)
+        
+    member this.RestartCompletedTasks() =
+        mb.Post(RestartCompletedTasks)
