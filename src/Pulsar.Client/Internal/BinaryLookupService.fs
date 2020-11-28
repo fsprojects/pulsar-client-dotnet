@@ -16,20 +16,37 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
     member this.GetPartitionsForTopic (topicName: TopicName) =
         task {
             let! metadata = this.GetPartitionedTopicMetadata topicName.CompleteTopicName
-            if metadata.Partitions > 0
-            then
-                return Array.init metadata.Partitions (fun i -> topicName.GetPartition(i))
+            if metadata.Partitions > 0 then
+                return Array.init metadata.Partitions topicName.GetPartition
             else
                 return [| topicName |]
         }
 
-    member this.GetPartitionedTopicMetadata topicName =
+    member private this.GetPartitionedTopicMetadata (endpoint, topicName, backoff: Backoff, remainingTimeMs) =
+         async {
+            try
+                let! clientCnx = endpoint |> connectionPool.GetBrokerlessConnection |> Async.AwaitTask
+                let requestId = Generators.getNextRequestId()
+                let payload = Commands.newPartitionMetadataRequest topicName requestId
+                let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                return PulsarResponseType.GetPartitionedTopicMetadata response
+            with Flatten ex ->
+                let delay = Math.Min(backoff.Next(), remainingTimeMs)
+                if delay <= 0 then
+                    raise (TimeoutException "Could not GetPartitionedTopicMetadata within configured timeout.")
+                Log.Logger.LogWarning(ex, "GetPartitionedTopicMetadata failed will retry in {0} ms", delay)
+                do! Async.Sleep delay
+                return! this.GetPartitionedTopicMetadata(endpoint, topicName, backoff, remainingTimeMs - delay)
+        }
+        
+     member this.GetPartitionedTopicMetadata topicName =
         task {
-            let! clientCnx = resolveEndPoint() |> connectionPool.GetBrokerlessConnection
-            let requestId = Generators.getNextRequestId()
-            let payload = Commands.newPartitionMetadataRequest topicName requestId
-            let! response = clientCnx.SendAndWaitForReply requestId payload
-            return PulsarResponseType.GetPartitionedTopicMetadata response
+            let backoff = Backoff { BackoffConfig.Default with
+                                        Initial = TimeSpan.FromMilliseconds(100.0)
+                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
+                                        Max = TimeSpan.FromMinutes(1.0) }
+            let! result = this.GetPartitionedTopicMetadata(resolveEndPoint(), topicName, backoff, int config.OperationTimeout.TotalMilliseconds)
+            return result
         }
 
     member this.GetBroker(topicName: CompleteTopicName) =
@@ -56,7 +73,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
             // (2) redirect to given address if response is: redirect
             if lookupTopicResult.Redirect then
                 Log.Logger.LogDebug("Redirecting to {0} topicName {1}", resultEndpoint, topicName)
-                return!  this.FindBroker(resultEndpoint, lookupTopicResult.Authoritative, topicName, redirectCount + 1)
+                return! this.FindBroker(resultEndpoint, lookupTopicResult.Authoritative, topicName, redirectCount + 1)
             else
                 // (3) received correct broker to connect
                 return if lookupTopicResult.Proxy
@@ -93,20 +110,33 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 return! this.GetTopicsUnderNamespace(endpoint, ns, backoff, remainingTimeMs - delay, isPersistent)
         }
         
-    member this.GetSchema(topicName: CompleteTopicName, schemaVersion: SchemaVersion) =
-        this.GetSchema(resolveEndPoint(), topicName, Some schemaVersion)
-        
-    member this.GetSchema(topicName: CompleteTopicName) =
-        this.GetSchema(resolveEndPoint(), topicName, None)
-        
-    member private this.GetSchema(endpoint: DnsEndPoint, topicName: CompleteTopicName, schemaVersion: SchemaVersion option) =
+    member this.GetSchema(topicName: CompleteTopicName, ?schemaVersion: SchemaVersion) =
         task {
-            let! clientCnx = connectionPool.GetBrokerlessConnection endpoint
-            let requestId = Generators.getNextRequestId()
-            let payload = Commands.newGetSchema topicName requestId schemaVersion
-            let! response = clientCnx.SendAndWaitForReply requestId payload
-            let schema = PulsarResponseType.GetTopicSchema response
-            if schema.IsNone then
-                Log.Logger.LogWarning("No schema found for topic {0} version {1}", topicName, schemaVersion)
-            return schema
+            let backoff = Backoff { BackoffConfig.Default with
+                                        Initial = TimeSpan.FromMilliseconds(100.0)
+                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
+                                        Max = TimeSpan.FromMinutes(1.0) }
+            let! result = this.GetSchema(resolveEndPoint(), topicName, schemaVersion, backoff, int config.OperationTimeout.TotalMilliseconds)
+            return result
+        }
+        
+    member private this.GetSchema(endpoint: DnsEndPoint, topicName: CompleteTopicName, schemaVersion: SchemaVersion option,
+                                  backoff: Backoff, remainingTimeMs: int) =
+        async {
+            try
+                let! clientCnx = connectionPool.GetBrokerlessConnection endpoint |> Async.AwaitTask
+                let requestId = Generators.getNextRequestId()
+                let payload = Commands.newGetSchema topicName requestId schemaVersion
+                let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                let schema = PulsarResponseType.GetTopicSchema response
+                if schema.IsNone then
+                    Log.Logger.LogWarning("No schema found for topic {0} version {1}", topicName, schemaVersion)
+                return schema
+            with Flatten ex ->
+                let delay = Math.Min(backoff.Next(), remainingTimeMs)
+                if delay <= 0 then
+                    raise (TimeoutException "Could not GetSchema within configured timeout.")
+                Log.Logger.LogWarning(ex, "GetSchema failed will retry in {0} ms", delay)
+                do! Async.Sleep delay
+                return! this.GetSchema(endpoint, topicName, schemaVersion, backoff, remainingTimeMs - delay)
         }

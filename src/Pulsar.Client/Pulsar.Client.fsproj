@@ -32,7 +32,7 @@
     <WarningLevel>3</WarningLevel>
     <WarningsAsErrors>3239;0025</WarningsAsErrors>
     <DebugType>portable</DebugType>
-    <NoWarn>3186</NoWarn>
+    <NoWarn>3186;40</NoWarn>
     <PackageIcon>pulsar-client-dotnet.png</PackageIcon>
     <PackageIconUrl />
   </PropertyGroup>

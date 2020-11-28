@@ -379,7 +379,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
     let hasEnoughMessagesForBatchReceive() =
         ConsumerBase.hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
     
-    let getNewPartitions () =
+    let getAllPartitions () =
         task {
             try
                 let! results =
@@ -715,7 +715,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     | Ready ->
                         // Check partitions changes of passed in topics, and add new topic partitions.
                         let! newPartitionsOption =
-                            getNewPartitions() 
+                            getAllPartitions() 
                             |> Async.AwaitTask
                         match newPartitionsOption with
                         | Some newPartitions ->
