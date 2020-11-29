@@ -611,9 +611,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 with ex ->
                     Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
                     raise <| BatchDeserializationException "Batch reading exception"
+                // try respond to channel
                 if hasWaitingChannel && incomingMessages.Count > 0 then
                     let waitingChannel = waiters |> ConsumerBase.dequeueWaiter
                     replyWithMessage waitingChannel <| dequeueMessage()
+                elif hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                    let cts, ch = batchWaiters |> ConsumerBase.dequeueBatchWaiter
+                    replyWithBatch (Some cts) ch
             else
                 Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
     
