@@ -13,6 +13,14 @@ open System.IO
 open ProtoBuf
 open System.Threading
 open Pulsar.Client.Api
+open System.Timers
+
+type internal RequestTime =
+    {
+        RequestStartTime: DateTime
+        RequestId: RequestId
+        ResponseTcs: TaskCompletionSource<PulsarResponseType>
+    }
 
 type internal ProducerOperations =
     {
@@ -34,6 +42,7 @@ and internal RequestsOperation =
     | CompleteRequest of RequestId * PulsarResponseType
     | FailRequest of RequestId * exn
     | FailAllRequestsAndStop
+    | Tick
     
 and internal CnxOperation =
     | AddProducer of ProducerId * ProducerOperations
@@ -84,12 +93,42 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     let consumers = Dictionary<ConsumerId, ConsumerOperations>()
     let producers = Dictionary<ProducerId, ProducerOperations>()
     let requests = Dictionary<RequestId, TaskCompletionSource<PulsarResponseType>>()
+    let requestTimeoutQueue = Queue<RequestTime>()
     let clientCnxId = Generators.getNextClientCnxId()
     let prefix = sprintf "clientCnx(%i, %A)" %clientCnxId broker.LogicalAddress
     let maxNumberOfRejectedRequestPerConnection = config.MaxNumberOfRejectedRequestPerConnection
     let rejectedRequestResetTimeSec = 60
     let mutable numberOfRejectedRequests = 0
     let mutable isActive = true
+    let requestTimeoutTimer = new Timer()
+    let startRequestTimeoutTimer () =
+        requestTimeoutTimer.Interval <- config.OperationTimeout.TotalMilliseconds
+        requestTimeoutTimer.AutoReset <- true
+        requestTimeoutTimer.Elapsed.Add(fun _ -> this.RequestsMb.Post(Tick))
+        requestTimeoutTimer.Start()
+    
+    let failRequest reqId (ex: exn) =
+        Log.Logger.LogWarning(ex, "{0} fail request {1}", prefix, reqId)
+        match requests.TryGetValue(reqId) with
+        | true, tsc ->
+            tsc.SetException ex
+            requests.Remove reqId |> ignore
+        | _ ->
+            Log.Logger.LogWarning(ex, "{0} fail non-existent request {1}, ignoring", prefix, reqId)
+    
+    let rec hanleTimeoutedMessages() =
+        if requestTimeoutQueue.Count > 0 then
+            let request = requestTimeoutQueue.Peek()
+            let currentDiff = DateTime.Now - request.RequestStartTime
+            if currentDiff >= config.OperationTimeout then
+                let request = requestTimeoutQueue.Dequeue()
+                let ex = TimeoutException <| String.Format("{0} {1} timedout after {2}ms",
+                                                prefix, request.RequestId, currentDiff.TotalMilliseconds)
+                failRequest request.RequestId ex
+                hanleTimeoutedMessages()
+            else
+                // if there is no request that is timed out then exit the loop
+                ()
     
     let requestsMb = MailboxProcessor<RequestsOperation>.Start(fun inbox ->
         let rec loop () =
@@ -98,8 +137,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 | AddRequest (reqId, tsc) ->
                     Log.Logger.LogDebug("{0} add request {1}", prefix, reqId)
                     requests.Add(reqId, tsc)
+                    requestTimeoutQueue.Enqueue({ RequestStartTime = DateTime.Now; RequestId = reqId; ResponseTcs = tsc })
                     return! loop()
-                | CompleteRequest (reqId, result)  ->
+                | CompleteRequest (reqId, result) ->
                     Log.Logger.LogDebug("{0} complete request {1}", prefix, reqId)
                     match requests.TryGetValue(reqId) with
                     | true, tsc ->
@@ -108,20 +148,17 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     | _ ->
                         Log.Logger.LogWarning("{0} complete non-existent request {1}, ignoring", prefix, reqId)
                     return! loop()
-                | FailRequest (reqId, ex)  ->
-                    Log.Logger.LogDebug("{0} fail request {1}", prefix, reqId)
-                    match requests.TryGetValue(reqId) with
-                    | true, tsc ->
-                        tsc.SetException ex
-                        requests.Remove reqId |> ignore
-                    | _ ->
-                        Log.Logger.LogWarning("{0} fail non-existent request {1}, ignoring", prefix, reqId)
+                | FailRequest (reqId, ex) ->
+                    failRequest reqId ex
                     return! loop()
                 | FailAllRequestsAndStop ->
                     Log.Logger.LogDebug("{0} fail requests and stop", prefix)
                     requests |> Seq.iter (fun kv ->
                         kv.Value.SetException(ConnectException("Disconnected.")))
                     requests.Clear()
+                 | Tick ->
+                    hanleTimeoutedMessages()
+                    return! loop ()
             }
         loop ()
     )
@@ -182,7 +219,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 operationsMb.Post(ChannelInactive)
                 return false
         }
-
+    
     let sendMb = MailboxProcessor<SocketMessage>.Start(fun inbox ->
         let rec loop () =
             async {
@@ -263,7 +300,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     
     let tryParse (buffer: ReadOnlySequence<byte>) =
         let length = int buffer.Length
-        if (length >= 8) then            
+        if (length >= 8) then
             let array = ArrayPool.Shared.Rent length
             try
                 buffer.CopyTo(Span(array))
@@ -271,7 +308,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 use reader = new BinaryReader(stream)
                 let totalength = reader.ReadInt32() |> int32FromBigEndian
                 let frameLength = totalength + 4
-                if (length >= frameLength) then                
+                if (length >= frameLength) then
                     let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
                     Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
                     let consumed = int64 frameLength |> buffer.GetPosition
@@ -549,10 +586,13 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     do requestsMb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} requestsMb mailbox failure", prefix))
     do operationsMb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} operationsMb mailbox failure", prefix))
     do sendMb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} sendMb mailbox failure", prefix))
+    do startRequestTimeoutTimer()
     do Task.Run(fun () -> readSocket()) |> ignore
 
     member private this.SendMb with get(): MailboxProcessor<SocketMessage> = sendMb
 
+    member private this.RequestsMb with get(): MailboxProcessor<RequestsOperation> = requestsMb
+    
     member private this.OperationsMb with get(): MailboxProcessor<CnxOperation> = operationsMb
 
     member this.MaxMessageSize with get() = maxMessageSize

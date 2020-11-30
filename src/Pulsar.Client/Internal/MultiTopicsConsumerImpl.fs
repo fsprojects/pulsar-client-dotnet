@@ -10,6 +10,7 @@ open Pulsar.Client.Common
 open Microsoft.Extensions.Logging
 open System.Threading
 open System.Timers
+open ConsumerBase
 
 type internal MultiTopicConnectionState =
     | Uninitialized
@@ -190,10 +191,10 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
         pollerCts.Cancel()
         pollerCts.Dispose()
         while waiters.Count > 0 do
-            let waitingChannel = waiters |> ConsumerBase.dequeueWaiter
+            let waitingChannel = waiters |> dequeueWaiter
             waitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed") :> exn))
         while batchWaiters.Count > 0 do
-            let cts, batchWaitingChannel = batchWaiters |> ConsumerBase.dequeueBatchWaiter
+            let cts, batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
             batchWaitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed") :> exn))
             cts.Cancel()
             cts.Dispose()
@@ -377,7 +378,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
         m
     
     let hasEnoughMessagesForBatchReceive() =
-        ConsumerBase.hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
+        hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
     
     let getAllPartitions () =
         task {
@@ -497,7 +498,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         prefix, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
                     // handle message
                     if hasWaitingChannel then
-                        let waitingChannel = waiters |> ConsumerBase.dequeueWaiter
+                        let waitingChannel = waiters |> dequeueWaiter
                         if (incomingMessages.Count = 0) then
                             replyWithMessage waitingChannel message
                         else
@@ -506,7 +507,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     else
                         enqueueMessage message
                         if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                            let cts, ch = batchWaiters |> ConsumerBase.dequeueBatchWaiter
+                            let cts, ch = batchWaiters |> dequeueBatchWaiter
                             replyWithBatch (Some cts) ch
                     // check if should reply to poller immediately
                     if isPollingAllowed() |> not then
@@ -561,7 +562,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     
                     Log.Logger.LogDebug("{0} SendBatchByTimeout", prefix)
                     if batchWaiters.Count > 0 then
-                        let cts, ch = batchWaiters |> ConsumerBase.dequeueBatchWaiter
+                        let cts, ch = batchWaiters |> dequeueBatchWaiter
                         replyWithBatch (Some cts) ch
                     return! loop ()
                 

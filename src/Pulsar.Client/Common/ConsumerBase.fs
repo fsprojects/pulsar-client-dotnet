@@ -9,7 +9,6 @@ type Waiter<'T> =
 type BatchWaiter<'T> =
     CancellationTokenSource * CancellationTokenRegistration * AsyncReplyChannel<ResultOrException<Messages<'T>>>
 
-
 let hasEnoughMessagesForBatchReceive (batchReceivePolicy: BatchReceivePolicy) incomingMessagesCount incomingMessagesSize =
     if (batchReceivePolicy.MaxNumMessages <= 0 && batchReceivePolicy.MaxNumBytes <= 0L) then
         false

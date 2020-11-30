@@ -14,6 +14,7 @@ open Pulsar.Client.Schema
 open pulsar.proto
 open System.Threading
 open System.Timers
+open ConsumerBase
     
 type internal ParseResult<'T> =
     | ParseOk of struct(byte[]*'T)
@@ -22,11 +23,6 @@ type internal ParseResult<'T> =
 type internal ConsumerTickType =
     | StatTick
     | ChunkTick
-    
-type Waiter<'T> =
-    CancellationTokenRegistration * AsyncReplyChannel<ResultOrException<Message<'T>>> 
-type BatchWaiter<'T> =
-    CancellationTokenSource * CancellationTokenRegistration * AsyncReplyChannel<ResultOrException<Messages<'T>>>
     
 type internal ConsumerMessage<'T> =
     | ConnectionOpened
@@ -400,7 +396,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         msg
 
     let hasEnoughMessagesForBatchReceive() =
-        ConsumerBase.hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
+        hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
         
     /// Record the event that one message has been processed by the application.
     /// Periodically, it sends a Flow command to notify the broker that it can push more messages
@@ -464,10 +460,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         chunkTimer.Stop()
         cleanup(this)
         while waiters.Count > 0 do
-            let waitingChannel = waiters |> ConsumerBase.dequeueWaiter
+            let waitingChannel = waiters |> dequeueWaiter
             waitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed") :> exn))
         while batchWaiters.Count > 0 do
-            let cts, batchWaitingChannel = batchWaiters |> ConsumerBase.dequeueBatchWaiter
+            let cts, batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
             batchWaitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed") :> exn))
             cts.Cancel()
             cts.Dispose()
@@ -576,7 +572,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                 deadLettersProcessor.AddMessage(message.MessageId, message)
             if hasWaitingChannel then
-                let waitingChannel = waiters |> ConsumerBase.dequeueWaiter
+                let waitingChannel = waiters |> dequeueWaiter
                 if (incomingMessages.Count = 0) then
                     replyWithMessage waitingChannel message
                 else
@@ -585,7 +581,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             else
                 enqueueMessage message
                 if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                    let cts, ch = batchWaiters |> ConsumerBase.dequeueBatchWaiter
+                    let cts, ch = batchWaiters |> dequeueBatchWaiter
                     replyWithBatch (Some cts) ch
             
     let handleMessagePayload (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel
@@ -613,10 +609,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     raise <| BatchDeserializationException "Batch reading exception"
                 // try respond to channel
                 if hasWaitingChannel && incomingMessages.Count > 0 then
-                    let waitingChannel = waiters |> ConsumerBase.dequeueWaiter
+                    let waitingChannel = waiters |> dequeueWaiter
                     replyWithMessage waitingChannel <| dequeueMessage()
                 elif hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                    let cts, ch = batchWaiters |> ConsumerBase.dequeueBatchWaiter
+                    let cts, ch = batchWaiters |> dequeueBatchWaiter
                     replyWithBatch (Some cts) ch
             else
                 Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
@@ -822,7 +818,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     
                     Log.Logger.LogDebug("{0} SendBatchByTimeout", prefix)
                     if batchWaiters.Count > 0 then
-                        let cts, ch = batchWaiters |> ConsumerBase.dequeueBatchWaiter
+                        let cts, ch = batchWaiters |> dequeueBatchWaiter
                         replyWithBatch (Some cts) ch
                     return! loop ()
 
