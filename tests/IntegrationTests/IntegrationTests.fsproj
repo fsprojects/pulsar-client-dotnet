@@ -12,6 +12,7 @@
     <Compile Include="Expect.fs" />
     <Compile Include="Common.fs" />
     <Compile Include="Flow.fs" />
+    <Compile Include="Cancellation.fs" />
     <Compile Include="Reader.fs" />
     <Compile Include="Batching.fs" />
     <Compile Include="Acks.fs" />

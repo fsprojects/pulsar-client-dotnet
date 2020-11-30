@@ -37,15 +37,15 @@ type internal BatchAddResponse<'T> =
 
 type internal MultiTopicConsumerMessage<'T> =
     | Init
-    | Receive of AsyncReplyChannel<Task<ResultOrException<Message<'T>>>>
-    | BatchReceive of AsyncReplyChannel<Async<ResultOrException<Messages<'T>>>> * CancellationToken 
-    | BatchReceiveCompleted
-    | BatchTimeout of AsyncReplyChannel<ResultOrException<Messages<'T>>> * CancellationToken
-    | AddBatchMessage of AsyncReplyChannel<BatchAddResponse<'T>> * ResultOrException<Message<'T>> * CancellationToken
+    | Receive of CancellationToken * AsyncReplyChannel<ResultOrException<Message<'T>>>
+    | BatchReceive of CancellationToken * AsyncReplyChannel<ResultOrException<Messages<'T>>>
+    | MessageReceived of ResultOrException<Message<'T>> * AsyncReplyChannel<unit>
+    | SendBatchByTimeout
     | Acknowledge of AsyncReplyChannel<Task<unit>> * MessageId
     | NegativeAcknowledge of AsyncReplyChannel<Task<unit>> * MessageId
     | AcknowledgeCumulative of AsyncReplyChannel<Task<unit>> * MessageId
-    | RedeliverUnacknowledgedMessages of AsyncReplyChannel<Task>
+    | RedeliverUnacknowledged of RedeliverSet * AsyncReplyChannel<Task>
+    | RedeliverAllUnacknowledged of AsyncReplyChannel<Task>
     | Close of AsyncReplyChannel<ResultOrException<unit>>
     | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
     | HasReachedEndOfTheTopic of AsyncReplyChannel<bool>
@@ -55,6 +55,8 @@ type internal MultiTopicConsumerMessage<'T> =
     | GetStats of AsyncReplyChannel<Task<ConsumerStats array>>
     | ReconsumeLater of Message<'T> * int64 * AsyncReplyChannel<Task<unit>>
     | ReconsumeLaterCumulative of Message<'T> * int64 * AsyncReplyChannel<Task<unit>>
+    | RemoveWaiter of Waiter<'T>
+    | RemoveBatchWaiter of BatchWaiter<'T>
 
 type internal TopicAndConsumer<'T> =
     {
@@ -63,41 +65,62 @@ type internal TopicAndConsumer<'T> =
         Consumer: ConsumerImpl<'T>
     }
 
-type internal MultipleTopicsConsumerState<'T> = {
-    Stream: TaskSeq<ResultOrException<Message<'T>>>
-}
-
 type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                                       multiConsumerType: MultiConsumerType<'T>, lookup: BinaryLookupService,
                                       interceptors: ConsumerInterceptors<'T>, cleanup: MultiTopicsConsumerImpl<'T> -> unit) as this =
 
+    let _this = this :> IConsumer<'T>
     let consumerId = Generators.getNextConsumerId()
     let prefix = sprintf "mt/consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
     let consumers = Dictionary<CompleteTopicName,IConsumer<'T> * TaskGenerator<ResultOrException<Message<'T>>>>()
     let consumerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+    let pollerCts = new CancellationTokenSource()
     let mutable connectionState = MultiTopicConnectionState.Uninitialized
+    let mutable currentStream = Unchecked.defaultof<TaskSeq<ResultOrException<Message<'T>>>>
     let partitionedTopics = Dictionary<TopicName, ConsumerInitInfo<'T>>()
     let allTopics = HashSet()
-    let mutable currentBatch = Messages(consumerConfig.BatchReceivePolicy.MaxNumMessages, consumerConfig.BatchReceivePolicy.MaxNumBytes)
-    let batchWaiters = Queue<CancellationToken*AsyncReplyChannel<Async<ResultOrException<Messages<'T>>>>>()
-    let mutable unhandleMessage: ResultOrException<Message<'T>> option = None
-    
-    let alreadyCancelledExn = Error <| Exception "Batch already cancelled"
+    let mutable incomingMessagesSize = 0L
+    let defaultWaitingPoller = Unchecked.defaultof<AsyncReplyChannel<unit>>
+    let mutable waitingPoller = defaultWaitingPoller
+    let waiters = LinkedList<Waiter<'T>>()
+    let batchWaiters = LinkedList<BatchWaiter<'T>>()
+    let incomingMessages = Queue<ResultOrException<Message<'T>>>()
     let partitionsTimer = new Timer(60_000.0) // 1 minute
     let patternTimer = new Timer(consumerConfig.PatternAutoDiscoveryPeriod.TotalMilliseconds)
+    let sharedQueueResumeThreshold = consumerConfig.ReceiverQueueSize / 2
+    
+    let redeliverMessages messages =
+        task {
+            let! result = this.Mb.PostAndAsyncReply(fun channel -> RedeliverUnacknowledged (messages, channel))
+            return! result
+        } |> ignore
+    
+    let unAckedMessageRedeliver messages =
+        interceptors.OnAckTimeoutSend(this, messages)
+        redeliverMessages messages
+    
+    let unAckedMessageTracker =
+        if consumerConfig.AckTimeout > TimeSpan.Zero then
+            if consumerConfig.AckTimeoutTickTime > TimeSpan.Zero then
+                let tickDuration = if consumerConfig.AckTimeout > consumerConfig.AckTimeoutTickTime then consumerConfig.AckTimeoutTickTime else consumerConfig.AckTimeout
+                UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, tickDuration, unAckedMessageRedeliver) :> IUnAckedMessageTracker
+            else
+                UnAckedMessageTracker(prefix, consumerConfig.AckTimeout, consumerConfig.AckTimeout, unAckedMessageRedeliver) :> IUnAckedMessageTracker
+        else
+            UnAckedMessageTracker.UNACKED_MESSAGE_TRACKER_DISABLED
     
     let statsReduce (statsArray: ConsumerStats array) =
         let mutable numMsgsReceived: int64 = 0L
         let mutable numBytesReceived: int64 = 0L
         let mutable numReceiveFailed: int64 = 0L
-        // should be always 0 for multitopics consumer
+        // should be always 0 for multi-topics consumer
         let mutable numBatchReceiveFailed: int64 = 0L
         let mutable numAcksSent: int64 = 0L
         let mutable numAcksFailed: int64 = 0L
         let mutable totalMsgsReceived: int64 = 0L
         let mutable totalBytesReceived: int64 = 0L
         let mutable totalReceiveFailed: int64 = 0L
-        // should be always 0 for multitopics consumer
+        // should be always 0 for multi-topics consumer
         let mutable totalBatchReceiveFailed: int64 = 0L
         let mutable totalAcksSent: int64 = 0L
         let mutable totalAcksFailed: int64 = 0L
@@ -151,7 +174,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 if consumerImp.HasReachedEndOfTopic then
                     Log.Logger.LogWarning("{0} topic was terminated", topic)
                     do! Task.Delay(Timeout.Infinite) // infinite delay for terminated topic
-                let! message = consumer.ReceiveFsharpAsync()
+                let! message = consumer.ReceiveFsharpAsync(CancellationToken.None)
                 return
                     message |> Result.map (fun msg ->
                         let newMessageId = { msg.MessageId with TopicName = topic }
@@ -163,9 +186,18 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
         cleanup(this)
         partitionsTimer.Close()
         patternTimer.Close()
+        unAckedMessageTracker.Close()
+        pollerCts.Cancel()
+        pollerCts.Dispose()
+        while waiters.Count > 0 do
+            let waitingChannel = waiters |> ConsumerBase.dequeueWaiter
+            waitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed") :> exn))
         while batchWaiters.Count > 0 do
-            let _, batchWaitingChannel = batchWaiters.Dequeue()
-            batchWaitingChannel.Reply(async{ return Error (AlreadyClosedException("Consumer is already closed") :> exn)})
+            let cts, batchWaitingChannel = batchWaiters |> ConsumerBase.dequeueBatchWaiter
+            batchWaitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed") :> exn))
+            cts.Cancel()
+            cts.Dispose()
+        Log.Logger.LogInformation("{0} stopped", prefix)
 
     let singleInit (consumerInitInfo: ConsumerInitInfo<'T>) =
         let topic = consumerInitInfo.TopicName
@@ -179,7 +211,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                             Topics = seq { partitionedTopic } |> Seq.cache }
                 task {
                     let! result =    
-                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, partitionIndex,
+                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, partitionIndex, true,
                                           None, lookup, true, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider, interceptors, fun _ -> ())
                     return { IsPartitioned = true; TopicName = partitionedTopic; Consumer = result }
                 })
@@ -226,7 +258,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                                             Topics = seq { partitionedTopic } |> Seq.cache }
                                 task {
                                     let! result =    
-                                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, partitionIndex,
+                                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, partitionIndex, true,
                                                           None, lookup, createTopicIfDoesNotExist, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider, interceptors, fun _ -> ())
                                     return { IsPartitioned = true; TopicName = partitionedTopic; Consumer = result }
                                 })
@@ -237,7 +269,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                                                 ReceiverQueueSize = receiverQueueSize
                                                                 Topics = seq { consumerInitInfo.TopicName } |> Seq.cache }
                                     let! result =    
-                                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, -1,
+                                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, -1, true,
                                                           None, lookup, createTopicIfDoesNotExist, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider, interceptors, fun _ -> ())
                                     return { IsPartitioned = false; TopicName = consumerInitInfo.TopicName; Consumer = result }
                                 }
@@ -323,33 +355,100 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         partitionedTopics.Remove(removedTopic) |> ignore
                         stream)
                     |> Seq.cache
-        }
+        }    
+   
+    let isPollingAllowed() =
+        incomingMessages.Count <= sharedQueueResumeThreshold
+     
+    let enqueueMessage (m: ResultOrException<Message<'T>>) =
+        match m with
+        | Ok msg -> incomingMessagesSize <- incomingMessagesSize + msg.Data.LongLength
+        | _ -> ()
+        incomingMessages.Enqueue(m)
+
+    let dequeueMessage() =
+        let m = incomingMessages.Dequeue()
+        match m with
+        | Ok msg -> incomingMessagesSize <- incomingMessagesSize - msg.Data.LongLength
+        | _ -> ()
+        if isPollingAllowed() && (waitingPoller <> defaultWaitingPoller) then
+            waitingPoller.Reply()
+            waitingPoller <- defaultWaitingPoller
+        m
     
-    let rec work ct =
-        async {
-            let! msgAsync = this.Mb.PostAndAsyncReply(Receive)
-            let! msg = msgAsync |> Async.AwaitTask
-            match! this.Mb.PostAndAsyncReply(fun ch -> AddBatchMessage(ch, msg, ct)) with
-            | BatchReady msgs ->
-                Log.Logger.LogDebug("{0} completing batch work. {1} messages", prefix, msgs.Count)
-                return Ok msgs
-            | Success ->
-                Log.Logger.LogDebug("{0} adding one message to batch", prefix)
-                return! work ct
-            | Expired ->
-                Log.Logger.LogDebug("{0} batch work expired", prefix)
-                return alreadyCancelledExn
+    let hasEnoughMessagesForBatchReceive() =
+        ConsumerBase.hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
+    
+    let getAllPartitions () =
+        task {
+            try
+                let! results =
+                    partitionedTopics
+                    |> Seq.map (fun (KeyValue(topic, _)) -> task {
+                            let! partitionNames = lookup.GetPartitionsForTopic(topic)
+                            return (topic, partitionNames) 
+                        })
+                    |> Task.WhenAll
+                return Some results
+            with ex ->
+               Log.Logger.LogWarning(ex, "{0} Unabled to fetch new topics", prefix)
+               return None
         }
         
-    let completeBatch() =
-        let batch = currentBatch
-        currentBatch <- Messages(consumerConfig.BatchReceivePolicy.MaxNumMessages, consumerConfig.BatchReceivePolicy.MaxNumBytes)
-        this.Mb.Post(BatchReceiveCompleted)
-        batch
+
+    let replyWithBatch (cts: CancellationTokenSource option) (ch: AsyncReplyChannel<ResultOrException<Messages<'T>>>) =
+        cts |> Option.iter (fun cts ->
+            cts.Cancel()
+            cts.Dispose()
+        )
+        let messages = Messages(consumerConfig.BatchReceivePolicy.MaxNumMessages, consumerConfig.BatchReceivePolicy.MaxNumBytes)
+        
+        let mutable shouldContinue = true
+        let mutable error = None
+        while shouldContinue && incomingMessages.Count > 0 do
+            let m = incomingMessages.Peek()
+            match m with
+            | Ok msgPeeked ->
+                if messages.CanAdd msgPeeked then
+                    match dequeueMessage() with
+                    | Ok msg ->
+                        unAckedMessageTracker.Add msg.MessageId |> ignore
+                        messages.Add msg
+                    | _ -> failwith "Impossible branch in replyWithBatch"
+                else
+                    shouldContinue <- false
+            | Error ex ->
+                shouldContinue <- false
+                error <- Some ex
+        match error with
+        | Some ex when messages.Count = 0 ->
+            // only fail when no batched messages before error happened
+            ch.Reply <| Error ex
+        | _ ->
+            Log.Logger.LogDebug("{0} BatchFormed with size {1}", prefix, messages.Size)
+            ch.Reply <| Ok messages
+
+    let replyWithMessage (channel: AsyncReplyChannel<ResultOrException<Message<'T>>>) (message: ResultOrException<Message<'T>>) =
+        match message with
+        | Ok msg -> unAckedMessageTracker.Add msg.MessageId |> ignore
+        | _ -> ()
+        channel.Reply message
+    
+    let runPoller (ct: CancellationToken) =
+        Task.Run<unit>(fun () ->
+                task {
+                    while not ct.IsCancellationRequested do
+                        let! msg = currentStream.Next()
+                        if not ct.IsCancellationRequested then
+                            do! this.Mb.PostAndAsyncReply(fun channel -> MessageReceived (msg, channel))
+                        ()
+                }
+            , ct)
+    
     
     let mb = MailboxProcessor<MultiTopicConsumerMessage<'T>>.Start(fun inbox ->
 
-        let rec loop state =
+        let rec loop () =
             async {
                 let! msg = inbox.Receive()
                 match msg with
@@ -370,8 +469,9 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             |> Async.AwaitTask
                         this.ConnectionState <- Ready
                         Log.Logger.LogInformation("{0} created", prefix)
+                        currentStream <- streams |> TaskSeq
+                        runPoller pollerCts.Token |> ignore
                         consumerCreatedTsc.SetResult()
-                        return! loop { Stream = streams |> TaskSeq }
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not create", prefix)
                         do! consumersTasks
@@ -384,110 +484,345 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             |> Async.Ignore
                         this.ConnectionState <- Failed
                         consumerCreatedTsc.SetException(ex)
-                        stopConsumer()
+                        stopConsumer()    
+                    
+                    if this.ConnectionState <> Failed then
+                        return! loop ()
                         
-                | Receive channel ->
+                | MessageReceived (message, pollerChannel) ->
                     
-                    Log.Logger.LogDebug("{0} Receive; UH is None?: {1}", prefix, unhandleMessage.IsNone)
-                    match unhandleMessage with
-                    | Some msg ->
-                        unhandleMessage <- None
-                        channel.Reply(Task.FromResult msg)
-                    | None ->
-                        channel.Reply(state.Stream.Next())
-                    return! loop state
+                    let hasWaitingChannel = waiters.Count > 0
+                    let hasWaitingBatchChannel = batchWaiters.Count > 0
+                    Log.Logger.LogDebug("{0} MessageReceived queueLength={1}, hasWaitingChannel={2},  hasWaitingBatchChannel={3}",
+                        prefix, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
+                    // handle message
+                    if hasWaitingChannel then
+                        let waitingChannel = waiters |> ConsumerBase.dequeueWaiter
+                        if (incomingMessages.Count = 0) then
+                            replyWithMessage waitingChannel message
+                        else
+                            enqueueMessage message
+                            replyWithMessage waitingChannel <| dequeueMessage()
+                    else
+                        enqueueMessage message
+                        if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                            let cts, ch = batchWaiters |> ConsumerBase.dequeueBatchWaiter
+                            replyWithBatch (Some cts) ch
+                    // check if should reply to poller immediately
+                    if isPollingAllowed() |> not then
+                        waitingPoller <- pollerChannel
+                    else
+                        pollerChannel.Reply()
                     
-                | BatchReceive (channel, ct: CancellationToken) ->
+                    return! loop ()
+                        
+                | Receive (cancellationToken, ch) ->
+                    
+                    Log.Logger.LogDebug("{0} Receive", prefix)
+                    if incomingMessages.Count > 0 then
+                        replyWithMessage ch <| dequeueMessage()
+                    else
+                        let rec cancellationTokenRegistration =
+                            cancellationToken.Register((fun () ->
+                                Log.Logger.LogDebug("{0} receive cancelled", prefix)
+                                ch.Reply (TaskCanceledException() :> exn |> Error)
+                                this.Mb.Post(RemoveWaiter(cancellationTokenRegistration, ch))
+                            ), false)
+                        waiters.AddLast((cancellationTokenRegistration, ch)) |> ignore
+                        Log.Logger.LogDebug("{0} Receive waiting", prefix)
+                    return! loop ()
+                    
+                | BatchReceive (cancellationToken, ch) ->
                     
                     Log.Logger.LogDebug("{0} BatchReceive", prefix)
-                    match unhandleMessage with
-                    | Some (Error exn) ->
-                        unhandleMessage <- None
-                        channel.Reply(async { return Error exn })
-                    | _ ->
-                        if batchWaiters.Count = 0 then
-                            channel.Reply(work ct)
-                        else
-                            batchWaiters.Enqueue(ct, channel)
-                    
-                    return! loop state
-
-                | AddBatchMessage (channel, message, ct) ->
-                    
-                    Log.Logger.LogDebug("{0} AddBatchMessage", prefix)
-                    if ct.IsCancellationRequested then
-                        unhandleMessage <- Some message
-                        channel.Reply(Expired)
+                    if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
+                        replyWithBatch None ch
                     else
-                        match message with
-                        | Ok msg ->
-                            if (currentBatch.CanAdd(msg)) then
-                                currentBatch.Add(msg)
-                                if currentBatch.IsFull then
-                                    BatchReady <| completeBatch()
+                        let batchCts = new CancellationTokenSource()
+                        let rec cancellationTokenRegistration =
+                            cancellationToken.Register((fun () ->
+                                Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
+                                batchCts.Cancel()
+                                ch.Reply (TaskCanceledException() :> exn |> Error)
+                                this.Mb.Post(RemoveBatchWaiter(batchCts, cancellationTokenRegistration, ch))
+                            ), false)
+                        batchWaiters.AddLast((batchCts, cancellationTokenRegistration, ch)) |> ignore
+                        asyncDelay
+                            consumerConfig.BatchReceivePolicy.Timeout
+                            (fun () ->
+                                if not batchCts.IsCancellationRequested then
+                                    this.Mb.Post(SendBatchByTimeout)
                                 else
-                                    Success
-                            else
-                                unhandleMessage <- Some message
-                                BatchReady <| completeBatch()
-                        | Error _ ->
-                            unhandleMessage <- Some message
-                            BatchReady <| completeBatch()
-                        |> channel.Reply
-                        return! loop state
-                
-                | BatchReceiveCompleted ->
+                                    batchCts.Dispose())
+                        Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
+                    return! loop ()
                     
-                    Log.Logger.LogDebug("{0} BatchReceiveCompleted", prefix)
+                | SendBatchByTimeout ->
+                    
+                    Log.Logger.LogDebug("{0} SendBatchByTimeout", prefix)
                     if batchWaiters.Count > 0 then
-                        let ct, ch = batchWaiters.Dequeue()
-                        ch.Reply(work ct)
-                    return! loop state
-                    
-                | BatchTimeout (channel, ct) ->
-                    
-                    Log.Logger.LogDebug("{0} BatchTimeout", prefix)
-                    if not ct.IsCancellationRequested then
-                        completeBatch() |> Ok |> channel.Reply
-                    else
-                        alreadyCancelledExn |> channel.Reply
-                    return! loop state
+                        let cts, ch = batchWaiters |> ConsumerBase.dequeueBatchWaiter
+                        replyWithBatch (Some cts) ch
+                    return! loop ()
                 
                 | Acknowledge (channel, msgId) ->
 
                     Log.Logger.LogDebug("{0} Acknowledge {1}", prefix, msgId)
                     let (consumer, _) = consumers.[msgId.TopicName]
-                    channel.Reply(consumer.AcknowledgeAsync(msgId))
-                    return! loop state
+                    task {
+                        do! consumer.AcknowledgeAsync(msgId)
+                        unAckedMessageTracker.Remove msgId |> ignore
+                    } |> channel.Reply
+                    return! loop ()
 
                 | NegativeAcknowledge (channel, msgId) ->
 
                     Log.Logger.LogDebug("{0} NegativeAcknowledge {1}", prefix, msgId)
                     let (consumer, _) = consumers.[msgId.TopicName]
-                    channel.Reply(consumer.NegativeAcknowledge(msgId))
-                    return! loop state
+                    task {
+                        do! consumer.NegativeAcknowledge msgId
+                        unAckedMessageTracker.Remove msgId |> ignore
+                    } |> channel.Reply
+                    return! loop ()
 
                 | AcknowledgeCumulative (channel, msgId) ->
 
                     Log.Logger.LogDebug("{0} AcknowledgeCumulative {1}", prefix, msgId)
                     let (consumer, _) = consumers.[msgId.TopicName]
-                    channel.Reply(consumer.AcknowledgeCumulativeAsync(msgId))
-                    return! loop state
-
-                | RedeliverUnacknowledgedMessages channel ->
+                    task {
+                        do! consumer.AcknowledgeCumulativeAsync msgId
+                        unAckedMessageTracker.RemoveMessagesTill msgId |> ignore
+                    } |> channel.Reply
+                    return! loop ()
+                
+                | RedeliverAllUnacknowledged channel ->
 
                     Log.Logger.LogDebug("{0} RedeliverUnacknowledgedMessages", prefix)
                     match this.ConnectionState with
                     | Ready ->
-                        consumers
-                        |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.RedeliverUnacknowledgedMessagesAsync())
-                        |> Seq.toArray
-                        |> Task.WhenAll
-                        |> channel.Reply
+                        try
+                            let! _ =
+                                consumers
+                                |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.RedeliverUnacknowledgedMessagesAsync())
+                                |> Task.WhenAll
+                                |> Async.AwaitTask
+                            unAckedMessageTracker.Clear()
+                            incomingMessages.Clear()
+                            currentStream.RestartCompletedTasks()
+                            incomingMessagesSize <- 0L
+                            channel.Reply <| Task.FromResult()
+                        with ex ->
+                            Log.Logger.LogError(ex, "{0} RedeliverUnacknowledgedMessages failed", prefix)
+                            channel.Reply <| Task.FromException ex
                     | _ ->
                         channel.Reply(Task.FromException(Exception(prefix + " invalid state: " + this.ConnectionState.ToString())))
-                    return! loop state
+                    return! loop ()
+                    
+                | RedeliverUnacknowledged (messageIds, channel) ->
 
+                    Log.Logger.LogDebug("{0} RedeliverUnacknowledgedMessages", prefix)
+                    match consumerConfig.SubscriptionType with
+                    | SubscriptionType.Shared | SubscriptionType.KeyShared ->
+                        match this.ConnectionState with
+                        | Ready ->
+                            try
+                                let! _ =
+                                    messageIds
+                                    |> Seq.groupBy (fun msgId -> msgId.TopicName)
+                                    |> Seq.map(fun (topicName, msgIds) ->
+                                        let (consumer, _) = consumers.[topicName]
+                                        msgIds |> RedeliverSet |> (consumer :?> ConsumerImpl<'T>).RedeliverUnacknowledged
+                                        )
+                                    |> Async.Parallel
+                                    |> Async.Ignore
+                                channel.Reply <| Task.FromResult()
+                            with ex ->
+                                Log.Logger.LogError(ex, "{0} RedeliverUnacknowledgedMessages failed", prefix)
+                                channel.Reply <| Task.FromException ex
+                        | _ ->
+                            channel.Reply(Task.FromException <| Exception(prefix + " invalid state: " + this.ConnectionState.ToString()))
+                    | _ ->
+                        this.Mb.Post(RedeliverAllUnacknowledged channel)
+                        Log.Logger.LogInformation("{0} We cannot redeliver single messages if subscription type is not Shared", prefix)
+                    return! loop ()
+
+                | RemoveWaiter waiter ->
+                    
+                    waiters.Remove(waiter) |> ignore
+                    let (ctr, _) = waiter
+                    ctr.Dispose()
+                    return! loop ()
+                    
+                | RemoveBatchWaiter batchWaiter ->
+                    
+                    batchWaiters.Remove(batchWaiter) |> ignore
+                    let (cts, ctr, _) = batchWaiter
+                    ctr.Dispose()
+                    cts.Dispose()
+                    return! loop ()
+
+                | HasReachedEndOfTheTopic channel ->
+
+                    Log.Logger.LogDebug("{0} HasReachedEndOfTheTopic", prefix)
+                    consumers
+                    |> Seq.forall (fun (KeyValue(_, (consumer, _))) -> consumer.HasReachedEndOfTopic)
+                    |> channel.Reply
+                    return! loop ()
+
+                | Seek (channel, ts) ->
+
+                    Log.Logger.LogDebug("{0} Seek {1}", prefix, ts)
+                    consumers
+                    |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(ts) :> Task)
+                    |> Seq.toArray
+                    |> Task.WhenAll
+                    |> channel.Reply
+                    return! loop ()
+
+                | PatternTickTime ->
+                    
+                    Log.Logger.LogDebug("{0} PatternTickTime", prefix)
+                    try 
+                        match multiConsumerType with
+                        | Pattern patternInfo ->
+                            let! newAllTopics = patternInfo.GetTopics() |> Async.AwaitTask
+                            let addedTopics = newAllTopics |> HashSet
+                            let removedTopics = allTopics |> HashSet
+                            addedTopics.ExceptWith allTopics
+                            removedTopics.ExceptWith newAllTopics
+                            if addedTopics.Count > 0 then
+                                Log.Logger.LogInformation("{0} subscribing to {1} new topics", prefix, addedTopics.Count)
+                                let! streams = processAddedTopics addedTopics patternInfo.GetConsumerInfo |> Async.AwaitTask
+                                currentStream.AddGenerators(streams)
+                            if removedTopics.Count > 0 then
+                                Log.Logger.LogInformation("{0} removing subscription to {1} old topics", prefix, removedTopics.Count)
+                                let! streams = processRemovedTopics removedTopics |> Async.AwaitTask
+                                streams   
+                                |> Seq.iter (fun stream -> currentStream.RemoveGenerator stream)
+                            return! loop ()
+                        | _ ->
+                            Log.Logger.LogWarning("{0} PatternTickTime is not expected to be called for other multitopics types.", prefix)
+                            return! loop ()
+                    with ex ->
+                        Log.Logger.LogWarning(ex, "{0} PatternTickTime failed.", prefix)
+                        return! loop ()
+                
+                | PartitionTickTime  ->
+
+                    
+                    Log.Logger.LogDebug("{0} PartitionTickTime", prefix)
+                    match this.ConnectionState with
+                    | Ready ->
+                        // Check partitions changes of passed in topics, and add new topic partitions.
+                        let! newPartitionsOption =
+                            getAllPartitions() 
+                            |> Async.AwaitTask
+                        match newPartitionsOption with
+                        | Some newPartitions ->
+                            let oldConsumersCount = consumers.Count
+                            let mutable totalConsumersCount = oldConsumersCount
+                            let topicsToUpdate =
+                                newPartitions
+                                |> Seq.filter(fun (topic, partitionedTopicNames) ->
+                                        let oldPartitionsCount = partitionedTopics.[topic].Metadata.Partitions
+                                        let newPartitionsCount = partitionedTopicNames.Length
+                                        if (oldPartitionsCount < newPartitionsCount) then
+                                            Log.Logger.LogDebug("{0} partitions number. old: {1}, new: {2}, topic {3}",
+                                                                prefix, oldPartitionsCount, newPartitionsCount, topic)
+                                            totalConsumersCount <- totalConsumersCount + (newPartitionsCount - oldPartitionsCount)
+                                            true
+                                        elif (oldPartitionsCount > newPartitionsCount) then
+                                            Log.Logger.LogError("{0} not support shrink topic partitions. old: {1}, new: {2}, topic: {3}",
+                                                                prefix, oldPartitionsCount, newPartitionsCount, topic)
+                                            false
+                                        else
+                                            false)
+                                |> Seq.toArray
+                            if topicsToUpdate.Length > 0 then
+                                Log.Logger.LogInformation("{0} adding subscription to {1} new partitions", prefix, topicsToUpdate.Length)
+                                let receiverQueueSize = Math.Min(consumerConfig.ReceiverQueueSize, consumerConfig.MaxTotalReceiverQueueSizeAcrossPartitions / totalConsumersCount)
+                                let newConsumerTasks =
+                                    seq {
+                                        for (topic, partitionedTopicNames) in topicsToUpdate do
+                                            let consumerInitInfo = partitionedTopics.[topic]
+                                            let newConsumerTasks =
+                                                seq { consumerInitInfo.Metadata.Partitions..partitionedTopicNames.Length - 1 }
+                                                |> Seq.map (fun partitionIndex ->
+                                                    let partitionedTopic = partitionedTopicNames.[partitionIndex]
+                                                    let partititonedConfig = { consumerConfig with
+                                                                                ReceiverQueueSize = receiverQueueSize
+                                                                                Topics = seq { partitionedTopic } |> Seq.cache }
+                                                    task {
+                                                        let! result =
+                                                             ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, partitionIndex, true,
+                                                                                  None, lookup, true, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider, interceptors, fun _ -> ())
+                                                        return (partitionedTopic, result)
+                                                    })
+                                            yield! newConsumerTasks
+                                    }                            
+                                try
+                                    let! newConsumerResults =
+                                        newConsumerTasks
+                                        |> Task.WhenAll
+                                        |> Async.AwaitTask
+                                    let newStreams =
+                                        newConsumerResults
+                                        |> Seq.map (fun (topic, consumer) ->
+                                            let stream = getStream topic.CompleteTopicName consumer
+                                            consumers.Add(topic.CompleteTopicName, (consumer :> IConsumer<'T>, stream))
+                                            stream)
+                                    currentStream.AddGenerators(newStreams)
+                                    Log.Logger.LogDebug("{0} success create consumers for extended partitions. old: {1}, new: {2}",
+                                        prefix, oldConsumersCount, totalConsumersCount )
+                                with Flatten ex ->
+                                    Log.Logger.LogWarning(ex, "{0} fail create consumers for extended partitions. old: {1}, new: {2}",
+                                        prefix, oldConsumersCount, totalConsumersCount )
+                                    do! newConsumerTasks
+                                        |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
+                                        |> Seq.map (fun t ->
+                                           let (_, consumer) = t.Result
+                                           (consumer :> IConsumer<'T>).DisposeAsync().AsTask())
+                                        |> Task.WhenAll
+                                        |> Async.AwaitTask
+                                        |> Async.Ignore
+                                    Log.Logger.LogInformation("{0} disposed partially created consumers", prefix)
+                                    
+                        | None ->
+                            ()
+                    | _ ->
+                        ()
+                    return! loop ()
+
+                | GetStats channel ->
+                    
+                    Log.Logger.LogDebug("{0} GetStats", prefix)
+                    let statsTask =
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.GetStatsAsync())
+                        |> Task.WhenAll
+                    channel.Reply statsTask
+                    return! loop ()
+                    
+                | ReconsumeLater (msg, deliverAt, channel) ->
+                    
+                    Log.Logger.LogDebug("{0} ReconsumeLater", prefix)
+                    let (consumer, _) = consumers.[msg.MessageId.TopicName]
+                    task {
+                        do! consumer.ReconsumeLaterAsync(msg, deliverAt)
+                        unAckedMessageTracker.Remove msg.MessageId |> ignore
+                    } |> channel.Reply
+                    return! loop ()
+                    
+                | ReconsumeLaterCumulative (msg, delayTime, channel) ->
+                    
+                    Log.Logger.LogDebug("{0} ReconsumeLater", prefix)
+                    let (consumer, _) = consumers.[msg.MessageId.TopicName]
+                    task {
+                        do! consumer.ReconsumeLaterCumulativeAsync(msg, delayTime)
+                        unAckedMessageTracker.RemoveMessagesTill msg.MessageId |> ignore
+                    } |> channel.Reply
+                    return! loop ()
+                                
                 | Close channel ->
 
                     Log.Logger.LogDebug("{0} Close", prefix)
@@ -507,7 +842,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             Log.Logger.LogError(ex, "{0} could not close", prefix)
                             this.ConnectionState <- Failed
                             channel.Reply <| Error ex
-                            return! loop state
+                            return! loop ()
                         
 
                 | Unsubscribe channel ->
@@ -522,175 +857,17 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         try
                             let! _ = Task.WhenAll consumerTasks |> Async.AwaitTask
                             this.ConnectionState <- Closed
-                            Log.Logger.LogInformation("{0} unsubscribed", prefix)    
+                            Log.Logger.LogInformation("{0} unsubscribed", prefix)
                             stopConsumer()
                             channel.Reply <| Ok()
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} could not unsubscribe", prefix)
                             this.ConnectionState <- Failed    
                             channel.Reply <| Error ex
-                            return! loop state
-
-                | HasReachedEndOfTheTopic channel ->
-
-                    Log.Logger.LogDebug("{0} HasReachedEndOfTheTopic", prefix)
-                    consumers
-                    |> Seq.forall (fun (KeyValue(_, (consumer, _))) -> consumer.HasReachedEndOfTopic)
-                    |> channel.Reply
-                    return! loop state
-
-                | Seek (channel, ts) ->
-
-                    Log.Logger.LogDebug("{0} Seek {1}", prefix, ts)
-                    consumers
-                    |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(ts) :> Task)
-                    |> Seq.toArray
-                    |> Task.WhenAll
-                    |> channel.Reply
-                    return! loop state
-
-                | PatternTickTime ->
-                    
-                    Log.Logger.LogDebug("{0} PatternTickTime", prefix)
-                    try 
-                        match multiConsumerType with
-                        | Pattern patternInfo ->
-                            let! newAllTopics = patternInfo.GetTopics() |> Async.AwaitTask
-                            let addedTopics = newAllTopics |> HashSet
-                            let removedTopics = allTopics |> HashSet
-                            addedTopics.ExceptWith allTopics
-                            removedTopics.ExceptWith newAllTopics
-                            if addedTopics.Count > 0 then
-                                Log.Logger.LogInformation("{0} subscribing to {1} new topics", prefix, addedTopics.Count)
-                                let! streams = processAddedTopics addedTopics patternInfo.GetConsumerInfo |> Async.AwaitTask
-                                state.Stream.AddGenerators(streams)
-                            if removedTopics.Count > 0 then
-                                Log.Logger.LogInformation("{0} removing subscription to {1} old topics", prefix, removedTopics.Count)
-                                let! streams = processRemovedTopics removedTopics |> Async.AwaitTask
-                                streams   
-                                |> Seq.iter (fun stream -> state.Stream.RemoveGenerator stream)
-                            return! loop state
-                        | _ ->
-                            Log.Logger.LogWarning("{0} PatternTickTime is not expected to be called for other multitopics types.", prefix)
-                            return! loop state
-                    with ex ->
-                        Log.Logger.LogWarning(ex, "{0} PatternTickTime failed.", prefix)
-                        return! loop state
-                
-                | PartitionTickTime  ->
-
-                    Log.Logger.LogDebug("{0} PartitionTickTime", prefix)
-                    match this.ConnectionState with
-                    | Ready ->
-                        // Check partitions changes of passed in topics, and add new topic partitions.
-                        let! newPartitions =
-                            partitionedTopics
-                            |> Seq.map (fun (KeyValue(topic, _)) -> task {
-                                    let! partitionNames = lookup.GetPartitionsForTopic(topic)
-                                    return (topic, partitionNames) 
-                                })
-                            |> Task.WhenAll
-                            |> Async.AwaitTask
-                        let oldConsumersCount = consumers.Count
-                        let mutable totalConsumersCount = oldConsumersCount
-                        let topicsToUpdate =
-                            newPartitions
-                            |> Seq.filter(fun (topic, partitionedTopicNames) ->
-                                    let oldPartitionsCount = partitionedTopics.[topic].Metadata.Partitions
-                                    let newPartitionsCount = partitionedTopicNames.Length
-                                    if (oldPartitionsCount < newPartitionsCount) then
-                                        Log.Logger.LogDebug("{0} partitions number. old: {1}, new: {2}, topic {3}",
-                                                            prefix, oldPartitionsCount, newPartitionsCount, topic)
-                                        totalConsumersCount <- totalConsumersCount + (newPartitionsCount - oldPartitionsCount)
-                                        true
-                                    elif (oldPartitionsCount > newPartitionsCount) then
-                                        Log.Logger.LogError("{0} not support shrink topic partitions. old: {1}, new: {2}, topic: {3}",
-                                                            prefix, oldPartitionsCount, newPartitionsCount, topic)
-                                        false
-                                    else
-                                        false)
-                            |> Seq.toArray
-                        if topicsToUpdate.Length > 0 then
-                            Log.Logger.LogInformation("{0} adding subscription to {1} new partitions", prefix, topicsToUpdate.Length)
-                            let receiverQueueSize = Math.Min(consumerConfig.ReceiverQueueSize, consumerConfig.MaxTotalReceiverQueueSizeAcrossPartitions / totalConsumersCount)
-                            let newConsumerTasks =
-                                seq {
-                                    for (topic, partitionedTopicNames) in topicsToUpdate do
-                                        let consumerInitInfo = partitionedTopics.[topic]
-                                        let newConsumerTasks =
-                                            seq { consumerInitInfo.Metadata.Partitions..partitionedTopicNames.Length - 1 }
-                                            |> Seq.map (fun partitionIndex ->
-                                                let partitionedTopic = partitionedTopicNames.[partitionIndex]
-                                                let partititonedConfig = { consumerConfig with
-                                                                            ReceiverQueueSize = receiverQueueSize
-                                                                            Topics = seq { partitionedTopic } |> Seq.cache }
-                                                task {
-                                                    let! result =
-                                                         ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, partitionIndex,
-                                                                              None, lookup, true, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider, interceptors, fun _ -> ())
-                                                    return (partitionedTopic, result)
-                                                })
-                                        yield! newConsumerTasks
-                                }                            
-                            try
-                                let! newConsumerResults =
-                                    newConsumerTasks
-                                    |> Task.WhenAll
-                                    |> Async.AwaitTask
-                                let newStreams =
-                                    newConsumerResults
-                                    |> Seq.map (fun (topic, consumer) ->
-                                        let stream = getStream topic.CompleteTopicName consumer
-                                        consumers.Add(topic.CompleteTopicName, (consumer :> IConsumer<'T>, stream))
-                                        stream)
-                                state.Stream.AddGenerators(newStreams)
-                                Log.Logger.LogDebug("{0} success create consumers for extended partitions. old: {1}, new: {2}",
-                                    prefix, oldConsumersCount, totalConsumersCount )
-                                return! loop state
-                            with Flatten ex ->
-                                do! newConsumerTasks
-                                    |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
-                                    |> Seq.map (fun t ->
-                                       let (_, consumer) = t.Result
-                                       (consumer :> IConsumer<'T>).DisposeAsync().AsTask())
-                                    |> Task.WhenAll
-                                    |> Async.AwaitTask
-                                    |> Async.Ignore
-                                Log.Logger.LogWarning(ex, "{0} fail create consumers for extended partitions. old: {1}, new: {2}",
-                                    prefix, oldConsumersCount, totalConsumersCount )
-                                return! loop state
-                        else
-                            return! loop state
-                    | _ ->
-                        ()
-                        return! loop state
-
-                | GetStats channel ->
-                    
-                    Log.Logger.LogDebug("{0} GetStats", prefix)
-                    let statsTask =
-                        consumers
-                        |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.GetStatsAsync())
-                        |> Task.WhenAll
-                    channel.Reply statsTask
-                    return! loop state
-                    
-                | ReconsumeLater (msg, deliverAt, channel) ->
-                    
-                    Log.Logger.LogDebug("{0} ReconsumeLater", prefix)
-                    let (consumer, _) = consumers.[msg.MessageId.TopicName]
-                    channel.Reply(consumer.ReconsumeLaterAsync(msg, deliverAt))
-                    return! loop state
-                    
-                | ReconsumeLaterCumulative (msg, delayTime, channel) ->
-                    
-                    Log.Logger.LogDebug("{0} ReconsumeLater", prefix)
-                    let (consumer, _) = consumers.[msg.MessageId.TopicName]
-                    channel.Reply(consumer.ReconsumeLaterCumulativeAsync(msg, delayTime))
-                    return! loop state
+                            return! loop ()
             }
 
-        loop { Stream = TaskSeq(Seq.empty) }
+        loop ()
     )
 
     do
@@ -761,45 +938,30 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
 
     interface IConsumer<'T> with
 
-        member this.ReceiveAsync() =
+        member this.ReceiveAsync(cancellationToken: CancellationToken) =
             task {
-                let! t = mb.PostAndAsyncReply(Receive)
-                match! t with
+                match! mb.PostAndAsyncReply(fun channel -> Receive(cancellationToken, channel)) with
                 | Ok msg ->
                     return msg
                 | Error exn ->
                     return reraize exn
             }
             
-        member this.BatchReceiveAsync() =
+        member this.ReceiveAsync() =
+            _this.ReceiveAsync(CancellationToken.None)
+            
+        member this.BatchReceiveAsync(cancellationToken: CancellationToken) =
             task {
-                use cts = new CancellationTokenSource()
-                let ct = cts.Token
-                let receiveBatchTask =
-                    task {
-                        let! batchWork = mb.PostAndAsyncReply(fun channel -> BatchReceive(channel, ct))
-                        if not ct.IsCancellationRequested then
-                            return! batchWork
-                        else
-                            return alreadyCancelledExn
-                    }
-                let timeoutTask =
-                    task {
-                        do! Task.Delay (consumerConfig.BatchReceivePolicy.Timeout.TotalMilliseconds |> int)
-                        if not ct.IsCancellationRequested then
-                            return! mb.PostAndAsyncReply(fun channel -> BatchTimeout(channel, ct))                        
-                        else
-                            return alreadyCancelledExn
-                    }
-                let! result = seq { receiveBatchTask; timeoutTask } |> Task.WhenAny
-                cts.Cancel()
-                match! result with
-                | Ok msgs ->
-                    return msgs
+                match! mb.PostAndAsyncReply(fun channel -> BatchReceive(cancellationToken, channel)) with
+                | Ok msg ->
+                    return msg
                 | Error exn ->
                     return reraize exn
             }
 
+        member this.BatchReceiveAsync() =
+            _this.BatchReceiveAsync(CancellationToken.None)
+            
         member this.AcknowledgeAsync (msgId: MessageId) =
             task {
                 let! t = mb.PostAndAsyncReply(fun channel -> Acknowledge(channel, msgId))
@@ -821,7 +983,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
 
         member this.RedeliverUnacknowledgedMessagesAsync () =
             task {
-                let! result = mb.PostAndAsyncReply(RedeliverUnacknowledgedMessages)
+                let! result = mb.PostAndAsyncReply(RedeliverAllUnacknowledged)
                 return! result
             }
 

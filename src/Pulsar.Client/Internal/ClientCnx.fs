@@ -329,7 +329,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let rejectedRequests = Interlocked.Increment(&numberOfRejectedRequests)
             if (rejectedRequests = 1) then
                 // schedule timer
-                asyncDelay (rejectedRequestResetTimeSec*1000) (fun() -> Interlocked.Exchange(&numberOfRejectedRequests, 0) |> ignore)
+                asyncDelayMs (rejectedRequestResetTimeSec*1000) (fun() -> Interlocked.Exchange(&numberOfRejectedRequests, 0) |> ignore)
             elif (rejectedRequests >= maxNumberOfRejectedRequestPerConnection) then
                 Log.Logger.LogError("{0} Close connection because received {1} rejected request in {2} seconds ", prefix,
                         rejectedRequests, rejectedRequestResetTimeSec);

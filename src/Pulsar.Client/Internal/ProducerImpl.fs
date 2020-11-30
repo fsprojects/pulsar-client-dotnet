@@ -516,7 +516,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 stopProducer()
                     | _ ->
                         Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
-                    return! loop ()
+                    
+                    if connectionHandler.ConnectionState <> Failed then
+                        return! loop ()
 
                 | ProducerMessage.ConnectionClosed clientCnx ->
 

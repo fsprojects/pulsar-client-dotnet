@@ -121,8 +121,8 @@ let tests =
 
             do! Task.Delay(1000) |> Async.AwaitTask
             
-            let messages1 = generateMessages 10 (producerName + "1")
-            let messages2 = generateMessages 10 (producerName + "2")
+            let messages1 = generateMessages numberOfMessages (producerName + "1")
+            let messages2 = generateMessages numberOfMessages (producerName + "2")
             let producerTask =
                 Task.Run(fun () ->
                     task {
@@ -134,15 +134,15 @@ let tests =
                 Task.Run(fun () ->
                     task {
                         do! consumeAndVerifyMessages consumer1 consumerName1 messages1
-                        do! Task.Delay(100)
+                        do! Task.Delay(200)
                         do! consumer1.DisposeAsync()
                     }:> Task)
-                
             
             let consumer2Task =
                 Task.Run(fun () ->
                     task {
                         do! consumeAndVerifyMessages consumer2 consumerName2 messages2
+                        Log.Error("Wrong consumer to failover")
                         failwith "Wrong consumer to failover"
                     }:> Task)
                 
@@ -155,6 +155,7 @@ let tests =
             let! failoverTask = Task.WhenAny(consumer2Task, consumer3Task) |> Async.AwaitTask
             
             do! Task.WhenAll(producerTask, consumer1Task, failoverTask) |> Async.AwaitTask
+            do! Async.Sleep(110) // wait for acks
 
             Log.Debug("Finished Failover consumer with PriorityLevel works fine")
         }
