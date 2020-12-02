@@ -1051,10 +1051,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             stopConsumer()
                             channel.Reply <| Ok()
                         with Flatten ex ->
-                            Log.Logger.LogError(ex, "{0} failed to close", prefix)
-                            channel.Reply <| Error ex
+                            Log.Logger.LogError(ex, "{0} failed to send close to server, doing local close", prefix)
+                            connectionHandler.Closed()
+                            stopConsumer()
+                            channel.Reply <| Ok()
                     | _ ->
-                        Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
+                        Log.Logger.LogWarning("{0} closing but current state {1}, doing local close", prefix, connectionHandler.ConnectionState)
                         connectionHandler.Closed()
                         stopConsumer()
                         channel.Reply <| Ok()
@@ -1079,6 +1081,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
                             channel.Reply <| Error ex
+                            
+                        if connectionHandler.ConnectionState <> Closed then
+                            return! loop ()
                     | _ ->
                         Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
                         channel.Reply <| Error((NotConnectedException "Not connected to broker") :> exn)

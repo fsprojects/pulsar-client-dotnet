@@ -1,5 +1,6 @@
 ﻿module internal Pulsar.Client.Common.Commands
 
+open System.Collections
 open System.Collections.Generic
 open System.Threading.Tasks
 open pulsar.proto
@@ -189,7 +190,19 @@ let newSeekByMsgId (consumerId: ConsumerId) (requestId : RequestId) (messageId: 
     let request =
         CommandSeek(
             ConsumerId = %consumerId, RequestId = %requestId,
-            MessageId = MessageIdData(ledgerId = uint64(%messageId.LedgerId), entryId = uint64(%messageId.EntryId))
+            MessageId = MessageIdData(
+                ledgerId = uint64(%messageId.LedgerId),
+                entryId = uint64(%messageId.EntryId),
+                AckSets =
+                    match messageId.Type with
+                    | Individual -> [||]
+                    | Cumulative (batchIndex, acker) ->
+                        let batchSize = acker.GetBatchSize()
+                        let ackSet = BitArray batchSize
+                        for i in %batchIndex..batchSize-1 do
+                            ackSet.Set(i, true)
+                        ackSet |> toLongArray
+            )
         )
     let command = BaseCommand(``type`` = CommandType.Seek, Seek = request)
     command |> serializeSimpleCommand

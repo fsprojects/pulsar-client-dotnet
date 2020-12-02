@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Internal
 
+open FSharp.UMX
 open Pulsar.Client.Common
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -26,7 +27,11 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
             ResetIncludeHead = readerConfig.ResetIncludeHead
             ConsumerName = readerConfig.ReaderName
             KeySharedPolicy = readerConfig.KeySharedPolicy
-            MessageDecryptor = readerConfig.MessageDecryptor }
+            MessageDecryptor = readerConfig.MessageDecryptor
+            // Reader doesn't need any batch receiving behaviours
+            // disable the batch receive timer for the ConsumerImpl instance wrapped by the ReaderImpl
+            BatchReceivePolicy = ReaderImpl<'T>.DISABLED_BATCH_RECEIVE_POLICY
+    }
 
     let consumer =
         ConsumerImpl<'T>(consumerConfig, clientConfig, readerConfig.Topic, connectionPool, readerConfig.Topic.PartitionIndex,
@@ -48,12 +53,15 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
             return reader :> IReader<'T>
         }
         
+    static member internal DISABLED_BATCH_RECEIVE_POLICY =
+            BatchReceivePolicy(1, 0L, TimeSpan.Zero)
+        
     interface IReader<'T> with    
 
         member this.ReadNextAsync() =
             task {
                 let! message = castedConsumer.ReceiveAsync()
-                do! castedConsumer.AcknowledgeAsync(message.MessageId)
+                castedConsumer.AcknowledgeCumulativeAsync(message.MessageId) |> ignore
                 return message
             }
 

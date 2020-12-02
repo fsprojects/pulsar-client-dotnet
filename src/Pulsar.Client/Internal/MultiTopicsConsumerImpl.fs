@@ -836,15 +836,13 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         try
                             let! _ = Task.WhenAll consumerTasks |> Async.AwaitTask
                             this.ConnectionState <- Closed
-                            Log.Logger.LogInformation("{0} closed", prefix)
                             stopConsumer()
                             channel.Reply <| Ok()
                         with Flatten ex ->
-                            Log.Logger.LogError(ex, "{0} could not close", prefix)
-                            this.ConnectionState <- Failed
-                            channel.Reply <| Error ex
-                            return! loop ()
-                        
+                            Log.Logger.LogError(ex, "{0} could not close all child consumers properly", prefix)
+                            this.ConnectionState <- Closed
+                            stopConsumer()
+                            channel.Reply <| Ok()
 
                 | Unsubscribe channel ->
 
@@ -863,7 +861,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                             channel.Reply <| Ok()
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} could not unsubscribe", prefix)
-                            this.ConnectionState <- Failed    
+                            this.ConnectionState <- Failed
                             channel.Reply <| Error ex
                             return! loop ()
             }

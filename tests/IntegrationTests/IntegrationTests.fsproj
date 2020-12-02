@@ -19,6 +19,7 @@
     <Compile Include="Keys.fs" />
     <Compile Include="Partitions.fs" />
     <Compile Include="Basic.fs" />
+    <Compile Include="Seek.fs" />
     <Compile Include="DeadLetters.fs" />
     <Compile Include="Compression.fs" />
     <Compile Include="SequenceId.fs" />
