@@ -54,13 +54,13 @@ module CommandsTests =
 
         (bytes, totalSize, commandSize, command, magicNumber, crc32, medataSize, metadata, payload)
 
-    let serializeDeserializeSimpleCommand (cmd: Payload) =
+    let serializeDeserializeSimpleCommand ((cmd, _): Payload) =
         let stream = new MemoryStream()
         (cmd stream).Wait()
         let commandBytes = stream.ToArray()
         commandBytes |> deserializeSimpleCommand
 
-    let serializeDeserializePayloadCommand (cmd: Payload) =
+    let serializeDeserializePayloadCommand ((cmd, _): Payload) =
         let stream = new MemoryStream()
         (cmd stream).Wait()
         let commandBytes = stream.ToArray()
