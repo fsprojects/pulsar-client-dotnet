@@ -2,17 +2,14 @@
 
 open System.Collections
 open System.Collections.Generic
-open System.Threading.Tasks
 open pulsar.proto
 open FSharp.UMX
 open System
-open System.Data
 open ProtoBuf
 open System.IO
 open System.Net
 open Microsoft.Extensions.Logging
 open Pulsar.Client.Internal
-open Pulsar.Client
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -92,21 +89,26 @@ let private processComplexCommand (command : BaseCommand) (metadata: MessageMeta
     stream.CopyToAsync(output)
 
 let serializeSimpleCommand(command : BaseCommand) =
-    fun (output: Stream) ->
-        task {
-            use stream = MemoryStreamManager.GetStream()
-            use binaryWriter = new BinaryWriter(stream)
-            return! processSimpleCommand command stream binaryWriter output
-        }
+    let f = 
+        fun (output: Stream) ->
+            task {
+                use stream = MemoryStreamManager.GetStream()
+                use binaryWriter = new BinaryWriter(stream)
+                return! processSimpleCommand command stream binaryWriter output
+            }
+    (f, command.``type``)
         
 
 let serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[]) =
-    fun (output: Stream) ->
-        task {
-            use stream = MemoryStreamManager.GetStream()
-            use binaryWriter = new BinaryWriter(stream)
-            return! processComplexCommand command metadata payload stream binaryWriter output
-        }
+    let f = 
+        fun (output: Stream) ->
+            task {
+                use stream = MemoryStreamManager.GetStream()
+                use binaryWriter = new BinaryWriter(stream)
+                return! processComplexCommand command metadata payload stream binaryWriter output
+            }
+    (f, command.``type``)
+    
 let newPartitionMetadataRequest(topicName : CompleteTopicName) (requestId : RequestId) : Payload =
     let request = CommandPartitionedTopicMetadata(Topic = %topicName, RequestId = %requestId)
     let command = BaseCommand(``type`` = CommandType.PartitionedMetadata, partitionMetadata = request)
@@ -150,7 +152,7 @@ let newMultiMessageAck (consumerId : ConsumerId) (messages: seq<LedgerId*EntryId
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 
-let newConnect (authMethodName: string) (authData: Common.AuthData) (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : Payload =
+let newConnect (authMethodName: string) (authData: AuthData) (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : Payload =
     let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion, AuthMethodName = authMethodName)
     if authMethodName = "ycav1" then
         request.AuthMethod <- AuthMethod.AuthMethodYcaV1

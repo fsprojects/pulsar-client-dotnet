@@ -444,7 +444,7 @@ type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey 
         
         
 type internal WriterStream = Stream
-type internal Payload = WriterStream -> Task<unit>
+type internal Payload = (WriterStream -> Task<unit>) * BaseCommand.Type
 type internal Connection =
     {
         Input: PipeReader

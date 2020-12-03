@@ -20,6 +20,7 @@ type internal RequestTime =
         RequestStartTime: DateTime
         RequestId: RequestId
         ResponseTcs: TaskCompletionSource<PulsarResponseType>
+        CommandType: BaseCommand.Type
     }
 
 type internal ProducerOperations =
@@ -38,9 +39,9 @@ and internal ConsumerOperations =
     }
     
 and internal RequestsOperation =
-    | AddRequest of RequestId * TaskCompletionSource<PulsarResponseType>
-    | CompleteRequest of RequestId * PulsarResponseType
-    | FailRequest of RequestId * exn
+    | AddRequest of RequestId * BaseCommand.Type * TaskCompletionSource<PulsarResponseType>
+    | CompleteRequest of RequestId * BaseCommand.Type * PulsarResponseType
+    | FailRequest of RequestId * BaseCommand.Type * exn
     | FailAllRequestsAndStop
     | Tick
     
@@ -58,7 +59,7 @@ and internal PulsarCommand =
     | XCommandSendReceipt of CommandSendReceipt
     | XCommandMessage of (CommandMessage * MessageMetadata * byte[] * bool )
     | XCommandPing of CommandPing
-    | XCommandLookupTopicResponse of CommandLookupTopicResponse
+    | XCommandLookupResponse of CommandLookupTopicResponse
     | XCommandProducerSuccess of CommandProducerSuccess
     | XCommandSuccess of CommandSuccess
     | XCommandSendError of CommandSendError
@@ -107,14 +108,14 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         requestTimeoutTimer.Elapsed.Add(fun _ -> this.RequestsMb.Post(Tick))
         requestTimeoutTimer.Start()
     
-    let failRequest reqId (ex: exn) =
-        Log.Logger.LogWarning(ex, "{0} fail request {1}", prefix, reqId)
+    let failRequest reqId commandType (ex: exn) =
+        Log.Logger.LogWarning(ex, "{0} fail request {1} type {2}", prefix, reqId, commandType)
         match requests.TryGetValue(reqId) with
         | true, tsc ->
             tsc.SetException ex
             requests.Remove reqId |> ignore
         | _ ->
-            Log.Logger.LogWarning(ex, "{0} fail non-existent request {1}, ignoring", prefix, reqId)
+            Log.Logger.LogWarning(ex, "{0} fail non-existent request {1} type {2}, ignoring", prefix, reqId, commandType)
     
     let rec hanleTimeoutedMessages() =
         if requestTimeoutQueue.Count > 0 then
@@ -122,9 +123,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let currentDiff = DateTime.Now - request.RequestStartTime
             if currentDiff >= config.OperationTimeout then
                 let request = requestTimeoutQueue.Dequeue()
-                let ex = TimeoutException <| String.Format("{0} {1} timedout after {2}ms",
-                                                prefix, request.RequestId, currentDiff.TotalMilliseconds)
-                failRequest request.RequestId ex
+                let ex = TimeoutException <| String.Format("{0} request {1} type {2} timedout after {3}ms",
+                                                prefix, request.RequestId, request.CommandType, currentDiff.TotalMilliseconds)
+                failRequest request.RequestId request.CommandType ex
                 hanleTimeoutedMessages()
             else
                 // if there is no request that is timed out then exit the loop
@@ -134,22 +135,22 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         let rec loop () =
             async {
                 match! inbox.Receive() with
-                | AddRequest (reqId, tsc) ->
-                    Log.Logger.LogDebug("{0} add request {1}", prefix, reqId)
+                | AddRequest (reqId, commandType, tsc) ->
+                    Log.Logger.LogDebug("{0} add request {1} type {2}", prefix, reqId, commandType)
                     requests.Add(reqId, tsc)
-                    requestTimeoutQueue.Enqueue({ RequestStartTime = DateTime.Now; RequestId = reqId; ResponseTcs = tsc })
+                    requestTimeoutQueue.Enqueue({ RequestStartTime = DateTime.Now; RequestId = reqId; ResponseTcs = tsc; CommandType = commandType })
                     return! loop()
-                | CompleteRequest (reqId, result) ->
-                    Log.Logger.LogDebug("{0} complete request {1}", prefix, reqId)
+                | CompleteRequest (reqId, commandType, result) ->
                     match requests.TryGetValue(reqId) with
                     | true, tsc ->
+                        Log.Logger.LogDebug("{0} complete request {1} type {2}", prefix, reqId, commandType)
                         tsc.SetResult result
                         requests.Remove reqId |> ignore
                     | _ ->
-                        Log.Logger.LogWarning("{0} complete non-existent request {1}, ignoring", prefix, reqId)
+                        Log.Logger.LogWarning("{0} complete non-existent request {1} type {2}, ignoring", prefix, reqId, commandType)
                     return! loop()
-                | FailRequest (reqId, ex) ->
-                    failRequest reqId ex
+                | FailRequest (reqId, commandType, ex) ->
+                    failRequest reqId commandType ex
                     return! loop()
                 | FailAllRequestsAndStop ->
                     Log.Logger.LogDebug("{0} fail requests and stop", prefix)
@@ -209,13 +210,13 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         loop ()
     )
 
-    let sendSerializedPayload (serializedPayload: Payload ) =
+    let sendSerializedPayload (writePayload, commandType) =
         task {
             try
-                do! connection.Output |> serializedPayload
+                do! connection.Output |> writePayload
                 return true
             with ex ->
-                Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally on writing", prefix)
+                Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally on writing {1}", prefix, commandType)
                 operationsMb.Post(ChannelInactive)
                 return false
         }
@@ -233,7 +234,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     return! loop ()
                 | SocketRequestMessageWithReply (reqId, payload, replyChannel) ->
                     let tsc = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
-                    requestsMb.Post(AddRequest(reqId, tsc))
+                    requestsMb.Post <| AddRequest(reqId, snd payload, tsc)
                     let! _ = sendSerializedPayload payload |> Async.AwaitTask
                     replyChannel.Reply(tsc.Task)
                     return! loop ()
@@ -270,7 +271,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let (metadata,payload,checksumValid) = readMessage reader stream frameLength
             Ok (XCommandMessage (command.Message, metadata, payload, checksumValid))
         | BaseCommand.Type.LookupResponse ->
-            Ok (XCommandLookupTopicResponse command.lookupTopicResponse)
+            Ok (XCommandLookupResponse command.lookupTopicResponse)
         | BaseCommand.Type.Ping ->
             Ok (XCommandPing command.Ping)
         | BaseCommand.Type.ProducerSuccess ->
@@ -325,8 +326,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             Result.Error IncompleteCommand, SequencePosition()
         
 
-    let handleSuccess requestId result =
-        requestsMb.Post(CompleteRequest(requestId, result))
+    let handleSuccess requestId result responseType =
+        requestsMb.Post(CompleteRequest(requestId, responseType, result))
 
     let getPulsarClientException error errorMsg =
         match error with
@@ -354,9 +355,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | ServerError.NotAllowedError -> NotAllowedException errorMsg :> exn
         | _ -> exn errorMsg
 
-    let handleError requestId error msg =
+    let handleError requestId error msg commandType =
         let exc = getPulsarClientException error msg
-        requestsMb.Post(FailRequest(requestId, exc))
+        requestsMb.Post(FailRequest(requestId, commandType, exc))
 
     let checkServerError serverError errMsg =
         if (serverError = ServerError.ServiceNotReady) then
@@ -377,11 +378,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     
     let getMessageReceived (cmd: CommandMessage) (messageMetadata: MessageMetadata) payload checkSumValid =
         let mapCompressionType = function
-            | pulsar.proto.CompressionType.None -> Pulsar.Client.Common.CompressionType.None
-            | pulsar.proto.CompressionType.Lz4 -> Pulsar.Client.Common.CompressionType.LZ4
-            | pulsar.proto.CompressionType.Zlib -> Pulsar.Client.Common.CompressionType.ZLib
-            | pulsar.proto.CompressionType.Zstd -> Pulsar.Client.Common.CompressionType.ZStd
-            | pulsar.proto.CompressionType.Snappy -> Pulsar.Client.Common.CompressionType.Snappy
+            | CompressionType.None -> Pulsar.Client.Common.CompressionType.None
+            | CompressionType.Lz4 -> Pulsar.Client.Common.CompressionType.LZ4
+            | CompressionType.Zlib -> Pulsar.Client.Common.CompressionType.ZLib
+            | CompressionType.Zstd -> Pulsar.Client.Common.CompressionType.ZStd
+            | CompressionType.Snappy -> Pulsar.Client.Common.CompressionType.Snappy
             | _ -> Pulsar.Client.Common.CompressionType.None
         let metadata = {
             NumMessages = messageMetadata.NumMessagesInBatch
@@ -393,7 +394,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             SchemaVersion = getOptionalSchemaVersion messageMetadata.SchemaVersion
             SequenceId = %(int64 messageMetadata.SequenceId)
             ChunkId = %(int messageMetadata.ChunkId)
-            PublishTime = %(int64 messageMetadata.PublishTime) |> Tools.convertToDateTime
+            PublishTime = %(int64 messageMetadata.PublishTime) |> convertToDateTime
             Uuid = %messageMetadata.Uuid
             EncryptionKeys =
                 if messageMetadata.EncryptionKeys.Count > 0 then
@@ -447,10 +448,10 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | XCommandPartitionedTopicMetadataResponse cmd ->
             if (cmd.ShouldSerializeError()) then
                 checkServerError cmd.Error cmd.Message
-                handleError %cmd.RequestId cmd.Error cmd.Message
+                handleError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.PartitionedMetadataResponse
             else
                 let result = PartitionedTopicMetadata { Partitions = int cmd.Partitions }
-                handleSuccess %cmd.RequestId result
+                handleSuccess %cmd.RequestId result BaseCommand.Type.PartitionedMetadataResponse
         | XCommandSendReceipt cmd ->
             let producerOperations = producers.[%cmd.ProducerId]
             producerOperations.AckReceived {
@@ -477,10 +478,10 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let consumerOperations = consumers.[%cmd.ConsumerId]
             let msgReceived = getMessageReceived cmd metadata payload checkSumValid
             consumerOperations.MessageReceived(msgReceived, this)
-        | XCommandLookupTopicResponse cmd ->
+        | XCommandLookupResponse cmd ->
             if (cmd.ShouldSerializeError()) then
                 checkServerError cmd.Error cmd.Message
-                handleError %cmd.RequestId cmd.Error cmd.Message
+                handleError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.LookupResponse
             else
                 let result = LookupTopicResult {
                     BrokerServiceUrl = cmd.brokerServiceUrl
@@ -488,16 +489,16 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     Redirect = (cmd.Response = CommandLookupTopicResponse.LookupType.Redirect)
                     Proxy = cmd.ProxyThroughServiceUrl
                     Authoritative = cmd.Authoritative }
-                handleSuccess %cmd.RequestId result
+                handleSuccess %cmd.RequestId result BaseCommand.Type.LookupResponse
         | XCommandProducerSuccess cmd ->            
             let result = ProducerSuccess {
                 GeneratedProducerName = cmd.ProducerName
                 SchemaVersion = getOptionalSchemaVersion cmd.SchemaVersion
                 LastSequenceId = %cmd.LastSequenceId
             }
-            handleSuccess %cmd.RequestId result
+            handleSuccess %cmd.RequestId result BaseCommand.Type.ProducerSuccess
         | XCommandSuccess cmd ->
-            handleSuccess %cmd.RequestId Empty
+            handleSuccess %cmd.RequestId Empty BaseCommand.Type.Success
         | XCommandCloseProducer cmd ->
             let producerOperations = producers.[%cmd.ProducerId]
             producerOperations.ConnectionClosed(this)
@@ -509,7 +510,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             consumerOperations.ReachedEndOfTheTopic()
         | XCommandGetTopicsOfNamespaceResponse cmd ->
             let result = TopicsOfNamespace cmd.Topics
-            handleSuccess %cmd.RequestId result
+            handleSuccess %cmd.RequestId result BaseCommand.Type.GetTopicsOfNamespaceResponse
         | XCommandGetLastMessageIdResponse cmd ->
             let result = LastMessageId {
                 LedgerId = %(int64 cmd.LastMessageId.ledgerId)
@@ -522,7 +523,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 TopicName = %""
                 ChunkMessageIds = None
             }
-            handleSuccess %cmd.RequestId result
+            handleSuccess %cmd.RequestId result BaseCommand.Type.GetLastMessageIdResponse
         | XCommandActiveConsumerChange cmd ->
             let consumerOperations = consumers.[%cmd.ConsumerId]
             consumerOperations.ActiveConsumerChanged(cmd.IsActive)
@@ -530,19 +531,19 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             if (cmd.ShouldSerializeErrorCode()) then
                 if cmd.ErrorCode = ServerError.TopicNotFound then
                     let result = TopicSchema None
-                    handleSuccess %cmd.RequestId result
+                    handleSuccess %cmd.RequestId result BaseCommand.Type.GetSchemaResponse
                 else
                     checkServerError cmd.ErrorCode cmd.ErrorMessage
-                    handleError %cmd.RequestId cmd.ErrorCode cmd.ErrorMessage
+                    handleError %cmd.RequestId cmd.ErrorCode cmd.ErrorMessage BaseCommand.Type.GetSchemaResponse
             else            
                 let result = TopicSchema ({
                     SchemaInfo = getSchemaInfo cmd.Schema
                     SchemaVersion = getOptionalSchemaVersion cmd.SchemaVersion
                 } |> Some)
-                handleSuccess %cmd.RequestId result
+                handleSuccess %cmd.RequestId result BaseCommand.Type.GetSchemaResponse
         | XCommandError cmd ->
             Log.Logger.LogError("{0} CommandError Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
-            handleError %cmd.RequestId cmd.Error cmd.Message
+            handleError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.Error
 
     let readSocket () =
         task {

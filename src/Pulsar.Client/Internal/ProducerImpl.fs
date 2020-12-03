@@ -210,7 +210,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         task {
             use stream = MemoryStreamManager.GetStream()
             use reader = new BinaryReader(stream)
-            do! msg.Payload (stream :> Stream) // materialize stream
+            do! (fst msg.Payload) (stream :> Stream) // materialize stream
             let streamSize = stream.Length
             stream.Seek(4L, SeekOrigin.Begin) |> ignore
             let cmdSize = reader.ReadInt32() |> int32FromBigEndian
