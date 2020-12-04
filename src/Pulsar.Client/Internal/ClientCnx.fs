@@ -108,14 +108,15 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         requestTimeoutTimer.Elapsed.Add(fun _ -> this.RequestsMb.Post(Tick))
         requestTimeoutTimer.Start()
     
-    let failRequest reqId commandType (ex: exn) =
-        Log.Logger.LogWarning(ex, "{0} fail request {1} type {2}", prefix, reqId, commandType)
+    let failRequest reqId commandType (ex: exn) isTimeout =
         match requests.TryGetValue(reqId) with
         | true, tsc ->
+            Log.Logger.LogWarning(ex, "{0} fail request {1} type {2}", prefix, reqId, commandType)
             tsc.SetException ex
             requests.Remove reqId |> ignore
         | _ ->
-            Log.Logger.LogWarning(ex, "{0} fail non-existent request {1} type {2}, ignoring", prefix, reqId, commandType)
+            if not isTimeout then
+                Log.Logger.LogWarning(ex, "{0} fail non-existent request {1} type {2}, ignoring", prefix, reqId, commandType)
     
     let rec hanleTimeoutedMessages() =
         if requestTimeoutQueue.Count > 0 then
@@ -125,7 +126,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 let request = requestTimeoutQueue.Dequeue()
                 let ex = TimeoutException <| String.Format("{0} request {1} type {2} timedout after {3}ms",
                                                 prefix, request.RequestId, request.CommandType, currentDiff.TotalMilliseconds)
-                failRequest request.RequestId request.CommandType ex
+                failRequest request.RequestId request.CommandType ex true
                 hanleTimeoutedMessages()
             else
                 // if there is no request that is timed out then exit the loop
@@ -150,7 +151,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                         Log.Logger.LogWarning("{0} complete non-existent request {1} type {2}, ignoring", prefix, reqId, commandType)
                     return! loop()
                 | FailRequest (reqId, commandType, ex) ->
-                    failRequest reqId commandType ex
+                    failRequest reqId commandType ex false
                     return! loop()
                 | FailAllRequestsAndStop ->
                     Log.Logger.LogDebug("{0} fail requests and stop", prefix)
