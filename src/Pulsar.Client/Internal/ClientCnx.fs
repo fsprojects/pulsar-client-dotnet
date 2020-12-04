@@ -454,31 +454,40 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 let result = PartitionedTopicMetadata { Partitions = int cmd.Partitions }
                 handleSuccess %cmd.RequestId result BaseCommand.Type.PartitionedMetadataResponse
         | XCommandSendReceipt cmd ->
-            let producerOperations = producers.[%cmd.ProducerId]
-            producerOperations.AckReceived {
-                LedgerId = %(int64 cmd.MessageId.ledgerId)
-                EntryId = %(int64 cmd.MessageId.entryId)
-                SequenceId = %(int64 cmd.SequenceId)
-                HighestSequenceId = %(int64 cmd.HighestSequenceId)
-            }
+            match producers.TryGetValue %cmd.ProducerId with
+            | true, producerOperations ->
+                producerOperations.AckReceived {
+                    LedgerId = %(int64 cmd.MessageId.ledgerId)
+                    EntryId = %(int64 cmd.MessageId.entryId)
+                    SequenceId = %(int64 cmd.SequenceId)
+                    HighestSequenceId = %(int64 cmd.HighestSequenceId)
+                }
+            | _ ->
+                Log.Logger.LogWarning("{0} producer {1} wasn't found on CommandSendReceipt", prefix, %cmd.ProducerId)
         | XCommandSendError cmd ->
             Log.Logger.LogWarning("{0} Received send error from server: {1} : {2}", prefix, cmd.Error, cmd.Message)
-            let producerOperations = producers.[%cmd.ProducerId]
-            match cmd.Error with
-            | ServerError.ChecksumError ->
-                producerOperations.RecoverChecksumError %(int64 cmd.SequenceId)
-            | ServerError.TopicTerminatedError ->
-                producerOperations.TopicTerminatedError()
+            match producers.TryGetValue %cmd.ProducerId with
+            | true, producerOperations ->
+                match cmd.Error with
+                | ServerError.ChecksumError ->
+                    producerOperations.RecoverChecksumError %(int64 cmd.SequenceId)
+                | ServerError.TopicTerminatedError ->
+                    producerOperations.TopicTerminatedError()
+                | _ ->
+                    // By default, for transient error, let the reconnection logic
+                    // to take place and re-establish the produce again
+                    this.Close()
             | _ ->
-                // By default, for transient error, let the reconnection logic
-                // to take place and re-establish the produce again
-                this.Close()
+                Log.Logger.LogWarning("{0} producer {1} wasn't found on CommandSendError", prefix, %cmd.ProducerId)
         | XCommandPing _ ->
             Commands.newPong() |> SocketMessageWithoutReply |> sendMb.Post
         | XCommandMessage (cmd, metadata, payload, checkSumValid) ->
-            let consumerOperations = consumers.[%cmd.ConsumerId]
-            let msgReceived = getMessageReceived cmd metadata payload checkSumValid
-            consumerOperations.MessageReceived(msgReceived, this)
+            match consumers.TryGetValue %cmd.ConsumerId with
+            | true, consumerOperations ->
+                let msgReceived = getMessageReceived cmd metadata payload checkSumValid
+                consumerOperations.MessageReceived(msgReceived, this)
+            | _ ->
+                Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandMessage", prefix, %cmd.ConsumerId)
         | XCommandLookupResponse cmd ->
             if (cmd.ShouldSerializeError()) then
                 checkServerError cmd.Error cmd.Message
@@ -491,7 +500,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     Proxy = cmd.ProxyThroughServiceUrl
                     Authoritative = cmd.Authoritative }
                 handleSuccess %cmd.RequestId result BaseCommand.Type.LookupResponse
-        | XCommandProducerSuccess cmd ->            
+        | XCommandProducerSuccess cmd ->
             let result = ProducerSuccess {
                 GeneratedProducerName = cmd.ProducerName
                 SchemaVersion = getOptionalSchemaVersion cmd.SchemaVersion
@@ -501,14 +510,23 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | XCommandSuccess cmd ->
             handleSuccess %cmd.RequestId Empty BaseCommand.Type.Success
         | XCommandCloseProducer cmd ->
-            let producerOperations = producers.[%cmd.ProducerId]
-            producerOperations.ConnectionClosed(this)
+            match producers.TryGetValue %cmd.ProducerId with
+            | true, producerOperations ->
+                producerOperations.ConnectionClosed(this)
+            | _ ->
+                Log.Logger.LogWarning("{0} producer {1} wasn't found on CommandCloseProducer", prefix, %cmd.ProducerId)
         | XCommandCloseConsumer cmd ->
-            let consumerOperations = consumers.[%cmd.ConsumerId]
-            consumerOperations.ConnectionClosed(this)
+            match consumers.TryGetValue %cmd.ConsumerId with
+            | true, consumerOperations ->
+                consumerOperations.ConnectionClosed(this)
+            | _ ->
+                Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandCloseConsumer", prefix, %cmd.ConsumerId)
         | XCommandReachedEndOfTopic cmd ->
-            let consumerOperations = consumers.[%cmd.ConsumerId]
-            consumerOperations.ReachedEndOfTheTopic()
+            match consumers.TryGetValue %cmd.ConsumerId with
+            | true, consumerOperations ->
+                consumerOperations.ReachedEndOfTheTopic()
+            | _ ->
+                Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandReachedEndOfTopic", prefix, %cmd.ConsumerId)
         | XCommandGetTopicsOfNamespaceResponse cmd ->
             let result = TopicsOfNamespace cmd.Topics
             handleSuccess %cmd.RequestId result BaseCommand.Type.GetTopicsOfNamespaceResponse
@@ -526,8 +544,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             }
             handleSuccess %cmd.RequestId result BaseCommand.Type.GetLastMessageIdResponse
         | XCommandActiveConsumerChange cmd ->
-            let consumerOperations = consumers.[%cmd.ConsumerId]
-            consumerOperations.ActiveConsumerChanged(cmd.IsActive)
+            match consumers.TryGetValue %cmd.ConsumerId with
+            | true, consumerOperations ->
+                consumerOperations.ActiveConsumerChanged(cmd.IsActive)
+            | _ ->
+                Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandActiveConsumerChange", prefix, %cmd.ConsumerId)
         | XCommandGetSchemaResponse cmd ->
             if (cmd.ShouldSerializeErrorCode()) then
                 if cmd.ErrorCode = ServerError.TopicNotFound then
