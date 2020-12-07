@@ -63,6 +63,17 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             producerConfig.CustomMessageRouter.Value
         | _ ->
             failwith "Unknown MessageRoutingMode"
+            
+            
+    let getAllPartitions () =
+        task {
+            try
+                let! results = lookup.GetPartitionsForTopic(producerConfig.Topic)
+                return Some results
+            with ex ->
+               Log.Logger.LogWarning(ex, "{0} Unabled to fetch partitions", prefix)
+               return None
+        }
 
     let statsReduce (statsArray: ProducerStats array) =
         let mutable numMsgsSent: int64 = 0L
@@ -205,48 +216,53 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     match this.ConnectionState with
                     | Ready ->
                         // Check partitions changes of passed in topics, and add new topic partitions.
-                        let! partitionedTopicNames = lookup.GetPartitionsForTopic(producerConfig.Topic) |> Async.AwaitTask
-                        Log.Logger.LogDebug("{0} partitions number. old: {1}, new: {2}", prefix, numPartitions, partitionedTopicNames.Length )
-                        if numPartitions = partitionedTopicNames.Length
-                        then
-                            // topic partition number not changed
+                        let! partitionedTopicNamesOption = getAllPartitions() |> Async.AwaitTask
+                        match partitionedTopicNamesOption with
+                        | Some partitionedTopicNames ->
+                        
+                            Log.Logger.LogDebug("{0} partitions number. old: {1}, new: {2}", prefix, numPartitions, partitionedTopicNames.Length )
+                            if numPartitions = partitionedTopicNames.Length
+                            then
+                                // topic partition number not changed
+                                ()
+                            elif numPartitions < partitionedTopicNames.Length
+                            then
+                                let producerTasks =
+                                    seq { numPartitions..partitionedTopicNames.Length - 1 }
+                                    |> Seq.map (fun partitionIndex ->
+                                        let partitionedTopic = partitionedTopicNames.[partitionIndex]
+                                        let partititonedConfig = { producerConfig with
+                                                                    MaxPendingMessages = maxPendingMessages
+                                                                    Topic = partitionedTopic }
+                                        task {
+                                            let! producer = ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup,
+                                                                schema, interceptors, fun _ -> ())
+                                            return producer :> IProducer<'T>
+                                        })
+                                try
+                                    let! producerResults =
+                                        producerTasks
+                                        |> Task.WhenAll
+                                        |> Async.AwaitTask
+                                    producers.AddRange(producerResults)
+                                    Log.Logger.LogDebug("{0} success create producers for extended partitions. old: {1}, new: {2}",
+                                        prefix, numPartitions, partitionedTopicNames.Length )
+                                    numPartitions <- partitionedTopicNames.Length
+                                with Flatten ex ->
+                                    Log.Logger.LogWarning(ex, "{0} fail create producers for extended partitions. old: {1}, new: {2}",
+                                        prefix, numPartitions, partitionedTopicNames.Length )
+                                    do! producerTasks
+                                        |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
+                                        |> Seq.map (fun t -> task { return! t.Result.DisposeAsync() })
+                                        |> Task.WhenAll
+                                        |> Async.AwaitTask
+                                        |> Async.Ignore
+                                    Log.Logger.LogInformation("{0} disposed partially created producers", prefix)
+                            else
+                                Log.Logger.LogError("{0} not support shrink topic partitions. old: {1}, new: {2}",
+                                    prefix, numPartitions, partitionedTopicNames.Length )
+                        | None ->
                             ()
-                        elif numPartitions < partitionedTopicNames.Length
-                        then
-                            let producerTasks =
-                                seq { numPartitions..partitionedTopicNames.Length - 1 }
-                                |> Seq.map (fun partitionIndex ->
-                                    let partitionedTopic = partitionedTopicNames.[partitionIndex]
-                                    let partititonedConfig = { producerConfig with
-                                                                MaxPendingMessages = maxPendingMessages
-                                                                Topic = partitionedTopic }
-                                    task {
-                                        let! producer = ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup,
-                                                            schema, interceptors, fun _ -> ())
-                                        return producer :> IProducer<'T>
-                                    })
-                            try
-                                let! producerResults =
-                                    producerTasks
-                                    |> Task.WhenAll
-                                    |> Async.AwaitTask
-                                producers.AddRange(producerResults)
-                                Log.Logger.LogDebug("{0} success create producers for extended partitions. old: {1}, new: {2}",
-                                    prefix, numPartitions, partitionedTopicNames.Length )
-                                numPartitions <- partitionedTopicNames.Length
-                            with Flatten ex ->
-                                Log.Logger.LogWarning(ex, "{0} fail create producers for extended partitions. old: {1}, new: {2}",
-                                    prefix, numPartitions, partitionedTopicNames.Length )
-                                do! producerTasks
-                                    |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
-                                    |> Seq.map (fun t -> task { return! t.Result.DisposeAsync() })
-                                    |> Task.WhenAll
-                                    |> Async.AwaitTask
-                                    |> Async.Ignore
-                                Log.Logger.LogInformation("{0} disposed partially created producers", prefix)
-                        else
-                            Log.Logger.LogError("{0} not support shrink topic partitions. old: {1}, new: {2}",
-                                prefix, numPartitions, partitionedTopicNames.Length )
                     | _ ->
                         ()
                     return! loop ()
