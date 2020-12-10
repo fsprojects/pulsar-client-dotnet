@@ -128,7 +128,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             PendingMsgs = pendingMsgs 
         }
     
-    let timer = new Timer(1000.0 * 60.0) // 1 minute
+    let timer = new Timer(60_000.0) // 1 minute
 
     let stopProducer() =
         cleanup(this)

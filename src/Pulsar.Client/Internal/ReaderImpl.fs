@@ -56,11 +56,18 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
     static member internal DISABLED_BATCH_RECEIVE_POLICY =
             BatchReceivePolicy(1, 0L, TimeSpan.Zero)
         
-    interface IReader<'T> with    
+    interface IReader<'T> with
 
         member this.ReadNextAsync() =
             task {
                 let! message = castedConsumer.ReceiveAsync()
+                castedConsumer.AcknowledgeCumulativeAsync(message.MessageId) |> ignore
+                return message
+            }
+            
+        member this.ReadNextAsync ct =
+            task {
+                let! message = castedConsumer.ReceiveAsync(ct)
                 castedConsumer.AcknowledgeCumulativeAsync(message.MessageId) |> ignore
                 return message
             }
