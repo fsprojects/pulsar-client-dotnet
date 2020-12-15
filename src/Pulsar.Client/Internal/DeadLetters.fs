@@ -57,7 +57,8 @@ type internal DeadLetterProcessor<'T>
                     try
                         let! producer = dlProducer.Value
                         let key = getOptionalKey message
-                        let msg = MessageBuilder(message.GetValue(), message.Data, key, message.Properties)
+                        let value = Unchecked.defaultof<'T> // no data decoding is needed
+                        let msg = MessageBuilder(value, message.Data, key, message.Properties)
                         let! _ = producer.SendAsync(msg)
                         do! acknowledge messageId
                         return true

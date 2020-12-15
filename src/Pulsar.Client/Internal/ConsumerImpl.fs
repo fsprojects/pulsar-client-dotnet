@@ -1403,6 +1403,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     do! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, AckType.Individual, deliverAt, channel))
             }
             
+        member this.LastDisconnectedTimestamp =
+            connectionHandler.LastDisconnectedTimestamp
+            
         
     interface IAsyncDisposable with
         

@@ -30,6 +30,7 @@ type internal ConnectionHandler( parentPrefix: string,
                         backoff: Backoff) as this =
 
     let mutable connectionState = Uninitialized
+    let mutable lastDisconnectedTimestamp = 0L
     let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
     let mutable epoch = 0UL
     let prefix = parentPrefix + " ConnectionHandler"
@@ -87,6 +88,7 @@ type internal ConnectionHandler( parentPrefix: string,
                         
                 | ConnectionClosed clientCnx ->
                     
+                    this.LastDisconnectedTimestamp <- DateTime.UtcNow |> convertToMsTimestamp
                     match this.ConnectionState with
                     | Ready cnx when cnx <> clientCnx ->
                         Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
@@ -142,6 +144,10 @@ type internal ConnectionHandler( parentPrefix: string,
     member this.ConnectionState
         with get() = Volatile.Read(&connectionState)
         and private set(value) = Volatile.Write(&connectionState, value)
+        
+    member this.LastDisconnectedTimestamp
+        with get() = Volatile.Read(&lastDisconnectedTimestamp)
+        and private set(value) = Volatile.Write(&lastDisconnectedTimestamp, value)
         
     member this.CheckIfActive() =
         match this.ConnectionState with

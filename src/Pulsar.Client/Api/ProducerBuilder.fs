@@ -142,6 +142,11 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
         { config with
             AutoUpdatePartitions = autoUpdatePartitions }
         |> this.With
+        
+    member this.AutoUpdateInterval autoUpdatePartitionsInterval =
+        { config with
+            AutoUpdatePartitionsInterval = autoUpdatePartitionsInterval }
+        |> this.With
     
     member this.MessageEncryptor messageEncryptor  =
         { config with

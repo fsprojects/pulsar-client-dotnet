@@ -58,6 +58,7 @@ type internal MultiTopicConsumerMessage<'T> =
     | ReconsumeLaterCumulative of Message<'T> * int64 * AsyncReplyChannel<Task<unit>>
     | RemoveWaiter of Waiter<'T>
     | RemoveBatchWaiter of BatchWaiter<'T>
+    | LastDisconnectedTimestamp of AsyncReplyChannel<int64>
 
 type internal TopicAndConsumer<'T> =
     {
@@ -86,7 +87,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
     let waiters = LinkedList<Waiter<'T>>()
     let batchWaiters = LinkedList<BatchWaiter<'T>>()
     let incomingMessages = Queue<ResultOrException<Message<'T>>>()
-    let partitionsTimer = new Timer(60_000.0) // 1 minute
+    let partitionsTimer = new Timer(consumerConfig.AutoUpdatePartitionsInterval.TotalMilliseconds)
     let patternTimer = new Timer(consumerConfig.PatternAutoDiscoveryPeriod.TotalMilliseconds)
     let sharedQueueResumeThreshold = consumerConfig.ReceiverQueueSize / 2
     
@@ -669,6 +670,15 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     |> Seq.forall (fun (KeyValue(_, (consumer, _))) -> consumer.HasReachedEndOfTopic)
                     |> channel.Reply
                     return! loop ()
+                    
+                | LastDisconnectedTimestamp channel ->
+                    
+                    Log.Logger.LogDebug("{0} LastDisconnectedTimestamp", prefix)
+                    consumers
+                    |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.LastDisconnectedTimestamp)
+                    |> Seq.max
+                    |> channel.Reply
+                    return! loop ()
 
                 | Seek (channel, ts) ->
 
@@ -1006,7 +1016,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 | Error ex -> reraize ex
             }
 
-        member this.HasReachedEndOfTopic with get() =
+        member this.HasReachedEndOfTopic =
             mb.PostAndReply(HasReachedEndOfTheTopic)
 
         member this.NegativeAcknowledge msgId =
@@ -1059,6 +1069,9 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, deliverAt, channel))
                     return! result
             }
+            
+        member this.LastDisconnectedTimestamp =
+            mb.PostAndReply(LastDisconnectedTimestamp)
         
     interface IAsyncDisposable with
         

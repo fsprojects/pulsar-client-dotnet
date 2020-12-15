@@ -60,3 +60,5 @@ type IProducer<'T> =
     abstract member LastSequenceId : SequenceId
     /// Get the producer name
     abstract member Name: string
+    /// The last disconnected timestamp of the producer
+    abstract member LastDisconnectedTimestamp: int64

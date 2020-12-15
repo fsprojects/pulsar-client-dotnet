@@ -190,6 +190,11 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
         { config with
             AutoUpdatePartitions = autoUpdatePartitions }
         |> this.With
+        
+    member this.AutoUpdateInterval autoUpdatePartitionsInterval =
+        { config with
+            AutoUpdatePartitionsInterval = autoUpdatePartitionsInterval }
+        |> this.With
 
     member this.PatternAutoDiscoveryPeriod period =
         { config with

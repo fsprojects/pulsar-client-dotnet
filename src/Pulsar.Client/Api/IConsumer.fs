@@ -52,3 +52,5 @@ type IConsumer<'T> =
     abstract member ReconsumeLaterAsync: messages:Messages<'T> * deliverAt:int64 -> Task<unit>
     /// ReconsumeLater the reception of all the messages in the stream up to (and including) the provided message.
     abstract member ReconsumeLaterCumulativeAsync: message:Message<'T> * deliverAt:int64 -> Task<unit>
+    /// The last disconnected timestamp of the consumer
+    abstract member LastDisconnectedTimestamp: int64

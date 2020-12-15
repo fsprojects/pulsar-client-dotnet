@@ -831,6 +831,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         
         member this.GetStatsAsync() =
             mb.PostAndAsyncReply(ProducerMessage.GetStats) |> Async.StartAsTask
+            
+        member this.LastDisconnectedTimestamp =
+            connectionHandler.LastDisconnectedTimestamp
         
     interface IAsyncDisposable with
         

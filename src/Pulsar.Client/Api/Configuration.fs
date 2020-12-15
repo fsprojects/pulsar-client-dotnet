@@ -53,6 +53,7 @@ type ConsumerConfiguration<'T> =
         AckTimeoutTickTime: TimeSpan
         AcknowledgementsGroupTime: TimeSpan
         AutoUpdatePartitions: bool
+        AutoUpdatePartitionsInterval: TimeSpan
         PatternAutoDiscoveryPeriod: TimeSpan
         ReadCompacted: bool
         NegativeAckRedeliveryDelay: TimeSpan
@@ -86,6 +87,7 @@ type ConsumerConfiguration<'T> =
             AckTimeoutTickTime = TimeSpan.FromMilliseconds(1000.0)
             AcknowledgementsGroupTime = TimeSpan.FromMilliseconds(100.0)
             AutoUpdatePartitions = true
+            AutoUpdatePartitionsInterval = TimeSpan.FromSeconds(60.0)
             PatternAutoDiscoveryPeriod = TimeSpan.FromMinutes(1.0)
             ReadCompacted = false
             NegativeAckRedeliveryDelay = TimeSpan.FromMinutes(1.0)
@@ -122,6 +124,7 @@ type ProducerConfiguration =
         MessageRoutingMode: MessageRoutingMode
         CustomMessageRouter: IMessageRouter option
         AutoUpdatePartitions: bool
+        AutoUpdatePartitionsInterval: TimeSpan
         HashingScheme: HashingScheme
         InitialSequenceId : SequenceId option
         BlockIfQueueFull: bool
@@ -148,6 +151,7 @@ type ProducerConfiguration =
             MessageRoutingMode = MessageRoutingMode.RoundRobinPartition
             CustomMessageRouter = None
             AutoUpdatePartitions = true
+            AutoUpdatePartitionsInterval = TimeSpan.FromSeconds(60.0)
             HashingScheme = HashingScheme.DotnetStringHash
             InitialSequenceId = Option.None
             BlockIfQueueFull = false

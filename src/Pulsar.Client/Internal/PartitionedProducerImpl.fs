@@ -19,6 +19,7 @@ type internal PartitionedProducerMessage =
     | Close of AsyncReplyChannel<ResultOrException<unit>>
     | TickTime
     | GetStats of AsyncReplyChannel<ProducerStats>
+    | LastDisconnectedTimestamp of AsyncReplyChannel<int64>
 
 type internal PartitionedConnectionState =
     | Uninitialized
@@ -128,7 +129,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             PendingMsgs = pendingMsgs 
         }
     
-    let timer = new Timer(60_000.0) // 1 minute
+    let timer = new Timer(producerConfig.AutoUpdatePartitionsInterval.TotalMilliseconds)
 
     let stopProducer() =
         cleanup(this)
@@ -187,6 +188,15 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     Log.Logger.LogDebug("{0} LastSequenceId", prefix)
                     producers
                     |> Seq.map (fun producer -> producer.LastSequenceId)
+                    |> Seq.max
+                    |> channel.Reply
+                    return! loop ()
+                    
+                | LastDisconnectedTimestamp channel ->
+                    
+                    Log.Logger.LogDebug("{0} LastDisconnectedTimestamp", prefix)
+                    producers
+                    |> Seq.map (fun producer -> producer.LastDisconnectedTimestamp)
                     |> Seq.max
                     |> channel.Reply
                     return! loop ()
@@ -376,6 +386,8 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         member this.Name = producerConfig.ProducerName
 
         member this.GetStatsAsync() = mb.PostAndAsyncReply(GetStats) |> Async.StartAsTask
+        
+        member this.LastDisconnectedTimestamp = mb.PostAndReply(LastDisconnectedTimestamp)
 
         
     interface IAsyncDisposable with
