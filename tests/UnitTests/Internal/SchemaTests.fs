@@ -206,21 +206,16 @@ let tests =
                 Expect.equal "" input.value5.b output.value5.b
         }
 
-        test "Avro schema works fine with long strings (> 256 characters)" {
-            let inputs = [ SampleClass(
-                                        value1 = 1L,
-                                        value2 = new string('1', 257),
-                                        value3 = SampleEnum.S1,
-                                        value4 = List(["some string list"]),
-                                        value5 = SampleNestedClass( a = 1L, b = "s")
-                                    ) ]
+        // Uncomment this test once apache/avro#957 or apache/avro#1013 is merged
+        ptest "Avro schema works fine with long strings (> 256 characters)" {
+            let inputs = [{ AvroSchemaTest.X = String('1', 257); Y = [] |> ResizeArray}]
             for input in inputs do
-                let schema = Schema.AVRO<SampleClass>()
+                let schema = Schema.AVRO()
                 let output =
                     input
                     |> schema.Encode
                     |> schema.Decode
-                Expect.equal "" input.value2 output.value2
+                Expect.equal "" input.X output.X
         }
         
         test "Protobuf schema works fine" {
