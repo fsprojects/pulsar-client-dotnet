@@ -212,4 +212,33 @@ let tests =
             Expect.equal "" 3 result.Count
             Log.Debug("Finished StartMessageFromRollbackDuration")
         }
+
+        testAsync "Check reading in startMessageIdInclusive mode" {
+            Log.Debug("Started Check reading in startMessageIdInclusive mode")
+            let client = getClient()
+            let topicName = "public/retention/" + Guid.NewGuid().ToString("N")
+            let producerName = "startMessageIdInclusiveProducer"
+            let readerName = "startMessageIdInclusiveReader"
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(true)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! messageId = producer.SendAsync("Hello world1" |> Encoding.UTF8.GetBytes) |> Async.AwaitTask
+
+            let! reader =
+                client.NewReader()
+                    .Topic(topicName)
+                    .ReaderName(readerName)
+                    .StartMessageIdInclusive(true)
+                    .StartMessageId(messageId)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! result = readerLoopRead reader |> Async.AwaitTask
+            Expect.equal "" 1 result.Count
+            Log.Debug("Finished Check reading in startMessageIdInclusive mode")
+        }
     ]
