@@ -567,6 +567,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
                             rawMessage.Metadata.SequenceId,
                             rawMessage.Metadata.OrderingKey,
+                            rawMessage.Metadata.PublishTime,
                             getValue
                         )
             if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
@@ -1145,6 +1146,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
                                 %(int64 singleMessageMetadata.SequenceId),
                                 singleMessageMetadata.OrderingKey,
+                                rawMessage.Metadata.PublishTime,
                                 getValue
                             )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
