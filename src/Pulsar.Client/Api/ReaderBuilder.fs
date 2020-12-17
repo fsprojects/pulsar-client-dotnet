@@ -43,9 +43,9 @@ type ReaderBuilder<'T> private (createReaderAsync, config: ReaderConfiguration, 
                 |> Some }
         |> this.With
 
-    member this.StartMessageIdInclusive (startMessageIdInclusive: bool) =
+    member this.StartMessageIdInclusive () =
         { config with
-            ResetIncludeHead = startMessageIdInclusive }
+            ResetIncludeHead = true }
         |> this.With
 
     member this.ReadCompacted readCompacted =

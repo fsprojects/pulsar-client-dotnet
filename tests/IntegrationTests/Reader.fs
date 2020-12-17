@@ -106,7 +106,7 @@ let tests =
                     .Topic(topicName)
                     .ReaderName(readerName + "3")
                     .StartMessageId(result.[0].MessageId)
-                    .StartMessageIdInclusive(true)
+                    .StartMessageIdInclusive()
                     .CreateAsync() |> Async.AwaitTask
             let! result3 = readerLoopRead reader3
             Expect.equal "" numberOfMessages result3.Count
@@ -153,6 +153,90 @@ let tests =
             Log.Debug("Finished Check reading from producer messageId. Batching: " + batching.ToString())
         }
 
+    let checkReadingFromLastMessageId batching =
+        task {
+            Log.Debug("Started Check reading from last messageId. Batching: " + batching.ToString())
+
+            let client = getClient()
+            let topicName = "public/retention/" + Guid.NewGuid().ToString("N")
+            let producerName = "readerProducer"
+            let readerName = "producerIdReader"
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(batching)
+                    .CreateAsync()
+
+            let! msgId1 = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #1 Sent from %s on %s" producerName (DateTime.Now.ToLongTimeString()) ))
+            Log.Debug("msgId1 is {0}", msgId1)
+            let! msgId2 = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #2 Sent from %s on %s" producerName (DateTime.Now.ToLongTimeString()) ))
+            Log.Debug("msgId2 is {0}", msgId2)
+            do! producer.DisposeAsync()
+
+            let! exclusiveReader =
+                client.NewReader()
+                    .Topic(topicName)
+                    .ReaderName(readerName)
+                    .StartMessageId(msgId2)
+                    .CreateAsync()
+            let! exclusiveResult = exclusiveReader.HasMessageAvailableAsync()
+            
+            let! inclusiveReader =
+                client.NewReader()
+                    .Topic(topicName)
+                    .ReaderName(readerName)
+                    .StartMessageId(msgId2)
+                    .StartMessageIdInclusive()
+                    .CreateAsync()
+            let! inclusiveResult = inclusiveReader.HasMessageAvailableAsync()
+            
+            do! exclusiveReader.DisposeAsync()
+            do! inclusiveReader.DisposeAsync()
+            
+            Expect.isFalse "exclusive" exclusiveResult
+            Expect.isTrue "inclusive" inclusiveResult
+            
+            Log.Debug("Finished Check reading from last messageId. Batching: " + batching.ToString())
+        }
+    
+    let checkReadingFromRollback batching =
+        task {
+            Log.Debug("Started Check StartMessageFromRollbackDuration. Batching: " + batching.ToString())
+
+            let client = getClient()
+            let topicName = "public/retention/" + Guid.NewGuid().ToString("N")
+            let producerName = "readerRollbackDurationProducer"
+            let readerName = "rollbackDurationReader"
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(batching)
+                    .CreateAsync()
+
+            let! _ = producer.SendAsync("Hello world1" |> Encoding.UTF8.GetBytes)
+            do! Async.Sleep(500)
+            let! _ = producer.SendAsync("Hello world2" |> Encoding.UTF8.GetBytes)
+            do! Async.Sleep(500)
+            let! _ = producer.SendAsync("Hello world3" |> Encoding.UTF8.GetBytes)
+            do! Async.Sleep(500)
+
+            let! reader =
+                client.NewReader()
+                    .Topic(topicName)
+                    .ReaderName(readerName)
+                    .StartMessageFromRollbackDuration(TimeSpan.FromSeconds(20.0))
+                    .CreateAsync()
+
+            let! result = readerLoopRead reader
+            Expect.equal "" 3 result.Count
+            Log.Debug("Finished StartMessageFromRollbackDuration. Batching: " + batching.ToString())
+        }
+
+    
 
     testList "Reader" [
 
@@ -180,36 +264,19 @@ let tests =
             do! checkReadingFromProducerMessageId true |> Async.AwaitTask
         }
         
-        testAsync "Check StartMessageFromRollbackDuration" {
-            Log.Debug("Started Check StartMessageFromRollbackDuration")
-            let client = getClient()
-            let topicName = "public/retention/" + Guid.NewGuid().ToString("N")
-            let producerName = "readerRollbackDurationProducer"
-            let readerName = "rollbackDurationReader"
+        testAsync "Check reading from last messageId without batching" {
+            do! checkReadingFromLastMessageId false |> Async.AwaitTask
+        }
 
-            let! producer =
-                client.NewProducer()
-                    .Topic(topicName)
-                    .ProducerName(producerName)
-                    .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
-
-            let! _ = producer.SendAsync("Hello world1" |> Encoding.UTF8.GetBytes) |> Async.AwaitTask
-            do! Async.Sleep(500)
-            let! _ = producer.SendAsync("Hello world2" |> Encoding.UTF8.GetBytes) |> Async.AwaitTask
-            do! Async.Sleep(500)
-            let! _ = producer.SendAsync("Hello world3" |> Encoding.UTF8.GetBytes) |> Async.AwaitTask
-            do! Async.Sleep(500)
-
-            let! reader =
-                client.NewReader()
-                    .Topic(topicName)
-                    .ReaderName(readerName)
-                    .StartMessageFromRollbackDuration(TimeSpan.FromSeconds(20.0))
-                    .CreateAsync() |> Async.AwaitTask
-
-            let! result = readerLoopRead reader |> Async.AwaitTask
-            Expect.equal "" 3 result.Count
-            Log.Debug("Finished StartMessageFromRollbackDuration")
+        ptestAsync "Check reading from last messageId with batching" {
+            do! checkReadingFromLastMessageId true |> Async.AwaitTask
+        }
+        
+        testAsync "Check StartMessageFromRollbackDuration without batching" {
+            do! checkReadingFromRollback false |> Async.AwaitTask
+        }
+        
+        testAsync "Check StartMessageFromRollbackDuration with batching" {
+            do! checkReadingFromRollback true |> Async.AwaitTask
         }
     ]
