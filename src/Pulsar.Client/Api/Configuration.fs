@@ -21,6 +21,10 @@ type PulsarClientConfiguration =
         TlsProtocols: SslProtocols
         ListenerName: string
         MaxLookupRedirects: int
+        EnableTransaction: bool
+        Temp: bool
+        InitialBackoffInterval: TimeSpan
+        MaxBackoffInterval: TimeSpan
     }
     static member Default =
         {
@@ -36,6 +40,10 @@ type PulsarClientConfiguration =
             TlsProtocols = SslProtocols.None
             ListenerName = ""
             MaxLookupRedirects = 20
+            EnableTransaction = false
+            Temp = false
+            InitialBackoffInterval = TimeSpan.FromMilliseconds(100.0)
+            MaxBackoffInterval = TimeSpan.FromSeconds(60.0)
         }
 
 type ConsumerConfiguration<'T> =
@@ -184,4 +192,15 @@ type ReaderConfiguration =
             StartMessageFromRollbackDuration = TimeSpan.Zero
             MessageDecryptor = None
             KeySharedPolicy = None
+        }
+
+type TransactionConfiguration =
+    {
+        TxnTimeout: TimeSpan
+        TxnRequestTimeout: TimeSpan
+    }
+    static member Default =
+        {
+            TxnTimeout = TimeSpan.FromMinutes(1.0)
+            TxnRequestTimeout = TimeSpan.FromSeconds(30.0)
         }

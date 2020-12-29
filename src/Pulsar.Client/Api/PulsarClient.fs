@@ -10,6 +10,7 @@ open System.Threading.Tasks
 open Pulsar.Client.Common
 open System.Threading
 open Pulsar.Client.Schema
+open Pulsar.Client.Transaction
 
 type internal PulsarClientState =
     | Active
@@ -35,6 +36,11 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
     let mutable clientState = Active
     let autoProduceStubType =  typeof<AutoProduceBytesSchemaStub>
     let autoConsumeStubType =  typeof<AutoConsumeSchemaStub>
+    let transactionClient =
+        if config.EnableTransaction then
+            TransactionCoordinatorClient(config, connectionPool, lookupService) |> Some
+        else
+            None
 
     let tryStopMailbox() =
         match this.ClientState with
@@ -123,6 +129,7 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
     )
 
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "PulsarClient mailbox failure"))
+    do transactionClient |> Option.iter(fun tc -> tc.Start())
 
     static member Logger
         with get () = Log.Logger
@@ -331,3 +338,10 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
 
     member this.NewReader(schema) =
         ReaderBuilder(this.CreateReaderAsync, schema)
+        
+    member this.NewTransaction() =
+        match transactionClient with
+        | Some transClient ->
+            TransactionBuilder(transClient)
+        | None ->
+            failwith "EnableTransaction property is required for starting new transactions"

@@ -43,8 +43,8 @@ type internal ConnectionHandler( parentPrefix: string,
     let mb = MailboxProcessor<ConnectionHandlerMessage>.Start(fun inbox ->
         let rec loop () =
             async {
-                let! msg = inbox.Receive()
-                match msg with
+                match! inbox.Receive() with
+                
                 | GrabCnx ->
                     
                     match this.ConnectionState with

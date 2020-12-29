@@ -3,6 +3,7 @@
 open System.Collections
 open System.Net
 open System
+open Pulsar.Client.Transaction
 open pulsar.proto
 open System.IO.Pipelines
 open System.IO
@@ -419,7 +420,8 @@ type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey 
             ?properties0 : IReadOnlyDictionary<string, string>,
             ?deliverAt : int64,
             ?sequenceId : SequenceId,
-            ?orderingKey: byte[]) =
+            ?orderingKey: byte[],
+            ?txn: Transaction) =
             
     let properties = defaultArg properties0 EmptyProps
     member this.Value = value
@@ -429,20 +431,25 @@ type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey 
     member this.DeliverAt = deliverAt
     member this.SequenceId = sequenceId
     member this.OrderingKey = orderingKey
+    member this.Txn = txn
             
     /// Get a new instance of the message with updated properties
     member this.WithProperties properties =
-        MessageBuilder(this.Value, this.Payload, this.Key, properties, ?deliverAt = this.DeliverAt, ?sequenceId = this.SequenceId, ?orderingKey = this.OrderingKey)
+        MessageBuilder(this.Value, this.Payload, this.Key, properties, ?deliverAt = this.DeliverAt,
+                       ?sequenceId = this.SequenceId, ?orderingKey = this.OrderingKey, ?txn = txn)
     /// Get a new instance of the message with updated deliverAt
     member this.WithDeliverAt deliverAt =
-        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, deliverAt, ?sequenceId = this.SequenceId, ?orderingKey = this.OrderingKey)
+        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, deliverAt,
+                       ?sequenceId = this.SequenceId, ?orderingKey = this.OrderingKey, ?txn = txn)
     /// Get a new instance of the message with updated sequenceId
     member this.WithSequenceId sequenceId =
-        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, ?deliverAt = this.DeliverAt, ?sequenceId = sequenceId, ?orderingKey = this.OrderingKey)
+        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, ?deliverAt = this.DeliverAt,
+                       ?sequenceId = sequenceId, ?orderingKey = this.OrderingKey, ?txn = txn)
     /// Get a new instance of the message with updated orderingKey
     member this.WithOrderingKey (orderingKey: byte[]) =
         let verifiedOrderingKey = orderingKey |> Option.ofObj
-        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, ?deliverAt = this.DeliverAt, ?sequenceId = this.SequenceId, ?orderingKey = verifiedOrderingKey)
+        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, ?deliverAt = this.DeliverAt,
+                       ?sequenceId = this.SequenceId, ?orderingKey = verifiedOrderingKey, ?txn = txn)
         
         
 type internal WriterStream = Stream

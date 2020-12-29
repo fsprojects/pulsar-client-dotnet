@@ -52,6 +52,7 @@
     <Compile Include="Internal\Log.fs" />
     <Compile Include="Internal\BatchMessageAcker.fs" />
     <Compile Include="Internal\Backoff.fs" />
+    <Compile Include="Transaction\Transaction.fs" />
     <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Common\TopicName.fs" />
     <Compile Include="Common\DTO.fs" />
@@ -122,15 +123,19 @@
     <Compile Include="Internal\ReaderImpl.fs" />
     <Compile Include="Internal\MultiTopicsConsumerImpl.fs" />
     <Compile Include="Internal\PartitionedProducerImpl.fs" />
+    <Compile Include="Internal\TransactionMetaStoreHandler.fs" />
     <Compile Include="Api\Schema.fs" />
     <Compile Include="Api\AuthenticationFactory.fs" />
+    <Compile Include="Crypto\ICryptoKeyReader.fs" />
+    <Compile Include="Crypto\MessageCrypto.fs" />
+    <Compile Include="Transaction\TransactionCoordinatorClient.fs" />
+    <Compile Include="Transaction\TransactionBuilder.fs" />
+    <Compile Include="Transaction\TransactionBufferClient.fs" />
     <Compile Include="Api\ProducerBuilder.fs" />
     <Compile Include="Api\ConsumerBuilder.fs" />
     <Compile Include="Api\ReaderBuilder.fs" />
     <Compile Include="Api\PulsarClient.fs" />
     <Compile Include="Api\PulsarClientBuilder.fs" />
-    <Compile Include="Crypto\ICryptoKeyReader.fs" />
-    <Compile Include="Crypto\MessageCrypto.fs" />
   </ItemGroup>
   <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="ResolveReferences">
     <ItemGroup>

@@ -6,6 +6,7 @@ open System.Threading.Tasks
 open Pulsar.Client.Common
 open System.Runtime.InteropServices
 open FSharp.UMX
+open Pulsar.Client.Transaction
 
 type IProducer<'T> =
     inherit IAsyncDisposable
@@ -28,8 +29,10 @@ type IProducer<'T> =
     ///     Constructs <see cref="Pulsar.Client.Common.MessageBuilder" />
     /// </summary>
     /// <param name="value">Message data</param>
+    /// <param name="key">Key of the message for routing policy.</param>
     /// <param name="properties">The readonly dictionary with message properties.</param>
-    /// <param name="deliverAt">Unix timestamp in milliseconds after which message should be delivered to consumer(s).</param>
+    /// <param name="deliverAt">Unix timestamp in milliseconds after which message should be delivered to consumer(s).timestamp must be expressed as unix time milliseconds based on UTC.
+    ///     For example: <code>DateTimeOffset.UtcNow.AddSeconds(2.0).ToUnixTimeMilliseconds()</code></param>
     /// <param name="sequenceId">
     ///     Specify a custom sequence id for the message being published.
     ///     The sequence id can be used for deduplication purposes and it needs to follow these rules:
@@ -38,11 +41,10 @@ type IProducer<'T> =
     ///             <c>sequenceId(N+1) > sequenceId(N)</c>
     ///         - It's not necessary for sequence ids to be consecutive. There can be holes between messages. Eg. the
     ///             <c>sequenceId</c> could represent an offset or a cumulative size.
-    /// </param>    
-    /// <remarks>
-    ///     This <paramref name="deliverAt" /> timestamp must be expressed as unix time milliseconds based on UTC.
-    ///     For example: <code>DateTimeOffset.UtcNow.AddSeconds(2.0).ToUnixTimeMilliseconds()</code>.
-    /// </remarks>
+    /// </param>
+    /// <param name="keyBytes">Bytes of the key of the message for routing policy.</param>
+    /// <param name="orderingKey">Ordering key of the message for message dispatch in Key_Shared mode.</param>
+    /// <param name="txn">Transaction associated with this message.</param>
     abstract member NewMessage:
         value:'T
         * [<Optional; DefaultParameterValue(null:string)>]key:string
@@ -51,6 +53,7 @@ type IProducer<'T> =
         * [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>
         * [<Optional; DefaultParameterValue(null:byte[])>]keyBytes:byte[]
         * [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[]
+        * [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction
         -> MessageBuilder<'T>
     /// The last sequence id that was published by this producer.
     /// This represent either the automatically assigned

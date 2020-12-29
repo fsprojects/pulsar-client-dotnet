@@ -86,6 +86,11 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
             { config with
                 MaxLookupRedirects = maxLookupRedirects }
             
+    member this.EnableTransaction enableTransaction =
+        PulsarClientBuilder
+            { config with
+                Temp = enableTransaction }
+            
     member this.Build() =
         config
         |> verify

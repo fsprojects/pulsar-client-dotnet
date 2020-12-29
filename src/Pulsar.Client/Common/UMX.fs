@@ -8,6 +8,7 @@ open FSharp.UMX
 [<Measure>] type private requestId
 [<Measure>] type private producerId
 [<Measure>] type private consumerId
+[<Measure>] type private transactionCoordinatorId
 [<Measure>] type private sequenceId
 [<Measure>] type private chunkId
 [<Measure>] type private uuid
@@ -22,6 +23,7 @@ type EntryId = int64<entryId>
 type RequestId = uint64<requestId>
 type ProducerId = uint64<producerId>
 type ConsumerId = uint64<consumerId>
+type TransactionCoordinatorId = uint64<transactionCoordinatorId>
 type SequenceId = int64<sequenceId>
 type ChunkId = int<chunkId>
 type Uuid = string<uuid>

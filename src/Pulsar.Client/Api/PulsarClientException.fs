@@ -34,8 +34,6 @@ type NotAllowedException(msg) = inherit Exception(msg)
 type UnsupportedVersionException(msg) = inherit Exception(msg)
 type SubscriptionNotFoundException(msg) = inherit Exception(msg)
 type ConsumerNotFoundException(msg) = inherit Exception(msg)
-type TransactionCoordinatorNotFoundException(msg) = inherit Exception(msg)
-type InvalidTxnStatusException(msg) = inherit Exception(msg)
 
 
 // custom exception
@@ -44,6 +42,15 @@ exception MaxMessageSizeChanged of int
 type SchemaSerializationException(msg) = inherit Exception(msg)
 type DecompressionException(msg) = inherit Exception(msg)
 type BatchDeserializationException (msg) = inherit Exception(msg)
+
+//transaction
+type CoordinatorClientStateException (msg) = inherit Exception(msg)
+type CoordinatorNotFoundException (msg) = inherit Exception(msg)
+type InvalidTxnStatusException (msg) = inherit Exception(msg)
+type TransactionNotFoundException (msg) = inherit Exception(msg)
+type MetaStoreHandlerNotExistsException (msg) = inherit Exception(msg)
+type MetaStoreHandlerNotReadyException (msg) = inherit Exception(msg)
+type RequestTimeoutException (msg) = inherit Exception(msg)
 
 module PulsarClientException =
     let isRetriableError (ex: exn) =

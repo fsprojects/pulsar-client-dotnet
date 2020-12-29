@@ -52,6 +52,10 @@ type TopicName private (completeTopicName: string, partition: int) =
                         else
                             failwith "Invalid short topic name '" + topic + "', it should be in the format of <tenant>/<namespace>/<topic> or <topic>"
         TopicName(completeTopicName, GetPartitionIndex(completeTopicName))
+        
+    internal new (domain: string, namespaceName: NamespaceName, topic: string) =
+        let name = domain + "://" + namespaceName.ToString() + "/" + topic
+        TopicName(name)
 
     member this.CompleteTopicName: CompleteTopicName = %completeTopicName
 
@@ -72,6 +76,9 @@ type TopicName private (completeTopicName: string, partition: int) =
         else
             let partitionedTopicName = completeTopicName + PartitionTopicSuffix + index.ToString()
             TopicName(partitionedTopicName, index)
+            
+    static member TRANSACTION_COORDINATOR_ASSIGN =
+        TopicName("persistent", NamespaceName.SYSTEM_NAMESPACE, "transaction_coordinator_assign")
 
     override this.Equals obj =
         match obj with

@@ -126,7 +126,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                           topicName.CompleteTopicName,
                           (fun _ -> this.Mb.Post(ConsumerMessage.ConnectionOpened)),
                           (fun ex -> this.Mb.Post(ConsumerMessage.ConnectionFailed ex)),
-                          Backoff({ BackoffConfig.Default with Initial = TimeSpan.FromMilliseconds(100.0); Max = TimeSpan.FromSeconds(60.0) }))
+                          Backoff({ BackoffConfig.Default with
+                                        Initial = clientConfig.InitialBackoffInterval
+                                        Max = clientConfig.MaxBackoffInterval }))
 
     let hasMoreMessages (lastMessageIdInBroker: MessageId) (lastDequeuedMessage: MessageId) (inclusive: bool) =
         if (inclusive && lastMessageIdInBroker >= lastDequeuedMessage && lastMessageIdInBroker.EntryId <> %(-1L)) then
@@ -640,8 +642,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
         let rec loop () =
             async {
-                let! msg = inbox.Receive()
-                match msg with
+                match! inbox.Receive() with
+                
                 | ConsumerMessage.ConnectionOpened ->
 
                     match connectionHandler.ConnectionState with
@@ -1225,10 +1227,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     abstract member ReceiveFsharpAsync: CancellationToken -> Async<ResultOrException<Message<'T>>>
     default this.ReceiveFsharpAsync(cancellationToken: CancellationToken) =
         async {
-            let exn = connectionHandler.CheckIfActive()
-            if not (isNull exn) then
-                raise exn
-
+            connectionHandler.CheckIfActive() |> throwIfNotNull
             let! msgResult = mb.PostAndAsyncReply(fun channel -> Receive(cancellationToken, channel))
             match msgResult with
             | Ok _ ->
@@ -1244,10 +1243,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         
         member this.ReceiveAsync(cancellationToken: CancellationToken) =
             task {
-                let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then
-                    raise exn
-
+                connectionHandler.CheckIfActive() |> throwIfNotNull
                 match! mb.PostAndAsyncReply(fun channel -> Receive(cancellationToken, channel)) with
                 | Ok msg ->
                     return msg
@@ -1261,10 +1257,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
         member this.BatchReceiveAsync(cancellationToken: CancellationToken) =
             task {
-                let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then
-                    raise exn
-
+                connectionHandler.CheckIfActive() |> throwIfNotNull
                 match! mb.PostAndAsyncReply(fun channel -> BatchReceive(cancellationToken, channel)) with
                 | Ok msg ->
                     return msg

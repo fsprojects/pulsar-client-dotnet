@@ -37,6 +37,10 @@ and internal ConsumerOperations =
         ActiveConsumerChanged: bool -> unit
         ConnectionClosed: ClientCnx -> unit
     }
+and internal TransactionMetaStoreOperations =
+    {
+        ConnectionClosed: ClientCnx -> unit
+    }
     
 and internal RequestsOperation =
     | AddRequest of RequestId * BaseCommand.Type * TaskCompletionSource<PulsarResponseType>
@@ -48,8 +52,10 @@ and internal RequestsOperation =
 and internal CnxOperation =
     | AddProducer of ProducerId * ProducerOperations
     | AddConsumer of ConsumerId * ConsumerOperations
+    | AddTransactionMetaStoreHandler of TransactionCoordinatorId * TransactionMetaStoreOperations
     | RemoveConsumer of ConsumerId
     | RemoveProducer of ProducerId
+    | RemoveTransactionMetaStoreHandler of TransactionCoordinatorId
     | ChannelInactive
     | Stop
     
@@ -93,6 +99,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     let consumers = Dictionary<ConsumerId, ConsumerOperations>()
     let producers = Dictionary<ProducerId, ProducerOperations>()
+    let transactionMetaStores = Dictionary<TransactionCoordinatorId, TransactionMetaStoreOperations>()
     let requests = Dictionary<RequestId, TaskCompletionSource<PulsarResponseType>>()
     let requestTimeoutQueue = Queue<RequestTime>()
     let clientCnxId = Generators.getNextClientCnxId()
@@ -166,7 +173,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     )
 
     let tryStopMailboxes() =
-        if consumers.Count = 0 && producers.Count = 0 then
+        if consumers.Count = 0 && producers.Count = 0 && transactionMetaStores.Count = 0 then
             this.SendMb.Post(SocketMessage.Stop)
             this.OperationsMb.Post(CnxOperation.Stop)
 
@@ -182,6 +189,10 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     Log.Logger.LogDebug("{0} adding consumer {1}", prefix, consumerId)
                     consumers.Add(consumerId, consumerOperation)
                     return! loop()
+                | AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations) ->
+                    Log.Logger.LogDebug("{0} adding transaction metastore {1}", prefix, transactionMetaStoreId)
+                    transactionMetaStores.Add(transactionMetaStoreId, transactionMetaStoreOperations)
+                    return! loop()
                 | RemoveConsumer consumerId ->
                     Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
                     consumers.Remove(consumerId) |> ignore
@@ -191,6 +202,12 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 | RemoveProducer producerId ->
                     Log.Logger.LogDebug("{0} removing producer {1}", prefix, producerId)
                     producers.Remove(producerId) |> ignore
+                    if isActive |> not then
+                        tryStopMailboxes()
+                    return! loop()
+                | RemoveTransactionMetaStoreHandler transactionMetaStoreId ->
+                    Log.Logger.LogDebug("{0} removing transactionMetaStore {1}", prefix, transactionMetaStoreId)
+                    transactionMetaStores.Remove(transactionMetaStoreId) |> ignore
                     if isActive |> not then
                         tryStopMailboxes()
                     return! loop()
@@ -204,6 +221,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                             consumerOperation.ConnectionClosed(this))
                         producers |> Seq.iter(fun (KeyValue(_,producerOperation)) ->
                             producerOperation.ConnectionClosed(this))
+                        transactionMetaStores |> Seq.iter(fun (KeyValue(_,transactionMetaStoreOperation)) ->
+                            transactionMetaStoreOperation.ConnectionClosed(this))
                     return! loop()
                 | CnxOperation.Stop ->
                     Log.Logger.LogDebug("{0} operationsMb stopped", prefix)
@@ -351,7 +370,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | ServerError.InvalidTopicName -> InvalidTopicNameException errorMsg :> exn
         | ServerError.IncompatibleSchema -> IncompatibleSchemaException errorMsg :> exn
         | ServerError.ConsumerAssignError -> ConsumerAssignException errorMsg :> exn
-        | ServerError.TransactionCoordinatorNotFound -> TransactionCoordinatorNotFoundException errorMsg :> exn
+        | ServerError.TransactionCoordinatorNotFound -> CoordinatorNotFoundException errorMsg :> exn
         | ServerError.InvalidTxnStatus -> InvalidTxnStatusException errorMsg :> exn
         | ServerError.NotAllowedError -> NotAllowedException errorMsg :> exn
         | _ -> exn errorMsg
@@ -589,7 +608,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                             handleCommand xcmd
                             reader.AdvanceTo consumed
                         | Result.Error IncompleteCommand, _ ->
-                            Log.Logger.LogDebug("IncompleteCommand received", prefix)
+                            Log.Logger.LogDebug("{0} IncompleteCommand received", prefix)
                             reader.AdvanceTo(buffer.Start, buffer.End)
                         | Result.Error (CorruptedCommand ex), consumed ->
                             Log.Logger.LogError(ex, "{0} Ignoring corrupted command.", prefix)
@@ -639,6 +658,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     member this.RemoveProducer (consumerId: ProducerId) =
         operationsMb.Post(RemoveProducer(consumerId))
+        
+    member this.RemoveTransactionMetaStoreHandler (transactionMetaStoreId: TransactionCoordinatorId) =
+        operationsMb.Post(RemoveTransactionMetaStoreHandler(transactionMetaStoreId))
 
     member this.AddProducer (producerId: ProducerId, producerOperations: ProducerOperations) =
         operationsMb.Post(AddProducer (producerId, producerOperations))
@@ -646,6 +668,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     member this.AddConsumer (consumerId: ConsumerId, consumerOperations: ConsumerOperations) =
         operationsMb.Post(AddConsumer (consumerId, consumerOperations))
 
+    member this.AddTransactionMetaStoreHandler(transactionMetaStoreId: TransactionCoordinatorId,
+                                               transactionMetaStoreOperations: TransactionMetaStoreOperations) =
+        operationsMb.Post(AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations))
     member this.Close() =
         connection.Dispose()
 

@@ -12,6 +12,7 @@ open Microsoft.Extensions.Logging
 open Pulsar.Client.Schema
 open System.Threading
 open System.Timers
+open Pulsar.Client.Transaction
 
 type internal PartitionedProducerMessage =
     | Init
@@ -140,8 +141,8 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
         let rec loop () =
             async {
-                let! msg = inbox.Receive()
-                match msg with
+                match! inbox.Receive() with
+                
                 | Init ->
                     let producerTasks =
                         Seq.init numPartitions (fun partitionIndex ->
@@ -373,9 +374,10 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>,
             [<Optional; DefaultParameterValue(null:byte[])>]keyBytes:byte[],
-            [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[]) =
+            [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[],
+            [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction) =
             ProducerImpl.NewMessage(keyValueProcessor, schema, value, key, properties,
-                                    deliverAt, sequenceId, keyBytes, orderingKey)
+                                    deliverAt, sequenceId, keyBytes, orderingKey, txn)
 
         member this.ProducerId = producerId
 

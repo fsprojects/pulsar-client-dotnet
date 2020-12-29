@@ -308,3 +308,8 @@ let newGetSchema (topicName: CompleteTopicName) (requestId : RequestId) (schemaV
     | None -> ()        
     let command = BaseCommand(``type`` = CommandType.GetSchema, getSchema = request)
     command |> serializeSimpleCommand
+    
+let newTxn (tcId: TransactionCoordinatorId) (requestId: RequestId) (ttl: TimeSpan) =
+    let request = CommandNewTxn(TcId = %tcId, RequestId = %requestId, TxnTtlSeconds = uint64 ttl.TotalSeconds)
+    let command = BaseCommand(``type`` = CommandType.NewTxn, newTxn = request)
+    command |> serializeSimpleCommand

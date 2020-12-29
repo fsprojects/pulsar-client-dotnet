@@ -452,8 +452,8 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
 
         let rec loop () =
             async {
-                let! msg = inbox.Receive()
-                match msg with
+                match! inbox.Receive() with
+                
                 | Init ->
                     
                     Log.Logger.LogDebug("{0} Init", prefix)

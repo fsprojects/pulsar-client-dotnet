@@ -14,6 +14,8 @@ type NamespaceName(name : string) =
     member this.Tenant = tenant
 
     member this.LocalName = localName
+    
+    static member SYSTEM_NAMESPACE = NamespaceName("pulsar/system")
 
     override this.ToString() =
         name

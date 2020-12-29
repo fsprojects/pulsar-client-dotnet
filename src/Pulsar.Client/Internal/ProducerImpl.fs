@@ -14,6 +14,7 @@ open System.Collections.Generic
 open System.Timers
 open System.IO
 open System.Runtime.InteropServices
+open Pulsar.Client.Transaction
 
 type SendMessageRequest<'T> = MessageBuilder<'T> * AsyncReplyChannel<TaskCompletionSource<MessageId>>
 
@@ -80,8 +81,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                           (fun epoch -> this.Mb.Post(ProducerMessage.ConnectionOpened epoch)),
                           (fun ex -> this.Mb.Post(ProducerMessage.ConnectionFailed ex)),
                           Backoff { BackoffConfig.Default with
-                                        Initial = TimeSpan.FromMilliseconds(100.0)
-                                        Max = TimeSpan.FromSeconds(60.0)
+                                        Initial = clientConfig.InitialBackoffInterval
+                                        Max = clientConfig.MaxBackoffInterval
                                         MandatoryStop = TimeSpan.FromMilliseconds(Math.Max(100.0, sendTimeoutMs - 100.0))})
 
     let batchMessageContainer =
@@ -446,8 +447,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
         let rec loop () =
             async {
-                let! msg = inbox.Receive()
-                match msg with
+                match! inbox.Receive() with
 
                 | ProducerMessage.ConnectionOpened epoch ->
 
@@ -752,7 +752,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             deliverAt:Nullable<int64>,
             sequenceId:Nullable<SequenceId>,
             keyBytes:byte[],
-            orderingKey:byte[]) =
+            orderingKey:byte[],
+            txn:Transaction) =
             keyValueProcessor
             |> Option.map(fun kvp -> kvp.EncodeKeyValue value)
             |> Option.map(fun struct(k, v) ->
@@ -817,9 +818,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>,
             [<Optional; DefaultParameterValue(null:byte[])>]keyBytes:byte[],
-            [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[]) =
+            [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[],
+            [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction) =
             ProducerImpl.NewMessage(keyValueProcessor, schema, value, key, properties,
-                                    deliverAt, sequenceId, keyBytes, orderingKey)
+                                    deliverAt, sequenceId, keyBytes, orderingKey, txn)
                 
         member this.ProducerId = producerId
 
