@@ -146,7 +146,7 @@ NUGET
 
 GROUP Examples
 STORAGE: NONE
-RESTRICTION: == netcoreapp3.1
+RESTRICTION: == net50
 NUGET
   remote: https://api.nuget.org/v3/index.json
     Apache.Avro (1.10.1)
@@ -190,7 +190,6 @@ NUGET
       Microsoft.Extensions.DependencyInjection.Abstractions (>= 5.0)
       Microsoft.Extensions.Logging.Abstractions (>= 5.0)
       Microsoft.Extensions.Options (>= 5.0)
-      System.Diagnostics.DiagnosticSource (>= 5.0)
     Microsoft.Extensions.Logging.Abstractions (5.0)
     Microsoft.Extensions.Logging.Configuration (5.0)
       Microsoft.Extensions.Configuration (>= 5.0)
@@ -209,7 +208,6 @@ NUGET
       Microsoft.Extensions.Logging.Configuration (>= 5.0)
       Microsoft.Extensions.Options (>= 5.0)
       Microsoft.Extensions.Options.ConfigurationExtensions (>= 5.0)
-      System.Text.Json (>= 5.0)
     Microsoft.Extensions.Options (5.0)
       Microsoft.Extensions.DependencyInjection.Abstractions (>= 5.0)
       Microsoft.Extensions.Primitives (>= 5.0)
@@ -261,7 +259,6 @@ NUGET
       NETStandard.Library (>= 1.6)
     System.CodeDom (5.0)
     System.ComponentModel.Annotations (5.0)
-    System.Diagnostics.DiagnosticSource (5.0)
     System.IO (4.3)
       Microsoft.NETCore.Platforms (>= 1.1)
       Microsoft.NETCore.Targets (>= 1.1)
@@ -305,7 +302,7 @@ NUGET
 
 GROUP Tests
 STORAGE: NONE
-RESTRICTION: == netcoreapp3.1
+RESTRICTION: == net50
 NUGET
   remote: https://api.nuget.org/v3/index.json
     Apache.Avro (1.10.1)
@@ -332,7 +329,6 @@ NUGET
       Microsoft.Extensions.DependencyInjection.Abstractions (>= 5.0)
       Microsoft.Extensions.Logging.Abstractions (>= 5.0)
       Microsoft.Extensions.Options (>= 5.0)
-      System.Diagnostics.DiagnosticSource (>= 5.0)
     Microsoft.Extensions.Logging.Abstractions (5.0)
     Microsoft.Extensions.Options (5.0)
       Microsoft.Extensions.DependencyInjection.Abstractions (>= 5.0)
@@ -375,7 +371,6 @@ NUGET
       System.IO (>= 4.3)
       System.Runtime (>= 4.3)
       System.Text.Encoding (>= 4.3)
-    System.Diagnostics.DiagnosticSource (5.0)
     System.Globalization (4.3)
       Microsoft.NETCore.Platforms (>= 1.1)
       Microsoft.NETCore.Targets (>= 1.1)
@@ -443,7 +438,7 @@ NUGET
       Microsoft.NETCore.Platforms (>= 1.1)
       Microsoft.NETCore.Targets (>= 1.1)
       System.Runtime (>= 4.3)
-    YoloDev.Expecto.TestSdk (0.9.2)
+    YoloDev.Expecto.TestSdk (0.11.1)
       Expecto (>= 9.0 < 10.0)
       FSharp.Core (>= 4.6)
-      System.Collections.Immutable (>= 1.5 < 2.0)
+      System.Collections.Immutable (>= 1.5 < 5.1)

@@ -23,7 +23,7 @@ type internal TransactionCoordinatorMessage =
 
 type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfiguration,
                                             connectionPool: ConnectionPool,
-                                            lookup: BinaryLookupService) as this =
+                                            lookup: BinaryLookupService) =
 
     let DEFAULT_TXN_TTL = TimeSpan.FromSeconds(60.0)
     let prefix = "tcClient"

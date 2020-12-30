@@ -25,7 +25,7 @@ nuget NSec.Cryptography
 nuget PemUtils
 
 group Tests
-  framework: netcoreapp3.1
+  framework: net5.0
   source https://api.nuget.org/v3/index.json
   storage: none
 
@@ -41,7 +41,7 @@ group Tests
   nuget Apache.Avro
 
 group Examples
-  framework: netcoreapp3.1
+  framework: net5.0
   source https://api.nuget.org/v3/index.json
   storage: none
 
