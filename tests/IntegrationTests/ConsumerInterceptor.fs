@@ -235,19 +235,19 @@ let tests =
             let secondId = consumerInterceptor.AckCumulativeMessageIds.[2]
             
             match prevMsgId.Type with
-            | Cumulative _ -> failwith "MessageIdType should be Individual"
+            | Batch _ -> failwith "MessageIdType should be Individual"
             | Individual ->
                 if not (prevMsgId.EntryId = %1L) then
                     failwith "No interceptor for prevMsgAck"
 
             match firstId.Type with
-            | Cumulative (indx, _) ->
+            | Batch (indx, _) ->
                 if not (indx = %1 && firstId.EntryId = %2L) then
                     failwith "No interceptor for firstAck"
             | _ -> failwith "MessageIdType should be Cumulative"
 
             match secondId.Type with
-            | Cumulative (indx, _) ->
+            | Batch (indx, _) ->
                 if not (indx = %2 && secondId.EntryId = %2L) then
                     failwith "No interceptor for secondAck"
             | _ -> failwith "MessageIdType should be Cumulative"

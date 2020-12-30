@@ -597,7 +597,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                     tcss
                                     |> Array.iter (fun (msgId, msg, tcs) ->
                                         let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex
-                                                      Type = Cumulative msgId; TopicName = %""; ChunkMessageIds = None }
+                                                      Type = Batch msgId; TopicName = %""; ChunkMessageIds = None }
                                         interceptors.OnSendAcknowledgement(this, msg, msgId, null)
                                         stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
                                         tcs.SetResult(msgId))

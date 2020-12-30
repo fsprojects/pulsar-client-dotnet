@@ -19,6 +19,7 @@ type internal TransactionMetaStoreMessage =
     | ConnectionFailed of exn
     | ConnectionClosed of ClientCnx
     | NewTransaction of TimeSpan * AsyncReplyChannel<Task<TxnId>>
+    | NewTransactionResponse of RequestId * ResultOrException<TxnId>
 
 type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguration,
                                     transactionCoordinatorId: TransactionCoordinatorId,
@@ -43,7 +44,8 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                                     Max = clientConfig.MaxBackoffInterval }))
 
     let transactionMetaStoreOperations = {
-        ConnectionClosed = fun (clientCnx) -> this.Mb.Post(TransactionMetaStoreMessage.ConnectionClosed clientCnx)
+        ConnectionClosed = fun clientCnx -> this.Mb.Post(TransactionMetaStoreMessage.ConnectionClosed clientCnx)
+        NewTxnResponse = fun result -> this.Mb.Post(TransactionMetaStoreMessage.NewTransactionResponse result)
     }
 
     
@@ -99,6 +101,20 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                             |> ch.Reply
                     | _ ->
                         Log.Logger.LogWarning("{0} is not ready", prefix)
+                    return! loop ()
+                    
+                | TransactionMetaStoreMessage.NewTransactionResponse (reqId, txnId) ->
+                    
+                    Log.Logger.LogDebug("{0} NewTransactionResponse reqId={1} txnId={2}", prefix, reqId, txnId)
+                    match pendingRequests.TryGetValue reqId with
+                    | true, op ->
+                        pendingRequests.Remove(reqId) |> ignore
+                        match txnId with
+                        | Ok txnId -> op.SetResult(txnId)
+                        | Error ex -> op.SetException(ex)
+                    | _ ->
+                        Log.Logger.LogWarning("{0} Got new txn response for timeout reqId={1} txnId={2}",
+                                                prefix, reqId, txnId)
                     return! loop ()
            }
         loop ()

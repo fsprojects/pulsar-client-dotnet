@@ -4,8 +4,8 @@ open System
 open Pulsar.Client.Common
 
 type TxnId = {
-    MostSigBits: int64
-    LeastSigBits: int64
+    MostSigBits: uint64
+    LeastSigBits: uint64
 }
 
 type TxnOperations() = class end

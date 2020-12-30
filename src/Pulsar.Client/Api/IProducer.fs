@@ -44,7 +44,11 @@ type IProducer<'T> =
     /// </param>
     /// <param name="keyBytes">Bytes of the key of the message for routing policy.</param>
     /// <param name="orderingKey">Ordering key of the message for message dispatch in Key_Shared mode.</param>
-    /// <param name="txn">Transaction associated with this message.</param>
+    /// <param name="txn">
+    ///     Transaction associated with this message.
+    ///     After the transaction commit, it will be made visible to consumer.
+    ///     After the transaction abort, it will never be visible to consumer.
+    /// </param>
     abstract member NewMessage:
         value:'T
         * [<Optional; DefaultParameterValue(null:string)>]key:string

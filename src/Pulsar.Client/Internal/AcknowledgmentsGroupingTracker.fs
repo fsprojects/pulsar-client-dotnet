@@ -42,7 +42,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
     let getBatchDetails msgId =
         match msgId with
         | Individual -> failwith "Unexpected msgId type, expected Cumulative"
-        | Cumulative x -> x
+        | Batch x -> x
 
     let doCumulativeAck msgId isBatch =
         if msgId > lastCumulativeAck then

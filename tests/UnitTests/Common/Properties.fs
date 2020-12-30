@@ -14,7 +14,7 @@ type MessageIdGen() =
                {
                    LedgerId = %(int64 ledgerId)
                    EntryId = %(int64 entryId)
-                   Type = Cumulative (%index, BatchMessageAcker.NullAcker)
+                   Type = Batch (%index, BatchMessageAcker.NullAcker)
                    Partition = partition
                    TopicName = %""
                    ChunkMessageIds = None

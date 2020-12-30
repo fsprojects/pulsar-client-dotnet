@@ -11,6 +11,7 @@ open Microsoft.Extensions.Logging
 open System.IO
 open ProtoBuf
 open Pulsar.Client.Schema
+open Pulsar.Client.Transaction
 open pulsar.proto
 open System.Threading
 open System.Timers
@@ -165,9 +166,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             | Some nextMessageInQueue ->                
                 let previousMessage =
                     match nextMessageInQueue.Type with
-                    | Cumulative (index, acker) ->
+                    | Batch (index, acker) ->
                         // Get on the previous message within the current batch
-                        { nextMessageInQueue with Type = Cumulative(index - %1, acker) }
+                        { nextMessageInQueue with Type = Batch(index - %1, acker) }
                     | Individual ->
                         // Get on previous message in previous entry
                         { nextMessageInQueue with EntryId = nextMessageInQueue.EntryId - %1L }
@@ -276,10 +277,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | Individual ->
                     untrackMessage messageId
                     stats.IncrementNumAcksSent(1)
-                | Cumulative (_, batch) ->
+                | Batch (_, batch) ->
                     let batchSize = batch.GetBatchSize()
                     for i in 0..batchSize-1 do
-                        untrackMessage { messageId with Type = Cumulative(%i, batch) }
+                        untrackMessage { messageId with Type = Batch(%i, batch) }
                     stats.IncrementNumAcksSent(batchSize)
                 interceptors.OnAcknowledge(this, messageId, null)
             | AckType.Cumulative ->
@@ -335,7 +336,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let trySendAcknowledge ackType properties messageId =
         async {
             match messageId.Type with
-            | Cumulative batchDetails when not (markAckForBatchMessage messageId batchDetails ackType properties) ->
+            | Batch batchDetails when not (markAckForBatchMessage messageId batchDetails ackType properties) ->
                 if consumerConfig.BatchIndexAcknowledgmentEnabled then
                     do! acksGroupingTracker.AddBatchIndexAcknowledgment(messageId, ackType, properties)
                 // other messages in batch are still pending ack.
@@ -359,7 +360,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         | Some startMsgId ->
             match startMsgId.Type with
             | Individual -> false
-            | Cumulative (batchIndex, _) ->
+            | Batch (batchIndex, _) ->
                 if consumerConfig.ResetIncludeHead then
                     idx < batchIndex
                 else
@@ -666,7 +667,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                     match msgId.Type with
                                     | Individual ->
                                         ()
-                                    | Cumulative (index, _) ->
+                                    | Batch (index, _) ->
                                         data.BatchIndex <- %index
                                     data
                         // startMessageRollbackDurationInSec should be consider only once when consumer connects to first time
@@ -1123,7 +1124,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     {
                         rawMessage.MessageId with
                             Partition = partitionIndex
-                            Type = Cumulative(%i, acker)
+                            Type = Batch(%i, acker)
                             TopicName = %""
                     }
                 let msgKey = singleMessageMetadata.PartitionKey
@@ -1280,6 +1281,17 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 mb.Post(Acknowledge(msgId, AckType.Individual))
             }
             
+        member this.AcknowledgeAsync (msgId: MessageId, txn: Transaction) =
+            task {
+                let exn = connectionHandler.CheckIfActive()
+                if not (isNull exn) then
+                    stats.IncrementNumAcksFailed()
+                    interceptors.OnAcknowledge(this, msgId, exn)
+                    raise exn
+
+                mb.Post(Acknowledge(msgId, AckType.Individual))
+            }
+            
         member this.AcknowledgeAsync (msgs: Messages<'T>) =
             task {
                 let exn = connectionHandler.CheckIfActive()
@@ -1294,6 +1306,17 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
+            task {
+                let exn = connectionHandler.CheckIfActive()
+                if not (isNull exn) then
+                    stats.IncrementNumAcksFailed()
+                    interceptors.OnAcknowledgeCumulative(this, msgId, exn)
+                    raise exn
+
+                mb.Post(Acknowledge(msgId, AckType.Cumulative))
+            }
+            
+        member this.AcknowledgeCumulativeAsync (msgId: MessageId, txn: Transaction) =
             task {
                 let exn = connectionHandler.CheckIfActive()
                 if not (isNull exn) then

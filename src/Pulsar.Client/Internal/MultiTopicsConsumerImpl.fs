@@ -11,6 +11,7 @@ open Microsoft.Extensions.Logging
 open System.Threading
 open System.Timers
 open ConsumerBase
+open Pulsar.Client.Transaction
 
 type internal MultiTopicConnectionState =
     | Uninitialized
@@ -977,6 +978,12 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 return! t
             }
             
+         member this.AcknowledgeAsync (msgId: MessageId, txn: Transaction) =
+            task {
+                let! t = mb.PostAndAsyncReply(fun channel -> Acknowledge(channel, msgId))
+                return! t
+            }
+            
         member this.AcknowledgeAsync (msgs: Messages<'T>) =
             task {
                 for msg in msgs do
@@ -985,6 +992,12 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
             }
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
+            task {
+                let! result = mb.PostAndAsyncReply(fun channel -> AcknowledgeCumulative(channel, msgId))
+                return! result
+            }
+            
+        member this.AcknowledgeCumulativeAsync (msgId: MessageId, txn: Transaction) =
             task {
                 let! result = mb.PostAndAsyncReply(fun channel -> AcknowledgeCumulative(channel, msgId))
                 return! result

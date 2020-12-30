@@ -112,7 +112,7 @@ type BatchDetails = BatchIndex * BatchMessageAcker
 
 type MessageIdType =
     | Individual
-    | Cumulative of BatchDetails
+    | Batch of BatchDetails
 
 type AckSet = int64[]
 
@@ -152,7 +152,7 @@ type MessageId =
             if this.Partition >= 0 then
                 data.Partition <- this.Partition
             match this.Type with
-            | Cumulative (batchIndex, _) when %batchIndex >= 0 ->
+            | Batch (batchIndex, _) when %batchIndex >= 0 ->
                 data.BatchIndex <- %batchIndex
             | _ ->
                 ()
@@ -164,7 +164,7 @@ type MessageId =
             let msgData = Serializer.Deserialize<MessageIdData>(stream)
             let msgType =
                 if msgData.BatchIndex >= 0 then
-                    Cumulative (%msgData.BatchIndex, BatchMessageAcker.NullAcker)
+                    Batch (%msgData.BatchIndex, BatchMessageAcker.NullAcker)
                 else
                     Individual
             {
@@ -182,7 +182,7 @@ type MessageId =
             match this.Type with
             | Individual ->
                 sprintf "%d:%d:%d" this.LedgerId this.EntryId this.Partition
-            | Cumulative (i, _) ->
+            | Batch (i, _) ->
                 sprintf "%d:%d:%d:%d" this.LedgerId this.EntryId this.Partition i
         override this.Equals(other) =
             match other with
@@ -195,7 +195,7 @@ type MessageId =
             match this.Type with
             | Individual ->
                 (31 * ((int this.LedgerId) + 31 * (int this.EntryId)) + this.Partition)
-            | Cumulative (batchIndex, _) ->
+            | Batch (batchIndex, _) ->
                 (31 * ((int this.LedgerId) + 31 * (int this.EntryId)) + (31 * this.Partition) + %batchIndex)
                 
         interface IComparable<MessageId> with

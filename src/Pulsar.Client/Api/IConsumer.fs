@@ -4,6 +4,7 @@ open System
 open System.Threading
 open System.Threading.Tasks
 open Pulsar.Client.Common
+open Pulsar.Client.Transaction
 
 type IConsumer<'T> =
     inherit IAsyncDisposable
@@ -18,10 +19,28 @@ type IConsumer<'T> =
     abstract member BatchReceiveAsync: CancellationToken -> Task<Messages<'T>>
     /// Asynchronously acknowledge the consumption of a single message
     abstract member AcknowledgeAsync: messageId:MessageId -> Task<unit>
+    /// Asynchronously acknowledge the consumption of a single message, it will store in pending ack. 
+    /// After the transaction commit, the message will actually ack.
+    /// After the transaction abort, the message will be redelivered.
+    abstract member AcknowledgeAsync: messageId:MessageId * txn:Transaction -> Task<unit>
     /// Asynchronously acknowledge the consumption of Messages
     abstract member AcknowledgeAsync: messages:Messages<'T> -> Task<unit>
     /// Acknowledge the reception of all the messages in the stream up to (and including) the provided message.
     abstract member AcknowledgeCumulativeAsync: messageId:MessageId -> Task<unit>
+    /// Acknowledge the reception of all the messages in the stream up to (and including) the provided message with this
+    /// transaction, it will store in transaction pending ack.
+    /// After the transaction commit, the end of previous transaction acked message until this transaction
+    /// acked message will actually ack.
+    /// After the transaction abort, the end of previous transaction acked message until this transaction
+    /// acked message will be redelivered to this consumer.
+    /// Cumulative acknowledge with transaction only support cumulative ack and now have not support individual and
+    /// cumulative ack sharing.
+    /// If cumulative ack with a transaction success, we can cumulative ack messageId with the same transaction
+    /// more than previous messageId.
+    /// It will not be allowed to cumulative ack with a transaction different from the previous one when the previous
+    /// transaction haven't commit or abort.
+    /// Cumulative acknowledge cannot be used when the consumer type is set to ConsumerShared.
+    abstract member AcknowledgeCumulativeAsync: messageId:MessageId * txn:Transaction -> Task<unit>
     /// Redelivers all the unacknowledged messages
     abstract member RedeliverUnacknowledgedMessagesAsync: unit -> Task<unit>
     /// Unsubscribes consumer

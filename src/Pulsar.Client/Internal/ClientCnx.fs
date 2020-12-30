@@ -5,6 +5,7 @@ open System.Collections.Generic
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Microsoft.Extensions.Logging
 open System.Threading.Tasks
+open Pulsar.Client.Transaction
 open pulsar.proto
 open System
 open FSharp.UMX
@@ -39,6 +40,7 @@ and internal ConsumerOperations =
     }
 and internal TransactionMetaStoreOperations =
     {
+        NewTxnResponse: RequestId*ResultOrException<TxnId> -> unit
         ConnectionClosed: ClientCnx -> unit
     }
     
@@ -76,6 +78,7 @@ and internal PulsarCommand =
     | XCommandReachedEndOfTopic of CommandReachedEndOfTopic
     | XCommandActiveConsumerChange of CommandActiveConsumerChange
     | XCommandGetSchemaResponse of CommandGetSchemaResponse
+    | XCommandNewTxnResponse of CommandNewTxnResponse
     | XCommandError of CommandError
 
 and internal CommandParseError =
@@ -138,6 +141,13 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             else
                 // if there is no request that is timed out then exit the loop
                 ()
+                
+    let getTransactionExceptionByServerError error msg =
+        match error with
+        | ServerError.TransactionCoordinatorNotFound -> CoordinatorNotFoundException msg :> exn
+        | ServerError.InvalidTxnStatus -> InvalidTxnStatusException msg :> exn
+        | ServerError.TransactionNotFound -> TransactionNotFoundException msg :> exn
+        | _ -> Exception(msg)
     
     let requestsMb = MailboxProcessor<RequestsOperation>.Start(fun inbox ->
         let rec loop () =
@@ -314,6 +324,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             Ok (XCommandActiveConsumerChange command.ActiveConsumerChange)
         | BaseCommand.Type.GetSchemaResponse ->
             Ok (XCommandGetSchemaResponse command.getSchemaResponse)
+        | BaseCommand.Type.NewTxnResponse ->
+            Ok (XCommandNewTxnResponse command.newTxnResponse)
         | BaseCommand.Type.Error ->
             Ok (XCommandError command.Error)
         | unknownType ->
@@ -555,7 +567,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 EntryId = %(int64 cmd.LastMessageId.entryId)
                 Type =
                     match cmd.LastMessageId.BatchIndex with
-                    | index when index >= 0  -> Cumulative(%index, BatchMessageAcker.NullAcker)
+                    | index when index >= 0  -> Batch(%index, BatchMessageAcker.NullAcker)
                     | _ -> Individual
                 Partition = cmd.LastMessageId.Partition
                 TopicName = %""
@@ -582,6 +594,25 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     SchemaVersion = getOptionalSchemaVersion cmd.SchemaVersion
                 } |> Some)
                 handleSuccess %cmd.RequestId result BaseCommand.Type.GetSchemaResponse
+        | XCommandNewTxnResponse cmd ->
+            
+            let tcId = %cmd.TxnidMostBits
+            match transactionMetaStores.TryGetValue tcId with
+            | true, tmsOperations ->
+                let result =
+                    if (cmd.ShouldSerializeError()) then
+                        getTransactionExceptionByServerError cmd.Error cmd.Message
+                        |> Error
+                    else
+                         {
+                            LeastSigBits = cmd.TxnidLeastBits
+                            MostSigBits = cmd.TxnidMostBits
+                         } |> Ok
+                tmsOperations.NewTxnResponse (%cmd.RequestId, result)
+            | _ ->
+                Log.Logger.LogWarning("{0} tms {1} wasn't found on CommandNewTxnResponse", prefix, tcId)
+            
+           
         | XCommandError cmd ->
             Log.Logger.LogError("{0} CommandError Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
             handleError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.Error

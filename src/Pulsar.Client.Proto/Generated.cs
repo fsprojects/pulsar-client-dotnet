@@ -47,6 +47,11 @@ namespace pulsar.proto
             Time = 13,
             Timestamp = 14,
             KeyValue = 15,
+            Instant = 16,
+            LocalDate = 17,
+            LocalTime = 18,
+            LocalDateTime = 19,
+            ProtobufNative = 20,
         }
 
     }
@@ -88,6 +93,16 @@ namespace pulsar.proto
 
         [global::ProtoBuf.ProtoMember(5, Name = @"ack_set")]
         internal long[] AckSets { get; set; }
+
+        [global::ProtoBuf.ProtoMember(6, Name = @"batch_size")]
+        internal int BatchSize
+        {
+            get => __pbn__BatchSize.GetValueOrDefault();
+            set => __pbn__BatchSize = value;
+        }
+        internal bool ShouldSerializeBatchSize() => __pbn__BatchSize != null;
+        internal void ResetBatchSize() => __pbn__BatchSize = null;
+        private int? __pbn__BatchSize;
 
     }
 
@@ -318,10 +333,9 @@ namespace pulsar.proto
         private int? __pbn__MarkerType;
 
         [global::ProtoBuf.ProtoMember(22, Name = @"txnid_least_bits")]
-        [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits.GetValueOrDefault();
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -329,10 +343,9 @@ namespace pulsar.proto
         private ulong? __pbn__TxnidLeastBits;
 
         [global::ProtoBuf.ProtoMember(23, Name = @"txnid_most_bits")]
-        [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits.GetValueOrDefault();
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -1479,6 +1492,16 @@ namespace pulsar.proto
         internal void ResetTxnidMostBits() => __pbn__TxnidMostBits = null;
         private ulong? __pbn__TxnidMostBits;
 
+        [global::ProtoBuf.ProtoMember(8, Name = @"request_id")]
+        internal ulong RequestId
+        {
+            get => __pbn__RequestId.GetValueOrDefault();
+            set => __pbn__RequestId = value;
+        }
+        internal bool ShouldSerializeRequestId() => __pbn__RequestId != null;
+        internal void ResetRequestId() => __pbn__RequestId = null;
+        private ulong? __pbn__RequestId;
+
         [global::ProtoBuf.ProtoContract()]
         internal enum AckType
         {
@@ -1551,6 +1574,16 @@ namespace pulsar.proto
         internal bool ShouldSerializeMessage() => __pbn__Message != null;
         internal void ResetMessage() => __pbn__Message = null;
         private string __pbn__Message;
+
+        [global::ProtoBuf.ProtoMember(6, Name = @"request_id")]
+        internal ulong RequestId
+        {
+            get => __pbn__RequestId.GetValueOrDefault();
+            set => __pbn__RequestId = value;
+        }
+        internal bool ShouldSerializeRequestId() => __pbn__RequestId != null;
+        internal void ResetRequestId() => __pbn__RequestId = null;
+        private ulong? __pbn__RequestId;
 
     }
 
@@ -2502,6 +2535,9 @@ namespace pulsar.proto
         internal void ResetTxnAction() => __pbn__TxnAction = null;
         private TxnAction? __pbn__TxnAction;
 
+        [global::ProtoBuf.ProtoMember(5, Name = @"message_id")]
+        internal global::System.Collections.Generic.List<MessageIdData> MessageIds { get; } = new global::System.Collections.Generic.List<MessageIdData>();
+
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -2613,6 +2649,9 @@ namespace pulsar.proto
         internal bool ShouldSerializeTxnAction() => __pbn__TxnAction != null;
         internal void ResetTxnAction() => __pbn__TxnAction = null;
         private TxnAction? __pbn__TxnAction;
+
+        [global::ProtoBuf.ProtoMember(6, Name = @"message_id")]
+        internal global::System.Collections.Generic.List<MessageIdData> MessageIds { get; } = new global::System.Collections.Generic.List<MessageIdData>();
 
     }
 
@@ -3089,6 +3128,8 @@ namespace pulsar.proto
         TransactionCoordinatorNotFound = 20,
         InvalidTxnStatus = 21,
         NotAllowedError = 22,
+        TransactionConflict = 23,
+        TransactionNotFound = 24,
     }
 
     [global::ProtoBuf.ProtoContract()]
