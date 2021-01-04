@@ -19,7 +19,7 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
     let consumerConfig = {
         ConsumerConfiguration<'T>.Default with
             Topics = seq { readerConfig.Topic } |> Seq.cache
-            SubscriptionName = subscriptionName
+            SubscriptionName = %subscriptionName
             SubscriptionType = SubscriptionType.Exclusive
             SubscriptionMode = SubscriptionMode.NonDurable
             ReceiverQueueSize = readerConfig.ReceiverQueueSize

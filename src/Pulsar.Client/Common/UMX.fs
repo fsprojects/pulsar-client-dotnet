@@ -14,6 +14,7 @@ open FSharp.UMX
 [<Measure>] type private uuid
 [<Measure>] type private clientCnxId
 [<Measure>] type private completeTopicName
+[<Measure>] type private subscription
 [<Measure>] type private partitionKey
 [<Measure>] type private batchIndex
 [<Measure>] type private priorityLevel
@@ -29,6 +30,7 @@ type ChunkId = int<chunkId>
 type Uuid = string<uuid>
 type ClientCnxId = uint64<clientCnxId>
 type CompleteTopicName = string<completeTopicName>
+type SubscriptionName = string<subscription>
 type PartitionKey = string<partitionKey>
 type BatchIndex = int<batchIndex>
 type PriorityLevel = int<priorityLevel>

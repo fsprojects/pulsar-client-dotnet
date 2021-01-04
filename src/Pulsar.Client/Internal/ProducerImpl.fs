@@ -42,7 +42,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let _this = this :> IProducer<'T>
     let producerId = Generators.getNextProducerId()
     let mutable producerName = producerConfig.ProducerName
-    let prefix = sprintf "producer(%u, %s, %i)" %producerId producerName partitionIndex
+    let prefix = $"producer({producerId}, {producerName}, {partitionIndex})"
     let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
     let mutable schemaVersion = None
@@ -720,8 +720,15 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     do startCryptoTimer()
 
     member private this.SendMessage (message : MessageBuilder<'T>) =
-        let interceptMsg = interceptors.BeforeSend(this, message)
-        mb.PostAndAsyncReply(fun channel -> BeginSendMessage (interceptMsg, channel))
+        task {
+            match message.Txn with
+            | Some txn ->
+                do! txn.RegisterProducedTopic(producerConfig.Topic.CompleteTopicName)
+            | None ->
+                ()
+            let interceptMsg = interceptors.BeforeSend(this, message)
+            return! mb.PostAndAsyncReply(fun channel -> BeginSendMessage (interceptMsg, channel))
+        }
 
     member internal this.Mb with get(): MailboxProcessor<ProducerMessage<'T>> = mb
 
@@ -779,9 +786,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
     interface IProducer<'T> with
         member this.SendAndForgetAsync (message: 'T) =
+            connectionHandler.CheckIfActive() |> throwIfNotNull
+            let msg = _this.NewMessage message
             task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
-                let! tcs = _this.NewMessage message |> this.SendMessage
+                let! tcs = this.SendMessage msg
                 if tcs.Task.IsFaulted then
                     reraize tcs.Task.Exception.InnerException
                 else
@@ -789,8 +797,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             }
 
         member this.SendAndForgetAsync (message: MessageBuilder<'T>) =
+            connectionHandler.CheckIfActive() |> throwIfNotNull
             task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
                 let! tcs = this.SendMessage message
                 if tcs.Task.IsFaulted then
                     reraize tcs.Task.Exception.InnerException
@@ -799,15 +807,16 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             }
 
         member this.SendAsync (message: 'T) =
+            connectionHandler.CheckIfActive() |> throwIfNotNull
+            let msg = _this.NewMessage message
             task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
-                let! tcs = _this.NewMessage message |> this.SendMessage
+                let! tcs = this.SendMessage msg
                 return! tcs.Task
             }
 
         member this.SendAsync (message: MessageBuilder<'T>) =
+            connectionHandler.CheckIfActive() |> throwIfNotNull
             task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
                 let! tcs = this.SendMessage message
                 return! tcs.Task
             }

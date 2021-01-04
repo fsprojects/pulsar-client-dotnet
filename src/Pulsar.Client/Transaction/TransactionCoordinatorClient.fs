@@ -102,8 +102,22 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
     member this.NewTransactionAsync() =
         this.NewTransactionAsync(DEFAULT_TXN_TTL)
         
-     member this.NewTransactionAsync(timeSpan) =
+    member this.NewTransactionAsync(timeSpan) =
+        let handler = nextHandler()
         task {
-            let handler = nextHandler()
             return! handler.NewTransactionAsync(timeSpan)
         }
+        
+    member this.AddPublishPartitionToTxnAsync(txnId: TxnId, partition) =
+        let handlerId = int txnId.MostSigBits
+        if handlerId >= handlers.Count then
+            raise <| MetaStoreHandlerNotExistsException $"Transaction meta store handler for transaction meta store {txnId.MostSigBits} not exists."
+        let handler = handlers.[handlerId]
+        handler.AddPublishPartitionToTxnAsync(txnId, partition)
+        
+    member this.AddSubscriptionToTxnAsync(txnId: TxnId, topic: CompleteTopicName, subscription: SubscriptionName) =
+        let handlerId = int txnId.MostSigBits
+        if handlerId >= handlers.Count then
+            raise <| MetaStoreHandlerNotExistsException $"Transaction meta store handler for transaction meta store {txnId.MostSigBits} not exists."
+        let handler = handlers.[handlerId]
+        handler.AddSubscriptionToTxnAsync(txnId, topic, subscription)

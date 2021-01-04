@@ -9,7 +9,7 @@ open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Transaction
 
-type TransRequestTime = {
+type internal TransRequestTime = {
     CreationTime: DateTime
     RequestId: RequestId
 }
@@ -20,6 +20,21 @@ type internal TransactionMetaStoreMessage =
     | ConnectionClosed of ClientCnx
     | NewTransaction of TimeSpan * AsyncReplyChannel<Task<TxnId>>
     | NewTransactionResponse of RequestId * ResultOrException<TxnId>
+    | AddPartitionToTxn of TxnId * CompleteTopicName * AsyncReplyChannel<Task<unit>>
+    | AddPartitionToTxnResponse of RequestId * ResultOrException<unit>
+    | AddSubscriptionToTxn of TxnId * CompleteTopicName * SubscriptionName * AsyncReplyChannel<Task<unit>>
+    | AddSubscriptionToTxnResponse of RequestId * ResultOrException<unit>
+
+type internal TxnRequest =
+    | NewTransaction of TxnId
+    | Empty
+    static member GetNewTransaction = function
+        | NewTransaction x -> x
+        | _ -> failwith "Incorrect return type"
+        
+    static member GetEmpty = function
+        | Empty -> ()
+        | _ -> failwith "Incorrect return type"
 
 type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguration,
                                     transactionCoordinatorId: TransactionCoordinatorId,
@@ -28,8 +43,8 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
     let prefix = $"tmsHandler-{transactionCoordinatorId}"
     let mutable operationsLeft = 1000
     let blockIfReachMaxPendingOps = true
-    let pendingRequests = Dictionary<RequestId, TaskCompletionSource<TxnId>>()
-    let blockedRequests = Queue<TimeSpan*TaskCompletionSource<TxnId>>()
+    let pendingRequests = Dictionary<RequestId, TaskCompletionSource<TxnRequest>>()
+    let blockedRequests = Queue<TransactionMetaStoreMessage>()
     let timeoutQueue = Queue<TransRequestTime>()
     
     let connectionHandler = 
@@ -44,15 +59,33 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                                     Max = clientConfig.MaxBackoffInterval }))
 
     let transactionMetaStoreOperations = {
-        ConnectionClosed = fun clientCnx -> this.Mb.Post(TransactionMetaStoreMessage.ConnectionClosed clientCnx)
         NewTxnResponse = fun result -> this.Mb.Post(TransactionMetaStoreMessage.NewTransactionResponse result)
+        AddPartitionToTxnResponse = fun result -> this.Mb.Post(TransactionMetaStoreMessage.AddPartitionToTxnResponse result)
+        AddSubscriptionToTxnResponse = fun result -> this.Mb.Post(TransactionMetaStoreMessage.AddSubscriptionToTxnResponse result)
+        ConnectionClosed = fun clientCnx -> this.Mb.Post(TransactionMetaStoreMessage.ConnectionClosed clientCnx)
     }
 
+    let startRequest (clientCnx: ClientCnx) msg command =
+        if operationsLeft > 0 then
+            let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let requestId = Generators.getNextRequestId()
+            clientCnx.SendAndForget command
+            pendingRequests.Add(requestId, tcs)
+            timeoutQueue.Enqueue({ CreationTime = DateTime.Now; RequestId = requestId })
+            tcs.Task
+        elif blockIfReachMaxPendingOps then
+            let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            blockedRequests.Enqueue(msg)
+            tcs.Task
+        else
+            MetaStoreHandlerNotReadyException "Reach max pending ops."
+            |> Task.FromException<TxnRequest>
     
     let mb = MailboxProcessor<TransactionMetaStoreMessage>.Start(fun inbox ->
         let rec loop () =
             async {
-                match! inbox.Receive() with
+                let! msg = inbox.Receive()
+                match msg with
                 | TransactionMetaStoreMessage.ConnectionOpened ->
                     
                     match connectionHandler.ConnectionState with
@@ -80,41 +113,94 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     
                 | TransactionMetaStoreMessage.NewTransaction (ttl, ch) ->
                     
-                    Log.Logger.LogDebug("{0} New transaction with timeout {1}", prefix, ttl)
                     match connectionHandler.ConnectionState with
                     | ConnectionState.Ready clientCnx ->
-                        if operationsLeft > 0 then
-                            let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
-                            let requestId = Generators.getNextRequestId()
-                            let command = Commands.newTxn transactionCoordinatorId requestId ttl
-                            clientCnx.SendAndForget command
-                            pendingRequests.Add(requestId, tcs)
-                            timeoutQueue.Enqueue({ CreationTime = DateTime.Now; RequestId = requestId })
-                            ch.Reply tcs.Task
-                        elif blockIfReachMaxPendingOps then
-                            let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
-                            blockedRequests.Enqueue(ttl, tcs)
-                            ch.Reply tcs.Task
-                        else
-                            MetaStoreHandlerNotReadyException "Reach max pending ops."
-                            |> Task.FromException<TxnId>
-                            |> ch.Reply
+                        
+                        let requestId = Generators.getNextRequestId()
+                        Log.Logger.LogDebug("{0} New transaction with timeout {1} reqId {2}", prefix, ttl, requestId)
+                        let command = Commands.newTxn transactionCoordinatorId requestId ttl
+                        task {
+                            let! result = startRequest clientCnx msg command
+                            return TxnRequest.GetNewTransaction result
+                        } |> ch.Reply
                     | _ ->
-                        Log.Logger.LogWarning("{0} is not ready", prefix)
+                        Log.Logger.LogWarning("{0} is not ready for NewTransaction", prefix)
                     return! loop ()
                     
                 | TransactionMetaStoreMessage.NewTransactionResponse (reqId, txnId) ->
                     
-                    Log.Logger.LogDebug("{0} NewTransactionResponse reqId={1} txnId={2}", prefix, reqId, txnId)
                     match pendingRequests.TryGetValue reqId with
                     | true, op ->
+                        Log.Logger.LogDebug("{0} NewTransactionResponse reqId={1} txnId={2}", prefix, reqId, txnId)
                         pendingRequests.Remove(reqId) |> ignore
                         match txnId with
-                        | Ok txnId -> op.SetResult(txnId)
+                        | Ok txnId -> op.SetResult(NewTransaction txnId)
                         | Error ex -> op.SetException(ex)
                     | _ ->
                         Log.Logger.LogWarning("{0} Got new txn response for timeout reqId={1} txnId={2}",
                                                 prefix, reqId, txnId)
+                    return! loop ()
+                    
+                | TransactionMetaStoreMessage.AddPartitionToTxn (txnId, partition, ch) ->
+                    
+                    match connectionHandler.ConnectionState with
+                    | ConnectionState.Ready clientCnx ->
+                        
+                        let requestId = Generators.getNextRequestId()
+                        Log.Logger.LogDebug("{0} AddPartitionToTxn txnId {1}, partition {2}, reqId {3}",
+                                            prefix, txnId, partition, requestId)
+                        let command = Commands.newAddPartitionToTxn txnId requestId partition
+                        task {
+                            let! result = startRequest clientCnx msg command
+                            return TxnRequest.GetEmpty result
+                        } |> ch.Reply
+                    | _ ->
+                        Log.Logger.LogWarning("{0} is not ready for AddPartitionToTxn", prefix)
+                    return! loop ()
+                    
+                | TransactionMetaStoreMessage.AddPartitionToTxnResponse (reqId, result) ->
+                    
+                    match pendingRequests.TryGetValue reqId with
+                    | true, op ->
+                        Log.Logger.LogDebug("{0} AddPartitionToTxnResponse reqId={1}", prefix, reqId)
+                        pendingRequests.Remove(reqId) |> ignore
+                        match result with
+                        | Ok () -> op.SetResult(Empty)
+                        | Error ex -> op.SetException(ex)
+                    | _ ->
+                        Log.Logger.LogWarning("{0} Got addPartitionToTxn response for timeout reqId={1}",
+                                                prefix, reqId)
+                    return! loop ()
+                    
+                | TransactionMetaStoreMessage.AddSubscriptionToTxn (txnId, topic, subscription, ch) ->
+                    
+                    match connectionHandler.ConnectionState with
+                    | ConnectionState.Ready clientCnx ->
+                        
+                        let requestId = Generators.getNextRequestId()
+                        Log.Logger.LogDebug("{0} AddSubscriptionToTxn txnId {1}, topic {2}, subscription {3}, requestId {4}",
+                                            prefix, txnId, topic, subscription, requestId)
+                        let command = Commands.newAddSubscriptionToTxn txnId requestId topic subscription
+                        task {
+                            let! result = startRequest clientCnx msg command
+                            return TxnRequest.GetEmpty result
+                        } |> ch.Reply
+                    | _ ->
+                        Log.Logger.LogWarning("{0} is not ready for AddSubscriptionToTxn", prefix)
+                    return! loop ()
+                    
+                | TransactionMetaStoreMessage.AddSubscriptionToTxnResponse (reqId, result) ->
+                    
+                    match pendingRequests.TryGetValue reqId with
+                    | true, op ->
+                        Log.Logger.LogDebug("{0} AddSubscriptionToTxnResponse reqId={1}", prefix, reqId)
+                        pendingRequests.Remove(reqId) |> ignore
+                        match result with
+                        | Ok () -> op.SetResult(Empty)
+                        | Error ex -> op.SetException(ex)
+                    | _ ->
+                        Log.Logger.LogWarning("{0} Got addSubscriptionToTxn response for timeout reqId={1}",
+                                                prefix, reqId)
                     return! loop ()
            }
         loop ()
@@ -128,7 +214,22 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
     member this.NewTransactionAsync(ttl: TimeSpan) =
         connectionHandler.CheckIfActive() |> throwIfNotNull
         task {
-            let! t = mb.PostAndAsyncReply(fun ch -> NewTransaction(ttl, ch))
+            let! t = mb.PostAndAsyncReply(fun ch -> TransactionMetaStoreMessage.NewTransaction(ttl, ch))
+            return! t
+        }
+        
+    member this.AddPublishPartitionToTxnAsync(txnId: TxnId, partition) =
+        connectionHandler.CheckIfActive() |> throwIfNotNull
+        task {
+            let! t = mb.PostAndAsyncReply(fun ch -> TransactionMetaStoreMessage.AddPartitionToTxn(txnId, partition, ch))
+            return! t
+        }
+        
+    member this.AddSubscriptionToTxnAsync(txnId: TxnId, topic: CompleteTopicName, subscription: SubscriptionName) =
+        connectionHandler.CheckIfActive() |> throwIfNotNull
+        task {
+            let! t = mb.PostAndAsyncReply(fun ch ->
+                TransactionMetaStoreMessage.AddSubscriptionToTxn(txnId, topic, subscription, ch))
             return! t
         }
         

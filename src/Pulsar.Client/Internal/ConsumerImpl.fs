@@ -74,7 +74,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let waiters = LinkedList<Waiter<'T>>()
     let batchWaiters = LinkedList<BatchWaiter<'T>>()
     let subscribeTsc = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
-    let prefix = sprintf "consumer(%u, %s, %i)" %consumerId consumerConfig.ConsumerName partitionIndex
+    let prefix = $"consumer({consumerId}, {consumerConfig.ConsumerName}, {partitionIndex})"
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable hasReachedEndOfTopic = false
     let mutable avalablePermits = 0
@@ -131,6 +131,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                         Initial = clientConfig.InitialBackoffInterval
                                         Max = clientConfig.MaxBackoffInterval }))
 
+    let consumerTxnOperations =
+        {
+            ClearIncomingMessagesAndGetMessageNumber = fun () -> ()
+            IncreaseAvailablePermits = fun () -> ()
+        }
+    
     let hasMoreMessages (lastMessageIdInBroker: MessageId) (lastDequeuedMessage: MessageId) (inclusive: bool) =
         if (inclusive && lastMessageIdInBroker >= lastDequeuedMessage && lastMessageIdInBroker.EntryId <> %(-1L)) then
             true
@@ -1237,7 +1243,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 stats.IncrementNumReceiveFailed()
                 return msgResult
         }
-    member this.RedeliverUnacknowledged msgIds =
+    member internal this.RedeliverUnacknowledged msgIds =
         mb.PostAndAsyncReply(fun channel -> RedeliverUnacknowledged(msgIds, channel))
     
     interface IConsumer<'T> with
@@ -1288,7 +1294,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     stats.IncrementNumAcksFailed()
                     interceptors.OnAcknowledge(this, msgId, exn)
                     raise exn
-
+                
+                if txn |> isNull |> not then
+                    do! txn.RegisterAckedTopic(topicName.CompleteTopicName, consumerConfig.SubscriptionName)
                 mb.Post(Acknowledge(msgId, AckType.Individual))
             }
             
@@ -1323,7 +1331,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     stats.IncrementNumAcksFailed()
                     interceptors.OnAcknowledgeCumulative(this, msgId, exn)
                     raise exn
-
+                
+                if txn |> isNull |> not then
+                    txn.RegisterCumulativeAckConsumer(consumerId, consumerTxnOperations)
+                    do! txn.RegisterAckedTopic(topicName.CompleteTopicName, consumerConfig.SubscriptionName)
                 mb.Post(Acknowledge(msgId, AckType.Cumulative))
             }
 
@@ -1459,12 +1470,11 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
             this.SendFlowPermits this.Waiters.Count
         
     override this.ReceiveIndividualMessagesFromBatch (_: RawMessage) _ =
-        let prefix = sprintf "consumer(%u, %s, %i)" this.ConsumerId consumerConfig.ConsumerName partitionIndex
+        let prefix = $"consumer({this.ConsumerId}, {consumerConfig.ConsumerName}, {partitionIndex})"
         Log.Logger.LogError("{0} Closing consumer due to unsupported received batch-message with zero receiver queue size", prefix)
         let _ = this.Mb.PostAndReply(ConsumerMessage.Close) 
         let exn = 
-            sprintf "Unsupported Batch message with 0 size receiver queue for [%s]-[%s]"
-                consumerConfig.SubscriptionName consumerConfig.ConsumerName
+            $"Unsupported Batch message with 0 size receiver queue for [{consumerConfig.SubscriptionName}]-[{consumerConfig.ConsumerName}]"
             |> InvalidMessageException
         raise exn
         

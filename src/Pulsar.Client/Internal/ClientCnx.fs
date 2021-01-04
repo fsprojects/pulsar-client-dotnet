@@ -41,6 +41,8 @@ and internal ConsumerOperations =
 and internal TransactionMetaStoreOperations =
     {
         NewTxnResponse: RequestId*ResultOrException<TxnId> -> unit
+        AddPartitionToTxnResponse: RequestId*ResultOrException<unit> -> unit
+        AddSubscriptionToTxnResponse: RequestId*ResultOrException<unit> -> unit
         ConnectionClosed: ClientCnx -> unit
     }
     
@@ -79,6 +81,8 @@ and internal PulsarCommand =
     | XCommandActiveConsumerChange of CommandActiveConsumerChange
     | XCommandGetSchemaResponse of CommandGetSchemaResponse
     | XCommandNewTxnResponse of CommandNewTxnResponse
+    | XCommandAddPartitionToTxnResponse of CommandAddPartitionToTxnResponse
+    | XCommandAddSubscriptionToTxnResponse of CommandAddSubscriptionToTxnResponse
     | XCommandError of CommandError
 
 and internal CommandParseError =
@@ -478,7 +482,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             else
                 initialConnectionTsc.SetResult(this)
         | XCommandPartitionedTopicMetadataResponse cmd ->
-            if (cmd.ShouldSerializeError()) then
+            if cmd.ShouldSerializeError() then
                 checkServerError cmd.Error cmd.Message
                 handleError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.PartitionedMetadataResponse
             else
@@ -520,7 +524,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | _ ->
                 Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandMessage", prefix, %cmd.ConsumerId)
         | XCommandLookupResponse cmd ->
-            if (cmd.ShouldSerializeError()) then
+            if cmd.ShouldSerializeError() then
                 checkServerError cmd.Error cmd.Message
                 handleError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.LookupResponse
             else
@@ -595,12 +599,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 } |> Some)
                 handleSuccess %cmd.RequestId result BaseCommand.Type.GetSchemaResponse
         | XCommandNewTxnResponse cmd ->
-            
             let tcId = %cmd.TxnidMostBits
             match transactionMetaStores.TryGetValue tcId with
             | true, tmsOperations ->
                 let result =
-                    if (cmd.ShouldSerializeError()) then
+                    if cmd.ShouldSerializeError() then
                         getTransactionExceptionByServerError cmd.Error cmd.Message
                         |> Error
                     else
@@ -611,8 +614,32 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 tmsOperations.NewTxnResponse (%cmd.RequestId, result)
             | _ ->
                 Log.Logger.LogWarning("{0} tms {1} wasn't found on CommandNewTxnResponse", prefix, tcId)
-            
-           
+        | XCommandAddPartitionToTxnResponse cmd ->
+            let tcId = %cmd.TxnidMostBits
+            match transactionMetaStores.TryGetValue tcId with
+            | true, tmsOperations ->
+                let result =
+                    if cmd.ShouldSerializeError() then
+                        getTransactionExceptionByServerError cmd.Error cmd.Message
+                        |> Error
+                    else
+                         Ok ()
+                tmsOperations.AddPartitionToTxnResponse (%cmd.RequestId, result)
+            | _ ->
+                Log.Logger.LogWarning("{0} tms {1} wasn't found on CommandAddPartitionToTxnResponse", prefix, tcId)
+        | XCommandAddSubscriptionToTxnResponse cmd ->
+            let tcId = %cmd.TxnidMostBits
+            match transactionMetaStores.TryGetValue tcId with
+            | true, tmsOperations ->
+                let result =
+                    if cmd.ShouldSerializeError() then
+                        getTransactionExceptionByServerError cmd.Error cmd.Message
+                        |> Error
+                    else
+                         Ok ()
+                tmsOperations.AddSubscriptionToTxnResponse (%cmd.RequestId, result)
+            | _ ->
+                Log.Logger.LogWarning("{0} tms {1} wasn't found on XCommandAddSubscriptionToTxnResponse", prefix, tcId)
         | XCommandError cmd ->
             Log.Logger.LogError("{0} CommandError Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
             handleError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.Error

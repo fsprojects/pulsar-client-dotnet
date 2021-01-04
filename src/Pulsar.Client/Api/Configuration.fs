@@ -51,7 +51,7 @@ type ConsumerConfiguration<'T> =
         Topics: TopicName seq
         TopicsPattern: string
         ConsumerName: string
-        SubscriptionName: string
+        SubscriptionName: SubscriptionName
         SubscriptionType: SubscriptionType
         SubscriptionMode: SubscriptionMode
         ReceiverQueueSize: int
@@ -85,7 +85,7 @@ type ConsumerConfiguration<'T> =
             Topics = []
             TopicsPattern = ""
             ConsumerName = ""
-            SubscriptionName = ""
+            SubscriptionName = %""
             SubscriptionType = SubscriptionType.Exclusive
             SubscriptionMode = SubscriptionMode.Durable
             ReceiverQueueSize = 1000

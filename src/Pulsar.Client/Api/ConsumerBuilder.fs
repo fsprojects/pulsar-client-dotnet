@@ -32,7 +32,7 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
                 ((c.Topics |> Seq.isEmpty) && String.IsNullOrEmpty(c.TopicsPattern))
             ) "Topic name must be set on the consumer builder"
         |> (fun c ->
-                c.SubscriptionName
+                %c.SubscriptionName
                 |> invalidArgIfBlankString "Subscription name must be set on the consumer builder"
                 |> fun _ -> c
             )
@@ -60,7 +60,7 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
             )
         |> (fun c ->
                 if c.RetryEnable && (c.Topics |> Seq.isEmpty |> not) then
-                    let prefixPart = c.SingleTopic.NamespaceName.ToString() + "/" + c.SubscriptionName
+                    let prefixPart = c.SingleTopic.NamespaceName.ToString() + "/" + %c.SubscriptionName
                     let defaultRetryLetterTopic = prefixPart + RetryMessageUtil.RETRY_GROUP_TOPIC_SUFFIX
                     let defaultDeadLetterTopic = prefixPart + RetryMessageUtil.DLQ_GROUP_TOPIC_SUFFIX
                     let newPolicy =
@@ -126,7 +126,9 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
 
     member this.SubscriptionName subscriptionName =
         { config with
-            SubscriptionName = subscriptionName |> invalidArgIfBlankString "Subscription name must not be blank" }
+            SubscriptionName = subscriptionName
+                               |> invalidArgIfBlankString "Subscription name must not be blank"
+                               |> UMX.tag }
         |> this.With        
 
     member this.SubscriptionType subscriptionType =

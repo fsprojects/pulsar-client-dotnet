@@ -8,6 +8,13 @@ open Microsoft.Extensions.Logging
 
 type TransactionBuilder internal (transactionClient: TransactionCoordinatorClient, config: TransactionConfiguration) =
     
+    let txnOperations = {
+        AddPublishPartitionToTxn = fun (txnId, topicName) ->
+            transactionClient.AddPublishPartitionToTxnAsync(txnId, topicName)
+        AddSubscriptionToTxn = fun (txnId, topicName, subscription) ->
+            transactionClient.AddSubscriptionToTxnAsync(txnId, topicName, subscription)
+    }
+    
     internal new(transactionClient) =
         TransactionBuilder(transactionClient, TransactionConfiguration.Default)
     
@@ -23,7 +30,7 @@ type TransactionBuilder internal (transactionClient: TransactionCoordinatorClien
         task {
             let! txnId = transactionClient.NewTransactionAsync(config.TxnRequestTimeout)
             Log.Logger.LogDebug("Success to new txn. txnID: {0}", txnId)
-            return Transaction(config.TxnTimeout, TxnOperations(), txnId)
+            return Transaction(config.TxnTimeout, txnOperations, txnId)
         }
         
         

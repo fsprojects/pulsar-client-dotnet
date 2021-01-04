@@ -14,7 +14,7 @@ open FSharp.UMX
 type internal DeadLetterProcessor<'T>
     (policy: DeadLetterPolicy,
      getTopicName: unit -> string,
-     subscriptionName: string,
+     subscriptionName: SubscriptionName,
      createProducer: string -> Task<IProducer<'T>>) =
 
     let topicName = getTopicName()
@@ -23,7 +23,7 @@ type internal DeadLetterProcessor<'T>
         if String.IsNullOrEmpty(policy.DeadLetterTopic) |> not then
             policy.DeadLetterTopic
         else
-            (sprintf "%s-%s%s" topicName subscriptionName RetryMessageUtil.DLQ_GROUP_TOPIC_SUFFIX)
+            $"{topicName}-{subscriptionName}{RetryMessageUtil.DLQ_GROUP_TOPIC_SUFFIX}"
 
     let dlProducer = lazy (
         createProducer dlTopicName

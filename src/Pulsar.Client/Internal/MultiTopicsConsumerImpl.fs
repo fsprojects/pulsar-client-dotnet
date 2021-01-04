@@ -43,9 +43,9 @@ type internal MultiTopicConsumerMessage<'T> =
     | BatchReceive of CancellationToken * AsyncReplyChannel<ResultOrException<Messages<'T>>>
     | MessageReceived of ResultOrException<Message<'T>> * AsyncReplyChannel<unit>
     | SendBatchByTimeout
-    | Acknowledge of AsyncReplyChannel<Task<unit>> * MessageId
+    | Acknowledge of AsyncReplyChannel<Task<unit>> * MessageId * Transaction option
     | NegativeAcknowledge of AsyncReplyChannel<Task<unit>> * MessageId
-    | AcknowledgeCumulative of AsyncReplyChannel<Task<unit>> * MessageId
+    | AcknowledgeCumulative of AsyncReplyChannel<Task<unit>> * MessageId * Transaction option
     | RedeliverUnacknowledged of RedeliverSet * AsyncReplyChannel<Task>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<Task>
     | Close of AsyncReplyChannel<ResultOrException<unit>>
@@ -74,7 +74,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
 
     let _this = this :> IConsumer<'T>
     let consumerId = Generators.getNextConsumerId()
-    let prefix = sprintf "mt/consumer(%u, %s)" %consumerId consumerConfig.ConsumerName
+    let prefix = $"mt/consumer({consumerId}, {consumerConfig.ConsumerName})"
     let consumers = Dictionary<CompleteTopicName,IConsumer<'T> * TaskGenerator<ResultOrException<Message<'T>>>>()
     let consumerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let pollerCts = new CancellationTokenSource()
@@ -568,13 +568,17 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         replyWithBatch (Some cts) ch
                     return! loop ()
                 
-                | Acknowledge (channel, msgId) ->
+                | Acknowledge (channel, msgId, txnOption) ->
 
                     Log.Logger.LogDebug("{0} Acknowledge {1}", prefix, msgId)
                     let (consumer, _) = consumers.[msgId.TopicName]
                     task {
-                        do! consumer.AcknowledgeAsync(msgId)
-                        unAckedMessageTracker.Remove msgId |> ignore
+                        match txnOption with
+                        | Some txn ->
+                            do! consumer.AcknowledgeAsync(msgId, txn)
+                            unAckedMessageTracker.Remove msgId |> ignore
+                        | None ->
+                            do! consumer.AcknowledgeAsync(msgId)
                     } |> channel.Reply
                     return! loop ()
 
@@ -588,12 +592,16 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     } |> channel.Reply
                     return! loop ()
 
-                | AcknowledgeCumulative (channel, msgId) ->
+                | AcknowledgeCumulative (channel, msgId, txnOption) ->
 
                     Log.Logger.LogDebug("{0} AcknowledgeCumulative {1}", prefix, msgId)
                     let (consumer, _) = consumers.[msgId.TopicName]
                     task {
-                        do! consumer.AcknowledgeCumulativeAsync msgId
+                        match txnOption with
+                        | Some txn ->
+                            do! consumer.AcknowledgeCumulativeAsync(msgId, txn)
+                        | None ->
+                            do! consumer.AcknowledgeCumulativeAsync msgId
                         unAckedMessageTracker.RemoveMessagesTill msgId |> ignore
                     } |> channel.Reply
                     return! loop ()
@@ -974,32 +982,32 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
             
         member this.AcknowledgeAsync (msgId: MessageId) =
             task {
-                let! t = mb.PostAndAsyncReply(fun channel -> Acknowledge(channel, msgId))
+                let! t = mb.PostAndAsyncReply(fun channel -> Acknowledge(channel, msgId, None))
                 return! t
             }
             
          member this.AcknowledgeAsync (msgId: MessageId, txn: Transaction) =
             task {
-                let! t = mb.PostAndAsyncReply(fun channel -> Acknowledge(channel, msgId))
+                let! t = mb.PostAndAsyncReply(fun channel -> Acknowledge(channel, msgId, Some txn))
                 return! t
             }
             
         member this.AcknowledgeAsync (msgs: Messages<'T>) =
             task {
                 for msg in msgs do
-                    let! t = mb.PostAndAsyncReply(fun channel -> Acknowledge(channel, msg.MessageId))
+                    let! t = mb.PostAndAsyncReply(fun channel -> Acknowledge(channel, msg.MessageId, None))
                     do! t
             }
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
             task {
-                let! result = mb.PostAndAsyncReply(fun channel -> AcknowledgeCumulative(channel, msgId))
+                let! result = mb.PostAndAsyncReply(fun channel -> AcknowledgeCumulative(channel, msgId, None))
                 return! result
             }
             
         member this.AcknowledgeCumulativeAsync (msgId: MessageId, txn: Transaction) =
             task {
-                let! result = mb.PostAndAsyncReply(fun channel -> AcknowledgeCumulative(channel, msgId))
+                let! result = mb.PostAndAsyncReply(fun channel -> AcknowledgeCumulative(channel, msgId, Some txn))
                 return! result
             }
 

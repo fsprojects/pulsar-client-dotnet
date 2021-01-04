@@ -2,6 +2,7 @@
 
 open System.Collections
 open System.Collections.Generic
+open Pulsar.Client.Transaction
 open pulsar.proto
 open FSharp.UMX
 open System
@@ -226,7 +227,7 @@ let newGetTopicsOfNamespaceRequest (ns : NamespaceName) (requestId : RequestId) 
     let command = BaseCommand(``type`` = CommandType.GetTopicsOfNamespace, getTopicsOfNamespace = request)
     command |> serializeSimpleCommand
 
-let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumerId: ConsumerId) (requestId: RequestId)
+let newSubscribe (topicName: CompleteTopicName) (subscription: SubscriptionName) (consumerId: ConsumerId) (requestId: RequestId)
     (consumerName: string) (subscriptionType: SubscriptionType) (subscriptionInitialPosition: SubscriptionInitialPosition)
     (readCompacted: bool) (startMessageId: MessageIdData) (durable: bool) (startMessageRollbackDuration: TimeSpan)
     (createTopicIfDoesNotExist: bool) (keySharedPolicy: KeySharedPolicy option) (schemaInfo: SchemaInfo) (priorityLevel: PriorityLevel) =
@@ -243,7 +244,7 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: string) (consumer
         | SubscriptionInitialPosition.Earliest -> CommandSubscribe.InitialPosition.Earliest
         | SubscriptionInitialPosition.Latest -> CommandSubscribe.InitialPosition.Latest
         | _ -> failwith "Unknown initialPosition type"
-    let request = CommandSubscribe(Topic = %topicName, Subscription = subscription, subType = subType, ConsumerId = %consumerId,
+    let request = CommandSubscribe(Topic = %topicName, Subscription = %subscription, subType = subType, ConsumerId = %consumerId,
                     RequestId = %requestId, ConsumerName =  consumerName, initialPosition = initialPosition, ReadCompacted = readCompacted,
                     StartMessageId = startMessageId, Durable = durable, ForceTopicCreation = createTopicIfDoesNotExist, PriorityLevel = %priorityLevel)
     match keySharedPolicy with
@@ -312,4 +313,16 @@ let newGetSchema (topicName: CompleteTopicName) (requestId : RequestId) (schemaV
 let newTxn (tcId: TransactionCoordinatorId) (requestId: RequestId) (ttl: TimeSpan) =
     let request = CommandNewTxn(TcId = %tcId, RequestId = %requestId, TxnTtlSeconds = uint64 ttl.TotalSeconds)
     let command = BaseCommand(``type`` = CommandType.NewTxn, newTxn = request)
+    command |> serializeSimpleCommand
+    
+let newAddPartitionToTxn (txn: TxnId) (requestId: RequestId) (partition: CompleteTopicName) =
+    let request = CommandAddPartitionToTxn(TxnidLeastBits = txn.LeastSigBits, TxnidMostBits = txn.MostSigBits, RequestId = %requestId)
+    request.Partitions.Add(%partition)
+    let command = BaseCommand(``type`` = CommandType.NewTxn, addPartitionToTxn = request)
+    command |> serializeSimpleCommand
+    
+let newAddSubscriptionToTxn (txn: TxnId) (requestId: RequestId) (topic: CompleteTopicName) (subscription: SubscriptionName) =
+    let request = CommandAddSubscriptionToTxn(TxnidLeastBits = txn.LeastSigBits, TxnidMostBits = txn.MostSigBits, RequestId = %requestId)
+    request.Subscriptions.Add(Subscription(Topic = %topic, subscription = %subscription))
+    let command = BaseCommand(``type`` = CommandType.NewTxn, addSubscriptionToTxn = request)
     command |> serializeSimpleCommand
