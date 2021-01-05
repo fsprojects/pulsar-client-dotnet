@@ -225,30 +225,32 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let canAddToBatch (message : MessageBuilder<'T>) =
         producerConfig.BatchingEnabled && message.DeliverAt.IsNone
 
-    let createMessageMetadata (sequenceId: SequenceId) (message : MessageBuilder<'a>) (numMessagesInBatch: int option) =
+    let createMessageMetadata (sequenceId: SequenceId) (txnId: TxnId option) (numMessagesInBatch: int option)
+        (payload: byte[]) (key: MessageKey option) (properties: IReadOnlyDictionary<string, string>) (deliverAt: int64 option)
+        (orderingKey: byte[] option)=
         let metadata =
             MessageMetadata (
                 SequenceId = (sequenceId |> uint64),
                 PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() |> uint64),
                 ProducerName = producerConfig.ProducerName,
-                UncompressedSize = (message.Payload.Length |> uint32)
+                UncompressedSize = (payload.Length |> uint32)
             )
-        if message.Payload.Length = 0 then
+        if payload.Length = 0 then
             metadata.NullValue <- true
         if protoCompressionType <> pulsar.proto.CompressionType.None then
             metadata.Compression <- protoCompressionType
-        match message.Key with
+        match key with
         | Some key ->
             metadata.PartitionKey <- %key.PartitionKey
             metadata.PartitionKeyB64Encoded <- key.IsBase64Encoded
         | None ->
             metadata.NullPartitionKey <- true
-        if message.Properties.Count > 0 then
-            for property in message.Properties do
+        if properties.Count > 0 then
+            for property in properties do
                 metadata.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
         if numMessagesInBatch.IsSome then
             metadata.NumMessagesInBatch <- numMessagesInBatch.Value
-        match message.DeliverAt with
+        match deliverAt with
         | Some deliverAt ->
             metadata.DeliverAtTime <- deliverAt
         | None ->
@@ -258,9 +260,15 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             metadata.SchemaVersion <- sv
         | None ->
             ()
-        match message.OrderingKey with
+        match orderingKey with
         | Some orderingKey ->
             metadata.OrderingKey <- orderingKey
+        | None ->
+            ()
+        match txnId with
+        | Some txnId ->
+            metadata.TxnidLeastBits <- txnId.LeastSigBits
+            metadata.TxnidMostBits <- txnId.MostSigBits
         | None ->
             ()
         metadata
@@ -268,13 +276,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let getHighestSequenceId (pendingMessage: PendingMessage<'T>): SequenceId =
         %Math.Max(%pendingMessage.SequenceId, %pendingMessage.HighestSequenceId)
         
-    let processOpSendMsg {OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId;
-                          PartitionKey = partitionKey; OrderingKey = orderingKey } =
+    let processOpSendMsg { OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId;
+                          PartitionKey = partitionKey; OrderingKey = orderingKey; TxnId = txnId } =
         let (batchPayload, batchCallbacks) = opSendMsg;
         let batchSize = batchCallbacks.Length
-        let msgBuilder = MessageBuilder(batchPayload, batchPayload, partitionKey, ?orderingKey = orderingKey)
-        let metadata = createMessageMetadata lowestSequenceId msgBuilder (Some batchSize)
-        let compressedBatchPayload = compressionCodec.Encode msgBuilder.Payload
+        let metadata = createMessageMetadata lowestSequenceId txnId (Some batchSize)
+                           batchPayload partitionKey EmptyProps None orderingKey
+        let compressedBatchPayload = compressionCodec.Encode batchPayload
         if (compressedBatchPayload.Length > maxMessageSize) then
             batchCallbacks
             |> Seq.iter (fun (_, message, tcs) ->
@@ -301,7 +309,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     failMessage message tcs ex)
             
     let canAddToCurrentBatch (msg: MessageBuilder<'T>) =
-        batchMessageContainer.HaveEnoughSpace(msg)
+        batchMessageContainer.HaveEnoughSpace(msg) && batchMessageContainer.HasSameTxn(msg)
 
     let batchMessageAndSend() =
         let batchSize = batchMessageContainer.NumMessagesInBatch
@@ -335,7 +343,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         else
             true
         
-    let beginSendMessage sendRequest =
+    let beginSendMessage (sendRequest: SendMessageRequest<'T>) =
         let (message, channel) = sendRequest
         if canEnqueueRequest channel sendRequest 1 then
             let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
@@ -390,8 +398,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     let isChunked = totalChunks > 1
                     let uuid = if isChunked then sprintf "%s-%d" producerName sequenceId else ""
                     let messageIds = if isChunked then Array.zeroCreate totalChunks else Array.empty
+                    let txnId = message.Txn |> Option.map (fun txn -> txn.Id)
                     while chunkId < totalChunks && not chunkError do
-                        let metadata = createMessageMetadata sequenceId message None
+                        let metadata = createMessageMetadata sequenceId txnId None
+                                           message.Payload message.Key message.Properties message.DeliverAt message.OrderingKey
                         let chunkPayload = 
                             if isChunked && producerConfig.Topic.IsPersistent then
                                 metadata.Uuid <- uuid
@@ -769,7 +779,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     ?properties0 = (properties |> Option.ofObj),
                     ?deliverAt = (deliverAt |> Option.ofNullable),
                     ?sequenceId = (sequenceId |> Option.ofNullable),
-                    ?orderingKey = (orderingKey |> Option.ofObj)))
+                    ?orderingKey = (orderingKey |> Option.ofObj),
+                    ?txn = (txn |> Option.ofObj)))
             |> Option.defaultWith (fun () ->
                 let keyObj =
                     if String.IsNullOrEmpty(key) && (isNull keyBytes || keyBytes.Length = 0) then
@@ -782,7 +793,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     ?properties0 = (properties |> Option.ofObj),
                     ?deliverAt = (deliverAt |> Option.ofNullable),
                     ?sequenceId = (sequenceId |> Option.ofNullable),
-                    ?orderingKey = (orderingKey |> Option.ofObj)))
+                    ?orderingKey = (orderingKey |> Option.ofObj),
+                    ?txn = (txn |> Option.ofObj)))
 
     interface IProducer<'T> with
         member this.SendAndForgetAsync (message: 'T) =

@@ -3,10 +3,13 @@
 open Pulsar.Client.Common
 open Pulsar.Client.Api
 open System.IO
+open Pulsar.Client.Transaction
 open pulsar.proto
 open FSharp.UMX
 open System
 open ProtoBuf
+open System.Collections.Generic
+open Microsoft.Extensions.Logging
 
 module internal BatchHelpers =
     [<Literal>]
@@ -51,6 +54,7 @@ type internal OpSendMsgWrapper<'T> = {
     HighestSequenceId: SequenceId
     PartitionKey: MessageKey option
     OrderingKey: byte[] option
+    TxnId: TxnId option
 }
 
 [<AbstractClass>]
@@ -60,6 +64,16 @@ type internal MessageContainer<'T>(config: ProducerConfiguration) =
     let maxNumMessagesInBatch = config.BatchingMaxMessages
 
     abstract member Add: BatchItem<'T> -> bool
+    member this.AddStart (prefix, batchItem) =
+        Log.Logger.LogDebug("{0} add message to batch, num messages in batch so far is {1}", prefix, this.NumMessagesInBatch)
+        this.CurrentBatchSizeBytes <- this.CurrentBatchSizeBytes + batchItem.Message.Payload.Length
+        this.NumMessagesInBatch <- this.NumMessagesInBatch + 1
+        match this.CurrentTxnId, batchItem.Message.Txn with
+        | None, Some txn ->
+            this.CurrentTxnId <- Some txn.Id
+        | _ ->
+            ()
+            
     member this.HaveEnoughSpace (msgBuilder: MessageBuilder<'T>) =
         let messageSize = msgBuilder.Payload.Length
         ((maxBytesInBatch <= 0 && (messageSize + this.CurrentBatchSizeBytes) <= this.MaxMessageSize)
@@ -69,6 +83,12 @@ type internal MessageContainer<'T>(config: ProducerConfiguration) =
         (maxBytesInBatch > 0 && this.CurrentBatchSizeBytes >= maxBytesInBatch)
         || (maxBytesInBatch <= 0 && this.CurrentBatchSizeBytes >= this.MaxMessageSize)
         || (maxNumMessagesInBatch > 0 && this.NumMessagesInBatch >= maxNumMessagesInBatch)
+    member this.HasSameTxn (msgBuilder: MessageBuilder<'T>) =
+        match msgBuilder.Txn, this.CurrentTxnId with
+        | Some txn, Some currentTxnId ->
+            txn.Id = currentTxnId
+        | _ ->
+            true
     abstract member CreateOpSendMsg: unit -> OpSendMsgWrapper<'T>
     abstract member CreateOpSendMsgs: unit -> seq<OpSendMsgWrapper<'T>>
     abstract member Clear: unit -> unit
@@ -77,11 +97,9 @@ type internal MessageContainer<'T>(config: ProducerConfiguration) =
     member val CurrentBatchSizeBytes = 0 with get, set
     member val MaxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE with get, set
     member val NumMessagesInBatch = 0 with get, set
-
+    member val CurrentTxnId = None with get, set
 
 open BatchHelpers
-open System.Collections.Generic
-open Microsoft.Extensions.Logging
 
 type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerConfiguration) =
     inherit MessageContainer<'T>(config)
@@ -90,9 +108,7 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
     let batchItems = ResizeArray<BatchItem<'T>>()
 
     override this.Add batchItem =
-        Log.Logger.LogDebug("{0} add message to batch, num messages in batch so far is {1}", prefix, this.NumMessagesInBatch)
-        this.CurrentBatchSizeBytes <- this.CurrentBatchSizeBytes + batchItem.Message.Payload.Length
-        this.NumMessagesInBatch <- this.NumMessagesInBatch + 1
+        this.AddStart(prefix, batchItem)
         batchItems.Add(batchItem)
         this.IsBatchFull()
     override this.CreateOpSendMsg () =
@@ -104,6 +120,7 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
             HighestSequenceId = highestSequenceId
             PartitionKey = batchItems.[0].Message.Key
             OrderingKey = batchItems.[0].Message.OrderingKey
+            TxnId = this.CurrentTxnId
         }
     override this.CreateOpSendMsgs () =
         raise <| NotSupportedException()
@@ -133,9 +150,7 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
             msg.Key
     
     override this.Add batchItem =
-        Log.Logger.LogDebug("{0} add message to batch, num messages in batch so far is {1}", prefix, this.NumMessagesInBatch)
-        this.CurrentBatchSizeBytes <- this.CurrentBatchSizeBytes + batchItem.Message.Payload.Length
-        this.NumMessagesInBatch <- this.NumMessagesInBatch + 1
+        this.AddStart(prefix, batchItem)
         let key = batchItem.Message |> getKey
         match keyBatchItems.TryGetValue key with
         | true, items ->
@@ -158,6 +173,7 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
                 HighestSequenceId = highestSequenceId
                 PartitionKey = batchItems.[0].Message.Key
                 OrderingKey = batchItems.[0].Message.OrderingKey
+                TxnId = this.CurrentTxnId
             })
     override this.Clear() =
         keyBatchItems.Clear()
