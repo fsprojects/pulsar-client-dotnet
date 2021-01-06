@@ -37,6 +37,11 @@ module internal BatchHelpers =
                     smm.OrderingKey <- orderingKey
                 | _ ->
                     ()
+                match message.EventTime with
+                | Some eventTime ->
+                    smm.EventTime <- eventTime |> convertToMsTimestamp |> uint64
+                | _ ->
+                    ()
                 if message.Properties.Count > 0 then
                     for property in message.Properties do
                         smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))

@@ -291,6 +291,7 @@ type internal Metadata =
         SequenceId: SequenceId
         ChunkId: ChunkId
         Uuid: Uuid
+        EventTime: Nullable<DateTime>
         PublishTime: DateTime
         EncryptionKeys: EncryptionKey[]
         EncryptionParam: byte[]
@@ -342,7 +343,9 @@ type EncryptionContext =
 
 type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey, hasBase64EncodedKey: bool,
                   properties: IReadOnlyDictionary<string, string>, encryptionCtx: EncryptionContext option,
-                  schemaVersion: byte[], sequenceId: SequenceId, orderingKey: byte[], publishTime: DateTime, getValue: unit -> 'T) =
+                  schemaVersion: byte[], sequenceId: SequenceId, orderingKey: byte[], publishTime: DateTime,
+                  eventTime: Nullable<DateTime>,
+                  getValue: unit -> 'T) =
     /// Get the unique message ID associated with this message.
     member this.MessageId = messageId
     /// Get the raw payload of the message.
@@ -362,24 +365,29 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
     member this.EncryptionContext = encryptionCtx
     /// Get the ordering key of the message.
     member this.OrderingKey = orderingKey
-    /// Get the publish time of the message.
+    /// Get the publish time of the message in UTC (automatically set by the client library on produce).
     member this.PublishTime = publishTime
+    /// Get the event time of the message in UTC (manually set by the application on produce).
+    member this.EventTime = eventTime
     /// Get the de-serialized value of the message, according the configured Schema.
     member this.GetValue() =
         getValue()
 
     member internal this.WithMessageId messageId =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, orderingKey, publishTime, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
+                orderingKey, publishTime, eventTime, getValue)
     /// Get a new instance of the message with updated data
     member this.WithData data =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, orderingKey, publishTime, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
+                orderingKey, publishTime, eventTime, getValue)
     /// Get a new instance of the message with updated key
     member this.WithKey (key, hasBase64EncodedKey) =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, orderingKey, publishTime, getValue)
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
+                orderingKey, publishTime, eventTime, getValue)
     /// Get a new instance of the message with updated properties
     member this.WithProperties properties =
-        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId, orderingKey, publishTime, getValue)
-     
+        Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
+                orderingKey, publishTime, eventTime, getValue)
 
 type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 
@@ -418,9 +426,10 @@ type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 /// </summary>
 type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey option,
             ?properties0 : IReadOnlyDictionary<string, string>,
-            ?deliverAt : int64,
+            ?deliverAt : DateTime,
             ?sequenceId : SequenceId,
             ?orderingKey: byte[],
+            ?eventTime: DateTime,
             ?txn: Transaction) =
             
     let properties = defaultArg properties0 EmptyProps
@@ -431,25 +440,28 @@ type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey 
     member this.DeliverAt = deliverAt
     member this.SequenceId = sequenceId
     member this.OrderingKey = orderingKey
+    member this.EventTime = eventTime
     member this.Txn = txn
             
     /// Get a new instance of the message with updated properties
     member this.WithProperties properties =
-        MessageBuilder(this.Value, this.Payload, this.Key, properties, ?deliverAt = this.DeliverAt,
-                       ?sequenceId = this.SequenceId, ?orderingKey = this.OrderingKey, ?txn = txn)
+        MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
+                       ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn)
     /// Get a new instance of the message with updated deliverAt
-    member this.WithDeliverAt deliverAt =
-        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, deliverAt,
-                       ?sequenceId = this.SequenceId, ?orderingKey = this.OrderingKey, ?txn = txn)
+    member this.WithDeliverAt (deliverAt: Nullable<DateTime>) =
+        MessageBuilder(value, payload, key, properties, ?deliverAt = Option.ofNullable deliverAt,
+                       ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn)
+    member this.WithEventTime (eventTime: Nullable<DateTime>) =
+        MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
+                       ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = Option.ofNullable eventTime, ?txn = txn)
     /// Get a new instance of the message with updated sequenceId
-    member this.WithSequenceId sequenceId =
-        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, ?deliverAt = this.DeliverAt,
-                       ?sequenceId = sequenceId, ?orderingKey = this.OrderingKey, ?txn = txn)
+    member this.WithSequenceId (sequenceId: Nullable<SequenceId>) =
+        MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
+                       ?sequenceId = Option.ofNullable sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn)
     /// Get a new instance of the message with updated orderingKey
     member this.WithOrderingKey (orderingKey: byte[]) =
-        let verifiedOrderingKey = orderingKey |> Option.ofObj
-        MessageBuilder(this.Value, this.Payload, this.Key, this.Properties, ?deliverAt = this.DeliverAt,
-                       ?sequenceId = this.SequenceId, ?orderingKey = verifiedOrderingKey, ?txn = txn)
+        MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
+                       ?sequenceId = sequenceId, ?orderingKey = Option.ofObj orderingKey, ?eventTime = eventTime, ?txn = txn)
         
         
 type internal WriterStream = Stream

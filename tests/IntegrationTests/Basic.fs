@@ -6,6 +6,7 @@ open System.Diagnostics
 
 open Expecto
 open Expecto.Flip
+open Expecto.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
 open System.Threading.Tasks
@@ -257,6 +258,7 @@ let tests =
             let interval = 10000L
             let producerName = "schedule-producer"
             let consumerName = "schedule-consumer"
+            let testEventTime = DateTime(2000, 1, 1, 1, 1, 1, DateTimeKind.Utc)
             let sw = Stopwatch()
 
             let! producer =
@@ -276,12 +278,12 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        let now = DateTimeOffset.UtcNow;
+                        let now = DateTime.UtcNow;
                         let deliverAt = now.AddMilliseconds(float interval)
-                        let timestamp = Nullable(deliverAt.ToUnixTimeMilliseconds())
+                        let timestamp = Nullable(deliverAt)
                         let message = Encoding.UTF8.GetBytes(sprintf "Message was sent with interval '%i' milliseconds" interval)
                         sw.Start()
-                        let! _ = producer.NewMessage(message, deliverAt = timestamp) |> producer.SendAsync
+                        let! _ = producer.NewMessage(message, deliverAt = timestamp, eventTime = testEventTime) |> producer.SendAsync
                         ()
                     }:> Task)
 
@@ -291,6 +293,7 @@ let tests =
                         let! message = consumer.ReceiveAsync()
                         let received = Encoding.UTF8.GetString(message.Data)
                         Log.Debug("{0} received {1}", consumerName, received)
+                        Expect.equal "" testEventTime (message.EventTime.GetValueOrDefault())
                         sw.Stop()
                         do! consumer.AcknowledgeAsync(message.MessageId)
                         Log.Debug("{0} acknowledged {1}", consumerName, received)

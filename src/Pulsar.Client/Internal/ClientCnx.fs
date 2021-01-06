@@ -430,8 +430,13 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             SchemaVersion = getOptionalSchemaVersion messageMetadata.SchemaVersion
             SequenceId = %(int64 messageMetadata.SequenceId)
             ChunkId = %(int messageMetadata.ChunkId)
-            PublishTime = %(int64 messageMetadata.PublishTime) |> convertToDateTime
+            PublishTime = int64 messageMetadata.PublishTime |> convertToDateTime
             Uuid = %messageMetadata.Uuid
+            EventTime =
+                if messageMetadata.ShouldSerializeEventTime() then
+                    int64 messageMetadata.EventTime |> convertToDateTime |> Nullable
+                else
+                    Nullable()
             EncryptionKeys =
                 if messageMetadata.EncryptionKeys.Count > 0 then
                     messageMetadata.EncryptionKeys |> Seq.map EncryptionKey.FromProto |> Seq.toArray

@@ -371,13 +371,14 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         member this.NewMessage (value:'T,
             [<Optional; DefaultParameterValue(null:string)>]key:string,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>]properties: IReadOnlyDictionary<string, string>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>,
+            [<Optional; DefaultParameterValue(Nullable():Nullable<DateTime>)>]deliverAt:Nullable<DateTime>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>,
             [<Optional; DefaultParameterValue(null:byte[])>]keyBytes:byte[],
             [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[],
+            [<Optional; DefaultParameterValue(Nullable():Nullable<DateTime>)>]eventTime:Nullable<DateTime>,
             [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction) =
             ProducerImpl.NewMessage(keyValueProcessor, schema, value, key, properties,
-                                    deliverAt, sequenceId, keyBytes, orderingKey, txn)
+                                    deliverAt, sequenceId, keyBytes, orderingKey, eventTime, txn)
 
         member this.ProducerId = producerId
 

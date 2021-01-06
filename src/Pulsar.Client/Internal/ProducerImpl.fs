@@ -226,8 +226,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         producerConfig.BatchingEnabled && message.DeliverAt.IsNone
 
     let createMessageMetadata (sequenceId: SequenceId) (txnId: TxnId option) (numMessagesInBatch: int option)
-        (payload: byte[]) (key: MessageKey option) (properties: IReadOnlyDictionary<string, string>) (deliverAt: int64 option)
-        (orderingKey: byte[] option)=
+        (payload: byte[]) (key: MessageKey option) (properties: IReadOnlyDictionary<string, string>) (deliverAt: DateTime option)
+        (orderingKey: byte[] option) (eventTime: DateTime option)=
         let metadata =
             MessageMetadata (
                 SequenceId = (sequenceId |> uint64),
@@ -252,7 +252,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             metadata.NumMessagesInBatch <- numMessagesInBatch.Value
         match deliverAt with
         | Some deliverAt ->
-            metadata.DeliverAtTime <- deliverAt
+            metadata.DeliverAtTime <- deliverAt |> convertToMsTimestamp
         | None ->
             ()
         match schemaVersion with
@@ -263,6 +263,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         match orderingKey with
         | Some orderingKey ->
             metadata.OrderingKey <- orderingKey
+        | None ->
+            ()
+        match eventTime with
+        | Some eventTime ->
+            metadata.EventTime <- eventTime |> convertToMsTimestamp |> uint64
         | None ->
             ()
         match txnId with
@@ -281,7 +286,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         let (batchPayload, batchCallbacks) = opSendMsg;
         let batchSize = batchCallbacks.Length
         let metadata = createMessageMetadata lowestSequenceId txnId (Some batchSize)
-                           batchPayload partitionKey EmptyProps None orderingKey
+                           batchPayload partitionKey EmptyProps None orderingKey None
         let compressedBatchPayload = compressionCodec.Encode batchPayload
         if (compressedBatchPayload.Length > maxMessageSize) then
             batchCallbacks
@@ -401,7 +406,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     let txnId = message.Txn |> Option.map (fun txn -> txn.Id)
                     while chunkId < totalChunks && not chunkError do
                         let metadata = createMessageMetadata sequenceId txnId None
-                                           message.Payload message.Key message.Properties message.DeliverAt message.OrderingKey
+                                           message.Payload message.Key message.Properties message.DeliverAt
+                                           message.OrderingKey message.EventTime
                         let chunkPayload = 
                             if isChunked && producerConfig.Topic.IsPersistent then
                                 metadata.Uuid <- uuid
@@ -766,10 +772,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             value:'T,
             key:string,
             properties: IReadOnlyDictionary<string, string>,
-            deliverAt:Nullable<int64>,
+            deliverAt:Nullable<DateTime>,
             sequenceId:Nullable<SequenceId>,
             keyBytes:byte[],
             orderingKey:byte[],
+            eventTime: Nullable<DateTime>,
             txn:Transaction) =
             keyValueProcessor
             |> Option.map(fun kvp -> kvp.EncodeKeyValue value)
@@ -780,6 +787,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     ?deliverAt = (deliverAt |> Option.ofNullable),
                     ?sequenceId = (sequenceId |> Option.ofNullable),
                     ?orderingKey = (orderingKey |> Option.ofObj),
+                    ?eventTime = (eventTime |> Option.ofNullable),
                     ?txn = (txn |> Option.ofObj)))
             |> Option.defaultWith (fun () ->
                 let keyObj =
@@ -794,6 +802,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     ?deliverAt = (deliverAt |> Option.ofNullable),
                     ?sequenceId = (sequenceId |> Option.ofNullable),
                     ?orderingKey = (orderingKey |> Option.ofObj),
+                    ?eventTime = (eventTime |> Option.ofNullable),
                     ?txn = (txn |> Option.ofObj)))
 
     interface IProducer<'T> with
@@ -836,13 +845,14 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.NewMessage (value:'T,
             [<Optional; DefaultParameterValue(null:string)>]key:string,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>]properties: IReadOnlyDictionary<string, string>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<int64>)>]deliverAt:Nullable<int64>,
+            [<Optional; DefaultParameterValue(Nullable():Nullable<DateTime>)>]deliverAt:Nullable<DateTime>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>,
             [<Optional; DefaultParameterValue(null:byte[])>]keyBytes:byte[],
             [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[],
+            [<Optional; DefaultParameterValue(Nullable():Nullable<DateTime>)>]eventTime:Nullable<DateTime>,
             [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction) =
             ProducerImpl.NewMessage(keyValueProcessor, schema, value, key, properties,
-                                    deliverAt, sequenceId, keyBytes, orderingKey, txn)
+                                    deliverAt, sequenceId, keyBytes, orderingKey, eventTime, txn)
                 
         member this.ProducerId = producerId
 

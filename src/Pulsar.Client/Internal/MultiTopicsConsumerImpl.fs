@@ -55,11 +55,11 @@ type internal MultiTopicConsumerMessage<'T> =
     | PatternTickTime
     | PartitionTickTime
     | GetStats of AsyncReplyChannel<Task<ConsumerStats array>>
-    | ReconsumeLater of Message<'T> * int64 * AsyncReplyChannel<Task<unit>>
-    | ReconsumeLaterCumulative of Message<'T> * int64 * AsyncReplyChannel<Task<unit>>
+    | ReconsumeLater of Message<'T> * DateTime * AsyncReplyChannel<Task<unit>>
+    | ReconsumeLaterCumulative of Message<'T> * DateTime * AsyncReplyChannel<Task<unit>>
     | RemoveWaiter of Waiter<'T>
     | RemoveBatchWaiter of BatchWaiter<'T>
-    | LastDisconnectedTimestamp of AsyncReplyChannel<int64>
+    | LastDisconnectedTimestamp of AsyncReplyChannel<DateTime>
 
 type internal TopicAndConsumer<'T> =
     {
@@ -684,7 +684,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     
                     Log.Logger.LogDebug("{0} LastDisconnectedTimestamp", prefix)
                     consumers
-                    |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.LastDisconnectedTimestamp)
+                    |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.LastDisconnected)
                     |> Seq.max
                     |> channel.Reply
                     return! loop ()
@@ -1066,7 +1066,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 return allStats |> statsReduce
             }
             
-        member this.ReconsumeLaterAsync (msg: Message<'T>, deliverAt: int64) =
+        member this.ReconsumeLaterAsync (msg: Message<'T>, deliverAt: DateTime) =
             task {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
@@ -1074,7 +1074,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 return! result
             }
             
-        member this.ReconsumeLaterCumulativeAsync (msg: Message<'T>, deliverAt: int64) =
+        member this.ReconsumeLaterCumulativeAsync (msg: Message<'T>, deliverAt: DateTime) =
             task {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
@@ -1082,7 +1082,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 return! result
             }
         
-        member this.ReconsumeLaterAsync (msgs: Messages<'T>, deliverAt: int64) =
+        member this.ReconsumeLaterAsync (msgs: Messages<'T>, deliverAt: DateTime) =
             task {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
@@ -1091,7 +1091,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     return! result
             }
             
-        member this.LastDisconnectedTimestamp =
+        member this.LastDisconnected =
             mb.PostAndReply(LastDisconnectedTimestamp)
         
     interface IAsyncDisposable with

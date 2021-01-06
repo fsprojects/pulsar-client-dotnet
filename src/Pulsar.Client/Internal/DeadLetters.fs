@@ -81,7 +81,7 @@ type internal DeadLetterProcessor<'T>
                 propertiesMap.Add(RetryMessageUtil.SYSTEM_PROPERTY_REAL_TOPIC, topicName)
                 propertiesMap.Add(RetryMessageUtil.SYSTEM_PROPERTY_ORIGIN_MESSAGE_ID, message.MessageId.ToString())
             propertiesMap.Add(RetryMessageUtil.SYSTEM_PROPERTY_RECONSUMETIMES, string reconsumetimes)
-            propertiesMap.Add(RetryMessageUtil.SYSTEM_PROPERTY_DELIVER_AT, deliverAt |> string)
+            propertiesMap.Add(RetryMessageUtil.SYSTEM_PROPERTY_DELIVER_AT, deliverAt |> convertToMsTimestamp |> string)
             task {
                 if reconsumetimes > policy.MaxRedeliveryCount then
                     let dlp = this :> IDeadLetterProcessor<'T>
