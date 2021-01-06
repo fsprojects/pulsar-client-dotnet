@@ -1,10 +1,14 @@
 ﻿module Pulsar.Client.IntegrationTests.ZeroQueueConsumer
 
 open System
+open System.Threading
 open Expecto
+open Expecto.Flip
 open Expecto.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
+open Pulsar.Client.Api
+open Pulsar.Client.Common
 open Pulsar.Client.IntegrationTests.Common
 open Serilog
 
@@ -111,5 +115,54 @@ let tests =
 
             Log.Debug("Finished ZeroQueueConsumer with multiconsumer work fine")
 
+        }
+        
+        testAsync "ZeroConsumer redelivery works well" {
+            Log.Debug("Started ZeroConsumer redelivery works well")
+            
+            let client = getClient()
+            
+            let topicName = Guid.NewGuid().ToString()
+            let! producer = client.NewProducer(Schema.STRING())
+                                .Topic(topicName)
+                                .EnableBatching(false)
+                                .CreateAsync()
+                                |> Async.AwaitTask
+                                
+            let! consumer = client.NewConsumer(Schema.STRING())
+                               .Topic(topicName)
+                               .SubscriptionName("test-subscription")
+                               .SubscriptionType(SubscriptionType.Exclusive)
+                               .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+                               .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(100.))
+                               .ReceiverQueueSize(0)
+                               .SubscribeAsync()
+                               |> Async.AwaitTask
+            
+            let firstTick = Environment.TickCount64.ToString()
+            let secondTick = Environment.TickCount64.ToString()
+            let! _ = producer.SendAsync(firstTick) |> Async.AwaitTask
+            let! _ = producer.SendAsync(secondTick) |> Async.AwaitTask
+             
+            let cts = new CancellationTokenSource(TimeSpan.FromSeconds(5.))
+             
+            for i in 1..5 do
+                 let! msg = consumer.ReceiveAsync(cts.Token) |> Async.AwaitTask
+                 Expect.equal "" (msg.GetValue()) firstTick
+                 do! consumer.RedeliverUnacknowledgedMessagesAsync() |> Async.AwaitTask
+                 
+            let! msg = consumer.ReceiveAsync(cts.Token) |> Async.AwaitTask
+            do! consumer.NegativeAcknowledge(msg.MessageId) |> Async.AwaitTask
+            let! msg1 = consumer.ReceiveAsync(cts.Token) |> Async.AwaitTask
+            Expect.equal "" (msg1.GetValue()) secondTick
+            do! consumer.AcknowledgeAsync(msg1.MessageId) |> Async.AwaitTask
+            let! msg2 = consumer.ReceiveAsync(cts.Token) |> Async.AwaitTask
+            Expect.equal "" (msg2.GetValue()) firstTick
+            do! consumer.AcknowledgeAsync(msg2.MessageId) |> Async.AwaitTask
+            
+            do! Async.Sleep(110) // wait for acks
+
+            Log.Debug("Finished ZeroConsumer redelivery works well")
+            
         }
     ]

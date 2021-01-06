@@ -402,7 +402,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     /// Periodically, it sends a Flow command to notify the broker that it can push more messages
     let messageProcessed (msg: Message<'T>) =
         lastDequeuedMessageId <- msg.MessageId
-        increaseAvailablePermits 1
+        if consumerConfig.ReceiverQueueSize > 0 then
+            //don't increase for zero queue consumer
+            increaseAvailablePermits 1
         stats.UpdateNumMsgsReceived(msg.Data.Length)
         trackMessage msg.MessageId
 
