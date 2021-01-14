@@ -17,6 +17,6 @@ type IDeadLetterProcessor<'T> =
     abstract member ClearMessages: unit -> unit
     abstract member AddMessage: MessageId * Message<'T> -> unit
     abstract member RemoveMessage: MessageId -> unit
-    abstract member ProcessMessages: MessageId * (MessageId -> Async<unit>) -> Task<bool>
+    abstract member ProcessMessages: MessageId * (MessageId -> Task<unit>) -> Task<bool>
     abstract member MaxRedeliveryCount: uint32
-    abstract member ReconsumeLater: Message<'T> * DateTime * (MessageId -> Async<unit>) -> Task<bool>
+    abstract member ReconsumeLater: Message<'T> * DateTime * (MessageId -> Task<unit>) -> Task<bool>

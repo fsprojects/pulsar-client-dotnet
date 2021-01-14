@@ -16,7 +16,7 @@ open System.IO
 open System.Runtime.InteropServices
 open Pulsar.Client.Transaction
 
-type SendMessageRequest<'T> = MessageBuilder<'T> * AsyncReplyChannel<TaskCompletionSource<MessageId>>
+type SendMessageRequest<'T> = MessageBuilder<'T> * AsyncReplyChannel<Task<MessageId>>
 
 type internal ProducerTickType =
     | SendBatchTick
@@ -118,9 +118,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             failPendingMessage msg ex
         while blockedRequests.Count > 0 do
             let (_, ch) = blockedRequests.Dequeue()
-            let tcs = TaskCompletionSource()
-            tcs.SetException(ex)
-            ch.Reply(tcs)
+            ch.Reply(Task.FromException<MessageId>(ex))
         if producerConfig.BatchingEnabled then
             failPendingBatchMessages ex
 
@@ -336,14 +334,12 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         maxMessageSize <- messageSize
         batchMessageContainer.MaxMessageSize <- messageSize
         
-    let canEnqueueRequest (channel: AsyncReplyChannel<TaskCompletionSource<MessageId>>) sendRequest msgCount =
+    let canEnqueueRequest (channel: AsyncReplyChannel<Task<MessageId>>) sendRequest msgCount =
         if pendingMessages.Count + msgCount > producerConfig.MaxPendingMessages then
             if producerConfig.BlockIfQueueFull then
                 blockedRequests.Enqueue(sendRequest)
             else
-                let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
-                tcs.SetException(ProducerQueueIsFullError "Producer send queue is full")
-                channel.Reply(tcs)
+                channel.Reply(Task.FromException<MessageId>(ProducerQueueIsFullError "Producer send queue is full"))
             false
         else
             true
@@ -441,7 +437,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         | Error ex ->
                             chunkError <- true
                             failMessage message tcs ex
-            channel.Reply(tcs)
+            channel.Reply(tcs.Task)
     
     let stopProducer() =
         sendTimeoutTimer.Stop()
@@ -810,9 +806,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             connectionHandler.CheckIfActive() |> throwIfNotNull
             let msg = _this.NewMessage message
             task {
-                let! tcs = this.SendMessage msg
-                if tcs.Task.IsFaulted then
-                    reraize tcs.Task.Exception.InnerException
+                let! task = this.SendMessage msg
+                if task.IsFaulted then
+                    reraize task.Exception.InnerException
                 else
                     return ()
             }
@@ -820,9 +816,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.SendAndForgetAsync (message: MessageBuilder<'T>) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             task {
-                let! tcs = this.SendMessage message
-                if tcs.Task.IsFaulted then
-                    reraize tcs.Task.Exception.InnerException
+                let! task = this.SendMessage message
+                if task.IsFaulted then
+                    reraize task.Exception.InnerException
                 else
                     return ()
             }
@@ -831,15 +827,15 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             connectionHandler.CheckIfActive() |> throwIfNotNull
             let msg = _this.NewMessage message
             task {
-                let! tcs = this.SendMessage msg
-                return! tcs.Task
+                let! task = this.SendMessage msg
+                return! task
             }
 
         member this.SendAsync (message: MessageBuilder<'T>) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             task {
-                let! tcs = this.SendMessage message
-                return! tcs.Task
+                let! task = this.SendMessage message
+                return! task
             }
 
         member this.NewMessage (value:'T,

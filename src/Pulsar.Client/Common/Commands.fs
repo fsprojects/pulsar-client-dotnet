@@ -126,20 +126,30 @@ let newSend (producerId : ProducerId) (sequenceId : SequenceId) (highestSequence
     serializePayloadCommand command msgMetadata payload
 
 let newAck (consumerId : ConsumerId) (ledgerId: LedgerId) (entryId: EntryId) (ackType : AckType)
-    (properties: IReadOnlyDictionary<string, int64>) (ackSet: AckSet) : Payload =
+    (properties: IReadOnlyDictionary<string, int64>) (ackSet: AckSet) (validationError: CommandAck.ValidationError option)
+    (txnId: TxnId option) (requestId: RequestId option) (batchSize: int option) : Payload =
     let request = CommandAck(ConsumerId = %consumerId, ack_type = ackType.ToCommandAckType())
-    request.MessageIds.Add(MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId, AckSets = ackSet))
+    let messageIdData = MessageIdData(ledgerId = uint64 %ledgerId,
+                                         entryId = uint64 %entryId,
+                                         AckSets = ackSet)
+    match batchSize with
+    | Some batchSize -> messageIdData.BatchSize <- batchSize
+    | None -> ()
+    request.MessageIds.Add(messageIdData)
+    match validationError with
+    | Some validationError -> request.validation_error <- validationError
+    | None -> ()
+    match txnId with
+    | Some txnId ->
+        request.TxnidMostBits <- txnId.MostSigBits
+        request.TxnidLeastBits <- txnId.LeastSigBits
+    | None -> ()
+    match requestId with
+    | Some requestId -> request.RequestId <- %requestId
+    | None -> ()
     properties
     |> Seq.map(fun (KeyValue(key, value)) -> KeyLongValue(Key = key, Value = uint64 value))
     |> request.Properties.AddRange
-    let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
-    serializeSimpleCommand command
-
-let newErrorAck (consumerId : ConsumerId) (ledgerId: LedgerId) (entryId: EntryId) (ackType : AckType)
-    (error: CommandAck.ValidationError) : Payload =
-    let request = CommandAck(ConsumerId = %consumerId, ack_type = ackType.ToCommandAckType())
-    request.MessageIds.Add(MessageIdData(ledgerId = uint64 %ledgerId, entryId = uint64 %entryId))
-    request.validation_error <- error
     let command = BaseCommand(``type`` = CommandType.Ack, Ack = request)
     serializeSimpleCommand command
 

@@ -16,7 +16,7 @@ type BatchMessageAcker internal (batchSize: int) =
             unackedCount <- unackedCount - 1
         unackedCount = 0
 
-    member internal this.AckGroup (batchIndex: BatchIndex) =
+    member internal this.AckCumulative (batchIndex: BatchIndex) =
         for i in 0 .. %batchIndex do
             if bitSet.[i] then
                 bitSet.[i] <- false

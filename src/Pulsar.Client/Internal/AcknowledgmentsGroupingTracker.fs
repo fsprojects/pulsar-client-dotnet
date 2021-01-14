@@ -10,8 +10,8 @@ open FSharp.UMX
 
 type internal GroupingTrackerMessage =
     | IsDuplicate of (MessageId*AsyncReplyChannel<bool>)
-    | AddAcknowledgment of (MessageId*AckType*IReadOnlyDictionary<string, int64>*AsyncReplyChannel<unit>)
-    | AddBatchIndexAcknowledgment of (MessageId*AckType*IReadOnlyDictionary<string, int64>*AsyncReplyChannel<unit>)
+    | AddAcknowledgment of (MessageId*AckType*IReadOnlyDictionary<string, int64>)
+    | AddBatchIndexAcknowledgment of (MessageId*AckType*IReadOnlyDictionary<string, int64>)
     | FlushAndClean
     | Flush
     | Stop
@@ -20,8 +20,8 @@ type internal LastCumulativeAck = MessageId
 
 type internal IAcknowledgmentsGroupingTracker =
     abstract member IsDuplicate: MessageId -> bool
-    abstract member AddAcknowledgment: MessageId * AckType * IReadOnlyDictionary<string, int64> -> Async<unit>
-    abstract member AddBatchIndexAcknowledgment: MessageId * AckType * IReadOnlyDictionary<string, int64> -> Async<unit>
+    abstract member AddAcknowledgment: MessageId * AckType * IReadOnlyDictionary<string, int64> -> unit
+    abstract member AddBatchIndexAcknowledgment: MessageId * AckType * IReadOnlyDictionary<string, int64> -> unit
     abstract member FlushAndClean: unit -> unit
     abstract member Flush: unit -> unit
     abstract member Close: unit -> unit
@@ -75,7 +75,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                     else
                                         null
                                 let payload = Commands.newAck consumerId lastCumulativeAck.LedgerId lastCumulativeAck.EntryId
-                                                  AckType.Cumulative (Dictionary()) ackSet
+                                                  AckType.Cumulative EmptyProperties ackSet None None None None
                                 let! ackSuccess = sendAckPayload cnx payload
                                 if ackSuccess then
                                     cumulativeAckFlushRequired <- false
@@ -138,6 +138,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                     match getState() with
                     | Ready cnx ->
                         let payload = Commands.newAck consumerId msgId.LedgerId msgId.EntryId ackType properties null
+                                        None None None None
                         return! sendAckPayload cnx payload
                     | _ ->
                         return false
@@ -167,6 +168,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                         bitSet.[j] <- false
                                 let ackSet = bitSet |> toLongArray
                                 Commands.newAck consumerId msgId.LedgerId msgId.EntryId ackType properties ackSet
+                                    None None None None
                         return! sendAckPayload cnx payload
                     | _ ->
                         return false
@@ -191,19 +193,17 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                         channel.Reply(pendingIndividualAcks.Contains msgId)
                     return! loop ()
                     
-                | GroupingTrackerMessage.AddAcknowledgment (msgId, ackType, properties, channel) ->
+                | GroupingTrackerMessage.AddAcknowledgment (msgId, ackType, properties) ->
                     
                     if ackGroupTime = TimeSpan.Zero || properties.Count > 0 then
                         // We cannot group acks if the delay is 0 or when there are properties attached to it. Fortunately that's an
                         // uncommon condition since it's only used for the compaction subscription
                         do! doImmediateAck msgId ackType properties
                         Log.Logger.LogDebug("{0} messageId {1} has been immediately acked", prefix, msgId)
-                        channel.Reply()
                         return! loop ()
                     elif ackType = AckType.Cumulative then
                         // cumulative ack
                         doCumulativeAck msgId false
-                        channel.Reply()
                         return! loop ()
                     else
                         // Individual ack
@@ -213,19 +213,16 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                 Log.Logger.LogWarning("{0} messageId {1} MAX_ACK_GROUP_SIZE reached and flushed", prefix, msgId)
                         else
                             Log.Logger.LogWarning("{0} messageId {1} has already been added to the ack tracker", prefix, msgId)
-                        channel.Reply()
                         return! loop ()
                         
-                | GroupingTrackerMessage.AddBatchIndexAcknowledgment (msgId, ackType, properties, channel) ->
+                | GroupingTrackerMessage.AddBatchIndexAcknowledgment (msgId, ackType, properties) ->
                     
                     if ackGroupTime = TimeSpan.Zero || properties.Count > 0 then
                         do! doImmediateBatchIndexAck msgId ackType properties
                         Log.Logger.LogDebug("{0} messageId {1} has been immediately batch index acked", prefix, msgId)
-                        channel.Reply()
                         return! loop ()
                     elif ackType = AckType.Cumulative then
                         doCumulativeAck msgId true
-                        channel.Reply()
                         return! loop ()
                     else
                         if pendingIndividualBatchIndexAcks.Add(msgId) then
@@ -234,7 +231,6 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                 Log.Logger.LogWarning("{0} messageId {1} MAX_ACK_GROUP_SIZE reached and flushed", prefix, msgId)
                         else
                             Log.Logger.LogWarning("{0} messageId {1} has already been added", prefix, msgId)
-                        channel.Reply()
                         return! loop ()
                 
                         
@@ -275,9 +271,9 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         member this.IsDuplicate(msgId) =
             mb.PostAndReply (fun channel -> GroupingTrackerMessage.IsDuplicate (msgId, channel))
         member this.AddAcknowledgment(msgId, ackType, properties) =
-            mb.PostAndAsyncReply (fun channel -> GroupingTrackerMessage.AddAcknowledgment (msgId, ackType, properties, channel))
+            mb.Post <| GroupingTrackerMessage.AddAcknowledgment (msgId, ackType, properties)
         member this.AddBatchIndexAcknowledgment(msgId, ackType, properties) =
-            mb.PostAndAsyncReply (fun channel -> GroupingTrackerMessage.AddBatchIndexAcknowledgment (msgId, ackType, properties, channel))
+            mb.Post <| GroupingTrackerMessage.AddBatchIndexAcknowledgment (msgId, ackType, properties)
         member this.Flush() =
             mb.Post GroupingTrackerMessage.Flush
         member this.FlushAndClean() =
@@ -291,8 +287,8 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         {
             new IAcknowledgmentsGroupingTracker with
                 member this.IsDuplicate(msgId) = false
-                member this.AddAcknowledgment(msgId, ackType, properties) = async { return () }
-                member this.AddBatchIndexAcknowledgment(msgId, ackType, properties) = async { return () }
+                member this.AddAcknowledgment(msgId, ackType, properties) = ()
+                member this.AddBatchIndexAcknowledgment(msgId, ackType, properties) = ()
                 member this.Flush() = ()
                 member this.FlushAndClean() = ()
                 member this.Close() = ()

@@ -9,6 +9,9 @@ type TxnId = {
     MostSigBits: uint64
     LeastSigBits: uint64
 }
+with
+    override this.ToString() =
+        $"{this.MostSigBits}:{this.LeastSigBits}"
 
 type TxnOperations =
     {
@@ -53,3 +56,6 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
         
     member this.Abort() =
         ()
+        
+    override this.ToString() =
+        $"Txn({txnId})"

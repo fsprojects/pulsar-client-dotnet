@@ -34,7 +34,7 @@ type internal ConsumerMessage<'T> =
     | Receive of CancellationToken * AsyncReplyChannel<ResultOrException<Message<'T>>>
     | BatchReceive of CancellationToken * AsyncReplyChannel<ResultOrException<Messages<'T>>>
     | SendBatchByTimeout
-    | Acknowledge of MessageId * AckType
+    | Acknowledge of MessageId * AckType * Transaction option * AsyncReplyChannel<Task<Unit>> option
     | NegativeAcknowledge of MessageId
     | RedeliverUnacknowledged of RedeliverSet * AsyncReplyChannel<unit>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
@@ -74,6 +74,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let waiters = LinkedList<Waiter<'T>>()
     let batchWaiters = LinkedList<BatchWaiter<'T>>()
     let subscribeTsc = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+    let ackRequests = Dictionary<RequestId, TaskCompletionSource<unit>>()
     let prefix = $"consumer({consumerId}, {consumerConfig.ConsumerName}, {partitionIndex})"
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable hasReachedEndOfTopic = false
@@ -276,33 +277,31 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             0
     
     let sendAcknowledge (messageId: MessageId) ackType properties =
-        async {
-            match ackType with
-            | AckType.Individual ->
-                match messageId.Type with
-                | Individual ->
-                    untrackMessage messageId
-                    stats.IncrementNumAcksSent(1)
-                | Batch (_, batch) ->
-                    let batchSize = batch.GetBatchSize()
-                    for i in 0..batchSize-1 do
-                        untrackMessage { messageId with Type = Batch(%i, batch) }
-                    stats.IncrementNumAcksSent(batchSize)
-                interceptors.OnAcknowledge(this, messageId, null)
-            | AckType.Cumulative ->
-                interceptors.OnAcknowledgeCumulative(this, messageId, null)
-                let count = untrackMessagesTill messageId
-                stats.IncrementNumAcksSent(count)
-            do! acksGroupingTracker.AddAcknowledgment(messageId, ackType, properties)
-            // Consumer acknowledgment operation immediately succeeds. In any case, if we're not able to send ack to broker,
-            // the messages will be re-delivered
+        match ackType with
+        | AckType.Individual ->
+            match messageId.Type with
+            | Individual ->
+                untrackMessage messageId
+                stats.IncrementNumAcksSent(1)
+            | Batch (_, batch) ->
+                let batchSize = batch.GetBatchSize()
+                for i in 0..batchSize-1 do
+                    untrackMessage { messageId with Type = Batch(%i, batch) }
+                stats.IncrementNumAcksSent(batchSize)
+            interceptors.OnAcknowledge(this, messageId, null)
             deadLettersProcessor.RemoveMessage messageId
-        }
-
+        | AckType.Cumulative ->
+            interceptors.OnAcknowledgeCumulative(this, messageId, null)
+            let count = untrackMessagesTill messageId
+            stats.IncrementNumAcksSent(count)
+        acksGroupingTracker.AddAcknowledgment(messageId, ackType, properties)
+        // Consumer acknowledgment operation immediately succeeds. In any case, if we're not able to send ack to broker,
+        // the messages will be re-delivered
+        
     let ackOrTrack msgId autoAck =
         if autoAck then
             Log.Logger.LogInformation("{0} Removing chunk message-id {1}", prefix, msgId)
-            sendAcknowledge msgId AckType.Individual EmptyProperties |> Async.StartImmediate
+            sendAcknowledge msgId AckType.Individual EmptyProperties
         else
             trackMessage msgId
             
@@ -311,14 +310,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                                       consumerConfig.ExpireTimeOfIncompleteChunkedMessage,
                                                       ackOrTrack)
     
-    let markAckForBatchMessage (msgId: MessageId) (batchDetails: BatchDetails) ackType properties =
-        let (batchIndex, batchAcker) = batchDetails
+    let markAckForBatchMessage (msgId: MessageId) ((batchIndex, batchAcker): BatchDetails) ackType properties =
         let isAllMsgsAcked =
             match ackType with
             | AckType.Individual ->
                 batchAcker.AckIndividual(batchIndex)
             | AckType.Cumulative ->
-                batchAcker.AckGroup(batchIndex)
+                batchAcker.AckCumulative(batchIndex)
         let outstandingAcks = batchAcker.GetOutstandingAcks()
         let batchSize = batchAcker.GetBatchSize()
         if isAllMsgsAcked then
@@ -329,7 +327,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             match ackType with
             | AckType.Cumulative ->
                 if not batchAcker.PrevBatchCumulativelyAcked then
-                    sendAcknowledge msgId.PrevBatchMessageId ackType properties |> Async.StartImmediate
+                    sendAcknowledge msgId.PrevBatchMessageId ackType properties
                     Log.Logger.LogDebug("{0} update PrevBatchCumulativelyAcked", prefix)
                     batchAcker.PrevBatchCumulativelyAcked <- true
                 interceptors.OnAcknowledgeCumulative(this, msgId, null)
@@ -339,17 +337,49 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 prefix, ackType, outstandingAcks, batchSize)
             false
 
-    let trySendAcknowledge ackType properties messageId =
-        async {
+    let doTransactionAcknowledgeForResponse ackType properties txnId messageId =
+        match connectionHandler.ConnectionState with
+        | Ready clientCnx ->
+            let requestId = Generators.getNextRequestId()
+            let command =
+                match messageId.Type with
+                | Batch (batchIndex, batchAcker) ->
+                    match ackType with
+                    | AckType.Individual -> batchAcker.AckIndividual(batchIndex)
+                    | AckType.Cumulative -> batchAcker.AckCumulative(batchIndex)
+                    |> ignore
+                    let ackSet = batchAcker.BitSet |> toLongArray
+                    Commands.newAck consumerId messageId.LedgerId messageId.EntryId ackType properties ackSet
+                            None (Some txnId) (Some requestId) (batchAcker.GetBatchSize() |> Some)
+                | _ ->
+                    Commands.newAck consumerId messageId.LedgerId messageId.EntryId ackType properties null
+                            None (Some txnId) (Some requestId) None
+            let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            ackRequests.Add(requestId, tcs)
+            match ackType with
+            | AckType.Individual -> unAckedMessageTracker.Remove(messageId) |> ignore
+            | AckType.Cumulative -> unAckedMessageTracker.RemoveMessagesTill(messageId) |> ignore
+            clientCnx.SendAndForget(command)
+            tcs.Task
+        | _ ->
+            Log.Logger.LogWarning("{0} not ready, can't do transactionAcknowledge. State: {1}",
+                                  prefix, connectionHandler.ConnectionState)
+            Task.FromException<unit>(NotConnectedException("TransactionAcknowledge failed"))
+    
+    let trySendAcknowledge ackType properties (txnOption: Transaction option) messageId =
+        match txnOption with
+        | Some txn ->
+            doTransactionAcknowledgeForResponse ackType properties txn.Id messageId
+        | None ->
             match messageId.Type with
             | Batch batchDetails when not (markAckForBatchMessage messageId batchDetails ackType properties) ->
                 if consumerConfig.BatchIndexAcknowledgmentEnabled then
-                    do! acksGroupingTracker.AddBatchIndexAcknowledgment(messageId, ackType, properties)
+                    acksGroupingTracker.AddBatchIndexAcknowledgment(messageId, ackType, properties)
                 // other messages in batch are still pending ack.
             | _ ->
-                do! sendAcknowledge messageId ackType properties
+                sendAcknowledge messageId ackType properties
                 Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
-        } 
+            Task.FromResult()
 
     let isPriorEntryIndex idx =
         match startMessageId with
@@ -390,7 +420,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let processPossibleToDLQ (messageId : MessageId) =
         task {
-            let acknowledge = trySendAcknowledge AckType.Individual EmptyProperties
+            let acknowledge = trySendAcknowledge AckType.Individual EmptyProperties None
             let! deadMessageProcessed = deadLettersProcessor.ProcessMessages(messageId, acknowledge)
             return deadMessageProcessed
         }
@@ -510,7 +540,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         
     let discardCorruptedMessage (msgId: MessageId) (clientCnx: ClientCnx) err =
         async {
-            let command = Commands.newErrorAck consumerId msgId.LedgerId msgId.EntryId AckType.Individual err
+            let command = Commands.newAck consumerId msgId.LedgerId msgId.EntryId AckType.Individual
+                            EmptyProperties null (Some err) None None None
             let! discardResult = clientCnx.Send command
             if discardResult then
                 Log.Logger.LogInformation("{0} Message {1} was discarded due to {2}", prefix, msgId, err)
@@ -521,7 +552,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         
     let getSchemaDecodeFunction (metadata: Metadata) =
         async {
-            // mutable workaround for unsuppported let! inside let
+            // mutable workaround for unsupported let! inside let
             let mutable schemaDecodeFunction = Unchecked.defaultof<(byte[]->'T)>
             if schemaProvider.IsNone || metadata.SchemaVersion.IsNone then
                 schemaDecodeFunction <- schema.Decode
@@ -551,7 +582,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             increaseAvailablePermits 1
             if consumerConfig.ExpireTimeOfIncompleteChunkedMessage > TimeSpan.Zero &&
                 DateTime.UtcNow > rawMessage.Metadata.PublishTime.Add(consumerConfig.ExpireTimeOfIncompleteChunkedMessage) then
-                sendAcknowledge rawMessage.MessageId AckType.Individual EmptyProperties |> Async.StartImmediate
+                sendAcknowledge rawMessage.MessageId AckType.Individual EmptyProperties
             else
                 trackMessage rawMessage.MessageId
             None
@@ -794,10 +825,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         Log.Logger.LogDebug("{0} Receive waiting", prefix)
                     return! loop ()
                 
-                | ConsumerMessage.Acknowledge (messageId, ackType) ->
+                | ConsumerMessage.Acknowledge (messageId, ackType, txnOption, chOption) ->
 
-                    Log.Logger.LogDebug("{0} Acknowledge {1} {2}", prefix, messageId, ackType)
-                    do! trySendAcknowledge ackType EmptyProperties messageId
+                    Log.Logger.LogDebug("{0} Acknowledge {1} {2} {3}", prefix, messageId, ackType, txnOption)
+                    let task = trySendAcknowledge ackType EmptyProperties txnOption messageId
+                    chOption |> Option.iter (fun ch -> ch.Reply(task))
                     return! loop ()
                     
                 | ConsumerMessage.BatchReceive (cancellationToken, ch) ->
@@ -957,7 +989,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                     Log.Logger.LogDebug("{0} HasMessageAvailable", prefix)
                     
-                    // avoid null referenece
+                    // avoid null reference
                     let startMessageId = startMessageId |> Option.defaultValue lastDequeuedMessageId
                     
                     // we haven't read yet. use startMessageId for comparison
@@ -1016,7 +1048,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     
                 | ConsumerMessage.ReconsumeLater (msg, ackType, deliverAt, channel) ->
                     
-                    let acknowldege = trySendAcknowledge ackType EmptyProperties
+                    let acknowldege = trySendAcknowledge ackType EmptyProperties None
                     let! success = deadLettersProcessor.ReconsumeLater(msg, deliverAt, acknowldege) |> Async.AwaitTask
                     if not success then
                         untrackMessage msg.MessageId
@@ -1286,7 +1318,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     interceptors.OnAcknowledge(this, msgId, exn)
                     raise exn
 
-                mb.Post(Acknowledge(msgId, AckType.Individual))
+                let! task = mb.PostAndAsyncReply(fun ch -> Acknowledge(msgId, AckType.Individual, None, Some ch))
+                if task.IsFaulted then
+                    stats.IncrementNumAcksFailed()
+                return! task
             }
             
         member this.AcknowledgeAsync (msgId: MessageId, txn: Transaction) =
@@ -1299,7 +1334,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 
                 if txn |> isNull |> not then
                     do! txn.RegisterAckedTopic(topicName.CompleteTopicName, consumerConfig.SubscriptionName)
-                mb.Post(Acknowledge(msgId, AckType.Individual))
+                    
+                let! task = mb.PostAndAsyncReply(fun ch -> Acknowledge(msgId, AckType.Individual, Some txn, Some ch))
+                if task.IsFaulted then
+                    stats.IncrementNumAcksFailed()
+                return! task
             }
             
         member this.AcknowledgeAsync (msgs: Messages<'T>) =
@@ -1312,7 +1351,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     raise exn
 
                 for msg in msgs do
-                    mb.Post(Acknowledge(msg.MessageId, AckType.Individual))
+                    mb.Post(Acknowledge(msg.MessageId, AckType.Individual, None, None))
             }
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
@@ -1323,7 +1362,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     interceptors.OnAcknowledgeCumulative(this, msgId, exn)
                     raise exn
 
-                mb.Post(Acknowledge(msgId, AckType.Cumulative))
+                let! task = mb.PostAndAsyncReply(fun ch -> Acknowledge(msgId, AckType.Cumulative, None, Some ch))
+                if task.IsFaulted then
+                    stats.IncrementNumAcksFailed()
+                return! task
             }
             
         member this.AcknowledgeCumulativeAsync (msgId: MessageId, txn: Transaction) =
@@ -1337,7 +1379,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 if txn |> isNull |> not then
                     txn.RegisterCumulativeAckConsumer(consumerId, consumerTxnOperations)
                     do! txn.RegisterAckedTopic(topicName.CompleteTopicName, consumerConfig.SubscriptionName)
-                mb.Post(Acknowledge(msgId, AckType.Cumulative))
+                    
+                let! task = mb.PostAndAsyncReply(fun ch -> Acknowledge(msgId, AckType.Individual, Some txn, Some ch))
+                if task.IsFaulted then
+                    stats.IncrementNumAcksFailed()
+                return! task
             }
 
         member this.RedeliverUnacknowledgedMessagesAsync () =
