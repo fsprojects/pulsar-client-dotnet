@@ -34,6 +34,8 @@ type NotAllowedException(msg) = inherit Exception(msg)
 type UnsupportedVersionException(msg) = inherit Exception(msg)
 type SubscriptionNotFoundException(msg) = inherit Exception(msg)
 type ConsumerNotFoundException(msg) = inherit Exception(msg)
+type MessageAcknowledgeException(msg) = inherit Exception(msg)
+type TransactionConflictException(msg) = inherit Exception(msg)
 
 
 // custom exception
@@ -65,8 +67,12 @@ module PulsarClientException =
         | :? InvalidMessageException
         | :? InvalidTopicNameException
         | :? NotSupportedException
+        | :? NotAllowedException
         | :? ChecksumException
         | :? CryptoException
+        | :? ConsumerAssignException
+        | :? MessageAcknowledgeException
+        | :? TransactionConflictException
         | :? ProducerBusyException
         | :? ConsumerBusyException
              -> false

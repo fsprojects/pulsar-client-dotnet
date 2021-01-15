@@ -31,6 +31,7 @@ type internal ProducerMessage<'T> =
     | AckReceived of SendReceipt
     | BeginSendMessage of SendMessageRequest<'T>
     | RecoverChecksumError of SequenceId
+    | RecoverNotAllowedError of SequenceId
     | TopicTerminatedError
     | Close of AsyncReplyChannel<ResultOrException<unit>>
     | Tick of ProducerTickType
@@ -452,6 +453,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         AckReceived = fun (sendReceipt) -> this.Mb.Post(AckReceived sendReceipt)
         TopicTerminatedError = fun () -> this.Mb.Post(TopicTerminatedError)
         RecoverChecksumError = fun (seqId) -> this.Mb.Post(RecoverChecksumError seqId)
+        RecoverNotAllowedError = fun (seqId) -> this.Mb.Post(RecoverNotAllowedError seqId)
         ConnectionClosed = fun (clientCnx) -> this.Mb.Post(ConnectionClosed clientCnx)
     }
 
@@ -635,7 +637,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     //* <li><b>if doesn't match with existing checksum</b>: it means message is already corrupt and can't retry again.
                     //* So, fail send-message by failing callback</li>
                     //* </ul>
-                    Log.Logger.LogWarning("{0} RecoverChecksumError id={1}", prefix, sequenceId)
+                    Log.Logger.LogWarning("{0} RecoverChecksumError seqId={1}", prefix, sequenceId)
                     if pendingMessages.Count > 0 then
                         let pendingMessage = pendingMessages.Peek()
                         let expectedSequenceId = getHighestSequenceId pendingMessage
@@ -653,6 +655,22 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 
                         else
                             Log.Logger.LogDebug("{0} Corrupt message is already timed out {1}", prefix, sequenceId)
+                    else
+                        Log.Logger.LogDebug("{0} Got send failure for timed out seqId {1}", prefix, sequenceId)
+                    return! loop ()
+                    
+                | ProducerMessage.RecoverNotAllowedError sequenceId ->
+                   
+                    Log.Logger.LogWarning("{0} RecoverNotAllowedError seqId={1}", prefix, sequenceId)
+                    if pendingMessages.Count > 0 then
+                        let pendingMessage = pendingMessages.Peek()
+                        let expectedSequenceId = getHighestSequenceId pendingMessage
+                        if sequenceId = expectedSequenceId then
+                            failPendingMessage pendingMessage (
+                                prefix + ": the size of the message is not allowed" |> NotAllowedException
+                            )
+                        else
+                            Log.Logger.LogDebug("{0} Not allowed message is already timed out {1}", prefix, sequenceId)
                     else
                         Log.Logger.LogDebug("{0} Got send failure for timed out seqId {1}", prefix, sequenceId)
                     return! loop ()

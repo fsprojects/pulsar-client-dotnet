@@ -29,6 +29,7 @@ type internal ProducerOperations =
         AckReceived: SendReceipt -> unit
         TopicTerminatedError: unit -> unit
         RecoverChecksumError: SequenceId -> unit
+        RecoverNotAllowedError: SequenceId -> unit
         ConnectionClosed: ClientCnx -> unit
     }    
 and internal ConsumerOperations =
@@ -37,6 +38,8 @@ and internal ConsumerOperations =
         ReachedEndOfTheTopic: unit -> unit
         ActiveConsumerChanged: bool -> unit
         ConnectionClosed: ClientCnx -> unit
+        AckReceipt: RequestId -> unit
+        AckError: RequestId * exn -> unit
     }
 and internal TransactionMetaStoreOperations =
     {
@@ -83,6 +86,7 @@ and internal PulsarCommand =
     | XCommandNewTxnResponse of CommandNewTxnResponse
     | XCommandAddPartitionToTxnResponse of CommandAddPartitionToTxnResponse
     | XCommandAddSubscriptionToTxnResponse of CommandAddSubscriptionToTxnResponse
+    | XCommandAckResponse of CommandAckResponse
     | XCommandError of CommandError
 
 and internal CommandParseError =
@@ -389,6 +393,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | ServerError.TransactionCoordinatorNotFound -> CoordinatorNotFoundException errorMsg :> exn
         | ServerError.InvalidTxnStatus -> InvalidTxnStatusException errorMsg :> exn
         | ServerError.NotAllowedError -> NotAllowedException errorMsg :> exn
+        | ServerError.TransactionConflict -> TransactionConflictException errorMsg :> exn
         | _ -> exn errorMsg
 
     let handleError requestId error msg commandType =
@@ -504,6 +509,16 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 }
             | _ ->
                 Log.Logger.LogWarning("{0} producer {1} wasn't found on CommandSendReceipt", prefix, %cmd.ProducerId)
+        | XCommandAckResponse cmd ->
+            match consumers.TryGetValue %cmd.ConsumerId with
+            | true, consumerOperations ->
+                if cmd.ShouldSerializeError() then
+                    let ex = getPulsarClientException cmd.Error cmd.Message
+                    consumerOperations.AckError(%cmd.RequestId, ex)
+                else
+                    consumerOperations.AckReceipt(%cmd.RequestId)
+            | _ ->
+                Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandAckResponse", prefix, %cmd.ConsumerId)
         | XCommandSendError cmd ->
             Log.Logger.LogWarning("{0} Received send error from server: {1} : {2}", prefix, cmd.Error, cmd.Message)
             match producers.TryGetValue %cmd.ProducerId with
@@ -513,6 +528,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     producerOperations.RecoverChecksumError %(int64 cmd.SequenceId)
                 | ServerError.TopicTerminatedError ->
                     producerOperations.TopicTerminatedError()
+                | ServerError.NotAllowedError ->
+                    producerOperations.RecoverNotAllowedError %(int64 cmd.SequenceId)
                 | _ ->
                     // By default, for transient error, let the reconnection logic
                     // to take place and re-establish the produce again

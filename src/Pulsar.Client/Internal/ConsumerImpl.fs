@@ -48,6 +48,8 @@ type internal ConsumerMessage<'T> =
     | ReconsumeLater of Message<'T> * AckType * DateTime * AsyncReplyChannel<unit>
     | RemoveWaiter of Waiter<'T>
     | RemoveBatchWaiter of BatchWaiter<'T>
+    | AckReceipt of RequestId
+    | AckError of RequestId * exn
 
 type internal ConsumerInitInfo<'T> =
     {
@@ -56,8 +58,6 @@ type internal ConsumerInitInfo<'T> =
         SchemaProvider: MultiVersionSchemaInfoProvider option
         Metadata: PartitionedTopicMetadata
     }
-    
-
 
 type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                            topicName: TopicName, connectionPool: ConnectionPool,
@@ -74,7 +74,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let waiters = LinkedList<Waiter<'T>>()
     let batchWaiters = LinkedList<BatchWaiter<'T>>()
     let subscribeTsc = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
-    let ackRequests = Dictionary<RequestId, TaskCompletionSource<unit>>()
+    let ackRequests = Dictionary<RequestId, MessageId * TxnId * TaskCompletionSource<unit>>()
     let prefix = $"consumer({consumerId}, {consumerConfig.ConsumerName}, {partitionIndex})"
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable hasReachedEndOfTopic = false
@@ -355,7 +355,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Commands.newAck consumerId messageId.LedgerId messageId.EntryId ackType properties null
                             None (Some txnId) (Some requestId) None
             let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
-            ackRequests.Add(requestId, tcs)
+            ackRequests.Add(requestId, (messageId, txnId, tcs))
             match ackType with
             | AckType.Individual -> unAckedMessageTracker.Remove(messageId) |> ignore
             | AckType.Cumulative -> unAckedMessageTracker.RemoveMessagesTill(messageId) |> ignore
@@ -414,6 +414,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         Option.map (fun (SchemaVersion bytes) -> bytes) >> Option.defaultValue null
     
     let clearDeadLetters() = deadLettersProcessor.ClearMessages()
+    
+    let clearAckRequests() =
+        for KeyValue(_, (_, _, tcs)) in ackRequests do
+            tcs.SetException(MessageAcknowledgeException "Consumer was closed")
+        ackRequests.Clear()
 
     let getNewIndividualMsgIdWithPartition messageId =
         { messageId with Type = Individual; Partition = partitionIndex; TopicName = %"" }
@@ -492,6 +497,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         unAckedMessageTracker.Close()
         acksGroupingTracker.Close()
         clearDeadLetters()
+        clearAckRequests()
         negativeAcksTracker.Close()
         connectionHandler.Close()
         interceptors.Close()
@@ -675,6 +681,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         ReachedEndOfTheTopic = fun () -> this.Mb.Post(ReachedEndOfTheTopic)
         ActiveConsumerChanged = fun (isActive) -> this.Mb.Post(ActiveConsumerChanged isActive)
         ConnectionClosed = fun (clientCnx) -> this.Mb.Post(ConnectionClosed clientCnx)
+        AckError = fun (reqId, ex) -> this.Mb.Post(AckError(reqId, ex))
+        AckReceipt = fun (reqId) -> this.Mb.Post(AckReceipt(reqId))
     }
     
     let mb = MailboxProcessor<ConsumerMessage<'T>>.Start(fun inbox ->
@@ -887,6 +895,28 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let (cts, ctr, _) = batchWaiter
                     ctr.Dispose()
                     cts.Dispose()
+                    return! loop ()
+                    
+                | ConsumerMessage.AckReceipt reqId ->
+                    
+                    match ackRequests.TryGetValue(reqId) with
+                    | true, (msgId, txnId, tcs) ->
+                        ackRequests.Remove(reqId) |> ignore
+                        tcs.SetResult()
+                        Log.Logger.LogDebug("{0} MessageId : {1} has ack receipt by TxnId : {2}", prefix, msgId, txnId)
+                    | _ ->
+                        Log.Logger.LogInformation("{0} Ack request has been handled requestId : {1}", prefix, reqId)
+                    return! loop ()
+                    
+                | ConsumerMessage.AckError (reqId, ex) ->
+                    
+                    match ackRequests.TryGetValue(reqId) with
+                    | true, (msgId, txnId, tcs) ->
+                        ackRequests.Remove(reqId) |> ignore
+                        tcs.SetException(ex)
+                        Log.Logger.LogWarning("{0} MessageId : {1} has ack error by TxnId : {2}", prefix, msgId, txnId)
+                    | _ ->
+                        Log.Logger.LogInformation("{0} Ack request has been handled requestId : {1}", prefix, reqId)
                     return! loop ()
 
                 | ConsumerMessage.RedeliverUnacknowledged (messageIds, channel) ->
