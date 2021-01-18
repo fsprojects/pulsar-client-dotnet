@@ -41,7 +41,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
     
     let getBatchDetails msgId =
         match msgId with
-        | Individual -> failwith "Unexpected msgId type, expected Cumulative"
+        | MessageIdType.Single -> failwith "Unexpected msgId type, expected Cumulative"
         | Batch x -> x
 
     let doCumulativeAck msgId isBatch =
@@ -161,7 +161,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                         let bitSet = BitArray(acker.GetBatchSize(), true)
                         let payload =
                                 match ackType with
-                                | AckType.Individual ->
+                                | Individual ->
                                     bitSet.[i] <- false
                                 | AckType.Cumulative ->
                                     for j in 0 .. i do

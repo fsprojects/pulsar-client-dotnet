@@ -1,12 +1,12 @@
 ﻿module Pulsar.Client.UnitTests.Internal.UnAckedMessageTrackerTests
 
+open System
+open System.Threading.Tasks
 open FSharp.UMX
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Internal
 open Pulsar.Client.Common
-open System
-open System.Threading.Tasks
 
 [<Tests>]
 let tests =
@@ -18,7 +18,7 @@ let tests =
 
         test "UnAckedMessageTracker add and remove works" {
             let tracker = UnAckedMessageTracker("UnAckedMessageTracker_1", TimeSpan.FromMilliseconds(50.0), TimeSpan.FromMilliseconds(10.0), emptyRedeliver, emptyScheduler) :> IUnAckedMessageTracker
-            let msgId = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %""; ChunkMessageIds = None }
+            let msgId = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Single; TopicName = %""; ChunkMessageIds = None }
             tracker.Add(msgId) |> Expect.isTrue ""
             tracker.Remove(msgId) |> Expect.isTrue ""
             tracker.Close()
@@ -26,7 +26,7 @@ let tests =
 
         test "UnAckedMessageTracker add 3 and remove until 1 works" {
             let tracker = UnAckedMessageTracker("UnAckedMessageTracker_2", TimeSpan.FromMilliseconds(50.0), TimeSpan.FromMilliseconds(25.0), emptyRedeliver, emptyScheduler) :> IUnAckedMessageTracker
-            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %""; ChunkMessageIds = None }
+            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Single; TopicName = %""; ChunkMessageIds = None }
             let msgId2 = { msgId1 with EntryId = %2L }
             let msgId3 = { msgId1 with EntryId = %3L }
             tracker.Add msgId1 |> Expect.isTrue ""
@@ -40,7 +40,7 @@ let tests =
 
         test "UnAckedMessageTracker add 3 and remove until 3 works" {
             let tracker = UnAckedMessageTracker("UnAckedMessageTracker_3", TimeSpan.FromMilliseconds(50.0), TimeSpan.FromMilliseconds(10.0), emptyRedeliver, emptyScheduler) :> IUnAckedMessageTracker
-            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %""; ChunkMessageIds = None }
+            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Single; TopicName = %""; ChunkMessageIds = None }
             let msgId2 = { msgId1 with EntryId = %2L }
             let msgId3 = { msgId1 with EntryId = %3L }
             tracker.Add msgId1 |> Expect.isTrue ""
@@ -65,7 +65,7 @@ let tests =
                 tsc.SetResult(length)
                 
             let tracker = UnAckedMessageTracker("UnAckedMessageTracker_4", TimeSpan.FromMilliseconds(50.0), TimeSpan.FromMilliseconds(25.0), redeliver, getScheduler) :> IUnAckedMessageTracker                       
-            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %""; ChunkMessageIds = None }
+            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Single; TopicName = %""; ChunkMessageIds = None }
             let msgId2 = { msgId1 with EntryId = %2L }
             let msgId3 = { msgId1 with EntryId = %3L }
             
@@ -93,7 +93,7 @@ let tests =
                 tsc.SetResult(length)
                 
             let tracker = UnAckedMessageTracker("UnAckedMessageTracker_5", TimeSpan.FromMilliseconds(50.0), TimeSpan.FromMilliseconds(25.0), redeliver, getScheduler) :> IUnAckedMessageTracker
-            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Individual; TopicName = %""; ChunkMessageIds = None }
+            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Single; TopicName = %""; ChunkMessageIds = None }
             let msgId2 = { msgId1 with EntryId = %2L }
             let msgId3 = { msgId1 with EntryId = %3L }
             

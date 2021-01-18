@@ -208,7 +208,7 @@ let newSeekByMsgId (consumerId: ConsumerId) (requestId : RequestId) (messageId: 
                 entryId = uint64(%messageId.EntryId),
                 AckSets =
                     match messageId.Type with
-                    | Individual -> [||]
+                    | MessageIdType.Single -> [||]
                     | Batch (batchIndex, acker) ->
                         let batchSize = acker.GetBatchSize()
                         let ackSet = BitArray batchSize

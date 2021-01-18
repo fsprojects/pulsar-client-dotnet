@@ -21,7 +21,7 @@ let tests =
                     return true
                 }
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.Zero, getState, sendPayload) :> IAcknowledgmentsGroupingTracker
-            ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None }, AckType.Individual, EmptyProperties)
+            ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }, Individual, EmptyProperties)
             do! Async.Sleep(45)
             Expect.isTrue "" sendPayloadCalled
         }
@@ -35,7 +35,7 @@ let tests =
                     return true
                 }
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(100.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
-            ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None }, AckType.Individual, EmptyProperties)
+            ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }, Individual, EmptyProperties)
             do! Async.Sleep(45)
             Expect.isFalse "" sendPayloadCalled
         }
@@ -49,7 +49,7 @@ let tests =
                     return true
                 }
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
-            ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None }, AckType.Individual, EmptyProperties)
+            ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }, Individual, EmptyProperties)
             do! Async.Sleep(100)
             Expect.isTrue "" sendPayloadCalled
         }
@@ -62,8 +62,8 @@ let tests =
                     sendPayloadCalledCount <- sendPayloadCalledCount + 1
                     return true
                 }
-            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None }
-            let message2 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let message2 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
 
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             ackTracker.AddAcknowledgment(message2, AckType.Cumulative, EmptyProperties)
@@ -81,9 +81,9 @@ let tests =
                     sendPayloadCalledCount <- sendPayloadCalledCount + 1
                     return true
                 }
-            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None }
-            let message2 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None }
-            let message3 = { LedgerId = %1L; EntryId = %3L; Type = MessageIdType.Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let message2 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let message3 = { LedgerId = %1L; EntryId = %3L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
 
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             ackTracker.AddAcknowledgment(message1, AckType.Cumulative, EmptyProperties)
@@ -110,8 +110,8 @@ let tests =
             let message2 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Batch(%1, acker); Partition = 0; TopicName = %""; ChunkMessageIds = None }
 
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
-            ackTracker.AddBatchIndexAcknowledgment(message1, AckType.Individual, readOnlyDict [("1", 2L)])
-            ackTracker.AddBatchIndexAcknowledgment(message2, AckType.Individual, EmptyProperties)
+            ackTracker.AddBatchIndexAcknowledgment(message1, Individual, readOnlyDict [("1", 2L)])
+            ackTracker.AddBatchIndexAcknowledgment(message2, Individual, EmptyProperties)
             
             do! Async.Sleep(100)
             Expect.equal "" 2 sendPayloadCalledCount
@@ -136,9 +136,9 @@ let tests =
             let message4 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Batch(%1, acker2); Partition = 0; TopicName = %""; ChunkMessageIds = None }
             
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
-            ackTracker.AddAcknowledgment(message1, AckType.Individual, EmptyProperties)
-            ackTracker.AddBatchIndexAcknowledgment(message3, AckType.Individual, EmptyProperties)
-            ackTracker.AddBatchIndexAcknowledgment(message4, AckType.Individual, EmptyProperties)
+            ackTracker.AddAcknowledgment(message1, Individual, EmptyProperties)
+            ackTracker.AddBatchIndexAcknowledgment(message3, Individual, EmptyProperties)
+            ackTracker.AddBatchIndexAcknowledgment(message4, Individual, EmptyProperties)
             
             do! Async.Sleep(100)
             Expect.equal "" 1 sendPayloadCalledCount

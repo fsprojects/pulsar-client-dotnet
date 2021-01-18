@@ -48,7 +48,7 @@ let tests =
         test "One-message chunk works" {
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_1", 2, true, TimeSpan.Zero, fun _ _ -> ())
             let metadata = { testMetadata with NumChunks = 1; TotalChunkMsgSize = 1 }
-            let msgId = { EntryId = %1L; LedgerId = %1L; Type = Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let msgId = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
             let rawMessage = { testRawMessage with MessageId = msgId; Metadata = metadata; Payload = [| 1uy |] }
             let context = tracker.GetContext(metadata)
             match context with
@@ -66,7 +66,7 @@ let tests =
         test "Two-message chunk works" {
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_2", 2, true, TimeSpan.Zero, fun _ _ -> ())
             let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 1 }
-            let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
             let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = [| 1uy |] }
             let context = tracker.GetContext(metadata1)
             match context with
@@ -76,7 +76,7 @@ let tests =
             | _ ->
                 failwith "No context"
             let metadata2 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; ChunkId = %1 }
-            let msgId2 = { EntryId = %2L; LedgerId = %1L; Type = Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let msgId2 = { EntryId = %2L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
             let rawMessage2 = { testRawMessage with MessageId = msgId2; Metadata = metadata2; Payload = [| 2uy |] }
             let context = tracker.GetContext(metadata2)
             match context with
@@ -99,7 +99,7 @@ let tests =
                 xMsgId <- msgId
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_3", 1, false, TimeSpan.Zero, ackOrTrack) // one pending context allowed
             let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 1; Uuid = %"1" }
-            let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
             let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = [| 1uy |] }
             let context = tracker.GetContext(metadata1)
             match context with
@@ -109,7 +109,7 @@ let tests =
             | _ ->
                 failwith "No context"
             let metadata2 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"2" }
-            let msgId2 = { EntryId = %2L; LedgerId = %1L; Type = Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let msgId2 = { EntryId = %2L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
             let rawMessage2 = { testRawMessage with MessageId = msgId2; Metadata = metadata2; Payload = [| 2uy |] }
             let context = tracker.GetContext(metadata2)
             match context with
@@ -133,7 +133,7 @@ let tests =
                 xMsgId <- msgId
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_4", 2, false, TimeSpan.FromMilliseconds(50.0), ackOrTrack) // one pending context allowed
             let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 1; Uuid = %"1" }
-            let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
             let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = [| 1uy |] }
             let context = tracker.GetContext(metadata1)
             match context with
@@ -154,7 +154,7 @@ let tests =
         test "Wrong chunk order handled as expected" {
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_5", 2, true, TimeSpan.Zero, fun _ _ -> ())
             let metadata1 = { testMetadata with NumChunks = 3; TotalChunkMsgSize = 3 }
-            let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Individual; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
             let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = [| 1uy |] }
             let context = tracker.GetContext(metadata1)
             match context with

@@ -457,7 +457,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 {
                     LedgerId = %(int64 cmd.MessageId.ledgerId)
                     EntryId = %(int64 cmd.MessageId.entryId)
-                    Type = Individual
+                    Type = MessageIdType.Single
                     Partition = -1
                     TopicName = %""
                     ChunkMessageIds = None
@@ -594,7 +594,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Type =
                     match cmd.LastMessageId.BatchIndex with
                     | index when index >= 0  -> Batch(%index, BatchMessageAcker.NullAcker)
-                    | _ -> Individual
+                    | _ -> MessageIdType.Single
                 Partition = cmd.LastMessageId.Partition
                 TopicName = %""
                 ChunkMessageIds = None

@@ -1,16 +1,15 @@
 ﻿namespace Pulsar.Client.UnitTests.Common
 
+open System
+open System.IO
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Common
 open Pulsar.Client.Common.Commands
 open pulsar.proto
 open FSharp.UMX
-open System
-open System.IO
 open ProtoBuf
 open Pulsar.Client.Api
-open System.Threading.Tasks
 
 module CommandsTests =
 
@@ -174,12 +173,12 @@ module CommandsTests =
             }
 
             test "newAck should return correct frame" {
-                let messageId = { LedgerId = %1L; EntryId = %2L; Partition = -1; Type = Individual; TopicName = %""; ChunkMessageIds = None }
+                let messageId = { LedgerId = %1L; EntryId = %2L; Partition = -1; Type = Single; TopicName = %""; ChunkMessageIds = None }
                 let consumerId = %1UL
 
                 let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand
-                        (newAck consumerId messageId.LedgerId messageId.EntryId AckType.Individual EmptyProperties null None None None None)
+                        (newAck consumerId messageId.LedgerId messageId.EntryId Individual EmptyProperties null None None None None)
 
                 totalSize |> Expect.equal "" 18
                 commandSize |> Expect.equal "" 14

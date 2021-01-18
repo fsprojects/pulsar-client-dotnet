@@ -52,9 +52,10 @@
     <Compile Include="Internal\Log.fs" />
     <Compile Include="Internal\BatchMessageAcker.fs" />
     <Compile Include="Internal\Backoff.fs" />
-    <Compile Include="Transaction\Transaction.fs" />
     <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Common\TopicName.fs" />
+    <Compile Include="Common\MessageId.fs" />
+    <Compile Include="Transaction\Transaction.fs" />
     <Compile Include="Common\DTO.fs" />
     <Compile Include="Common\ServiceUri.fs" />
     <Compile Include="Common\RetryMessageUtil.fs" />

@@ -588,7 +588,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                     if chunkDetailsOption.IsNone || chunkDetailsOption.Value.IsLast then
                                         let currentMessageId =
                                             { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
-                                                Type = Individual; TopicName = %""; ChunkMessageIds = None }
+                                                Type = MessageIdType.Single; TopicName = %""; ChunkMessageIds = None }
                                         let msgId = 
                                             match chunkDetailsOption with
                                             | Some chunkDetail ->
@@ -604,7 +604,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                         let chunkDetails = chunkDetailsOption.Value
                                         let currentMsgId =
                                                     { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
-                                                      Type = Individual; TopicName = %""; ChunkMessageIds = None }
+                                                      Type = MessageIdType.Single; TopicName = %""; ChunkMessageIds = None }
                                         chunkDetails.MessageIds.[chunkDetails.ChunkId] <- currentMsgId
                                         
                                 | BatchCallbacks tcss ->
@@ -852,8 +852,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.SendAsync (message: MessageBuilder<'T>) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             task {
-                let! task = this.SendMessage message
-                return! task
+                let! sendTask = this.SendMessage message
+                if not sendTask.IsFaulted then
+                    message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
+                return! sendTask
             }
 
         member this.NewMessage (value:'T,

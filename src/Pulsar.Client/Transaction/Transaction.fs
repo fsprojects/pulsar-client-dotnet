@@ -2,6 +2,7 @@ namespace Pulsar.Client.Transaction
 
 open System
 open System.Collections.Concurrent
+open System.Threading
 open System.Threading.Tasks
 open Pulsar.Client.Common
 
@@ -30,7 +31,19 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
     
     let producedTopics = ConcurrentDictionary<CompleteTopicName, unit>()
     let ackedTopics = ConcurrentDictionary<CompleteTopicName, unit>()
+    let sendTasks = ResizeArray<Task<MessageId>>()
+    let ackTasks = ResizeArray<Task<Unit>>()
     let cumulativeAckConsumers = ConcurrentDictionary<ConsumerId, ConsumerTxnOperations>()
+    let mutable allowOperations = false
+    let lockObj = new Object()
+    
+    let allOpComplete() =
+        seq {
+            for sendTask in sendTasks do
+                yield (sendTask :> Task)
+            for ackTask in sendTasks do
+                yield (ackTask :> Task)
+        } |> Task.WhenAll
     
     member internal this.RegisterProducedTopic(topic: CompleteTopicName) =
         if producedTopics.TryAdd(topic, ()) then
@@ -49,10 +62,43 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
     member internal this.RegisterCumulativeAckConsumer(consumerId: ConsumerId, consumerOperations: ConsumerTxnOperations) =
         cumulativeAckConsumers.TryAdd(consumerId, consumerOperations) |> ignore
     
+    member internal this.RegisterSendOp(sendTask: Task<MessageId>) =
+        if allowOperations then
+            lock lockObj (fun () ->
+                if allowOperations then
+                    sendTasks.Add(sendTask)
+                else
+                    failwith "Can't send message while transaction is closing"
+            )
+        else
+            failwith "Can't send message while transaction is closing"
+        
+    member internal this.RegisterAckOp(ackTask: Task<Unit>) =
+        if allowOperations then
+            lock lockObj (fun () ->
+                if allowOperations then
+                    ackTasks.Add(ackTask)
+                else
+                    failwith "Can't ack message while transaction is closing"
+            )
+        else
+            failwith "Can't ack message while transaction is closing"
+    
     member this.Id = txnId
     
     member this.Commit() =
-        ()
+        if allowOperations then
+            lock lockObj (fun () ->
+                if allowOperations then
+                    allowOperations <- false
+                    allOpComplete()
+                    //TODO
+                    ()
+                else
+                    failwith "Can't commit while transaction is closing"
+            )
+        else
+            failwith "Can't commit while transaction is closing"
         
     member this.Abort() =
         ()

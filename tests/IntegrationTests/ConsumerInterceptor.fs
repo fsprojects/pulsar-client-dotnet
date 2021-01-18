@@ -236,7 +236,7 @@ let tests =
             
             match prevMsgId.Type with
             | Batch _ -> failwith "MessageIdType should be Individual"
-            | Individual ->
+            | Single ->
                 if not (prevMsgId.EntryId = %1L) then
                     failwith "No interceptor for prevMsgAck"
 

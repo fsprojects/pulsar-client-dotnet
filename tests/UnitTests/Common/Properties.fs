@@ -23,7 +23,7 @@ type MessageIdGen() =
                {
                    LedgerId = %(int64 ledgerId)
                    EntryId = %(int64 entryId)
-                   Type = Individual
+                   Type = Single
                    Partition = partition
                    TopicName = %""
                    ChunkMessageIds = None

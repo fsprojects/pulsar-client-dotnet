@@ -11,7 +11,7 @@ let tests =
 
     testList "MessageIdTests" [
         test "Less works correctly" {
-            let msgId1 = { LedgerId = %1L; EntryId = %1L; Type = Individual; Partition = 1; TopicName = %""; ChunkMessageIds = None }
+            let msgId1 = { LedgerId = %1L; EntryId = %1L; Type = Single; Partition = 1; TopicName = %""; ChunkMessageIds = None }
             let msgId2 = { msgId1 with LedgerId = %2L; EntryId = %0L; }
             let msgId3 = { msgId1 with EntryId = %2L; Partition = 0; }
             let msgId4 = { msgId1 with LedgerId = %2L; Partition = 0; }
@@ -34,7 +34,7 @@ let tests =
         }
         
         test "Equals works correctly" {
-            let msgId1 = { LedgerId = %1L; EntryId = %1L; Type = Individual; Partition = 1; TopicName = %""; ChunkMessageIds = None }
+            let msgId1 = { LedgerId = %1L; EntryId = %1L; Type = Single; Partition = 1; TopicName = %""; ChunkMessageIds = None }
             let msgId2 = { msgId1 with TopicName = %"abcd" }
             let msgId3 = { msgId1 with ChunkMessageIds = Some [||] }
             Expect.equal "" msgId1 msgId2
