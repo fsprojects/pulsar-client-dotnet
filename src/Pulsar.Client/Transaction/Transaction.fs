@@ -2,9 +2,12 @@ namespace Pulsar.Client.Transaction
 
 open System
 open System.Collections.Concurrent
-open System.Threading
+open System.Collections.Generic
+open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
 open Pulsar.Client.Common
+open Pulsar.Client.Internal
+open Microsoft.Extensions.Logging
 
 type TxnId = {
     MostSigBits: uint64
@@ -18,12 +21,14 @@ type TxnOperations =
     {
         AddPublishPartitionToTxn: TxnId * CompleteTopicName -> Task<unit>
         AddSubscriptionToTxn: TxnId * CompleteTopicName * SubscriptionName -> Task<unit>
+        Commit: TxnId * MessageId seq -> Task<unit>
+        Abort: TxnId * MessageId seq -> Task<unit>
     }
     
 type ConsumerTxnOperations =
     {
-        ClearIncomingMessagesAndGetMessageNumber: unit -> unit
-        IncreaseAvailablePermits: unit -> unit
+        ClearIncomingMessagesAndGetMessageNumber: unit -> Async<int>
+        IncreaseAvailablePermits: int -> unit
     }
 
 [<AllowNullLiteral>]
@@ -33,9 +38,9 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
     let ackedTopics = ConcurrentDictionary<CompleteTopicName, unit>()
     let sendTasks = ResizeArray<Task<MessageId>>()
     let ackTasks = ResizeArray<Task<Unit>>()
-    let cumulativeAckConsumers = ConcurrentDictionary<ConsumerId, ConsumerTxnOperations>()
+    let cumulativeAckConsumers = Dictionary<ConsumerId, ConsumerTxnOperations>()
     let mutable allowOperations = false
-    let lockObj = new Object()
+    let lockObj = Object()
     
     let allOpComplete() =
         seq {
@@ -44,6 +49,17 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             for ackTask in sendTasks do
                 yield (ackTask :> Task)
         } |> Task.WhenAll
+        
+    let executeInsideLock f errorMsg =
+        if allowOperations then
+            lock lockObj (fun () ->
+                if allowOperations then
+                    f()
+                else
+                    failwith errorMsg
+            )
+        else
+            failwith errorMsg
     
     member internal this.RegisterProducedTopic(topic: CompleteTopicName) =
         if producedTopics.TryAdd(topic, ()) then
@@ -60,48 +76,71 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             Task.FromResult()
             
     member internal this.RegisterCumulativeAckConsumer(consumerId: ConsumerId, consumerOperations: ConsumerTxnOperations) =
-        cumulativeAckConsumers.TryAdd(consumerId, consumerOperations) |> ignore
+        executeInsideLock (fun () ->
+            cumulativeAckConsumers.[consumerId] <- consumerOperations
+        ) "Can't ack message cumulatively while transaction is closing"
     
     member internal this.RegisterSendOp(sendTask: Task<MessageId>) =
-        if allowOperations then
-            lock lockObj (fun () ->
-                if allowOperations then
-                    sendTasks.Add(sendTask)
-                else
-                    failwith "Can't send message while transaction is closing"
-            )
-        else
-            failwith "Can't send message while transaction is closing"
-        
+        executeInsideLock (fun () ->
+            sendTasks.Add(sendTask)
+        ) "Can't send message while transaction is closing"
+       
     member internal this.RegisterAckOp(ackTask: Task<Unit>) =
-        if allowOperations then
-            lock lockObj (fun () ->
-                if allowOperations then
-                    ackTasks.Add(ackTask)
-                else
-                    failwith "Can't ack message while transaction is closing"
-            )
-        else
-            failwith "Can't ack message while transaction is closing"
+        executeInsideLock (fun () ->
+            ackTasks.Add(ackTask)
+        ) "Can't ack message while transaction is closing"
     
     member this.Id = txnId
     
+    member private this.AbortInner() =
+        task {
+            try
+                do! allOpComplete()
+            with ex ->
+                Log.Logger.LogError(ex, "Error during abort txnId={0}", txnId)
+            let msgIds =
+                sendTasks
+                |> Seq.where (fun t -> t.IsCompleted)
+                |> Seq.map (fun t -> t.Result)
+            let! cumulativeConsumersData =
+                cumulativeAckConsumers
+                |> Seq.map(fun (KeyValue(_, v)) ->
+                    async {
+                        let! permits = v.ClearIncomingMessagesAndGetMessageNumber()
+                        return (permits, v)
+                    })
+                |> Async.Parallel
+            try
+                return! txnOperations.Abort(txnId, msgIds)
+            finally
+                cumulativeConsumersData
+                |> Seq.iter(fun (permits, consumer) -> consumer.IncreaseAvailablePermits(permits))
+                cumulativeAckConsumers.Clear()
+        }
+    
+    member private this.CommitInner() =
+        task {
+            try
+                do! allOpComplete()
+            with ex ->
+                do! this.AbortInner()
+                reraize ex
+            let msgIds =
+                sendTasks |> Seq.map (fun t -> t.Result)
+            return! txnOperations.Commit(txnId, msgIds)
+        }
+    
     member this.Commit() =
-        if allowOperations then
-            lock lockObj (fun () ->
-                if allowOperations then
-                    allowOperations <- false
-                    allOpComplete()
-                    //TODO
-                    ()
-                else
-                    failwith "Can't commit while transaction is closing"
-            )
-        else
-            failwith "Can't commit while transaction is closing"
+        executeInsideLock (fun () ->
+            allowOperations <- false
+            this.CommitInner()
+        ) "Can't commit while transaction is closing"
         
     member this.Abort() =
-        ()
+        executeInsideLock (fun () ->
+            allowOperations <- false
+            this.AbortInner()
+        ) "Can't abort while transaction is closing"
         
     override this.ToString() =
         $"Txn({txnId})"

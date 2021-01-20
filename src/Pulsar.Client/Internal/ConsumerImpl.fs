@@ -50,6 +50,8 @@ type internal ConsumerMessage<'T> =
     | RemoveBatchWaiter of BatchWaiter<'T>
     | AckReceipt of RequestId
     | AckError of RequestId * exn
+    | ClearIncomingMessagesAndGetMessageNumber of AsyncReplyChannel<int>
+    | IncreaseAvailablePermits of int
 
 type internal ConsumerInitInfo<'T> =
     {
@@ -134,8 +136,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let consumerTxnOperations =
         {
-            ClearIncomingMessagesAndGetMessageNumber = fun () -> ()
-            IncreaseAvailablePermits = fun () -> ()
+            ClearIncomingMessagesAndGetMessageNumber = fun () ->
+                ConsumerMessage.ClearIncomingMessagesAndGetMessageNumber |> this.Mb.PostAndAsyncReply
+            IncreaseAvailablePermits = fun permits ->
+                ConsumerMessage.IncreaseAvailablePermits permits |> this.Mb.Post
         }
     
     let hasMoreMessages (lastMessageIdInBroker: MessageId) (lastDequeuedMessage: MessageId) (inclusive: bool) =
@@ -1109,6 +1113,22 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         stopConsumer()
                     else
                         return! loop ()
+                    
+                | ClearIncomingMessagesAndGetMessageNumber ch ->
+                    
+                    Log.Logger.LogDebug("{0} ClearIncomingMessagesAndGetMessageNumber", prefix)
+                    let messageNumber = incomingMessages.Count
+                    incomingMessages.Clear()
+                    incomingMessagesSize <- 0L
+                    unAckedMessageTracker.Clear()
+                    ch.Reply messageNumber
+                    return! loop ()
+                    
+                | IncreaseAvailablePermits permits ->
+                    
+                    Log.Logger.LogDebug("{0} IncreaseAvailablePermits {1}", prefix, permits)
+                    increaseAvailablePermits permits
+                    return! loop ()
                     
                 | ConsumerMessage.Close channel ->
 

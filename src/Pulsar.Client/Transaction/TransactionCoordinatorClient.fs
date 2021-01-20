@@ -121,3 +121,17 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
             raise <| MetaStoreHandlerNotExistsException $"Transaction meta store handler for transaction meta store {txnId.MostSigBits} not exists."
         let handler = handlers.[handlerId]
         handler.AddSubscriptionToTxnAsync(txnId, topic, subscription)
+        
+    member this.CommitAsync(txnId: TxnId, msgIds: MessageId seq) =
+        let handlerId = int txnId.MostSigBits
+        if handlerId >= handlers.Count then
+            raise <| MetaStoreHandlerNotExistsException $"Transaction meta store handler for transaction meta store {txnId.MostSigBits} not exists."
+        let handler = handlers.[handlerId]
+        handler.CommitAsync(txnId, msgIds)
+
+    member this.AbortAsync(txnId: TxnId, msgIds: MessageId seq) =
+        let handlerId = int txnId.MostSigBits
+        if handlerId >= handlers.Count then
+            raise <| MetaStoreHandlerNotExistsException $"Transaction meta store handler for transaction meta store {txnId.MostSigBits} not exists."
+        let handler = handlers.[handlerId]
+        handler.AbortAsync(txnId, msgIds)

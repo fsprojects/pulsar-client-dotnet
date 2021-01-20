@@ -13,6 +13,10 @@ type TransactionBuilder internal (transactionClient: TransactionCoordinatorClien
             transactionClient.AddPublishPartitionToTxnAsync(txnId, topicName)
         AddSubscriptionToTxn = fun (txnId, topicName, subscription) ->
             transactionClient.AddSubscriptionToTxnAsync(txnId, topicName, subscription)
+        Commit = fun (txnId, msgIds) ->
+            transactionClient.CommitAsync(txnId, msgIds)
+        Abort = fun (txnId, msgIds) ->
+            transactionClient.AbortAsync(txnId, msgIds)
     }
     
     internal new(transactionClient) =
@@ -20,6 +24,7 @@ type TransactionBuilder internal (transactionClient: TransactionCoordinatorClien
     
     member private this.With(newConfig: TransactionConfiguration) =
         TransactionBuilder(transactionClient, newConfig)
+        
     
     member this.TransactionTimeout transactionTimeout =
         { config with

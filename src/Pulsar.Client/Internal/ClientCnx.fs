@@ -46,6 +46,7 @@ and internal TransactionMetaStoreOperations =
         NewTxnResponse: RequestId*ResultOrException<TxnId> -> unit
         AddPartitionToTxnResponse: RequestId*ResultOrException<unit> -> unit
         AddSubscriptionToTxnResponse: RequestId*ResultOrException<unit> -> unit
+        EndTxnResponse: RequestId*ResultOrException<unit> -> unit
         ConnectionClosed: ClientCnx -> unit
     }
     
@@ -87,6 +88,7 @@ and internal PulsarCommand =
     | XCommandAddPartitionToTxnResponse of CommandAddPartitionToTxnResponse
     | XCommandAddSubscriptionToTxnResponse of CommandAddSubscriptionToTxnResponse
     | XCommandAckResponse of CommandAckResponse
+    | XCommandEndTxnResponse of CommandEndTxnResponse
     | XCommandError of CommandError
 
 and internal CommandParseError =
@@ -334,6 +336,12 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             Ok (XCommandGetSchemaResponse command.getSchemaResponse)
         | BaseCommand.Type.NewTxnResponse ->
             Ok (XCommandNewTxnResponse command.newTxnResponse)
+        | BaseCommand.Type.AddPartitionToTxnResponse ->
+            Ok (XCommandAddPartitionToTxnResponse command.addPartitionToTxnResponse)
+        | BaseCommand.Type.AddSubscriptionToTxnResponse ->
+            Ok (XCommandAddSubscriptionToTxnResponse command.addSubscriptionToTxnResponse)
+        | BaseCommand.Type.EndTxnResponse ->
+            Ok (XCommandEndTxnResponse command.endTxnResponse)
         | BaseCommand.Type.Error ->
             Ok (XCommandError command.Error)
         | unknownType ->
@@ -660,6 +668,19 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     else
                          Ok ()
                 tmsOperations.AddSubscriptionToTxnResponse (%cmd.RequestId, result)
+            | _ ->
+                Log.Logger.LogWarning("{0} tms {1} wasn't found on XCommandAddSubscriptionToTxnResponse", prefix, tcId)
+        | XCommandEndTxnResponse cmd ->
+            let tcId = %cmd.TxnidMostBits
+            match transactionMetaStores.TryGetValue tcId with
+            | true, tmsOperations ->
+                let result =
+                    if cmd.ShouldSerializeError() then
+                        getTransactionExceptionByServerError cmd.Error cmd.Message
+                        |> Error
+                    else
+                         Ok ()
+                tmsOperations.EndTxnResponse (%cmd.RequestId, result)
             | _ ->
                 Log.Logger.LogWarning("{0} tms {1} wasn't found on XCommandAddSubscriptionToTxnResponse", prefix, tcId)
         | XCommandError cmd ->

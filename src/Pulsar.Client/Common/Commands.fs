@@ -336,3 +336,17 @@ let newAddSubscriptionToTxn (txn: TxnId) (requestId: RequestId) (topic: Complete
     request.Subscriptions.Add(Subscription(Topic = %topic, subscription = %subscription))
     let command = BaseCommand(``type`` = CommandType.NewTxn, addSubscriptionToTxn = request)
     command |> serializeSimpleCommand
+    
+let newEndTxn (txn: TxnId) (requestId: RequestId) (msgIds: MessageId seq) (action: TxnAction)  =
+    let request = CommandEndTxn(TxnidLeastBits = txn.LeastSigBits, TxnidMostBits = txn.MostSigBits, RequestId = %requestId)
+    request.TxnAction <- action
+    msgIds
+    |> Seq.map (fun messageId ->
+            MessageIdData(
+                ledgerId = uint64(%messageId.LedgerId),
+                entryId = uint64(%messageId.EntryId),
+                Partition = messageId.Partition
+            ))
+    |> request.MessageIds.AddRange
+    let command = BaseCommand(``type`` = CommandType.EndTxn, endTxn = request)
+    command |> serializeSimpleCommand
