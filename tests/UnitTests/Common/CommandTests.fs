@@ -237,7 +237,7 @@ module CommandsTests =
             test "newSeek should return correct frame" {
                 let consumerId = %1UL
                 let requestId = %1UL
-                let timestamp = 1UL
+                let timestamp = %1L
 
                 let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand (newSeekByTimestamp consumerId requestId timestamp)

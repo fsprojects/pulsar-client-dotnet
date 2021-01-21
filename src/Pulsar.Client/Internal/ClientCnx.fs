@@ -443,11 +443,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             SchemaVersion = getOptionalSchemaVersion messageMetadata.SchemaVersion
             SequenceId = %(int64 messageMetadata.SequenceId)
             ChunkId = %(int messageMetadata.ChunkId)
-            PublishTime = int64 messageMetadata.PublishTime |> convertToDateTime
+            PublishTime = %(int64 messageMetadata.PublishTime)
             Uuid = %messageMetadata.Uuid
             EventTime =
                 if messageMetadata.ShouldSerializeEventTime() then
-                    int64 messageMetadata.EventTime |> convertToDateTime |> Nullable
+                    %(int64 messageMetadata.EventTime) |> Nullable
                 else
                     Nullable()
             EncryptionKeys =

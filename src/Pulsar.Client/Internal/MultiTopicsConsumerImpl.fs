@@ -51,15 +51,15 @@ type internal MultiTopicConsumerMessage<'T> =
     | Close of AsyncReplyChannel<ResultOrException<unit>>
     | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
     | HasReachedEndOfTheTopic of AsyncReplyChannel<bool>
-    | Seek of AsyncReplyChannel<Task> * uint64
+    | Seek of SeekData * AsyncReplyChannel<Task>
     | PatternTickTime
     | PartitionTickTime
     | GetStats of AsyncReplyChannel<Task<ConsumerStats array>>
-    | ReconsumeLater of Message<'T> * DateTime * AsyncReplyChannel<Task<unit>>
-    | ReconsumeLaterCumulative of Message<'T> * DateTime * AsyncReplyChannel<Task<unit>>
+    | ReconsumeLater of Message<'T> * TimeStamp * AsyncReplyChannel<Task<unit>>
+    | ReconsumeLaterCumulative of Message<'T> * TimeStamp * AsyncReplyChannel<Task<unit>>
     | RemoveWaiter of Waiter<'T>
     | RemoveBatchWaiter of BatchWaiter<'T>
-    | LastDisconnectedTimestamp of AsyncReplyChannel<DateTime>
+    | LastDisconnectedTimestamp of AsyncReplyChannel<TimeStamp>
 
 type internal TopicAndConsumer<'T> =
     {
@@ -381,6 +381,9 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
     
     let hasEnoughMessagesForBatchReceive() =
         hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
+        
+    let isIllegalMultiTopicsMessageId messageId =
+        messageId <> MessageId.Earliest && messageId <> MessageId.Latest
     
     let getAllPartitions () =
         task {
@@ -684,19 +687,25 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     
                     Log.Logger.LogDebug("{0} LastDisconnectedTimestamp", prefix)
                     consumers
-                    |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.LastDisconnected)
+                    |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.LastDisconnectedTimestamp)
                     |> Seq.max
                     |> channel.Reply
                     return! loop ()
 
-                | Seek (channel, ts) ->
+                | Seek (seekData, channel) ->
 
-                    Log.Logger.LogDebug("{0} Seek {1}", prefix, ts)
-                    consumers
-                    |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(ts) :> Task)
-                    |> Seq.toArray
-                    |> Task.WhenAll
-                    |> channel.Reply
+                    Log.Logger.LogDebug("{0} Seek {1}", prefix, seekData)
+                    let seekTask = 
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, (consumer, _))) ->
+                            match seekData with
+                            | Timestamp ts -> consumer.SeekAsync(ts)
+                            | MessageId msgId -> consumer.SeekAsync(msgId))
+                        |> Task.WhenAll
+                    unAckedMessageTracker.Clear()
+                    incomingMessages.Clear()
+                    incomingMessagesSize <- 0L
+                    channel.Reply seekTask
                     return! loop ()
 
                 | PatternTickTime ->
@@ -1017,12 +1026,17 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 return! result
             }
 
-        member this.SeekAsync (_: MessageId) =
-            Task.FromException<unit>(exn "Seek operation not supported on multitopics consumer")
-
-        member this.SeekAsync (timestamp: uint64) =
+        member this.SeekAsync (messageId: MessageId) =
+            if isIllegalMultiTopicsMessageId messageId then
+                failwith "Illegal messageId, messageId can only be earliest/latest"
             task {
-                let! result = mb.PostAndAsyncReply(fun channel -> Seek(channel, timestamp))
+                let! result = mb.PostAndAsyncReply(fun channel -> Seek(MessageId messageId, channel))
+                return! result
+            }
+
+        member this.SeekAsync (timestamp: TimeStamp) =
+            task {
+                let! result = mb.PostAndAsyncReply(fun channel -> Seek(Timestamp timestamp, channel))
                 return! result
             }
             
@@ -1066,7 +1080,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 return allStats |> statsReduce
             }
             
-        member this.ReconsumeLaterAsync (msg: Message<'T>, deliverAt: DateTime) =
+        member this.ReconsumeLaterAsync (msg: Message<'T>, deliverAt: TimeStamp) =
             task {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
@@ -1074,7 +1088,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 return! result
             }
             
-        member this.ReconsumeLaterCumulativeAsync (msg: Message<'T>, deliverAt: DateTime) =
+        member this.ReconsumeLaterCumulativeAsync (msg: Message<'T>, deliverAt: TimeStamp) =
             task {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
@@ -1082,7 +1096,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                 return! result
             }
         
-        member this.ReconsumeLaterAsync (msgs: Messages<'T>, deliverAt: DateTime) =
+        member this.ReconsumeLaterAsync (msgs: Messages<'T>, deliverAt: TimeStamp) =
             task {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
@@ -1091,7 +1105,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                     return! result
             }
             
-        member this.LastDisconnected =
+        member this.LastDisconnectedTimestamp =
             mb.PostAndReply(LastDisconnectedTimestamp)
         
     interface IAsyncDisposable with

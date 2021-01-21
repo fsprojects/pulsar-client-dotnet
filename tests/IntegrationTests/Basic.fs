@@ -15,6 +15,7 @@ open Pulsar.Client.Common
 open Serilog
 open Pulsar.Client.IntegrationTests
 open Pulsar.Client.IntegrationTests.Common
+open FSharp.UMX
 
 [<Tests>]
 let tests =
@@ -258,7 +259,7 @@ let tests =
             let interval = 10000L
             let producerName = "schedule-producer"
             let consumerName = "schedule-consumer"
-            let testEventTime = DateTime(2000, 1, 1, 1, 1, 1, DateTimeKind.Utc)
+            let testEventTime = DateTime(2000, 1, 1, 1, 1, 1, DateTimeKind.Utc) |> convertToMsTimestamp
             let sw = Stopwatch()
 
             let! producer =
@@ -279,11 +280,11 @@ let tests =
                 Task.Run(fun () ->
                     task {
                         let now = DateTime.UtcNow;
-                        let deliverAt = now.AddMilliseconds(float interval)
-                        let timestamp = Nullable(deliverAt)
+                        let deliverAt = now.AddMilliseconds(float interval) |> convertToMsTimestamp
+                        let timestamp = Nullable(%deliverAt)
                         let message = Encoding.UTF8.GetBytes(sprintf "Message was sent with interval '%i' milliseconds" interval)
                         sw.Start()
-                        let! _ = producer.NewMessage(message, deliverAt = timestamp, eventTime = testEventTime) |> producer.SendAsync
+                        let! _ = producer.NewMessage(message, deliverAt = timestamp, eventTime = (%testEventTime |> Nullable)) |> producer.SendAsync
                         ()
                     }:> Task)
 
@@ -293,7 +294,7 @@ let tests =
                         let! message = consumer.ReceiveAsync()
                         let received = Encoding.UTF8.GetString(message.Data)
                         Log.Debug("{0} received {1}", consumerName, received)
-                        Expect.equal "" testEventTime (message.EventTime.GetValueOrDefault())
+                        Expect.equal "" %testEventTime (message.EventTime.GetValueOrDefault())
                         sw.Stop()
                         do! consumer.AcknowledgeAsync(message.MessageId)
                         Log.Debug("{0} acknowledged {1}", consumerName, received)

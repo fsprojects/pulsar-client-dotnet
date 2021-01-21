@@ -5,6 +5,7 @@ open System.Threading
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System
+open FSharp.UMX
 
 type internal ConnectionHandlerMessage =
     | GrabCnx
@@ -88,7 +89,7 @@ type internal ConnectionHandler( parentPrefix: string,
                         
                 | ConnectionClosed clientCnx ->
                     
-                    this.LastDisconnectedTimestamp <- DateTime.UtcNow |> convertToMsTimestamp
+                    this.LastDisconnectedTimestamp <- %DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                     match this.ConnectionState with
                     | Ready cnx when cnx <> clientCnx ->
                         Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
@@ -146,8 +147,8 @@ type internal ConnectionHandler( parentPrefix: string,
         and private set(value) = Volatile.Write(&connectionState, value)
         
     member this.LastDisconnectedTimestamp
-        with get() = Volatile.Read(&lastDisconnectedTimestamp)
-        and private set(value) = Volatile.Write(&lastDisconnectedTimestamp, value)
+        with get() : TimeStamp = %(Volatile.Read(&lastDisconnectedTimestamp))
+        and private set(value: TimeStamp) = Volatile.Write(&lastDisconnectedTimestamp, %value)
         
     member this.CheckIfActive() =
         match this.ConnectionState with

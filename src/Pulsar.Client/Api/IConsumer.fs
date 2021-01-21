@@ -50,7 +50,7 @@ type IConsumer<'T> =
     /// Reset the subscription associated with this consumer to a specific message id.
     abstract member SeekAsync: messageId:MessageId -> Task<unit>
     /// Reset the subscription associated with this consumer to a specific message publish time (unix timestamp).
-    abstract member SeekAsync: timestamp:uint64 -> Task<unit>
+    abstract member SeekAsync: timestamp:TimeStamp -> Task<unit>
     /// Get the last message id available available for consume.
     abstract member GetLastMessageIdAsync: unit -> Task<MessageId>
     /// Acknowledge the failure to process a single message.
@@ -65,11 +65,11 @@ type IConsumer<'T> =
     abstract member Name: string
     /// Get statistics for the consumer.
     abstract member GetStatsAsync: unit -> Task<ConsumerStats>
-    /// ReconsumeLater the consumption of Message (deliverAt MUST be in UTC)
-    abstract member ReconsumeLaterAsync: message:Message<'T> * deliverAt:DateTime -> Task<unit>
-    /// ReconsumeLater the consumption of Messages (deliverAt MUST be in UTC)
-    abstract member ReconsumeLaterAsync: messages:Messages<'T> * deliverAt:DateTime -> Task<unit>
-    /// ReconsumeLater the reception of all the messages in the stream up to (and including) the provided message. (deliverAt MUST be in UTC)
-    abstract member ReconsumeLaterCumulativeAsync: message:Message<'T> * deliverAt:DateTime -> Task<unit>
-    /// The last disconnected timestamp of the consumer
-    abstract member LastDisconnected: DateTime
+    /// ReconsumeLater the consumption of Message
+    abstract member ReconsumeLaterAsync: message:Message<'T> * deliverAt:TimeStamp -> Task<unit>
+    /// ReconsumeLater the consumption of Messages
+    abstract member ReconsumeLaterAsync: messages:Messages<'T> * deliverAt:TimeStamp -> Task<unit>
+    /// ReconsumeLater the reception of all the messages in the stream up to (and including) the provided message.
+    abstract member ReconsumeLaterCumulativeAsync: message:Message<'T> * deliverAt:TimeStamp -> Task<unit>
+    /// The last disconnected timestamp of the consumer    abstract member LastDisconnected: DateTime
+    abstract member LastDisconnectedTimestamp: TimeStamp

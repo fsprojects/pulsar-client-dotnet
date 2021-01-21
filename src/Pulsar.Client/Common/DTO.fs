@@ -171,8 +171,8 @@ type internal Metadata =
         SequenceId: SequenceId
         ChunkId: ChunkId
         Uuid: Uuid
-        EventTime: Nullable<DateTime>
-        PublishTime: DateTime
+        EventTime: Nullable<TimeStamp>
+        PublishTime: TimeStamp
         EncryptionKeys: EncryptionKey[]
         EncryptionParam: byte[]
         EncryptionAlgo: string
@@ -223,8 +223,8 @@ type EncryptionContext =
 
 type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey, hasBase64EncodedKey: bool,
                   properties: IReadOnlyDictionary<string, string>, encryptionCtx: EncryptionContext option,
-                  schemaVersion: byte[], sequenceId: SequenceId, orderingKey: byte[], publishTime: DateTime,
-                  eventTime: Nullable<DateTime>,
+                  schemaVersion: byte[], sequenceId: SequenceId, orderingKey: byte[], publishTime: TimeStamp,
+                  eventTime: Nullable<TimeStamp>,
                   getValue: unit -> 'T) =
     /// Get the unique message ID associated with this message.
     member this.MessageId = messageId
@@ -245,9 +245,9 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
     member this.EncryptionContext = encryptionCtx
     /// Get the ordering key of the message.
     member this.OrderingKey = orderingKey
-    /// Get the publish time of the message in UTC (automatically set by the client library on produce).
+    /// Get the publish time of the message as Unix timestamp (automatically set by the client library on produce).
     member this.PublishTime = publishTime
-    /// Get the event time of the message in UTC (manually set by the application on produce).
+    /// Get the event time of the message as Unix timestamp (manually set by the application on produce).
     member this.EventTime = eventTime
     /// Get the de-serialized value of the message, according the configured Schema.
     member this.GetValue() =
@@ -306,10 +306,10 @@ type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 /// </summary>
 type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey option,
             ?properties0 : IReadOnlyDictionary<string, string>,
-            ?deliverAt : DateTime,
+            ?deliverAt : TimeStamp,
             ?sequenceId : SequenceId,
             ?orderingKey: byte[],
-            ?eventTime: DateTime,
+            ?eventTime: TimeStamp,
             ?txn: Transaction) =
             
     let properties = defaultArg properties0 EmptyProps
@@ -328,10 +328,10 @@ type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey 
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
                        ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn)
     /// Get a new instance of the message with updated deliverAt
-    member this.WithDeliverAt (deliverAt: Nullable<DateTime>) =
+    member this.WithDeliverAt (deliverAt: Nullable<TimeStamp>) =
         MessageBuilder(value, payload, key, properties, ?deliverAt = Option.ofNullable deliverAt,
                        ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn)
-    member this.WithEventTime (eventTime: Nullable<DateTime>) =
+    member this.WithEventTime (eventTime: Nullable<TimeStamp>) =
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
                        ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = Option.ofNullable eventTime, ?txn = txn)
     /// Get a new instance of the message with updated sequenceId
@@ -428,7 +428,7 @@ type internal ResultOrException<'T> = Result<'T, exn>
 
 type internal SeekData =
     | MessageId of MessageId
-    | Timestamp of uint64
+    | Timestamp of TimeStamp
 
 type AuthData =
     {

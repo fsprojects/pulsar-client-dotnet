@@ -20,7 +20,7 @@ type internal PartitionedProducerMessage =
     | Close of AsyncReplyChannel<ResultOrException<unit>>
     | TickTime
     | GetStats of AsyncReplyChannel<ProducerStats>
-    | LastDisconnectedTimestamp of AsyncReplyChannel<int64>
+    | LastDisconnectedTimestamp of AsyncReplyChannel<TimeStamp>
 
 type internal PartitionedConnectionState =
     | Uninitialized
@@ -371,11 +371,11 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         member this.NewMessage (value:'T,
             [<Optional; DefaultParameterValue(null:string)>]key:string,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>]properties: IReadOnlyDictionary<string, string>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<DateTime>)>]deliverAt:Nullable<DateTime>,
+            [<Optional; DefaultParameterValue(Nullable():Nullable<TimeStamp>)>]deliverAt:Nullable<TimeStamp>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>,
             [<Optional; DefaultParameterValue(null:byte[])>]keyBytes:byte[],
             [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[],
-            [<Optional; DefaultParameterValue(Nullable():Nullable<DateTime>)>]eventTime:Nullable<DateTime>,
+            [<Optional; DefaultParameterValue(Nullable():Nullable<TimeStamp>)>]eventTime:Nullable<TimeStamp>,
             [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction) =
             ProducerImpl.NewMessage(keyValueProcessor, schema, value, key, properties,
                                     deliverAt, sequenceId, keyBytes, orderingKey, eventTime, txn)

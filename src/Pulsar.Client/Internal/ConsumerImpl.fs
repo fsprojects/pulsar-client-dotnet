@@ -45,7 +45,7 @@ type internal ConsumerMessage<'T> =
     | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
     | Tick of ConsumerTickType
     | GetStats of AsyncReplyChannel<ConsumerStats>
-    | ReconsumeLater of Message<'T> * AckType * DateTime * AsyncReplyChannel<unit>
+    | ReconsumeLater of Message<'T> * AckType * TimeStamp * AsyncReplyChannel<unit>
     | RemoveWaiter of Waiter<'T>
     | RemoveBatchWaiter of BatchWaiter<'T>
     | AckReceipt of RequestId
@@ -591,8 +591,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             // discard message if chunk is out-of-order
             Log.Logger.LogWarning("{0} {1} msgId = {2}", prefix, error, rawMessage.MessageId)
             increaseAvailablePermits 1
+            let publishDateTime = convertToDateTime %rawMessage.Metadata.PublishTime
             if consumerConfig.ExpireTimeOfIncompleteChunkedMessage > TimeSpan.Zero &&
-                DateTime.UtcNow > rawMessage.Metadata.PublishTime.Add(consumerConfig.ExpireTimeOfIncompleteChunkedMessage) then
+                DateTime.UtcNow > publishDateTime.Add(consumerConfig.ExpireTimeOfIncompleteChunkedMessage) then
                 sendAcknowledge rawMessage.MessageId Individual EmptyProperties
             else
                 trackMessage rawMessage.MessageId
@@ -1033,8 +1034,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         // if we are starting from latest, we should seek to the actual last message first.
                         // allow the last one to be read when read head inclusively.
                         if startMessageId = MessageId.Latest then
-                            let! messageId = getLastMessageIdAsync() |> Async.AwaitTask
                             task {
+                                let! messageId = getLastMessageIdAsync() |> Async.AwaitTask
                                 let! result = this.Mb.PostAndAsyncReply(fun channel -> SeekAsync ((MessageId messageId), channel))
                                 return
                                     match result with
@@ -1230,6 +1231,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 |> readOnlyDict
                             else
                                 EmptyProps
+                let eventTime =
+                    if (singleMessageMetadata.ShouldSerializeEventTime()) then
+                        Nullable(%(int64 singleMessageMetadata.EventTime))
+                    else
+                        Nullable()
                 let message = Message (
                                 messageId,
                                 singleMessagePayload,
@@ -1241,7 +1247,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 %(int64 singleMessageMetadata.SequenceId),
                                 singleMessageMetadata.OrderingKey,
                                 rawMessage.Metadata.PublishTime,
-                                int64 singleMessageMetadata.EventTime |> convertToDateTime,
+                                eventTime,
                                 getValue
                             )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
@@ -1448,7 +1454,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (MessageId messageId, channel))
             }
 
-        member this.SeekAsync (timestamp: uint64) =
+        member this.SeekAsync (timestamp: TimeStamp) =
             task {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
                 return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (Timestamp timestamp, channel))
@@ -1492,7 +1498,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | _ -> mb.PostAndAsyncReply(ConsumerMessage.GetStats)
             }
             
-        member this.ReconsumeLaterAsync (msg: Message<'T>, deliverAt: DateTime) =
+        member this.ReconsumeLaterAsync (msg: Message<'T>, deliverAt: TimeStamp) =
             task {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
@@ -1504,7 +1510,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, Individual, deliverAt, channel))
             }
             
-        member this.ReconsumeLaterCumulativeAsync (msg: Message<'T>, deliverAt: DateTime) =
+        member this.ReconsumeLaterCumulativeAsync (msg: Message<'T>, deliverAt: TimeStamp) =
             task {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
@@ -1516,7 +1522,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, AckType.Cumulative, deliverAt, channel))
             }
         
-        member this.ReconsumeLaterAsync (msgs: Messages<'T>, deliverAt: DateTime) =
+        member this.ReconsumeLaterAsync (msgs: Messages<'T>, deliverAt: TimeStamp) =
             task {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
@@ -1530,8 +1536,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     do! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, Individual, deliverAt, channel))
             }
             
-        member this.LastDisconnected =
-            connectionHandler.LastDisconnectedTimestamp |> convertToDateTime
+        member this.LastDisconnectedTimestamp =
+            connectionHandler.LastDisconnectedTimestamp
             
         
     interface IAsyncDisposable with

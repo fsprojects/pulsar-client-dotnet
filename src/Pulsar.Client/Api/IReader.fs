@@ -14,8 +14,8 @@ type IReader<'T> =
     abstract member ReadNextAsync: CancellationToken -> Task<Message<'T>>
     /// Reset the subscription associated with this consumer to a specific message id.
     abstract member SeekAsync : messageId:MessageId -> Task<unit>
-    /// Reset the subscription associated with this consumer to a specific message publish time (unix timestamp).    
-    abstract member SeekAsync : timestamp:uint64 -> Task<unit>
+    /// Reset the subscription associated with this consumer to a specific message publish time (Unix timestamp in ms).    
+    abstract member SeekAsync : timestamp:TimeStamp -> Task<unit>
     /// Return true if the topic was terminated and this consumer has already consumed all the messages in the topic.
     abstract member HasReachedEndOfTopic: bool
     /// Check if there is any message available to read from the current position.

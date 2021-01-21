@@ -39,7 +39,7 @@ module internal BatchHelpers =
                     ()
                 match message.EventTime with
                 | Some eventTime ->
-                    smm.EventTime <- eventTime |> convertToMsTimestamp |> uint64
+                    smm.EventTime <- eventTime |> uint64
                 | _ ->
                     ()
                 if message.Properties.Count > 0 then

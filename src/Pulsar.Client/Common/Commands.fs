@@ -220,10 +220,10 @@ let newSeekByMsgId (consumerId: ConsumerId) (requestId : RequestId) (messageId: 
     let command = BaseCommand(``type`` = CommandType.Seek, Seek = request)
     command |> serializeSimpleCommand
 
-let newSeekByTimestamp (consumerId: ConsumerId) (requestId : RequestId) (timestamp: uint64) =
+let newSeekByTimestamp (consumerId: ConsumerId) (requestId : RequestId) (timestamp: TimeStamp) =
     let request =
         CommandSeek(
-            ConsumerId = %consumerId, RequestId = %requestId, MessagePublishTime = timestamp
+            ConsumerId = %consumerId, RequestId = %requestId, MessagePublishTime = uint64 timestamp
         )
     let command = BaseCommand(``type`` = CommandType.Seek, Seek = request)
     command |> serializeSimpleCommand

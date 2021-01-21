@@ -18,6 +18,7 @@ open FSharp.UMX
 [<Measure>] type private partitionKey
 [<Measure>] type private batchIndex
 [<Measure>] type private priorityLevel
+[<Measure>] type private timestamp
 
 type LedgerId = int64<ledgerId>
 type EntryId = int64<entryId>
@@ -34,3 +35,4 @@ type SubscriptionName = string<subscription>
 type PartitionKey = string<partitionKey>
 type BatchIndex = int<batchIndex>
 type PriorityLevel = int<priorityLevel>
+type TimeStamp = int64<timestamp>

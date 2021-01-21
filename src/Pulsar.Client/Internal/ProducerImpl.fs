@@ -225,8 +225,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         producerConfig.BatchingEnabled && message.DeliverAt.IsNone
 
     let createMessageMetadata (sequenceId: SequenceId) (txnId: TxnId option) (numMessagesInBatch: int option)
-        (payload: byte[]) (key: MessageKey option) (properties: IReadOnlyDictionary<string, string>) (deliverAt: DateTime option)
-        (orderingKey: byte[] option) (eventTime: DateTime option)=
+        (payload: byte[]) (key: MessageKey option) (properties: IReadOnlyDictionary<string, string>) (deliverAt: TimeStamp option)
+        (orderingKey: byte[] option) (eventTime: TimeStamp option)=
         let metadata =
             MessageMetadata (
                 SequenceId = (sequenceId |> uint64),
@@ -251,7 +251,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             metadata.NumMessagesInBatch <- numMessagesInBatch.Value
         match deliverAt with
         | Some deliverAt ->
-            metadata.DeliverAtTime <- deliverAt |> convertToMsTimestamp
+            metadata.DeliverAtTime <- %deliverAt
         | None ->
             ()
         match schemaVersion with
@@ -266,7 +266,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             ()
         match eventTime with
         | Some eventTime ->
-            metadata.EventTime <- eventTime |> convertToMsTimestamp |> uint64
+            metadata.EventTime <- eventTime |> uint64
         | None ->
             ()
         match txnId with
@@ -786,11 +786,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             value:'T,
             key:string,
             properties: IReadOnlyDictionary<string, string>,
-            deliverAt:Nullable<DateTime>,
+            deliverAt:Nullable<TimeStamp>,
             sequenceId:Nullable<SequenceId>,
             keyBytes:byte[],
             orderingKey:byte[],
-            eventTime: Nullable<DateTime>,
+            eventTime: Nullable<TimeStamp>,
             txn:Transaction) =
             keyValueProcessor
             |> Option.map(fun kvp -> kvp.EncodeKeyValue value)
@@ -861,11 +861,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.NewMessage (value:'T,
             [<Optional; DefaultParameterValue(null:string)>]key:string,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>]properties: IReadOnlyDictionary<string, string>,
-            [<Optional; DefaultParameterValue(Nullable():Nullable<DateTime>)>]deliverAt:Nullable<DateTime>,
+            [<Optional; DefaultParameterValue(Nullable():Nullable<TimeStamp>)>]deliverAt:Nullable<TimeStamp>,
             [<Optional; DefaultParameterValue(Nullable():Nullable<SequenceId>)>]sequenceId:Nullable<SequenceId>,
             [<Optional; DefaultParameterValue(null:byte[])>]keyBytes:byte[],
             [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[],
-            [<Optional; DefaultParameterValue(Nullable():Nullable<DateTime>)>]eventTime:Nullable<DateTime>,
+            [<Optional; DefaultParameterValue(Nullable():Nullable<TimeStamp>)>]eventTime:Nullable<TimeStamp>,
             [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction) =
             ProducerImpl.NewMessage(keyValueProcessor, schema, value, key, properties,
                                     deliverAt, sequenceId, keyBytes, orderingKey, eventTime, txn)
