@@ -63,8 +63,9 @@ type internal ConsumerInitInfo<'T> =
 
 type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                            topicName: TopicName, connectionPool: ConnectionPool,
-                           partitionIndex: int, hasParentConsumer: bool, startMessageId: MessageId option, lookup: BinaryLookupService,
-                           startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
+                           partitionIndex: int, hasParentConsumer: bool, startMessageId: MessageId option, 
+                           startMessageRollbackDuration: TimeSpan, lookup: BinaryLookupService,
+                           createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
                            schemaProvider: MultiVersionSchemaInfoProvider option,
                            interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) as this =
 
@@ -1305,18 +1306,18 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                        topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
-                       hasParent: bool, startMessageId: MessageId option, lookup: BinaryLookupService,
+                       hasParent: bool, startMessageId: MessageId option, startMessageRollbackDuration: TimeSpan, lookup: BinaryLookupService,
                        createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
                        interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
         task {
             let consumer =
                 if consumerConfig.ReceiverQueueSize > 0 then
                     ConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, hasParent,
-                                startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
+                                startMessageId, startMessageRollbackDuration, lookup, createTopicIfDoesNotExist,
                                 schema, schemaProvider, interceptors, cleanup)
                 else
                     ZeroQueueConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, hasParent,
-                                        startMessageId, lookup, TimeSpan.Zero, createTopicIfDoesNotExist,
+                                        startMessageId, lookup, createTopicIfDoesNotExist,
                                         schema, schemaProvider, interceptors, cleanup) :> ConsumerImpl<'T>
 
             do! consumer.InitInternal()
@@ -1557,13 +1558,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
 and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                            topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
-                           hasParent: bool, startMessageId: MessageId option, lookup: BinaryLookupService,
-                           startMessageRollbackDuration: TimeSpan, createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
+                           hasParent: bool, startMessageId: MessageId option, 
+                           lookup: BinaryLookupService,
+                           createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
                            schemaProvider: MultiVersionSchemaInfoProvider option,
                            interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) as this =
     
     inherit ConsumerImpl<'T>(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, hasParent,
-                             startMessageId, lookup, startMessageRollbackDuration, createTopicIfDoesNotExist,
+                             startMessageId, TimeSpan.Zero, lookup, createTopicIfDoesNotExist,
                              schema, schemaProvider, interceptors, cleanup)
 
     let _this = this :> IConsumer<'T>

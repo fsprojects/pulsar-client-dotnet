@@ -57,7 +57,6 @@ type RequestTimeoutException (msg) = inherit Exception(msg)
 module PulsarClientException =
     let isRetriableError (ex: exn) =
         match ex with
-        | :? TooManyRequestsException
         | :? AuthorizationException
         | :? InvalidConfigurationException
         | :? NotFoundException

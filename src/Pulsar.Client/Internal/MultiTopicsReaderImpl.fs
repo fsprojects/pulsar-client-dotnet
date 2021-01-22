@@ -8,13 +8,14 @@ open System
 open Pulsar.Client.Internal
 open Pulsar.Client.Schema
 
-type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientConfig: PulsarClientConfiguration,
+                        connectionPool: ConnectionPool, consumerInitInfo: ConsumerInitInfo<'T>,
                          schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: BinaryLookupService) =
     let subscriptionName =
         if String.IsNullOrEmpty readerConfig.SubscriptionRolePrefix then
-            "reader-" + Guid.NewGuid().ToString("N").Substring(22)
+            "mt/reader-" + Guid.NewGuid().ToString("N").Substring(22)
         else
-            readerConfig.SubscriptionRolePrefix + "-reader-" + Guid.NewGuid().ToString("N").Substring(22)
+            readerConfig.SubscriptionRolePrefix + "-mt/reader-" + Guid.NewGuid().ToString("N").Substring(22)
 
     let consumerConfig = {
         ConsumerConfiguration<'T>.Default with
@@ -24,19 +25,14 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
             SubscriptionMode = SubscriptionMode.NonDurable
             ReceiverQueueSize = readerConfig.ReceiverQueueSize
             ReadCompacted = readerConfig.ReadCompacted
-            ResetIncludeHead = readerConfig.ResetIncludeHead
-            ConsumerName = readerConfig.ReaderName
             KeySharedPolicy = readerConfig.KeySharedPolicy
             MessageDecryptor = readerConfig.MessageDecryptor
-            // Reader doesn't need any batch receiving behaviours
-            // disable the batch receive timer for the ConsumerImpl instance wrapped by the ReaderImpl
-            BatchReceivePolicy = ReaderImpl<'T>.DISABLED_BATCH_RECEIVE_POLICY
     }
 
     let consumer =
-        ConsumerImpl<'T>(consumerConfig, clientConfig, readerConfig.Topic, connectionPool, readerConfig.Topic.PartitionIndex,
-                     false, readerConfig.StartMessageId, readerConfig.StartMessageFromRollbackDuration, lookup, true, schema,
-                     schemaProvider, ConsumerInterceptors<'T>.Empty, fun _ -> ())
+        MultiTopicsConsumerImpl<'T>(consumerConfig, clientConfig, connectionPool, MultiConsumerType.Partitioned consumerInitInfo,
+                                    readerConfig.StartMessageId, readerConfig.StartMessageFromRollbackDuration,
+                                    lookup, ConsumerInterceptors<'T>.Empty, fun _ -> ())
 
     let castedConsumer = consumer :> IConsumer<'T>
 
@@ -46,15 +42,13 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
         }
 
     static member internal Init(config: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                                consumerInitInfo: ConsumerInitInfo<'T>,
                                 schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: BinaryLookupService) =
         task {
-            let reader = ReaderImpl(config, clientConfig, connectionPool, schema, schemaProvider, lookup)
+            let reader = MultiTopicsReaderImpl(config, clientConfig, connectionPool, consumerInitInfo, schema, schemaProvider, lookup)
             do! reader.InitInternal()
             return reader :> IReader<'T>
         }
-        
-    static member internal DISABLED_BATCH_RECEIVE_POLICY =
-            BatchReceivePolicy(1, 0L, TimeSpan.Zero)
         
     interface IReader<'T> with
 

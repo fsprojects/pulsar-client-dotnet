@@ -123,6 +123,7 @@
     <Compile Include="Internal\ConsumerImpl.fs" />
     <Compile Include="Internal\ReaderImpl.fs" />
     <Compile Include="Internal\MultiTopicsConsumerImpl.fs" />
+    <Compile Include="Internal\MultiTopicsReaderImpl.fs" />
     <Compile Include="Internal\PartitionedProducerImpl.fs" />
     <Compile Include="Internal\TransactionMetaStoreHandler.fs" />
     <Compile Include="Api\Schema.fs" />

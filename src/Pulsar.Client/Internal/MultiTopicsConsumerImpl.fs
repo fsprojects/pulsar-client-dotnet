@@ -60,6 +60,7 @@ type internal MultiTopicConsumerMessage<'T> =
     | RemoveWaiter of Waiter<'T>
     | RemoveBatchWaiter of BatchWaiter<'T>
     | LastDisconnectedTimestamp of AsyncReplyChannel<TimeStamp>
+    | HasMessageAvailable of AsyncReplyChannel<Task<bool>>
 
 type internal TopicAndConsumer<'T> =
     {
@@ -68,8 +69,9 @@ type internal TopicAndConsumer<'T> =
         Consumer: ConsumerImpl<'T>
     }
 
-type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                      multiConsumerType: MultiConsumerType<'T>, lookup: BinaryLookupService,
+type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                                      multiConsumerType: MultiConsumerType<'T>, startMessageId: MessageId option,
+                                      startMessageRollbackDuration: TimeSpan, lookup: BinaryLookupService,
                                       interceptors: ConsumerInterceptors<'T>, cleanup: MultiTopicsConsumerImpl<'T> -> unit) as this =
 
     let _this = this :> IConsumer<'T>
@@ -214,8 +216,10 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                             Topics = seq { partitionedTopic } |> Seq.cache }
                 task {
                     let! result =    
-                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, partitionIndex, true,
-                                          None, lookup, true, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider, interceptors, fun _ -> ())
+                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic,
+                                          connectionPool, partitionIndex, true, startMessageId, startMessageRollbackDuration,
+                                          lookup, true, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider,
+                                          interceptors, fun _ -> ())
                     return { IsPartitioned = true; TopicName = partitionedTopic; Consumer = result }
                 })
             |> Seq.cache
@@ -261,8 +265,10 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                                             Topics = seq { partitionedTopic } |> Seq.cache }
                                 task {
                                     let! result =    
-                                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, partitionIndex, true,
-                                                          None, lookup, createTopicIfDoesNotExist, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider, interceptors, fun _ -> ())
+                                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic,
+                                                          connectionPool, partitionIndex, true, startMessageId, startMessageRollbackDuration,
+                                                          lookup, createTopicIfDoesNotExist, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider,
+                                                          interceptors, fun _ -> ())
                                     return { IsPartitioned = true; TopicName = partitionedTopic; Consumer = result }
                                 })
                         else
@@ -272,8 +278,10 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                                                 ReceiverQueueSize = receiverQueueSize
                                                                 Topics = seq { consumerInitInfo.TopicName } |> Seq.cache }
                                     let! result =    
-                                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, -1, true,
-                                                          None, lookup, createTopicIfDoesNotExist, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider, interceptors, fun _ -> ())
+                                        ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic,
+                                                          connectionPool, -1, true, startMessageId, startMessageRollbackDuration,
+                                                          lookup, createTopicIfDoesNotExist, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider,
+                                                          interceptors, fun _ -> ())
                                     return { IsPartitioned = false; TopicName = consumerInitInfo.TopicName; Consumer = result }
                                 }
                             })
@@ -382,8 +390,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
     let hasEnoughMessagesForBatchReceive() =
         hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
         
-    let isIllegalMultiTopicsMessageId messageId =
-        messageId <> MessageId.Earliest && messageId <> MessageId.Latest
+    
     
     let getAllPartitions () =
         task {
@@ -783,8 +790,10 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                                                                 Topics = seq { partitionedTopic } |> Seq.cache }
                                                     task {
                                                         let! result =
-                                                             ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic, connectionPool, partitionIndex, true,
-                                                                                  None, lookup, true, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider, interceptors, fun _ -> ())
+                                                             ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic,
+                                                                               connectionPool, partitionIndex, true, startMessageId, startMessageRollbackDuration,
+                                                                               lookup, true, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider,
+                                                                               interceptors, fun _ -> ())
                                                         return (partitionedTopic, result)
                                                     })
                                             yield! newConsumerTasks
@@ -851,6 +860,18 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                         unAckedMessageTracker.RemoveMessagesTill msg.MessageId |> ignore
                     } |> channel.Reply
                     return! loop ()
+                                
+                | HasMessageAvailable channel ->
+                    
+                    Log.Logger.LogDebug("{0} HasMessageAvailable", prefix)
+                    task {
+                        let! results =
+                            consumers
+                            |> Seq.map (fun (KeyValue(_, (consumer, _))) -> (consumer :?> ConsumerImpl<'T>).HasMessageAvailableAsync())
+                            |> Task.WhenAll
+                        return results
+                        |> Array.exists id
+                    } |> channel.Reply
                                 
                 | Close channel ->
 
@@ -926,18 +947,24 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
         with get() = Volatile.Read(&connectionState)
         and set(value) = Volatile.Write(&connectionState, value)
 
-    member private this.InitInternal() =
+    member internal this.InitInternal() =
         task {
             mb.Post Init
             return! consumerCreatedTsc.Task
+        }
+        
+    member internal this.HasMessageAvailableAsync() =
+        task {
+            let! result = mb.PostAndAsyncReply HasMessageAvailable
+            return! result
         }
 
     static member InitPartitioned(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                                             consumerInitInfo: ConsumerInitInfo<'T>, lookup: BinaryLookupService, 
                                             interceptors: ConsumerInterceptors<'T>, cleanup: MultiTopicsConsumerImpl<'T> -> unit) =
         task {
-            let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool, MultiConsumerType.Partitioned consumerInitInfo, lookup,
-                                                   interceptors, cleanup)
+            let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool, MultiConsumerType.Partitioned consumerInitInfo,
+                                                   None, TimeSpan.Zero, lookup, interceptors, cleanup)
             do! consumer.InitInternal()
             return consumer
         }
@@ -946,8 +973,8 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                             consumerInitInfos: ConsumerInitInfo<'T>[], lookup: BinaryLookupService, 
                                             interceptors: ConsumerInterceptors<'T>, cleanup: MultiTopicsConsumerImpl<'T> -> unit) =
         task {
-            let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool, MultiConsumerType.MultiTopic consumerInitInfos, lookup,
-                                                   interceptors, cleanup)
+            let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool, MultiConsumerType.MultiTopic consumerInitInfos,
+                                                   None, TimeSpan.Zero, lookup, interceptors, cleanup)
             do! consumer.InitInternal()
             return consumer
         }
@@ -957,11 +984,14 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
                                             interceptors: ConsumerInterceptors<'T>, cleanup: MultiTopicsConsumerImpl<'T> -> unit) =
         task {
             let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool,
-                                                   MultiConsumerType.Pattern patternInfo,
+                                                   MultiConsumerType.Pattern patternInfo, None, TimeSpan.Zero,
                                                    lookup, interceptors, cleanup)
             do! consumer.InitInternal()
             return consumer
         }
+        
+    static member internal isIllegalMultiTopicsMessageId messageId =
+        messageId <> MessageId.Earliest && messageId <> MessageId.Latest
 
     interface IConsumer<'T> with
 
@@ -1027,7 +1057,7 @@ type internal MultiTopicsConsumerImpl<'T> private (consumerConfig: ConsumerConfi
             }
 
         member this.SeekAsync (messageId: MessageId) =
-            if isIllegalMultiTopicsMessageId messageId then
+            if MultiTopicsConsumerImpl<_>.isIllegalMultiTopicsMessageId messageId then
                 failwith "Illegal messageId, messageId can only be earliest/latest"
             task {
                 let! result = mb.PostAndAsyncReply(fun channel -> Seek(MessageId messageId, channel))

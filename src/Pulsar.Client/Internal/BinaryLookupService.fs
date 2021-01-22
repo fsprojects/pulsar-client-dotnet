@@ -31,12 +31,16 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                 return PulsarResponseType.GetPartitionedTopicMetadata response
             with Flatten ex ->
-                let delay = Math.Min(backoff.Next(), remainingTimeMs)
-                if delay <= 0 then
-                    raise (TimeoutException "Could not GetPartitionedTopicMetadata within configured timeout.")
-                Log.Logger.LogWarning(ex, "GetPartitionedTopicMetadata failed will retry in {0} ms", delay)
-                do! Async.Sleep delay
-                return! this.GetPartitionedTopicMetadata(endpoint, topicName, backoff, remainingTimeMs - delay)
+                let nextDelay = Math.Min(backoff.Next(), remainingTimeMs)
+                // skip retry scheduler when set lookup throttle in client or server side which will lead to `TooManyRequestsException`                
+                let isLookupThrottling =
+                    (PulsarClientException.isRetriableError ex |> not)
+                    || (ex :? TooManyRequestsException) 
+                if nextDelay <= 0 || isLookupThrottling then
+                    reraize ex
+                Log.Logger.LogWarning(ex, "GetPartitionedTopicMetadata failed will retry in {0} ms", nextDelay)
+                do! Async.Sleep nextDelay
+                return! this.GetPartitionedTopicMetadata(endpoint, topicName, backoff, remainingTimeMs - nextDelay)
         }
         
      member this.GetPartitionedTopicMetadata topicName =
