@@ -24,6 +24,15 @@ type ProtobufchemaTest = {
 [<CLIMutable>]
 type AvroSchemaTest = { X: string; Y: ResizeArray<int> }
 
+[<CLIMutable>]
+type UsesSharedSchema = { Uses: AvroSchemaTest }
+
+[<CLIMutable>]
+type AlsoUsesSharedSchema = { Uses: AvroSchemaTest }
+
+[<CLIMutable>]
+type AvroSharedSchemaTest = { X: UsesSharedSchema; Y: AlsoUsesSharedSchema }
+
 [<Tests>]
 let tests =
     
@@ -209,6 +218,17 @@ let tests =
         // Uncomment this test once apache/avro#957 or apache/avro#1013 is merged
         ptest "Avro schema works fine with long strings (> 256 characters)" {
             let inputs = [{ AvroSchemaTest.X = String('1', 257); Y = [] |> ResizeArray}]
+            for input in inputs do
+                let schema = Schema.AVRO()
+                let output =
+                    input
+                    |> schema.Encode
+                    |> schema.Decode
+                Expect.equal "" input.X output.X
+        }
+
+        test "Avro schema works with shared contracts" {
+            let inputs = [{ AvroSharedSchemaTest.X = { UsesSharedSchema.Uses = { AvroSchemaTest.X = String('1', 257); Y = [] |> ResizeArray} }; Y = { AlsoUsesSharedSchema.Uses = { AvroSchemaTest.X = String('1', 257); Y = [] |> ResizeArray} }}]
             for input in inputs do
                 let schema = Schema.AVRO()
                 let output =
