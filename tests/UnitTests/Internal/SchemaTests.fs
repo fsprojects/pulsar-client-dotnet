@@ -25,13 +25,7 @@ type ProtobufchemaTest = {
 type AvroSchemaTest = { X: string; Y: ResizeArray<int> }
 
 [<CLIMutable>]
-type UsesSharedSchema = { Uses: AvroSchemaTest }
-
-[<CLIMutable>]
-type AlsoUsesSharedSchema = { Uses: AvroSchemaTest }
-
-[<CLIMutable>]
-type AvroSharedSchemaTest = { X: UsesSharedSchema; Y: AlsoUsesSharedSchema }
+type UsesSharedSchema = { UsesContract: AvroSchemaTest; AlsoUsesContract: AvroSchemaTest }
 
 [<Tests>]
 let tests =
@@ -228,14 +222,14 @@ let tests =
         }
 
         test "Avro schema works with shared contracts" {
-            let inputs = [{ AvroSharedSchemaTest.X = { UsesSharedSchema.Uses = { AvroSchemaTest.X = String('1', 257); Y = [] |> ResizeArray} }; Y = { AlsoUsesSharedSchema.Uses = { AvroSchemaTest.X = String('1', 257); Y = [] |> ResizeArray} }}]
+            let inputs = [{ UsesSharedSchema.UsesContract = { AvroSchemaTest.X = String('1', 257); Y = [] |> ResizeArray}; AlsoUsesContract = { AvroSchemaTest.X = String('1', 257); Y = [] |> ResizeArray} }]
             for input in inputs do
                 let schema = Schema.AVRO()
                 let output =
                     input
                     |> schema.Encode
                     |> schema.Decode
-                Expect.equal "" input.X output.X
+                Expect.equal "" input.UsesContract output.UsesContract
         }
         
         test "Protobuf schema works fine" {
