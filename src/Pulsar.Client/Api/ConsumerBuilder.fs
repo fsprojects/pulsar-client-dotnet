@@ -60,7 +60,7 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
             )
         |> (fun c ->
                 if c.RetryEnable && (c.Topics |> Seq.isEmpty |> not) then
-                    let prefixPart = c.SingleTopic.NamespaceName.ToString() + "/" + c.SubscriptionName
+                    let prefixPart = c.SingleTopic.ToString() + "-" + c.SubscriptionName
                     let defaultRetryLetterTopic = prefixPart + RetryMessageUtil.RETRY_GROUP_TOPIC_SUFFIX
                     let defaultDeadLetterTopic = prefixPart + RetryMessageUtil.DLQ_GROUP_TOPIC_SUFFIX
                     let newPolicy =

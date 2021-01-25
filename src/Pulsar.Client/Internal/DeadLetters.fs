@@ -1,9 +1,7 @@
 ﻿namespace Pulsar.Client.Internal
 
 open System
-open System.Buffers.Binary
 open System.Collections.Generic
-open Newtonsoft.Json.Converters
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System.Threading.Tasks
@@ -72,16 +70,16 @@ type internal DeadLetterProcessor<'T>
         member this.ReconsumeLater (message, deliverAt, acknowledge) =
             let propertiesMap = Dictionary<string, string>()
             for KeyValue(k, v) in message.Properties do
-                propertiesMap.Add(k, v)
+                propertiesMap.[k] <- v
             let mutable reconsumetimes = 1
             match propertiesMap.TryGetValue(RetryMessageUtil.SYSTEM_PROPERTY_RECONSUMETIMES) with
             | true, v ->
                 reconsumetimes <- v |> int |> (+) 1
             | _ ->
-                propertiesMap.Add(RetryMessageUtil.SYSTEM_PROPERTY_REAL_TOPIC, topicName)
-                propertiesMap.Add(RetryMessageUtil.SYSTEM_PROPERTY_ORIGIN_MESSAGE_ID, message.MessageId.ToString())
-            propertiesMap.Add(RetryMessageUtil.SYSTEM_PROPERTY_RECONSUMETIMES, string reconsumetimes)
-            propertiesMap.Add(RetryMessageUtil.SYSTEM_PROPERTY_DELIVER_AT, deliverAt |> string)
+                propertiesMap.[RetryMessageUtil.SYSTEM_PROPERTY_REAL_TOPIC] <- topicName
+                propertiesMap.[RetryMessageUtil.SYSTEM_PROPERTY_ORIGIN_MESSAGE_ID] <- message.MessageId.ToString()
+            propertiesMap.[RetryMessageUtil.SYSTEM_PROPERTY_RECONSUMETIMES] <- string reconsumetimes
+            propertiesMap.[RetryMessageUtil.SYSTEM_PROPERTY_DELIVER_AT] <- deliverAt |> string
             task {
                 if reconsumetimes > policy.MaxRedeliveryCount then
                     let dlp = this :> IDeadLetterProcessor<'T>

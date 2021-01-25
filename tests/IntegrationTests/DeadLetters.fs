@@ -2,6 +2,7 @@ module Pulsar.Client.IntegrationTests.DeadLetters
 
 open System
 open Expecto
+open Expecto.Flip
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
@@ -412,6 +413,44 @@ let tests =
                 |]
 
             do! Task.WhenAll(tasks) |> Async.AwaitTask
+
+            description |> logTestEnd
+        }
+        
+        testAsync "Reconsume later works properly" {
+
+            let description = "Reconsume later works properly"
+
+            description |> logTestStart
+
+            let config = getTestConfig()
+            let producerName = "reconsumeProducer"
+            let consumerName = "reconsumeConsumer"
+
+            let! producer =
+                createProducer()
+                    .ProducerName(producerName)
+                    .Topic(config.TopicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+                    |> Async.AwaitTask
+
+            let! consumer =
+                createConsumer()
+                    .ConsumerName(consumerName)
+                    .Topic(config.TopicName)
+                    .SubscriptionName(config.SubscriptionName)
+                    .EnableRetry(true)
+                    .SubscribeAsync()
+                    |> Async.AwaitTask
+         
+            let! msgId = producer.SendAsync([| 0uy; 1uy; 0uy |]) |> Async.AwaitTask
+            let! msg1 = consumer.ReceiveAsync() |> Async.AwaitTask
+            do! consumer.ReconsumeLaterAsync(msg1, DateTime.UtcNow.AddSeconds(1.0) |> convertToMsTimestamp) |> Async.AwaitTask
+            let! msg2 = consumer.ReceiveAsync() |> Async.AwaitTask
+
+            Expect.equal "" msgId msg1.MessageId
+            Expect.equal "" (msg1.GetValue() |> Array.toList) (msg2.GetValue() |> Array.toList)
 
             description |> logTestEnd
         }
