@@ -1422,7 +1422,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     raise exn
 
                 for msgId in msgIds do
-                    mb.Post(Acknowledge(msgId, AckType.Individual))
+                    mb.Post(Acknowledge(msgId, AckType.Individual, None, None))
             }
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =

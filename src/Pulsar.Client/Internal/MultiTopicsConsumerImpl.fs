@@ -1041,7 +1041,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         member this.AcknowledgeAsync (msgIds: MessageId seq) =
             task {
                 for msgId in msgIds do
-                    let! t = mb.PostAndAsyncReply(fun channel -> Acknowledge(channel, msgId))
+                    let! t = mb.PostAndAsyncReply(fun channel -> Acknowledge(channel, msgId, None))
                     do! t
             }
 
