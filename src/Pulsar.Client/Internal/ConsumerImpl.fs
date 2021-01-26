@@ -1411,6 +1411,19 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 for msg in msgs do
                     mb.Post(Acknowledge(msg.MessageId, Individual, None, None))
             }
+            
+        member this.AcknowledgeAsync (msgIds: MessageId seq) =
+            task {
+                let exn = connectionHandler.CheckIfActive()
+                if not (isNull exn) then
+                    for msgId in msgIds do
+                        stats.IncrementNumAcksFailed()
+                        interceptors.OnAcknowledge(this, msgId, exn)
+                    raise exn
+
+                for msgId in msgIds do
+                    mb.Post(Acknowledge(msgId, AckType.Individual))
+            }
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
             task {

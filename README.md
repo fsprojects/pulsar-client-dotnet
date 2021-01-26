@@ -4,7 +4,7 @@
 [![.NET Core Windows](https://github.com/fsharplang-ru/pulsar-client-dotnet/workflows/.NET%20Core%20Windows/badge.svg)](https://github.com/fsharplang-ru/pulsar-client-dotnet/actions?query=workflow%3A%22.NET+Core+Windows%22)
 [![.NET Core Ubuntu](https://github.com/fsharplang-ru/pulsar-client-dotnet/workflows/.NET%20Core%20Ubuntu/badge.svg)](https://github.com/fsharplang-ru/pulsar-client-dotnet/actions?query=workflow%3A%22.NET+Core+Ubuntu%22)
 
-### Contributions are most welcome!
+### Contributions and stars ★ are most welcome!
 
 [Pulsar.Client nuget](https://www.nuget.org/packages/Pulsar.Client)
 

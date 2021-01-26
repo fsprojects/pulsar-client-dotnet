@@ -49,13 +49,13 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
 
         task {
             try
-                if (socket.ConnectAsync(args) |> not) then
+                if socket.ConnectAsync args |> not then
                     args.Complete()
                 let! _ = args
                 Log.Logger.LogDebug("Socket connected to {0}", endpoint)
                 return socket
             with
-            | ex ->
+            | Flatten ex ->
                 socket.Dispose()
                 Log.Logger.LogError(ex, "Socket connection failed to {0}", endpoint)
                 return reraize ex

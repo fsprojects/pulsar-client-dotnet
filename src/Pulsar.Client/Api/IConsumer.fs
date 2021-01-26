@@ -25,6 +25,8 @@ type IConsumer<'T> =
     abstract member AcknowledgeAsync: messageId:MessageId * txn:Transaction -> Task<unit>
     /// Asynchronously acknowledge the consumption of Messages
     abstract member AcknowledgeAsync: messages:Messages<'T> -> Task<unit>
+    /// Asynchronously acknowledge the consumption of Messages
+    abstract member AcknowledgeAsync: messages:MessageId seq -> Task<unit>
     /// Acknowledge the reception of all the messages in the stream up to (and including) the provided message.
     abstract member AcknowledgeCumulativeAsync: messageId:MessageId -> Task<unit>
     /// Acknowledge the reception of all the messages in the stream up to (and including) the provided message with this
