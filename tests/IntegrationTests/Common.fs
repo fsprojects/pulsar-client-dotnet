@@ -57,7 +57,7 @@ let sslClient =
         .ServiceUrl(pulsarSslAddress)
         .EnableTls(true)
         .TlsTrustCertificate(ca)
-        .Build()
+        .BuildAsync().Result
 
 let sslAdminClient =
     PulsarClientBuilder()
@@ -65,7 +65,7 @@ let sslAdminClient =
         .EnableTls(true)
         .TlsTrustCertificate(ca)
         .Authentication(sslAdmin)
-        .Build()
+        .BuildAsync().Result
 
 let sslUser1Client =
     PulsarClientBuilder()
@@ -73,7 +73,7 @@ let sslUser1Client =
         .EnableTls(true)
         .TlsTrustCertificate(ca)
         .Authentication(sslUser1)
-        .Build()
+        .BuildAsync().Result
         
 let getSslClient() = sslClient
 
