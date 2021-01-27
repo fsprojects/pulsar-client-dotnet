@@ -2,6 +2,7 @@
 
 open System
 open Pulsar.Client.Common
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 
@@ -91,10 +92,16 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
             { config with
                 Temp = enableTransaction }
             
-    member this.Build() =
-        config
-        |> verify
-        |> PulsarClient
+    member this.BuildAsync() =
+        let client =
+            config
+            |> verify
+            |> PulsarClient
+        task {
+            do! client.Init()
+            return client
+        }
+        
         
     member this.Configuration =
         config

@@ -398,7 +398,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     let mutable chunkError = false
                     let mutable chunkId = 0
                     let isChunked = totalChunks > 1
-                    let uuid = if isChunked then sprintf "%s-%d" producerName sequenceId else ""
+                    let uuid = if isChunked then $"{producerName}-{sequenceId}" else null
                     let messageIds = if isChunked then Array.zeroCreate totalChunks else Array.empty
                     let txnId = message.Txn |> Option.map (fun txn -> txn.Id)
                     while chunkId < totalChunks && not chunkError do

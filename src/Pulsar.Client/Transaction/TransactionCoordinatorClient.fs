@@ -19,7 +19,8 @@ type internal TransactionCoordinatorState =
     | CLOSED
 
 type internal TransactionCoordinatorMessage =
-    | Start of AsyncReplyChannel<Task>
+    | Start of AsyncReplyChannel<ResultOrException<Unit>>
+    | Close
 
 type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfiguration,
                                             connectionPool: ConnectionPool,
@@ -53,38 +54,50 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                     match state with
                     | NONE ->
                         state <- TransactionCoordinatorState.STARTING
-                        let! partitionMeta =
-                            lookup.GetPartitionedTopicMetadata(TopicName.TRANSACTION_COORDINATOR_ASSIGN.CompleteTopicName)
-                            |> Async.AwaitTask
-                        let tasks = 
-                            if partitionMeta.Partitions > 0 then
-                                seq {
-                                    for i in 0..partitionMeta.Partitions-1 do
-                                        let tcs = TaskCompletionSource()
-                                        let handler = TransactionMetaStoreHandler(clientConfig, %(uint64 i),
-                                                                                 getTCAssignTopicName(i), connectionPool, lookup, tcs)
-                                        handlers.Add(handler)
-                                        yield tcs.Task
-                                }
-                            else
-                                let tcs = TaskCompletionSource()
-                                let handler = TransactionMetaStoreHandler(clientConfig, %0UL,
-                                                                          getTCAssignTopicName(-1), connectionPool, lookup, tcs)
-                                handlers.Add(handler)
-                                seq { tcs.Task }
                         try
+                            let! partitionMeta =
+                                lookup.GetPartitionedTopicMetadata(TopicName.TRANSACTION_COORDINATOR_ASSIGN.CompleteTopicName)
+                                |> Async.AwaitTask
+                            let tasks = 
+                                if partitionMeta.Partitions > 0 then
+                                    seq {
+                                        for i in 0..partitionMeta.Partitions-1 do
+                                            let tcs = TaskCompletionSource()
+                                            let handler = TransactionMetaStoreHandler(clientConfig, %(uint64 i),
+                                                                                     getTCAssignTopicName(i), connectionPool, lookup, tcs)
+                                            handlers.Add(handler)
+                                            yield tcs.Task
+                                    }
+                                else
+                                    let tcs = TaskCompletionSource()
+                                    let handler = TransactionMetaStoreHandler(clientConfig, %0UL,
+                                                                              getTCAssignTopicName(-1), connectionPool, lookup, tcs)
+                                    handlers.Add(handler)
+                                    seq { tcs.Task }                                
                             do! tasks |> Task.WhenAll |> Async.AwaitTask |> Async.Ignore
                             Log.Logger.LogInformation("{0} connected with partitions count {1}", prefix, partitionMeta.Partitions)
                             state <- TransactionCoordinatorState.READY
-                            ch.Reply(Task.FromResult())
-                        with ex ->
-                            Log.Logger.LogError(ex, "{0} connection error on start, partitions count {1}", prefix, partitionMeta.Partitions)
-                            ch.Reply(Task.FromException(ex))
+                            ch.Reply(Ok ())
+                        with Flatten ex ->
+                            Log.Logger.LogError(ex, "{0} connection error on start", prefix)
+                            state <- TransactionCoordinatorState.NONE
+                            ch.Reply(Error ex)
                     | _ ->
                         Log.Logger.LogError("{0} Can not start while current state is {1}", prefix, state)
-                        ch.Reply(Task.FromException(CoordinatorClientStateException $"Can not start while current state is {state}"))
+                        state <- TransactionCoordinatorState.NONE
+                        ch.Reply(CoordinatorClientStateException $"Can not start while current state is {state}" :> exn |> Error)
                     return! loop ()
-                       
+                
+                | Close ->
+                    
+                    match state with
+                    | CLOSING | CLOSED ->
+                        Log.Logger.LogError("{0} The transaction meta store is closing or closed, doing nothing.", prefix)
+                    | _ ->
+                        for handler in handlers do
+                            handler.Close()
+                        handlers.Clear()
+                        state <- TransactionCoordinatorState.CLOSED
            }
         loop ()
     )
@@ -94,19 +107,14 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
     member this.Mb: MailboxProcessor<TransactionCoordinatorMessage> = mb
     
     member this.Start() =
-        async {
-            let! task = mb.PostAndAsyncReply(Start)
-            do! task |> Async.AwaitTask
-        } |> Async.RunSynchronously
+        mb.PostAndAsyncReply(Start)
         
     member this.NewTransactionAsync() =
         this.NewTransactionAsync(DEFAULT_TXN_TTL)
         
     member this.NewTransactionAsync(timeSpan) =
         let handler = nextHandler()
-        task {
-            return! handler.NewTransactionAsync(timeSpan)
-        }
+        handler.NewTransactionAsync(timeSpan)
         
     member this.AddPublishPartitionToTxnAsync(txnId: TxnId, partition) =
         let handlerId = int txnId.MostSigBits
@@ -135,3 +143,6 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
             raise <| MetaStoreHandlerNotExistsException $"Transaction meta store handler for transaction meta store {txnId.MostSigBits} not exists."
         let handler = handlers.[handlerId]
         handler.AbortAsync(txnId, msgIds)
+        
+    member this.Close() =
+        mb.Post(Close)

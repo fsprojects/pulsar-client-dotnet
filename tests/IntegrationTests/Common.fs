@@ -47,7 +47,7 @@ let configureLogging() =
 let commonClient =
     PulsarClientBuilder()
         .ServiceUrl(pulsarAddress)
-        .Build()
+        .BuildAsync().Result
 
 let getClient() = commonClient
 
@@ -85,13 +85,13 @@ let getSslUser1Client() = sslUser1Client
 let getNewClient() =
     PulsarClientBuilder()
         .ServiceUrl(pulsarAddress)
-        .Build()
+        .BuildAsync().Result
 
 let getStatsClient() =
     PulsarClientBuilder()
         .ServiceUrl(pulsarAddress)
         .StatsInterval(TimeSpan.FromSeconds 1.0)
-        .Build()
+        .BuildAsync().Result
 
 let produceMessages (producer: IProducer<byte[]>) number producerName =
     task {

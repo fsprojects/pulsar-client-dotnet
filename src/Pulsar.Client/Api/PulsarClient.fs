@@ -26,7 +26,7 @@ type internal PulsarClientMessage =
     | Close of AsyncReplyChannel<Task>
     | Stop
 
-type PulsarClient(config: PulsarClientConfiguration) as this =
+type PulsarClient internal (config: PulsarClientConfiguration) as this =
 
     let connectionPool = ConnectionPool(config)
     let lookupService = BinaryLookupService(config, connectionPool)
@@ -123,18 +123,29 @@ type PulsarClient(config: PulsarClientConfiguration) as this =
                 | Stop ->
                     this.ClientState <- Closed
                     do! connectionPool.CloseAsync() |> Async.AwaitTask
+                    transactionClient |> Option.iter (fun tc -> tc.Close())
                     Log.Logger.LogInformation("Pulsar client stopped")
             }
         loop ()
     )
 
     do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "PulsarClient mailbox failure"))
-    do transactionClient |> Option.iter(fun tc -> tc.Start())
-
+   
     static member Logger
         with get () = Log.Logger
         and set (value) = Log.Logger <- value
-
+    
+    member internal this.Init() =
+        task {
+            match transactionClient with
+            | Some tc ->
+                match! tc.Start() with
+                | Ok () -> ()
+                | Error exn -> reraize exn
+            | None ->
+                ()
+        }
+    
     member internal this.SubscribeAsync(consumerConfig : ConsumerConfiguration<'T>, schema, interceptors) =
         checkIfActive()
         if (consumerConfig.TopicsPattern |> String.IsNullOrEmpty |> not) then

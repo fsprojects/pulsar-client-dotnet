@@ -29,6 +29,7 @@ type internal TransactionMetaStoreMessage =
     | EndTxn of TxnId * MessageId seq * TxnAction * AsyncReplyChannel<Task<unit>>
     | EndTxnResponse of RequestId * ResultOrException<unit>
     | TimeoutTick
+    | Close
 
 type internal TxnRequest =
     | NewTransaction of TxnId
@@ -270,6 +271,14 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     checkTimeoutedMessages()
                     return! loop()
                     
+                | Close ->
+                    
+                    timeoutTimer.Stop()
+                    for KeyValue(k, v) in pendingRequests do
+                        v.SetException(AlreadyClosedException "{0} is closed")
+                    pendingRequests.Clear()
+                    timeoutQueue.Clear()
+                    connectionHandler.Close()
            }
         loop ()
     )
@@ -318,3 +327,5 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
             return! t
         }
         
+    member this.Close() =
+        mb.Post(Close)
