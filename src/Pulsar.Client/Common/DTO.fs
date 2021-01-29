@@ -434,7 +434,10 @@ type AuthData =
     {
         Bytes: byte[]
     }
-    static member INIT_AUTH_DATA = Encoding.UTF8.GetBytes("PulsarAuthInit")
+    static member INIT_AUTH_DATA_BYTES = Encoding.UTF8.GetBytes("PulsarAuthInit")
+    static member REFRESH_AUTH_DATA_BYTES = Encoding.UTF8.GetBytes("PulsarAuthRefresh")
+    static member INIT_AUTH_DATA = { Bytes = AuthData.INIT_AUTH_DATA_BYTES }
+    static member REFRESH_AUTH_DATA = { Bytes = AuthData.REFRESH_AUTH_DATA_BYTES }
 
 type MessageRoutingMode =
     | SinglePartition = 0

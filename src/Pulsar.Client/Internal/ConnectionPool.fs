@@ -6,25 +6,16 @@ open System.Collections.Concurrent
 open System.Net
 open System.Threading.Tasks
 open Pipelines.Sockets.Unofficial
-open System
 open Microsoft.Extensions.Logging
-open pulsar.proto
-open System.Reflection
 open Pulsar.Client.Internal
 open System.IO.Pipelines
 open Pulsar.Client.Api
 open System.Net.Sockets
 open System.Net.Security
-open System.Security.Authentication
 open System.Security.Cryptography.X509Certificates
 
 type internal ConnectionPool (config: PulsarClientConfiguration) =
 
-    let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
-    let protocolVersion =
-        ProtocolVersion.GetValues(typeof<ProtocolVersion>)
-        :?> ProtocolVersion[]
-        |> Array.last
 
     let connections = ConcurrentDictionary<bool*LogicalAddress, Task<ClientCnx>>()
 
@@ -132,7 +123,6 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                                   broker, maxMessageSize, brokerless)
         task {
             let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
-            let (LogicalAddress logicalAddress) = broker.LogicalAddress
             let pipeOptions = PipeOptions(pauseWriterThreshold = int64 maxMessageSize )
             let! socket = getSocket physicalAddress
 
@@ -167,12 +157,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             let unregisterClientCnx (broker: Broker) =
                 connections.TryRemove((brokerless, broker.LogicalAddress)) |> ignore
             let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, brokerless, initialConnectionTsc, unregisterClientCnx)
-            let proxyToBroker = if physicalAddress = logicalAddress then None else Some logicalAddress
-            let authenticationDataProvider = config.Authentication.GetAuthData(physicalAddress.Host);
-            let authData = authenticationDataProvider.Authenticate({ Bytes = AuthData.INIT_AUTH_DATA })
-            let authMethodName = config.Authentication.GetAuthMethodName()
-            let connectPayload = Commands.newConnect authMethodName authData clientVersion protocolVersion proxyToBroker
-
+            let connectPayload = clientCnx.NewConnectCommand()
             let! success = clientCnx.Send connectPayload
             if not success then
                 raise (ConnectionFailedOnSend "ConnectionPool connect")
@@ -181,7 +166,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         }
 
     member this.GetConnection (broker: Broker, maxMessageSize: int, brokerless: bool) =
-        let t = connections.GetOrAdd((brokerless, broker.LogicalAddress), fun(_) ->
+        let t = connections.GetOrAdd((brokerless, broker.LogicalAddress), fun _ ->
                 connect(broker, maxMessageSize, brokerless))
         if t.IsFaulted then
             Log.Logger.LogInformation("Removing faulted task to {0}", broker)

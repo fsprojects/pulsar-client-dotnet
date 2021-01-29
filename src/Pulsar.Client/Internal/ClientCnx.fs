@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Internal
 
+open System.Reflection
 open Pulsar.Client.Common
 open System.Collections.Generic
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -89,6 +90,7 @@ and internal PulsarCommand =
     | XCommandAddSubscriptionToTxnResponse of CommandAddSubscriptionToTxnResponse
     | XCommandAckResponse of CommandAckResponse
     | XCommandEndTxnResponse of CommandEndTxnResponse
+    | XCommandAuthChallenge of CommandAuthChallenge
     | XCommandError of CommandError
 
 and internal CommandParseError =
@@ -109,7 +111,17 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 brokerless: bool,
                 initialConnectionTsc: TaskCompletionSource<ClientCnx>,
                 unregisterClientCnx: Broker -> unit) as this =
-
+    
+    let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
+    let protocolVersion =
+        ProtocolVersion.GetValues(typeof<ProtocolVersion>)
+        :?> ProtocolVersion[]
+        |> Array.last
+    let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
+    let (LogicalAddress logicalAddress) = broker.LogicalAddress
+    let proxyToBroker = if physicalAddress = logicalAddress then None else Some logicalAddress
+    let mutable authenticationDataProvider = config.Authentication.GetAuthData(physicalAddress.Host);
+        
     let consumers = Dictionary<ConsumerId, ConsumerOperations>()
     let producers = Dictionary<ProducerId, ProducerOperations>()
     let transactionMetaStores = Dictionary<TransactionCoordinatorId, TransactionMetaStoreOperations>()
@@ -683,6 +695,25 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 tmsOperations.EndTxnResponse (%cmd.RequestId, result)
             | _ ->
                 Log.Logger.LogWarning("{0} tms {1} wasn't found on XCommandAddSubscriptionToTxnResponse", prefix, tcId)
+        | XCommandAuthChallenge cmd ->
+            if cmd.Challenge |> isNull |> not then
+                if (cmd.Challenge.auth_data |> Array.compareWith Operators.compare AuthData.REFRESH_AUTH_DATA_BYTES) = 0 then
+                    Log.Logger.LogDebug("{0} Refreshed authentication provider", prefix)
+                    authenticationDataProvider <- config.Authentication.GetAuthData(physicalAddress.Host)
+                let methodName = config.Authentication.GetAuthMethodName()
+                let authData = authenticationDataProvider.Authenticate({ Bytes = cmd.Challenge.auth_data })
+                let request = Commands.newAuthResponse methodName authData (int protocolVersion) clientVersion
+                Log.Logger.LogInformation("{0} Mutual auth {1}, requested {2}", prefix, methodName, cmd.Challenge.AuthMethodName)
+                async {
+                    let! result = this.Send(request)
+                    if not result then
+                        Log.Logger.LogWarning("{0} Failed to send request for mutual auth to broker", prefix)
+                        NotConnectedException "Failed to send request for mutual auth to broker"
+                        |> initialConnectionTsc.TrySetException
+                        |> ignore
+                } |> Async.StartImmediate
+            else
+                Log.Logger.LogWarning("{0} CommandAuthChallenge with empty challenge", prefix)
         | XCommandError cmd ->
             Log.Logger.LogError("{0} CommandError Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
             handleError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.Error
@@ -742,10 +773,15 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     member this.ClientCnxId with get() = clientCnxId
 
+    member internal this.NewConnectCommand() =
+        let authData = authenticationDataProvider.Authenticate(AuthData.INIT_AUTH_DATA)
+        let authMethodName = config.Authentication.GetAuthMethodName()
+        Commands.newConnect authMethodName authData clientVersion protocolVersion proxyToBroker
+    
     member this.Send payload =
         sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
         
-    member this.SendAndForget payload =
+    member this.SendAndForget (payload: Payload) =
         sendMb.Post(SocketMessageWithoutReply payload)
 
     member this.SendAndWaitForReply reqId payload =
@@ -772,6 +808,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     member this.AddTransactionMetaStoreHandler(transactionMetaStoreId: TransactionCoordinatorId,
                                                transactionMetaStoreOperations: TransactionMetaStoreOperations) =
         operationsMb.Post(AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations))
+        
     member this.Close() =
         connection.Dispose()
 

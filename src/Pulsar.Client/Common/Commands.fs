@@ -350,3 +350,9 @@ let newEndTxn (txn: TxnId) (requestId: RequestId) (msgIds: MessageId seq) (actio
     |> request.MessageIds.AddRange
     let command = BaseCommand(``type`` = CommandType.EndTxn, endTxn = request)
     command |> serializeSimpleCommand
+    
+let newAuthResponse (authMethod: string) (clientData: AuthData) (protocolVersion: int) (clientVersion: string) =
+    let response = pulsar.proto.AuthData(AuthMethodName = authMethod, auth_data = clientData.Bytes)
+    let request = CommandAuthResponse(ClientVersion = clientVersion, Response = response, ProtocolVersion = protocolVersion)
+    let command = BaseCommand(``type`` = CommandType.AuthResponse, authResponse = request)
+    command |> serializeSimpleCommand

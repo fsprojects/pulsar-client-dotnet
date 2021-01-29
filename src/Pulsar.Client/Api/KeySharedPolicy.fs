@@ -38,7 +38,7 @@ and KeySharedPolicySticky internal (ranges: Range[], allowOutOfOrderDelivery: bo
         if (isNull ranges) || (ranges.Length = 0) then
             raise <| ArgumentException("Ranges for KeyShared policy must not be empty.")
         for range1 in ranges do
-            if range1.Start < 0 || range1.End > KeySharedPolicy.DEFAULT_HASH_RANGE_SIZE then
+            if range1.Start < 0 || range1.End >= KeySharedPolicy.DEFAULT_HASH_RANGE_SIZE then
                 raise <| ArgumentException("Ranges must be [0, 65535] but provided range is " + range1.ToString())
             for range2 in ranges do
                 if range1 <> range2 && range1.Intersect(range2).IsSome then

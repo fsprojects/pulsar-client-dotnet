@@ -34,8 +34,8 @@ type ConsumerTxnOperations =
 [<AllowNullLiteral>]
 type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnId: TxnId) =
     
-    let producedTopics = ConcurrentDictionary<CompleteTopicName, unit>()
-    let ackedTopics = ConcurrentDictionary<CompleteTopicName, unit>()
+    let producedTopics = Dictionary<CompleteTopicName, Task<unit>>()
+    let ackedTopics = Dictionary<CompleteTopicName, Task<unit>>()
     let sendTasks = ResizeArray<Task<MessageId>>()
     let ackTasks = ResizeArray<Task<Unit>>()
     let cumulativeAckConsumers = Dictionary<ConsumerId, ConsumerTxnOperations>()
@@ -62,18 +62,24 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             failwith errorMsg
     
     member internal this.RegisterProducedTopic(topic: CompleteTopicName) =
-        if producedTopics.TryAdd(topic, ()) then
+        executeInsideLock (fun () ->
             // we need to issue the request to TC to register the produced topic
-            txnOperations.AddPublishPartitionToTxn(txnId, topic)
-        else
-            Task.FromResult()
+            match producedTopics.TryGetValue topic with
+            | true, task ->
+                task
+            | _ ->
+                txnOperations.AddPublishPartitionToTxn(txnId, topic)
+        ) "Can't RegisterProducedTopic while transaction is closing"
         
     member internal this.RegisterAckedTopic(topic: CompleteTopicName, subscription: SubscriptionName) =
-        if ackedTopics.TryAdd(topic, ()) then
+        executeInsideLock (fun () ->
             // we need to issue the request to TC to register the acked topic
-            txnOperations.AddSubscriptionToTxn(txnId, topic, subscription)
-        else
-            Task.FromResult()
+            match ackedTopics.TryGetValue topic with
+            | true, task ->
+                task
+            | _ ->
+                txnOperations.AddSubscriptionToTxn(txnId, topic, subscription)
+        ) "Can't RegisterProducedTopic while transaction is closing"
             
     member internal this.RegisterCumulativeAckConsumer(consumerId: ConsumerId, consumerOperations: ConsumerTxnOperations) =
         executeInsideLock (fun () ->
