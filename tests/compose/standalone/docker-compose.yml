@@ -6,7 +6,7 @@ version: '2.1'
 services:
   standalone:
     hostname: standalone
-    image: apachepulsar/pulsar:2.6.0
+    image: apachepulsar/pulsar:2.7.0
     ports:
       - "6650:6650"
     command: >
@@ -18,7 +18,7 @@ services:
       PULSAR_PREFIX_nettyMaxFrameSizeBytes: 5253120
 
   init:
-    image: apachepulsar/pulsar:2.6.0
+    image: apachepulsar/pulsar:2.7.0
     volumes:
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone.sh:/pulsar/bin/init-standalone.sh
