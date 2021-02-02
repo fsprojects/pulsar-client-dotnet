@@ -39,7 +39,7 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
     let sendTasks = ResizeArray<Task<MessageId>>()
     let ackTasks = ResizeArray<Task<Unit>>()
     let cumulativeAckConsumers = Dictionary<ConsumerId, ConsumerTxnOperations>()
-    let mutable allowOperations = false
+    let mutable allowOperations = true
     let lockObj = Object()
     
     let allOpComplete() =
@@ -68,7 +68,9 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             | true, task ->
                 task
             | _ ->
-                txnOperations.AddPublishPartitionToTxn(txnId, topic)
+                let t = txnOperations.AddPublishPartitionToTxn(txnId, topic)
+                producedTopics.Add(topic, t)
+                t
         ) "Can't RegisterProducedTopic while transaction is closing"
         
     member internal this.RegisterAckedTopic(topic: CompleteTopicName, subscription: SubscriptionName) =
@@ -78,7 +80,9 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             | true, task ->
                 task
             | _ ->
-                txnOperations.AddSubscriptionToTxn(txnId, topic, subscription)
+                let t = txnOperations.AddSubscriptionToTxn(txnId, topic, subscription)
+                ackedTopics.Add(topic, t)
+                t
         ) "Can't RegisterProducedTopic while transaction is closing"
             
     member internal this.RegisterCumulativeAckConsumer(consumerId: ConsumerId, consumerOperations: ConsumerTxnOperations) =

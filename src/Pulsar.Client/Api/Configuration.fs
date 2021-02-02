@@ -22,7 +22,6 @@ type PulsarClientConfiguration =
         ListenerName: string
         MaxLookupRedirects: int
         EnableTransaction: bool
-        Temp: bool
         InitialBackoffInterval: TimeSpan
         MaxBackoffInterval: TimeSpan
     }
@@ -41,7 +40,6 @@ type PulsarClientConfiguration =
             ListenerName = ""
             MaxLookupRedirects = 20
             EnableTransaction = false
-            Temp = false
             InitialBackoffInterval = TimeSpan.FromMilliseconds(100.0)
             MaxBackoffInterval = TimeSpan.FromSeconds(60.0)
         }
@@ -100,7 +98,7 @@ type ConsumerConfiguration<'T> =
             ReadCompacted = false
             NegativeAckRedeliveryDelay = TimeSpan.FromMinutes(1.0)
             ResetIncludeHead = false
-            DeadLetterProcessor = fun (_) -> DeadLetterProcessor<'T>.Disabled
+            DeadLetterProcessor = fun _ -> DeadLetterProcessor<'T>.Disabled
             DeadLetterPolicy = None
             KeySharedPolicy = None
             BatchReceivePolicy = BatchReceivePolicy()

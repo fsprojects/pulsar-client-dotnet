@@ -33,6 +33,7 @@
     <Compile Include="Stats.fs" />
     <Compile Include="ZeroQueueConsumer.fs" />
     <Compile Include="Failover.fs" />
+    <Compile Include="Transaction.fs" />
     <Compile Include="MessageCrypto.fs" />
     <None Include="paket.references" />
     <Compile Include="Main.fs" />

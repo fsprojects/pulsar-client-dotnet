@@ -90,7 +90,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
     member this.EnableTransaction enableTransaction =
         PulsarClientBuilder
             { config with
-                Temp = enableTransaction }
+                EnableTransaction = enableTransaction }
             
     member this.BuildAsync() =
         let client =

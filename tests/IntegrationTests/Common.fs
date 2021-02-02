@@ -6,6 +6,7 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Text
 open System.Threading.Tasks
 open Pulsar.Client.Common
+open Pulsar.Client.Transaction
 open Serilog
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.DependencyInjection
@@ -93,6 +94,12 @@ let getStatsClient() =
         .StatsInterval(TimeSpan.FromSeconds 1.0)
         .BuildAsync().Result
 
+let getTxnClient() =
+    PulsarClientBuilder()
+        .ServiceUrl(pulsarAddress)
+        .EnableTransaction(true)
+        .BuildAsync().Result
+
 let produceMessages (producer: IProducer<byte[]>) number producerName =
     task {
         for i in [1..number] do
@@ -115,6 +122,15 @@ let produceMessagesWithSameKey (producer: IProducer<byte[]>) number key producer
         for i in [1..number] do
             let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) )
             let! _ = producer.NewMessage(payload, key) |> producer.SendAsync
+            ()
+    }
+    
+let produceMessagesWithTxn (producer: IProducer<string>) (txn: Transaction) number producerName =
+    task {
+        for i in [1..number] do
+            let data = sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString())
+            let message = producer.NewMessage(data, txn = txn)
+            let! _ = producer.SendAsync(message)
             ()
     }
 
@@ -161,7 +177,7 @@ let getMessageNumber (msg: string) =
     let subString = msg.Substring(ind1+1, ind2 - ind1 - 2)
     int subString
 
-let consumeMessages (consumer: IConsumer<byte[]>) number consumerName =
+let consumeMessages (consumer: IConsumer<'T>) number consumerName =
     task {
         for i in [1..number] do
             let! message = consumer.ReceiveAsync()
@@ -191,6 +207,19 @@ let consumeMessagesWithProps (consumer: IConsumer<byte[]>) number consumerName =
                 && message.Properties.["prop1"] = i.ToString()
                 && message.Properties.["prop2"] = i.ToString()) |> not then
                 failwith <| sprintf "Incorrect properties %s" consumerName
+    }
+    
+let consumeMessagesWithTxn (consumer: IConsumer<byte[]>) (txn: Transaction) number consumerName =
+    task {
+        for i in [1..number] do
+            let! message = consumer.ReceiveAsync()
+            let received = Encoding.UTF8.GetString(message.Data)
+            Log.Debug("{0} received {1}", consumerName, received)
+            do! consumer.AcknowledgeAsync(message.MessageId, txn)
+            Log.Debug("{0} acknowledged {1}", consumerName, received)
+            let expected = "Message #" + string i
+            if received.StartsWith(expected) |> not then
+                failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
     }
 
 let consumeAndVerifyMessages (consumer: IConsumer<byte[]>) consumerName (expectedMessages : string[]) =

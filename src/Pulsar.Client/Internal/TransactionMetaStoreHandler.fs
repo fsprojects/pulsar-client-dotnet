@@ -72,10 +72,9 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
         ConnectionClosed = fun clientCnx -> this.Mb.Post(TransactionMetaStoreMessage.ConnectionClosed clientCnx)
     }
 
-    let startRequest (clientCnx: ClientCnx) msg command =
+    let startRequest (clientCnx: ClientCnx) requestId msg command =
         if operationsLeft > 0 then
             let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
-            let requestId = Generators.getNextRequestId()
             clientCnx.SendAndForget command
             pendingRequests.Add(requestId, tcs)
             timeoutQueue.Enqueue({ CreationTime = DateTime.Now; RequestId = requestId })
@@ -148,7 +147,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                         Log.Logger.LogDebug("{0} New transaction with timeout {1} reqId {2}", prefix, ttl, requestId)
                         let command = Commands.newTxn transactionCoordinatorId requestId ttl
                         task {
-                            let! result = startRequest clientCnx msg command
+                            let! result = startRequest clientCnx requestId msg command
                             return TxnRequest.GetNewTransaction result
                         } |> ch.Reply
                     | _ ->
@@ -156,18 +155,20 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                         Log.Logger.LogWarning("{0} is not ready for NewTransaction", prefix)
                     return! loop ()
                     
-                | TransactionMetaStoreMessage.NewTransactionResponse (reqId, txnId) ->
+                | TransactionMetaStoreMessage.NewTransactionResponse (reqId, txnIdResult) ->
                     
                     match pendingRequests.TryGetValue reqId with
                     | true, op ->
-                        Log.Logger.LogDebug("{0} NewTransactionResponse reqId={1} txnId={2}", prefix, reqId, txnId)
                         pendingRequests.Remove(reqId) |> ignore
-                        match txnId with
-                        | Ok txnId -> op.SetResult(NewTransaction txnId)
-                        | Error ex -> op.SetException(ex)
+                        match txnIdResult with
+                        | Ok txnId ->
+                            Log.Logger.LogDebug("{0} NewTransactionResponse reqId={1} txnId={2}", prefix, reqId, txnId)
+                            op.SetResult(NewTransaction txnId)
+                        | Error ex ->
+                            Log.Logger.LogError(ex, "{0} NewTransactionResponse reqId={1}", prefix, reqId)
+                            op.SetException(ex)
                     | _ ->
-                        Log.Logger.LogWarning("{0} Got new txn response for timeout reqId={1} txnId={2}",
-                                                prefix, reqId, txnId)
+                        Log.Logger.LogWarning("{0} Got new txn response for timeout reqId={1}", prefix, reqId)
                     return! loop ()
                     
                 | TransactionMetaStoreMessage.AddPartitionToTxn (txnId, partition, ch) ->
@@ -180,7 +181,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                                             prefix, txnId, partition, requestId)
                         let command = Commands.newAddPartitionToTxn txnId requestId partition
                         task {
-                            let! result = startRequest clientCnx msg command
+                            let! result = startRequest clientCnx requestId msg command
                             return TxnRequest.GetEmpty result
                         } |> ch.Reply
                     | _ ->
@@ -212,7 +213,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                                             prefix, txnId, topic, subscription, requestId)
                         let command = Commands.newAddSubscriptionToTxn txnId requestId topic subscription
                         task {
-                            let! result = startRequest clientCnx msg command
+                            let! result = startRequest clientCnx requestId msg command
                             return TxnRequest.GetEmpty result
                         } |> ch.Reply
                     | _ ->
@@ -244,7 +245,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                                             prefix, txnId, txnAction, requestId)
                         let command = Commands.newEndTxn txnId requestId msgIds txnAction
                         task {
-                            let! result = startRequest clientCnx msg command
+                            let! result = startRequest clientCnx requestId msg command
                             return TxnRequest.GetEmpty result
                         } |> ch.Reply
                     | _ ->
@@ -274,7 +275,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                 | Close ->
                     
                     timeoutTimer.Stop()
-                    for KeyValue(k, v) in pendingRequests do
+                    for KeyValue(_, v) in pendingRequests do
                         v.SetException(AlreadyClosedException "{0} is closed")
                     pendingRequests.Clear()
                     timeoutQueue.Clear()

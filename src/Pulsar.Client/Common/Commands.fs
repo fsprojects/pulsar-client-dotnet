@@ -328,13 +328,13 @@ let newTxn (tcId: TransactionCoordinatorId) (requestId: RequestId) (ttl: TimeSpa
 let newAddPartitionToTxn (txn: TxnId) (requestId: RequestId) (partition: CompleteTopicName) =
     let request = CommandAddPartitionToTxn(TxnidLeastBits = txn.LeastSigBits, TxnidMostBits = txn.MostSigBits, RequestId = %requestId)
     request.Partitions.Add(%partition)
-    let command = BaseCommand(``type`` = CommandType.NewTxn, addPartitionToTxn = request)
+    let command = BaseCommand(``type`` = CommandType.AddPartitionToTxn, addPartitionToTxn = request)
     command |> serializeSimpleCommand
     
 let newAddSubscriptionToTxn (txn: TxnId) (requestId: RequestId) (topic: CompleteTopicName) (subscription: SubscriptionName) =
     let request = CommandAddSubscriptionToTxn(TxnidLeastBits = txn.LeastSigBits, TxnidMostBits = txn.MostSigBits, RequestId = %requestId)
     request.Subscriptions.Add(Subscription(Topic = %topic, subscription = %subscription))
-    let command = BaseCommand(``type`` = CommandType.NewTxn, addSubscriptionToTxn = request)
+    let command = BaseCommand(``type`` = CommandType.AddSubscriptionToTxn, addSubscriptionToTxn = request)
     command |> serializeSimpleCommand
     
 let newEndTxn (txn: TxnId) (requestId: RequestId) (msgIds: MessageId seq) (action: TxnAction)  =

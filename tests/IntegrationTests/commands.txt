@@ -11,6 +11,10 @@ bin/pulsar-admin topics create-partitioned-topic persistent://public/default/par
 bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned6 --partitions 2
 bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned-dl-test --partitions 2
 bin/pulsar-admin topics create-partitioned-topic persistent://public/deduplication/partitioned --partitions 3
+bin/pulsar initialize-transaction-coordinator-metadata -cs pu-pulsar-zookeeper:2181 -c mycluster --initial-num-transaction-coordinators 2
+
+// to init helm chart
+helm install pu .
 
 // for TLS testing
 kubectl cp certs\ca.cert.pem pulsar/pulsar-broker-786d5756bf-tx5wd:/pulsar/conf/ca.cert.pem
@@ -19,6 +23,6 @@ kubectl cp certs\ca.cert.pem pulsar/pulsar-broker-786d5756bf-tx5wd:/pulsar/conf/
 minikube start --profile=pulsar --vm-driver=hyperv --hyperv-virtual-switch=kubevs --disk-size=45gb --cpus 4 --memory 8192
 
 // for time sync
- minikube ssh -- sudo date -u $((get-date).AddHours(-3).AddSeconds(7).ToString("MMddHHmmyyyy.ss"))
+minikube ssh -- sudo date -u $((get-date).AddHours(-3).AddSeconds(7).ToString("MMddHHmmyyyy.ss"))
  
  
