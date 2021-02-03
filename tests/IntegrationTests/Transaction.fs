@@ -21,40 +21,40 @@ let tests =
 
     testList "Transaction" [
         
-        ptestAsync "Send and receive 10 messages sequentially works fine with txn" {
+        testAsync "Send and receive 10 messages sequentially works fine with txn" {
 
             Log.Debug("Started Send and receive 10 messages concurrently works fine with txn")
             let client = getTxnClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
-            
-            let! txn =
-                client.NewTransaction().BuildAsync()
-                |> Async.AwaitTask
-
-            let! producer =
-                client.NewProducer(Schema.STRING())
-                    .Topic(topicName)
-                    .ProducerName("txnProduce")
-                    .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
-                    
+            let name = "txnProduce"
 
             let! consumer =
                 client.NewConsumer(Schema.STRING())
                     .Topic(topicName)
-                    .ConsumerName("txnProduce")
+                    .ConsumerName(name)
                     .SubscriptionName("test-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
-
-            Log.Debug("Before produce")
-            do! produceMessagesWithTxn producer txn numberOfMessages "txnProduce" |> Async.AwaitTask
-                
-            Log.Debug("Before commit")
-            do! txn.Commit() |> Async.AwaitTask
-            Log.Debug("After commit")
             
-            do! consumeMessages consumer numberOfMessages "txnProduce" |> Async.AwaitTask
+            
+            let! producer =
+                client.NewProducer(Schema.STRING())
+                    .Topic(topicName)
+                    .ProducerName(name)
+                    .EnableBatching(false)
+                    .SendTimeout(TimeSpan.Zero)
+                    .CreateAsync() |> Async.AwaitTask
+           
+            
+            let! txn =
+                client.NewTransaction().BuildAsync()
+                |> Async.AwaitTask
+          
+            do! produceMessagesWithTxn producer txn numberOfMessages name |> Async.AwaitTask
+            
+            do! txn.Commit() |> Async.AwaitTask
+            
+            do! consumeMessages consumer numberOfMessages name |> Async.AwaitTask
 
             Log.Debug("Finished Send and receive 10 messages sequentially works fine with txn")
         }

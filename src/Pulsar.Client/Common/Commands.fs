@@ -122,6 +122,10 @@ let newSend (producerId : ProducerId) (sequenceId : SequenceId) (highestSequence
         request.NumMessages <- numMessages
     if highestSequenceId.IsSome then
         request.HighestSequenceId <- uint64 %highestSequenceId.Value
+    if msgMetadata.ShouldSerializeTxnidLeastBits() then
+        request.TxnidLeastBits <- msgMetadata.TxnidLeastBits
+    if msgMetadata.ShouldSerializeTxnidMostBits() then
+        request.TxnidMostBits <- msgMetadata.TxnidMostBits
     let command = BaseCommand(``type`` = CommandType.Send, Send = request)
     serializePayloadCommand command msgMetadata payload
 
