@@ -17,4 +17,4 @@ bin/pulsar-admin topics create-partitioned-topic persistent://public/default/par
 bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned6 --partitions 2
 bin/pulsar-admin topics create-partitioned-topic persistent://public/default/partitioned-dl-test --partitions 2
 bin/pulsar-admin topics create-partitioned-topic persistent://public/deduplication/partitioned --partitions 3
-bin/pulsar initialize-transaction-coordinator-metadata -cs 127.0.0.1:2181 -c standalone --initial-num-transaction-coordinators 2
+bin/pulsar initialize-transaction-coordinator-metadata -cs standalone:2181 -c standalone --initial-num-transaction-coordinators 2
