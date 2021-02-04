@@ -16,6 +16,7 @@ services:
     environment:
       PULSAR_PREFIX_acknowledgmentAtBatchIndexLevelEnabled: "true"
       PULSAR_PREFIX_nettyMaxFrameSizeBytes: 5253120
+      PULSAR_PREFIX_transactionCoordinatorEnabled: "true"
 
   init:
     image: apachepulsar/pulsar:2.7.0

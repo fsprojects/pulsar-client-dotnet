@@ -122,6 +122,8 @@ let newSend (producerId : ProducerId) (sequenceId : SequenceId) (highestSequence
         request.NumMessages <- numMessages
     if highestSequenceId.IsSome then
         request.HighestSequenceId <- uint64 %highestSequenceId.Value
+    if msgMetadata.TotalChunkMsgSize > 0 then
+        request.IsChunk <- true
     if msgMetadata.ShouldSerializeTxnidLeastBits() then
         request.TxnidLeastBits <- msgMetadata.TxnidLeastBits
     if msgMetadata.ShouldSerializeTxnidMostBits() then
