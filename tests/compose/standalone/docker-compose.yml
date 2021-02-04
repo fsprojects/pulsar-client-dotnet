@@ -24,7 +24,7 @@ services:
     volumes:
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone.sh:/pulsar/bin/init-standalone.sh
-    command: bin/wait-for-it.sh standalone:8080 -t 120 -- bin/init-standalone.sh
+    command: bin/wait-for-it.sh standalone:8080 -t 120 -- bin/wait-for-it.sh standalone:2181 -t 120 -- bin/init-standalone.sh
     environment:
       webServiceUrl: http://standalone:8080/
 
