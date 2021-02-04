@@ -346,6 +346,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             Ok (XCommandActiveConsumerChange command.ActiveConsumerChange)
         | BaseCommand.Type.GetSchemaResponse ->
             Ok (XCommandGetSchemaResponse command.getSchemaResponse)
+        | BaseCommand.Type.AckResponse ->
+            Ok (XCommandAckResponse command.ackResponse)
         | BaseCommand.Type.NewTxnResponse ->
             Ok (XCommandNewTxnResponse command.newTxnResponse)
         | BaseCommand.Type.AddPartitionToTxnResponse ->

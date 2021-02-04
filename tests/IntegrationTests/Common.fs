@@ -125,10 +125,10 @@ let produceMessagesWithSameKey (producer: IProducer<byte[]>) number key producer
             ()
     }
     
-let produceMessagesWithTxn (producer: IProducer<string>) (txn: Transaction) number producerName =
+let produceMessagesWithTxn (producer: IProducer<byte[]>) (txn: Transaction) number producerName =
     task {
         for i in [1..number] do
-            let data = sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString())
+            let data = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()))
             let message = producer.NewMessage(data, txn = txn)
             let! _ = producer.SendAsync(message)
             ()
@@ -177,7 +177,7 @@ let getMessageNumber (msg: string) =
     let subString = msg.Substring(ind1+1, ind2 - ind1 - 2)
     int subString
 
-let consumeMessages (consumer: IConsumer<'T>) number consumerName =
+let consumeMessages (consumer: IConsumer<byte[]>) number consumerName =
     task {
         for i in [1..number] do
             let! message = consumer.ReceiveAsync()

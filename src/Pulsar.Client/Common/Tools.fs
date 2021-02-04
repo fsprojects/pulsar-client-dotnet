@@ -127,3 +127,9 @@ let tryPeek (queue: Queue<'T>) =
         queue.Peek() |> Some
     else
         None
+        
+type Result<'T, 'TError> with
+    member this.ToStr() =
+        match this with
+        | Ok smth -> $"Ok {smth}"
+        | Error err -> $"Error {err}"

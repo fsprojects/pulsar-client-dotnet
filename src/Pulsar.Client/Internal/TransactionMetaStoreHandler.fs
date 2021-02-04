@@ -6,6 +6,7 @@ open System.Threading.Tasks
 open System.Timers
 open Pulsar.Client.Api
 open Pulsar.Client.Common
+open Pulsar.Client.Common.Tools
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Transaction
@@ -168,7 +169,8 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                             Log.Logger.LogError(ex, "{0} NewTransactionResponse reqId={1}", prefix, reqId)
                             op.SetException(ex)
                     | _ ->
-                        Log.Logger.LogWarning("{0} Got new txn response for timeout reqId={1}", prefix, reqId)
+                        Log.Logger.LogWarning("{0} Got new txn response for timeout reqId={1}, result={2}",
+                                              prefix, reqId, txnIdResult.ToStr())
                     return! loop ()
                     
                 | TransactionMetaStoreMessage.AddPartitionToTxn (txnId, partition, ch) ->
@@ -193,14 +195,17 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     
                     match pendingRequests.TryGetValue reqId with
                     | true, op ->
-                        Log.Logger.LogDebug("{0} AddPartitionToTxnResponse reqId={1}", prefix, reqId)
                         pendingRequests.Remove(reqId) |> ignore
                         match result with
-                        | Ok () -> op.SetResult(Empty)
-                        | Error ex -> op.SetException(ex)
+                        | Ok () ->
+                            Log.Logger.LogDebug("{0} AddPartitionToTxnResponse reqId={1}", prefix, reqId)
+                            op.SetResult(Empty)
+                        | Error ex ->
+                            Log.Logger.LogError(ex, "{0} AddPartitionToTxnResponse reqId={1}", prefix, reqId)
+                            op.SetException(ex)
                     | _ ->
-                        Log.Logger.LogWarning("{0} Got addPartitionToTxn response for timeout reqId={1}",
-                                                prefix, reqId)
+                        Log.Logger.LogWarning("{0} Got addPartitionToTxn response for timeout reqId={1} result={2}",
+                                                prefix, reqId, result.ToStr())
                     return! loop ()
                     
                 | TransactionMetaStoreMessage.AddSubscriptionToTxn (txnId, topic, subscription, ch) ->
@@ -225,14 +230,17 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     
                     match pendingRequests.TryGetValue reqId with
                     | true, op ->
-                        Log.Logger.LogDebug("{0} AddSubscriptionToTxnResponse reqId={1}", prefix, reqId)
                         pendingRequests.Remove(reqId) |> ignore
                         match result with
-                        | Ok () -> op.SetResult(Empty)
-                        | Error ex -> op.SetException(ex)
+                        | Ok () ->
+                            Log.Logger.LogDebug("{0} AddSubscriptionToTxnResponse reqId={1}", prefix, reqId)
+                            op.SetResult(Empty)
+                        | Error ex ->
+                            Log.Logger.LogError(ex, "{0} AddSubscriptionToTxnResponse reqId={1}", prefix, reqId)
+                            op.SetException(ex)
                     | _ ->
-                        Log.Logger.LogWarning("{0} Got addSubscriptionToTxn response for timeout reqId={1}",
-                                                prefix, reqId)
+                        Log.Logger.LogWarning("{0} Got addSubscriptionToTxn response for timeout reqId={1} result={2}",
+                                                prefix, reqId, result.ToStr())
                     return! loop ()
                 
                 | TransactionMetaStoreMessage.EndTxn (txnId, msgIds, txnAction, ch) ->
@@ -257,14 +265,17 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     
                     match pendingRequests.TryGetValue reqId with
                     | true, op ->
-                        Log.Logger.LogDebug("{0} EndTxnResponse reqId={1}", prefix, reqId)
                         pendingRequests.Remove(reqId) |> ignore
                         match result with
-                        | Ok () -> op.SetResult(Empty)
-                        | Error ex -> op.SetException(ex)
+                        | Ok () ->
+                            Log.Logger.LogDebug("{0} EndTxnResponse reqId={1}", prefix, reqId)
+                            op.SetResult(Empty)
+                        | Error ex ->
+                            Log.Logger.LogError(ex, "{0} EndTxnResponse reqId={1}", prefix, reqId)
+                            op.SetException(ex)
                     | _ ->
-                        Log.Logger.LogWarning("{0} Got end transaction response for timeout reqId={1}",
-                                                prefix, reqId)
+                        Log.Logger.LogWarning("{0} Got end transaction response for timeout reqId={1} result={2}",
+                                                prefix, reqId, result.ToStr())
                     return! loop ()
                     
                 | TimeoutTick ->
