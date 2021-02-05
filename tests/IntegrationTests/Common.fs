@@ -102,14 +102,14 @@ let getTxnClient() =
 
 let produceMessages (producer: IProducer<byte[]>) number producerName =
     task {
-        for i in [1..number] do
+        for i in 1..number do
             let! _ = producer.SendAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
             ()
     }
 
 let produceMessagesWithProps (producer: IProducer<byte[]>) number producerName =
     task {
-        for i in [1..number] do
+        for i in 1..number do
             let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) )
             let key = i.ToString()
             let props = readOnlyDict [("prop1",key);("prop2",key)]
@@ -119,7 +119,7 @@ let produceMessagesWithProps (producer: IProducer<byte[]>) number producerName =
 
 let produceMessagesWithSameKey (producer: IProducer<byte[]>) number key producerName =
     task {
-        for i in [1..number] do
+        for i in 1..number do
             let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) )
             let! _ = producer.NewMessage(payload, key) |> producer.SendAsync
             ()
@@ -127,7 +127,7 @@ let produceMessagesWithSameKey (producer: IProducer<byte[]>) number key producer
     
 let produceMessagesWithTxn (producer: IProducer<byte[]>) (txn: Transaction) number producerName =
     task {
-        for i in [1..number] do
+        for i in 1..number do
             let data = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()))
             let message = producer.NewMessage(data, txn = txn)
             let! _ = producer.SendAsync(message)
@@ -136,7 +136,7 @@ let produceMessagesWithTxn (producer: IProducer<byte[]>) (txn: Transaction) numb
 
 let generateMessages number producerName =
     [|
-        for i in [1..number] do
+        for i in 1..number do
             yield sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString())
     |]
 
@@ -149,14 +149,14 @@ let producePredefinedMessages (producer: IProducer<byte[]>) (messages: string[])
 
 let fastProduceMessages (producer: IProducer<byte[]>) number producerName =
     task {
-        for i in [1..number] do
+        for i in 1..number do
             let! _ = producer.SendAndForgetAsync(Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) ))
             ()
     }
 
 let fastProduceMessagesWithSameKey (producer: IProducer<byte[]>) number key producerName =
     task {
-        for i in [1..number] do
+        for i in 1..number do
             let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producerName (DateTime.Now.ToLongTimeString()) )
             let! _ = producer.NewMessage(payload, key) |> producer.SendAndForgetAsync
             ()
@@ -179,7 +179,7 @@ let getMessageNumber (msg: string) =
 
 let consumeMessages (consumer: IConsumer<byte[]>) number consumerName =
     task {
-        for i in [1..number] do
+        for i in 1..number do
             let! message = consumer.ReceiveAsync()
             let received = Encoding.UTF8.GetString(message.Data)
             Log.Debug("{0} received {1}", consumerName, received)
@@ -192,7 +192,7 @@ let consumeMessages (consumer: IConsumer<byte[]>) number consumerName =
 
 let consumeMessagesWithProps (consumer: IConsumer<byte[]>) number consumerName =
     task {
-        for i in [1..number] do
+        for i in 1..number do
             let! message = consumer.ReceiveAsync()
             let received = Encoding.UTF8.GetString(message.Data)
             Log.Debug("{0} received {1}", consumerName, received)
@@ -211,7 +211,7 @@ let consumeMessagesWithProps (consumer: IConsumer<byte[]>) number consumerName =
     
 let consumeMessagesWithTxn (consumer: IConsumer<byte[]>) (txn: Transaction) number consumerName =
     task {
-        for i in [1..number] do
+        for i in 1..number do
             let! message = consumer.ReceiveAsync()
             let received = Encoding.UTF8.GetString(message.Data)
             Log.Debug("{0} received {1}", consumerName, received)

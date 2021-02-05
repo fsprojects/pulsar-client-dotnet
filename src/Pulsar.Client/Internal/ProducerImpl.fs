@@ -834,11 +834,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.SendAndForgetAsync (message: MessageBuilder<'T>) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             task {
-                let! task = this.SendMessage message
-                if task.IsFaulted then
-                    reraize task.Exception.InnerException
+                let! sendTask = this.SendMessage message
+                if sendTask.IsFaulted then
+                    let (Flatten ex) = sendTask.Exception in reraize ex
                 else
-                    return ()
+                    message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
             }
 
         member this.SendAsync (message: 'T) =
