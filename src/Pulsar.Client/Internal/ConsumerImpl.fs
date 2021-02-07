@@ -821,22 +821,25 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | ConsumerMessage.Receive (cancellationToken, ch) ->
 
                     Log.Logger.LogDebug("{0} Receive", prefix)
-                    if incomingMessages.Count > 0 then
-                        replyWithMessage ch <| dequeueMessage()
+                    if cancellationToken.IsCancellationRequested then
+                        TaskCanceledException() :> exn |> Error |> ch.Reply
                     else
-                        let tokenRegistration =
-                            if not cancellationToken.IsCancellationRequested then
-                                let rec cancellationTokenRegistration: CancellationTokenRegistration =
-                                    cancellationToken.Register((fun () ->
-                                        Log.Logger.LogDebug("{0} receive cancelled", prefix)
-                                        ch.Reply (TaskCanceledException() :> exn |> Error)
-                                        this.Mb.Post(RemoveWaiter(Some cancellationTokenRegistration, ch))
-                                    ), false)
-                                Some cancellationTokenRegistration
-                            else
-                                None
-                        waiters.AddLast((tokenRegistration, ch)) |> ignore
-                        Log.Logger.LogDebug("{0} Receive waiting", prefix)
+                        if incomingMessages.Count > 0 then
+                            replyWithMessage ch <| dequeueMessage()
+                        else
+                            let tokenRegistration =
+                                if cancellationToken.CanBeCanceled then
+                                    let rec cancellationTokenRegistration: CancellationTokenRegistration =
+                                        cancellationToken.Register((fun () ->
+                                            Log.Logger.LogDebug("{0} receive cancelled", prefix)
+                                            ch.Reply (TaskCanceledException() :> exn |> Error)
+                                            this.Mb.Post(RemoveWaiter(Some cancellationTokenRegistration, ch))
+                                        ), false)
+                                    Some cancellationTokenRegistration
+                                else
+                                    None
+                            waiters.AddLast((tokenRegistration, ch)) |> ignore
+                            Log.Logger.LogDebug("{0} Receive waiting", prefix)
                     return! loop ()
                 
                 | ConsumerMessage.Acknowledge (messageId, ackType, txnOption, chOption) ->
@@ -849,31 +852,34 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | ConsumerMessage.BatchReceive (cancellationToken, ch) ->
 
                     Log.Logger.LogDebug("{0} BatchReceive", prefix)
-                    if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
-                        replyWithBatch ch
+                    if cancellationToken.IsCancellationRequested then
+                        TaskCanceledException() :> exn |> Error |> ch.Reply
                     else
-                        let batchCts = new CancellationTokenSource()
-                        let registration =
-                            if not cancellationToken.IsCancellationRequested then
-                                let rec cancellationTokenRegistration =
-                                    cancellationToken.Register((fun () ->
-                                        Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
-                                        batchCts.Cancel()
-                                        ch.Reply (TaskCanceledException() :> exn |> Error)
-                                        this.Mb.Post(RemoveBatchWaiter(batchCts, Some cancellationTokenRegistration, ch))
-                                    ), false)
-                                Some cancellationTokenRegistration
-                            else
-                                None
-                        batchWaiters.AddLast((batchCts, registration, ch)) |> ignore
-                        asyncDelay
-                            consumerConfig.BatchReceivePolicy.Timeout
-                            (fun () ->
-                                if not batchCts.IsCancellationRequested then
-                                    this.Mb.Post(SendBatchByTimeout)
+                        if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
+                            replyWithBatch ch
+                        else
+                            let batchCts = new CancellationTokenSource()
+                            let registration =
+                                if cancellationToken.CanBeCanceled then
+                                    let rec cancellationTokenRegistration =
+                                        cancellationToken.Register((fun () ->
+                                            Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
+                                            batchCts.Cancel()
+                                            ch.Reply (TaskCanceledException() :> exn |> Error)
+                                            this.Mb.Post(RemoveBatchWaiter(batchCts, Some cancellationTokenRegistration, ch))
+                                        ), false)
+                                    Some cancellationTokenRegistration
                                 else
-                                    batchCts.Dispose())
-                        Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
+                                    None
+                            batchWaiters.AddLast((batchCts, registration, ch)) |> ignore
+                            asyncDelay
+                                consumerConfig.BatchReceivePolicy.Timeout
+                                (fun () ->
+                                    if not batchCts.IsCancellationRequested then
+                                        this.Mb.Post(SendBatchByTimeout)
+                                    else
+                                        batchCts.Dispose())
+                            Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
                     return! loop ()
                     
                 | ConsumerMessage.SendBatchByTimeout ->
