@@ -4,10 +4,14 @@ open System.Collections.Generic
 open System.Threading
 open Pulsar.Client.Api
 
+type UserCancellation = CancellationTokenRegistration option
+type BatchCancellation = CancellationTokenSource
+
 type Waiter<'T> =
-    CancellationTokenRegistration option * AsyncReplyChannel<ResultOrException<Message<'T>>> 
+    UserCancellation * AsyncReplyChannel<ResultOrException<Message<'T>>>
+    
 type BatchWaiter<'T> =
-    CancellationTokenSource * CancellationTokenRegistration option * AsyncReplyChannel<ResultOrException<Messages<'T>>>
+    BatchCancellation * UserCancellation * AsyncReplyChannel<ResultOrException<Messages<'T>>>
 
 let hasEnoughMessagesForBatchReceive (batchReceivePolicy: BatchReceivePolicy) incomingMessagesCount incomingMessagesSize =
     if (batchReceivePolicy.MaxNumMessages <= 0 && batchReceivePolicy.MaxNumBytes <= 0L) then

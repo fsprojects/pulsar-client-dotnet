@@ -534,13 +534,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         else
                             let tokenRegistration =
                                 if cancellationToken.CanBeCanceled then
-                                    let rec cancellationTokenRegistration: CancellationTokenRegistration =
+                                    let rec cancellationTokenRegistration =
                                         cancellationToken.Register((fun () ->
                                             Log.Logger.LogDebug("{0} receive cancelled", prefix)
-                                            ch.Reply (TaskCanceledException() :> exn |> Error)
-                                            this.Mb.Post(RemoveWaiter(Some cancellationTokenRegistration, ch))
-                                        ), false)
-                                    Some cancellationTokenRegistration
+                                            TaskCanceledException() :> exn |> Error |> ch.Reply
+                                            this.Mb.Post(RemoveWaiter(cancellationTokenRegistration, ch))
+                                        ), false) |> Some
+                                    cancellationTokenRegistration
                                 else
                                     None
                             waiters.AddLast((tokenRegistration, ch)) |> ignore
@@ -563,10 +563,11 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                         cancellationToken.Register((fun () ->
                                             Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
                                             batchCts.Cancel()
-                                            ch.Reply (TaskCanceledException() :> exn |> Error)
-                                            this.Mb.Post(RemoveBatchWaiter(batchCts, Some cancellationTokenRegistration, ch))
+                                            TaskCanceledException() :> exn |> Error |> ch.Reply
+                                            this.Mb.Post(RemoveBatchWaiter(batchCts, cancellationTokenRegistration, ch))
                                         ), false)
-                                    Some cancellationTokenRegistration
+                                        |> Some
+                                    cancellationTokenRegistration
                                 else
                                     None
                             batchWaiters.AddLast((batchCts, registration, ch)) |> ignore
