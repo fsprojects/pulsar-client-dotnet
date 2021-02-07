@@ -5,9 +5,9 @@ open System.Threading
 open Pulsar.Client.Api
 
 type Waiter<'T> =
-    CancellationTokenRegistration * AsyncReplyChannel<ResultOrException<Message<'T>>> 
+    CancellationTokenRegistration option * AsyncReplyChannel<ResultOrException<Message<'T>>> 
 type BatchWaiter<'T> =
-    CancellationTokenSource * CancellationTokenRegistration * AsyncReplyChannel<ResultOrException<Messages<'T>>>
+    CancellationTokenSource * CancellationTokenRegistration option * AsyncReplyChannel<ResultOrException<Messages<'T>>>
 
 let hasEnoughMessagesForBatchReceive (batchReceivePolicy: BatchReceivePolicy) incomingMessagesCount incomingMessagesSize =
     if (batchReceivePolicy.MaxNumMessages <= 0 && batchReceivePolicy.MaxNumBytes <= 0L) then
@@ -17,13 +17,15 @@ let hasEnoughMessagesForBatchReceive (batchReceivePolicy: BatchReceivePolicy) in
             || (batchReceivePolicy.MaxNumBytes > 0L && incomingMessagesSize >= batchReceivePolicy.MaxNumBytes)
             
 let dequeueWaiter (waiters: LinkedList<Waiter<'T>>) =
-    let (ctr, ch) = waiters.First.Value
+    let (ctrOpt, ch) = waiters.First.Value
     waiters.RemoveFirst()
-    ctr.Dispose()
+    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
     ch
         
 let dequeueBatchWaiter (batchWaiters: LinkedList<BatchWaiter<'T>>) =
-    let (cts, ctr, ch) = batchWaiters.First.Value
+    let (cts, ctrOpt, ch) = batchWaiters.First.Value
     batchWaiters.RemoveFirst()
-    ctr.Dispose()
-    (cts, ch)
+    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+    cts.Cancel()
+    cts.Dispose()
+    ch

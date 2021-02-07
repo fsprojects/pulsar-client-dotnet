@@ -456,11 +456,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         stats.UpdateNumMsgsReceived(msg.Data.Length)
         trackMessage msg.MessageId
 
-    let replyWithBatch (cts: CancellationTokenSource option) (ch: AsyncReplyChannel<ResultOrException<Messages<'T>>>) =
-        cts |> Option.iter (fun cts ->
-            cts.Cancel()
-            cts.Dispose()
-        )
+    let replyWithBatch (ch: AsyncReplyChannel<ResultOrException<Messages<'T>>>) =
         let messages = Messages(consumerConfig.BatchReceivePolicy.MaxNumMessages, consumerConfig.BatchReceivePolicy.MaxNumBytes)
         let mutable shouldContinue = true
         while shouldContinue && incomingMessages.Count > 0 do
@@ -514,10 +510,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             let waitingChannel = waiters |> dequeueWaiter
             waitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed") :> exn))
         while batchWaiters.Count > 0 do
-            let cts, batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
+            let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
             batchWaitingChannel.Reply(Error (AlreadyClosedException("Consumer is already closed") :> exn))
-            cts.Cancel()
-            cts.Dispose()
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let decryptMessage (rawMessage:RawMessage) =
@@ -636,8 +630,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             else
                 enqueueMessage message
                 if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                    let cts, ch = batchWaiters |> dequeueBatchWaiter
-                    replyWithBatch (Some cts) ch
+                    let ch = batchWaiters |> dequeueBatchWaiter
+                    replyWithBatch ch
             
     let handleMessagePayload (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel
                                 isMessageUndecryptable isChunkedMessage schemaDecodeFunction =
@@ -667,8 +661,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let waitingChannel = waiters |> dequeueWaiter
                     replyWithMessage waitingChannel <| dequeueMessage()
                 elif hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                    let cts, ch = batchWaiters |> dequeueBatchWaiter
-                    replyWithBatch (Some cts) ch
+                    let ch = batchWaiters |> dequeueBatchWaiter
+                    replyWithBatch ch
             else
                 Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
     
@@ -830,13 +824,18 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     if incomingMessages.Count > 0 then
                         replyWithMessage ch <| dequeueMessage()
                     else
-                        let rec cancellationTokenRegistration =
-                            cancellationToken.Register((fun () ->
-                                Log.Logger.LogDebug("{0} receive cancelled", prefix)
-                                ch.Reply (TaskCanceledException() :> exn |> Error)
-                                this.Mb.Post(RemoveWaiter(cancellationTokenRegistration, ch))
-                            ), false)
-                        waiters.AddLast((cancellationTokenRegistration, ch)) |> ignore
+                        let tokenRegistration =
+                            if not cancellationToken.IsCancellationRequested then
+                                let rec cancellationTokenRegistration: CancellationTokenRegistration =
+                                    cancellationToken.Register((fun () ->
+                                        Log.Logger.LogDebug("{0} receive cancelled", prefix)
+                                        ch.Reply (TaskCanceledException() :> exn |> Error)
+                                        this.Mb.Post(RemoveWaiter(Some cancellationTokenRegistration, ch))
+                                    ), false)
+                                Some cancellationTokenRegistration
+                            else
+                                None
+                        waiters.AddLast((tokenRegistration, ch)) |> ignore
                         Log.Logger.LogDebug("{0} Receive waiting", prefix)
                     return! loop ()
                 
@@ -851,17 +850,22 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                     Log.Logger.LogDebug("{0} BatchReceive", prefix)
                     if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
-                        replyWithBatch None ch
+                        replyWithBatch ch
                     else
                         let batchCts = new CancellationTokenSource()
-                        let rec cancellationTokenRegistration =
-                            cancellationToken.Register((fun () ->
-                                Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
-                                batchCts.Cancel()
-                                ch.Reply (TaskCanceledException() :> exn |> Error)
-                                this.Mb.Post(RemoveBatchWaiter(batchCts, cancellationTokenRegistration, ch))
-                            ), false)
-                        batchWaiters.AddLast((batchCts, cancellationTokenRegistration, ch)) |> ignore
+                        let registration =
+                            if not cancellationToken.IsCancellationRequested then
+                                let rec cancellationTokenRegistration =
+                                    cancellationToken.Register((fun () ->
+                                        Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
+                                        batchCts.Cancel()
+                                        ch.Reply (TaskCanceledException() :> exn |> Error)
+                                        this.Mb.Post(RemoveBatchWaiter(batchCts, Some cancellationTokenRegistration, ch))
+                                    ), false)
+                                Some cancellationTokenRegistration
+                            else
+                                None
+                        batchWaiters.AddLast((batchCts, registration, ch)) |> ignore
                         asyncDelay
                             consumerConfig.BatchReceivePolicy.Timeout
                             (fun () ->
@@ -876,8 +880,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     
                     Log.Logger.LogDebug("{0} SendBatchByTimeout", prefix)
                     if batchWaiters.Count > 0 then
-                        let cts, ch = batchWaiters |> dequeueBatchWaiter
-                        replyWithBatch (Some cts) ch
+                        let ch = batchWaiters |> dequeueBatchWaiter
+                        replyWithBatch ch
                     return! loop ()
 
                     
@@ -892,15 +896,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | ConsumerMessage.RemoveWaiter waiter ->
                     
                     waiters.Remove(waiter) |> ignore
-                    let (ctr, _) = waiter
-                    ctr.Dispose()
+                    let (ctrOpt, _) = waiter
+                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
                     return! loop ()
                     
                 | ConsumerMessage.RemoveBatchWaiter batchWaiter ->
                     
                     batchWaiters.Remove(batchWaiter) |> ignore
-                    let (cts, ctr, _) = batchWaiter
-                    ctr.Dispose()
+                    let (cts, ctrOpt, _) = batchWaiter
+                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
                     cts.Dispose()
                     return! loop ()
                     
