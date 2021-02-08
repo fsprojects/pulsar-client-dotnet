@@ -33,6 +33,7 @@
     <Compile Include="Internal\TaskSeq.fs" />
     <Compile Include="Internal\StatsTests.fs" />
     <Compile Include="Internal\ChunkedMessageTrackerTests.fs" />
+    <Compile Include="Internal\Transaction.fs" />
     <None Include="paket.references" />
     <Compile Include="Tests.fs" />
     <Compile Include="Main.fs" />

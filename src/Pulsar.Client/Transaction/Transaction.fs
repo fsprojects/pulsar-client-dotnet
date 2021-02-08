@@ -6,6 +6,7 @@ open System.Collections.Generic
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
 open Pulsar.Client.Common
+open Pulsar.Client.Common.UMX
 open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
 
@@ -32,10 +33,10 @@ type ConsumerTxnOperations =
     }
 
 [<AllowNullLiteral>]
-type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnId: TxnId) =
+type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnId: TxnId) as this =
     
-    let producedTopics = Dictionary<CompleteTopicName, Task<unit>>()
-    let ackedTopics = Dictionary<CompleteTopicName, Task<unit>>()
+    let producedTopics = ConcurrentDictionary<CompleteTopicName, Task<unit>>()
+    let ackedTopics = ConcurrentDictionary<CompleteTopicName * SubscriptionName, Task<unit>>()
     let sendTasks = ResizeArray<Task<MessageId>>()
     let ackTasks = ResizeArray<Task<Unit>>()
     let cumulativeAckConsumers = Dictionary<ConsumerId, ConsumerTxnOperations>()
@@ -60,30 +61,22 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             )
         else
             failwith errorMsg
+            
+    do asyncDelay timeout (fun () ->
+            if allowOperations then
+                try
+                    this.Abort().GetAwaiter().GetResult()
+                with ex ->
+                    Log.Logger.LogError(ex, "Failure while aborting txn {0} by timeout", txnId)
+        )
     
     member internal this.RegisterProducedTopic(topic: CompleteTopicName) =
-        executeInsideLock (fun () ->
-            // we need to issue the request to TC to register the produced topic
-            match producedTopics.TryGetValue topic with
-            | true, task ->
-                task
-            | _ ->
-                let t = txnOperations.AddPublishPartitionToTxn(txnId, topic)
-                producedTopics.Add(topic, t)
-                t
-        ) "Can't RegisterProducedTopic while transaction is closing"
+        producedTopics.GetOrAdd(topic, fun _ ->
+            txnOperations.AddPublishPartitionToTxn(txnId, topic))
         
     member internal this.RegisterAckedTopic(topic: CompleteTopicName, subscription: SubscriptionName) =
-        executeInsideLock (fun () ->
-            // we need to issue the request to TC to register the acked topic
-            match ackedTopics.TryGetValue topic with
-            | true, task ->
-                task
-            | _ ->
-                let t = txnOperations.AddSubscriptionToTxn(txnId, topic, subscription)
-                ackedTopics.Add(topic, t)
-                t
-        ) "Can't RegisterProducedTopic while transaction is closing"
+        ackedTopics.GetOrAdd((topic, subscription), fun _ ->
+            txnOperations.AddSubscriptionToTxn(txnId, topic, subscription))
             
     member internal this.RegisterCumulativeAckConsumer(consumerId: ConsumerId, consumerOperations: ConsumerTxnOperations) =
         executeInsideLock (fun () ->
@@ -140,13 +133,13 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             return! txnOperations.Commit(txnId, msgIds)
         }
     
-    member this.Commit() =
+    member this.Commit() : Task<unit> =
         executeInsideLock (fun () ->
             allowOperations <- false
             this.CommitInner()
         ) "Can't commit while transaction is closing"
         
-    member this.Abort() =
+    member this.Abort(): Task<unit> =
         executeInsideLock (fun () ->
             allowOperations <- false
             this.AbortInner()
