@@ -47,7 +47,7 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
         seq {
             for sendTask in sendTasks do
                 yield (sendTask :> Task)
-            for ackTask in sendTasks do
+            for ackTask in ackTasks do
                 yield (ackTask :> Task)
         } |> Task.WhenAll
         
@@ -81,17 +81,17 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
     member internal this.RegisterCumulativeAckConsumer(consumerId: ConsumerId, consumerOperations: ConsumerTxnOperations) =
         executeInsideLock (fun () ->
             cumulativeAckConsumers.[consumerId] <- consumerOperations
-        ) "Can't ack message cumulatively while transaction is closing"
+        ) "Can't ack message cumulatively in closed transaction"
     
     member internal this.RegisterSendOp(sendTask: Task<MessageId>) =
         executeInsideLock (fun () ->
             sendTasks.Add(sendTask)
-        ) "Can't send message while transaction is closing"
+        ) "Can't send message in closed transaction"
        
     member internal this.RegisterAckOp(ackTask: Task<Unit>) =
         executeInsideLock (fun () ->
             ackTasks.Add(ackTask)
-        ) "Can't ack message while transaction is closing"
+        ) "Can't ack message in closed transaction"
     
     member this.Id = txnId
     
@@ -137,13 +137,13 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
         executeInsideLock (fun () ->
             allowOperations <- false
             this.CommitInner()
-        ) "Can't commit while transaction is closing"
+        ) "Can't commit a closed transaction"
         
     member this.Abort(): Task<unit> =
         executeInsideLock (fun () ->
             allowOperations <- false
             this.AbortInner()
-        ) "Can't abort while transaction is closing"
+        ) "Can't abort a closed transaction"
         
     override this.ToString() =
         $"Txn({txnId})"

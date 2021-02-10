@@ -96,7 +96,7 @@ let tests =
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        do! produceMessages producer numberOfMessages name
+                        do! fastProduceMessages producer numberOfMessages name
                     }:> Task)
             
             let! txn =
@@ -150,6 +150,101 @@ let tests =
             Log.Debug("Finished Consume 10 messages within txn works fine")
         }
         
+    let consumeCumulativeTest isBatchEnabled =
+        task {
+            Log.Debug("Started Consume cumulative 10 messages within txn works fine")
+            let client = getTxnClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let numberOfMessages = 10
+            let name = "txnConsume"
+            
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(name)
+                    .EnableBatching(isBatchEnabled)
+                    .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(150.0))
+                    .SendTimeout(TimeSpan.Zero)
+                    .CreateAsync()
+                    
+            let! consumer1 =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(name + "1")
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync()
+            
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! fastProduceMessages producer numberOfMessages name
+                    }:> Task)
+            
+            let! txn1 =
+                client.NewTransaction().BuildAsync()
+            
+            let consumer1Task =
+                Task.Run(fun () ->
+                    task {
+                        let mutable msgId = MessageId.Earliest
+                        for _ in 1..numberOfMessages do
+                            let! message = consumer1.ReceiveAsync()
+                            let received = Encoding.UTF8.GetString(message.Data)
+                            Log.Debug("{0} received {1}", consumer1.Name, received)
+                            msgId <- message.MessageId
+                        do! consumer1.AcknowledgeCumulativeAsync(msgId, txn1)
+                        do! Task.Delay(100)
+                    }:> Task)
+            
+            do! Task.WhenAll [| producerTask; consumer1Task |] |> Async.AwaitTask
+            
+            do! txn1.Abort() |> Async.AwaitTask
+            do! consumer1.DisposeAsync().AsTask() |> Async.AwaitTask
+            
+            let! txn2 =
+                client.NewTransaction().BuildAsync()
+            let! consumer2 =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(name + "2")
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync()
+                    
+            let consumer2Task =
+                Task.Run(fun () ->
+                    task {
+                        let mutable msgId = MessageId.Earliest
+                        for _ in 1..numberOfMessages do
+                            let! message = consumer2.ReceiveAsync()
+                            let received = Encoding.UTF8.GetString(message.Data)
+                            Log.Debug("{0} received {1}", consumer2.Name, received)
+                            msgId <- message.MessageId
+                        do! consumer2.AcknowledgeCumulativeAsync(msgId, txn2)
+                        do! Task.Delay(100)
+                    }:> Task)
+            
+            do! consumer2Task
+            do! txn2.Commit()
+            do! consumer2.DisposeAsync().AsTask()
+            
+            let! consumer3 =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(name + "3")
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync()
+            use cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150.0))
+            try
+                let! _ = consumer3.ReceiveAsync(cts.Token)
+                failwith "Unexpected success"
+            with Flatten ex ->
+                match ex with
+                | :? TaskCanceledException -> ()
+                | _ -> reraize ex
+            
+            Log.Debug("Finished Consume cumulative 10 messages within txn works fine")
+        }
+        
 
     testList "Transaction" [
         
@@ -167,6 +262,14 @@ let tests =
         
         testAsync "Consume 10 messages within txn without batch works fine" {
             do! consumeTest false |> Async.AwaitTask
+        }
+        
+        ptestAsync "Consume cumulative 10 messages within txn with batch works fine" {
+            do! consumeCumulativeTest true |> Async.AwaitTask
+        }
+        
+        testAsync "Consume cumulative 10 messages within txn without batch works fine" {
+            do! consumeCumulativeTest false |> Async.AwaitTask
         }
         
         testAsync "Consume and Produce within txn works fine" {

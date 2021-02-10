@@ -7,6 +7,7 @@ open Expecto.Flip
 open Pulsar.Client.Common
 open Pulsar.Client.Transaction
 open FSharp.UMX
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 
 [<Tests>]
@@ -111,5 +112,173 @@ let tests =
                   ts.RegisterProducedTopic(topicName2)
                 |]
             Expect.notEqual "" results.[0] results.[1]
+        }
+        
+        testAsync "Ack and commit works as expected" {
+            
+            let timeout = TimeSpan.FromMinutes(1.0)
+            let mutable commited = false
+            let operations =
+                {
+                    AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
+                    AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
+                    Commit = fun (_, _) -> commited <- true; Task.FromResult()
+                    Abort = fun (_, _) -> Task.FromResult()
+                }
+            let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
+            let tcs = TaskCompletionSource<Unit>()
+            let ts = Transaction(timeout, operations, txnId)
+            ts.RegisterAckOp(tcs.Task)
+            let commitTask = ts.Commit()
+            do! Async.Sleep 40
+            Expect.isFalse "" commitTask.IsCompleted
+            tcs.SetResult()
+            do! Async.Sleep 40
+            Expect.isTrue "" commitTask.IsCompletedSuccessfully
+            Expect.isTrue "" commited
+        }
+        
+        testAsync "Send and commit works as expected" {
+            
+            let timeout = TimeSpan.FromMinutes(1.0)
+            let mutable commited = false
+            let operations =
+                {
+                    AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
+                    AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
+                    Commit = fun (_, _) -> commited <- true; Task.FromResult()
+                    Abort = fun (_, _) -> Task.FromResult()
+                }
+            let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
+            let tcs = TaskCompletionSource<MessageId>()
+            let ts = Transaction(timeout, operations, txnId)
+            ts.RegisterSendOp(tcs.Task)
+            let commitTask = ts.Commit()
+            do! Async.Sleep 40
+            Expect.isFalse "" commitTask.IsCompleted
+            tcs.SetResult(MessageId.Latest)
+            do! Async.Sleep 40
+            Expect.isTrue "" commitTask.IsCompletedSuccessfully
+            Expect.isTrue "" commited
+        }
+        
+        testAsync "Ack and abort works as expected" {
+            
+            let timeout = TimeSpan.FromMinutes(1.0)
+            let mutable aborted = false
+            let operations =
+                {
+                    AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
+                    AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
+                    Commit = fun (_, _) -> Task.FromResult()
+                    Abort = fun (_, _) -> aborted <- true;  Task.FromResult()
+                }
+            let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
+            let tcs = TaskCompletionSource<Unit>()
+            let ts = Transaction(timeout, operations, txnId)
+            ts.RegisterAckOp(tcs.Task)
+            let commitTask = ts.Abort()
+            do! Async.Sleep 40
+            Expect.isFalse "" commitTask.IsCompleted
+            tcs.SetResult()
+            do! Async.Sleep 40
+            Expect.isTrue "" commitTask.IsCompletedSuccessfully
+            Expect.isTrue "" aborted
+        }
+        
+        testAsync "Send and abort works as expected" {
+            
+            let timeout = TimeSpan.FromMinutes(1.0)
+            let mutable aborted = false
+            let operations =
+                {
+                    AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
+                    AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
+                    Commit = fun (_, _) -> Task.FromResult()
+                    Abort = fun (_, _) -> aborted <- true;  Task.FromResult()
+                }
+            let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
+            let tcs = TaskCompletionSource<MessageId>()
+            let ts = Transaction(timeout, operations, txnId)
+            ts.RegisterSendOp(tcs.Task)
+            let commitTask = ts.Abort()
+            do! Async.Sleep 40
+            Expect.isFalse "" commitTask.IsCompleted
+            tcs.SetResult(MessageId.Latest)
+            do! Async.Sleep 40
+            Expect.isTrue "" commitTask.IsCompletedSuccessfully
+            Expect.isTrue "" aborted
+        }
+        
+        testAsync "Can't use transaction after commit" {
+            
+            let timeout = TimeSpan.FromMinutes(1.0)
+            let mutable aborted = false
+            let operations =
+                {
+                    AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
+                    AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
+                    Commit = fun (_, _) -> Task.FromResult()
+                    Abort = fun (_, _) -> Task.FromResult()
+                }
+            let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
+            let ts = Transaction(timeout, operations, txnId)
+            ts.Commit() |> ignore
+            Expect.throws "" (fun () -> ts.Commit().Result)
+            Expect.throws "" (fun () -> ts.Abort().Result)
+            Expect.throws "" (fun () -> ts.RegisterSendOp(TaskCompletionSource<MessageId>().Task))
+            Expect.throws "" (fun () -> ts.RegisterAckOp(TaskCompletionSource<Unit>().Task))
+            Expect.throws "" (fun () -> ts.RegisterCumulativeAckConsumer(Unchecked.defaultof<ConsumerId>,
+                                                                         Unchecked.defaultof<ConsumerTxnOperations>))
+            
+        }
+        
+        testAsync "Can't use transaction after abort" {
+            
+            let timeout = TimeSpan.FromMinutes(1.0)
+            let mutable aborted = false
+            let operations =
+                {
+                    AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
+                    AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
+                    Commit = fun (_, _) -> Task.FromResult()
+                    Abort = fun (_, _) -> Task.FromResult()
+                }
+            let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
+            let ts = Transaction(timeout, operations, txnId)
+            ts.Abort() |> ignore
+            Expect.throws "" (fun () -> ts.Commit().Result)
+            Expect.throws "" (fun () -> ts.Abort().Result)
+            Expect.throws "" (fun () -> ts.RegisterSendOp(TaskCompletionSource<MessageId>().Task))
+            Expect.throws "" (fun () -> ts.RegisterAckOp(TaskCompletionSource<Unit>().Task))
+            Expect.throws "" (fun () -> ts.RegisterCumulativeAckConsumer(Unchecked.defaultof<ConsumerId>,
+                                                                         Unchecked.defaultof<ConsumerTxnOperations>))
+            
+        }
+        
+        testAsync "CumulativeAckConsumer is cleared after abort" {
+            
+            let timeout = TimeSpan.FromMinutes(1.0)
+            let operations =
+                {
+                    AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
+                    AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
+                    Commit = fun (_, _) -> Task.FromResult()
+                    Abort = fun (_, _) -> Task.FromResult()
+                }
+            let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
+            let ts = Transaction(timeout, operations, txnId)
+            
+            let msgToClearNum = 3
+            let mutable increased = 0
+            let consumerOperations =
+                {
+                    ClearIncomingMessagesAndGetMessageNumber = fun () -> async { return msgToClearNum }
+                    IncreaseAvailablePermits = fun num -> increased <- num
+                }
+            ts.RegisterCumulativeAckConsumer(%1UL, consumerOperations)
+            do! ts.Abort() |> Async.AwaitTask
+            
+            Expect.equal "" msgToClearNum increased
         }
     ]

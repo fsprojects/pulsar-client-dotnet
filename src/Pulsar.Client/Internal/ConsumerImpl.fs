@@ -1460,7 +1460,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     txn.RegisterCumulativeAckConsumer(consumerId, consumerTxnOperations)
                     do! txn.RegisterAckedTopic(topicName.CompleteTopicName, consumerConfig.SubscriptionName)
                     
-                let! task = mb.PostAndAsyncReply(fun ch -> Acknowledge(msgId, Individual, Some txn, Some ch))
+                let! task = mb.PostAndAsyncReply(fun ch -> Acknowledge(msgId, Cumulative, Some txn, Some ch))
                 if (not task.IsFaulted) && (txn |> isNull |> not) then
                     txn.RegisterAckOp(task)
                 return! task
