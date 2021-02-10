@@ -63,6 +63,39 @@ let tests =
             Log.Debug("Finished Consumer seek earliest redelivers all messages")
         }
         
+        testAsync "Consumer seek can be done to serialized message" {
+
+            Log.Debug("Started Consumer seek can be done to serialized message")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let producerName = "seekProducer"
+            let consumerName = "seekConsumer"
+
+            let! producer =
+                client.NewProducer(Schema.STRING())
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                client.NewConsumer(Schema.STRING())
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() |> Async.AwaitTask
+            
+            let! msgId1 = producer.SendAsync("Hello1") |> Async.AwaitTask
+            let! msgId2 = producer.SendAsync("Hello2") |> Async.AwaitTask
+            let serializedMsgId = msgId1.ToByteArray()
+            let deserializedMsgId = MessageId.FromByteArray(serializedMsgId)
+
+            do! consumer.SeekAsync(deserializedMsgId) |> Async.AwaitTask
+            let! msg = consumer.ReceiveAsync() |> Async.AwaitTask
+            
+            Expect.equal "" "Hello2" <| msg.GetValue()
+            Log.Debug("Finished Consumer seek can be done to serialized message")
+        }
+        
         testAsync "Seek in the middle of the batch works properly" {
 
             Log.Debug("Started Seek in the middle of the batch works properly")
