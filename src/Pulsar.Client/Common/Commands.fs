@@ -211,18 +211,22 @@ let newSeekByMsgId (consumerId: ConsumerId) (requestId : RequestId) (messageId: 
             ConsumerId = %consumerId, RequestId = %requestId,
             MessageId = MessageIdData(
                 ledgerId = uint64(%messageId.LedgerId),
-                entryId = uint64(%messageId.EntryId),
-                AckSets =
-                    match messageId.Type with
-                    | MessageIdType.Single -> [||]
-                    | Batch (batchIndex, acker) ->
-                        let batchSize = acker.GetBatchSize()
-                        let ackSet = BitArray batchSize
-                        for i in %batchIndex..batchSize-1 do
-                            ackSet.Set(i, true)
-                        ackSet |> toLongArray
+                entryId = uint64(%messageId.EntryId)
             )
-        )
+        )    
+    match messageId.Type with
+    | Batch (batchIndex, acker) ->
+        let batchSize =
+            if acker = BatchMessageAcker.NullAcker then
+                0 // should be improved later
+            else
+                acker.GetBatchSize()
+        let ackSet = BitArray batchSize
+        for i in %batchIndex..batchSize-1 do
+            ackSet.Set(i, true)
+        request.MessageId.AckSets <- (ackSet |> toLongArray)
+    | _ ->
+        ()
     let command = BaseCommand(``type`` = CommandType.Seek, Seek = request)
     command |> serializeSimpleCommand
 

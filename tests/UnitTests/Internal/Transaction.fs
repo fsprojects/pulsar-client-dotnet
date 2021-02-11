@@ -13,7 +13,7 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 [<Tests>]
 let tests =
     
-    ftestList "Transaction tests" [
+    testList "Transaction tests" [
         
         testAsync "Registering topic multiple times with same subscription returns same task" {
             

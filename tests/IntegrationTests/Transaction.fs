@@ -354,7 +354,6 @@ let tests =
             Log.Debug("Started Concurrent transactions works fine")
             let client = getTxnClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let numberOfMessages = 10
             let name = "txnConcurrent"
             
             let! producer1 =

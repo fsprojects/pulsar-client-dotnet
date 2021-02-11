@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
+open System.Collections
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
 open FSharp.UMX
@@ -349,17 +350,32 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             let command =
                 match messageId.Type with
                 | Batch (batchIndex, batchAcker) ->
-                    match ackType with
-                    | Individual -> batchAcker.AckIndividual(batchIndex)
-                    | AckType.Cumulative -> batchAcker.AckCumulative(batchIndex)
-                    |> ignore
                     let ackSet =
-                        if batchAcker.GetOutstandingAcks() > 0 then
-                            batchAcker.BitSet |> toLongArray
-                        else
+                        match ackType with
+                        | Cumulative ->
+                            batchAcker.AckCumulative(batchIndex) |> ignore
+                            let bitSet = BitArray(batchAcker.GetBatchSize(), true)
+                            for i in 0 .. %batchIndex do
+                                bitSet.[i] <- false
+                            bitSet
+                        | Individual ->
+                            let bitSet = BitArray(batchAcker.GetBatchSize(), true)
+                            bitSet.[%batchIndex] <- false
+                            bitSet
+                    let allBitsAreZero =
+                        let mutable result = true
+                        let mutable i = 0
+                        while result && i < ackSet.Length do
+                            result <- not ackSet.[i]
+                            i <- i + 1
+                        result
+                    let adjustedSet =
+                        if allBitsAreZero then
                             // hack to conform Java
                             [||]
-                    Commands.newAck consumerId messageId.LedgerId messageId.EntryId ackType properties ackSet
+                        else
+                            ackSet |> toLongArray
+                    Commands.newAck consumerId messageId.LedgerId messageId.EntryId ackType properties adjustedSet
                             None (Some txnId) (Some requestId) (batchAcker.GetBatchSize() |> Some)
                 | _ ->
                     Commands.newAck consumerId messageId.LedgerId messageId.EntryId ackType properties null
@@ -457,7 +473,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     /// Periodically, it sends a Flow command to notify the broker that it can push more messages
     let messageProcessed (msg: Message<'T>) =
         lastDequeuedMessageId <- msg.MessageId
-        increaseAvailablePermits 1
+        if consumerConfig.ReceiverQueueSize > 0 then
+            //don't increase for zero queue consumer
+            increaseAvailablePermits 1
         stats.UpdateNumMsgsReceived(msg.Data.Length)
         trackMessage msg.MessageId
 
