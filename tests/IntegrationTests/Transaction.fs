@@ -264,7 +264,7 @@ let tests =
             do! consumeTest false |> Async.AwaitTask
         }
         
-        ptestAsync "Consume cumulative 10 messages within txn with batch works fine" {
+        testAsync "Consume cumulative 10 messages within txn with batch works fine" {
             do! consumeCumulativeTest true |> Async.AwaitTask
         }
         

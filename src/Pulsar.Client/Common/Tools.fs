@@ -101,7 +101,7 @@ let signSafeMod dividend divisor =
     if modulo < 0
     then modulo + divisor
     else modulo
-    
+
 let toLongArray (bitSet: BitArray) =
     let resultArrayLengthLongs = bitSet.Length / 64 + (if bitSet.Length % 64 = 0 then 0 else 1)
     let resultArray = Array.create (resultArrayLengthLongs * 8) 0uy

@@ -353,7 +353,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | Individual -> batchAcker.AckIndividual(batchIndex)
                     | AckType.Cumulative -> batchAcker.AckCumulative(batchIndex)
                     |> ignore
-                    let ackSet = batchAcker.BitSet |> toLongArray
+                    let ackSet =
+                        if batchAcker.GetOutstandingAcks() > 0 then
+                            batchAcker.BitSet |> toLongArray
+                        else
+                            // hack to conform Java
+                            [||]
                     Commands.newAck consumerId messageId.LedgerId messageId.EntryId ackType properties ackSet
                             None (Some txnId) (Some requestId) (batchAcker.GetBatchSize() |> Some)
                 | _ ->

@@ -5,10 +5,10 @@ open Pulsar.Client.Common
 open FSharp.UMX
 open System
 
-let mutable private requestId = 0L
-let mutable private producerId = 0L
-let mutable private consumerId = 0L
-let mutable private clientCnxId = 0L
+let mutable private requestId = -1L
+let mutable private producerId = -1L
+let mutable private consumerId = -1L
+let mutable private clientCnxId = -1L
 
 let getNextRequestId(): RequestId =
     % (uint64 <| Interlocked.Increment(&requestId))
