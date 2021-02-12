@@ -769,14 +769,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             let mutable totalConsumersCount = oldConsumersCount
                             let topicsToUpdate =
                                 newPartitions
-                                |> Seq.filter(fun (topic, partitionedTopicNames) ->
+                                |> Array.filter(fun (topic, partitionedTopicNames) ->
                                     let consumerInitInfo = partitionedTopics.[topic]
                                     let oldPartitionsCount = consumerInitInfo.Metadata.Partitions
                                     let newPartitionsCount = partitionedTopicNames.Length
                                     if (oldPartitionsCount < newPartitionsCount) then
                                         Log.Logger.LogDebug("{0} partitions number. old: {1}, new: {2}, topic {3}",
                                                             prefix, oldPartitionsCount, newPartitionsCount, topic)
-                                        totalConsumersCount <- totalConsumersCount + (newPartitionsCount - oldPartitionsCount)
                                         true
                                     elif (oldPartitionsCount > newPartitionsCount) then
                                         Log.Logger.LogError("{0} not support shrink topic partitions. old: {1}, new: {2}, topic: {3}",
@@ -784,7 +783,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                         false
                                     else
                                         false)
-                                |> Seq.toArray
                             if topicsToUpdate.Length > 0 then
                                 Log.Logger.LogInformation("{0} adding subscription to {1} new partitions", prefix, topicsToUpdate.Length)
                                 let receiverQueueSize = Math.Min(consumerConfig.ReceiverQueueSize, consumerConfig.MaxTotalReceiverQueueSizeAcrossPartitions / totalConsumersCount)
@@ -794,6 +792,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                             let consumerInitInfo = partitionedTopics.[topic]
                                             let oldPartitionsCount = consumerInitInfo.Metadata.Partitions
                                             let newPartitionsCount = partitionedTopicNames.Length
+                                            totalConsumersCount <- totalConsumersCount + (newPartitionsCount - oldPartitionsCount)
                                             partitionedTopics.[topic] <-
                                                 {
                                                     consumerInitInfo with
