@@ -755,7 +755,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         return! loop ()
                 
                 | PartitionTickTime  ->
-
                     
                     Log.Logger.LogDebug("{0} PartitionTickTime", prefix)
                     match this.ConnectionState with
@@ -771,19 +770,20 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             let topicsToUpdate =
                                 newPartitions
                                 |> Seq.filter(fun (topic, partitionedTopicNames) ->
-                                        let oldPartitionsCount = partitionedTopics.[topic].Metadata.Partitions
-                                        let newPartitionsCount = partitionedTopicNames.Length
-                                        if (oldPartitionsCount < newPartitionsCount) then
-                                            Log.Logger.LogDebug("{0} partitions number. old: {1}, new: {2}, topic {3}",
-                                                                prefix, oldPartitionsCount, newPartitionsCount, topic)
-                                            totalConsumersCount <- totalConsumersCount + (newPartitionsCount - oldPartitionsCount)
-                                            true
-                                        elif (oldPartitionsCount > newPartitionsCount) then
-                                            Log.Logger.LogError("{0} not support shrink topic partitions. old: {1}, new: {2}, topic: {3}",
-                                                                prefix, oldPartitionsCount, newPartitionsCount, topic)
-                                            false
-                                        else
-                                            false)
+                                    let consumerInitInfo = partitionedTopics.[topic]
+                                    let oldPartitionsCount = consumerInitInfo.Metadata.Partitions
+                                    let newPartitionsCount = partitionedTopicNames.Length
+                                    if (oldPartitionsCount < newPartitionsCount) then
+                                        Log.Logger.LogDebug("{0} partitions number. old: {1}, new: {2}, topic {3}",
+                                                            prefix, oldPartitionsCount, newPartitionsCount, topic)
+                                        totalConsumersCount <- totalConsumersCount + (newPartitionsCount - oldPartitionsCount)
+                                        true
+                                    elif (oldPartitionsCount > newPartitionsCount) then
+                                        Log.Logger.LogError("{0} not support shrink topic partitions. old: {1}, new: {2}, topic: {3}",
+                                                            prefix, oldPartitionsCount, newPartitionsCount, topic)
+                                        false
+                                    else
+                                        false)
                                 |> Seq.toArray
                             if topicsToUpdate.Length > 0 then
                                 Log.Logger.LogInformation("{0} adding subscription to {1} new partitions", prefix, topicsToUpdate.Length)
@@ -792,8 +792,17 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                     seq {
                                         for (topic, partitionedTopicNames) in topicsToUpdate do
                                             let consumerInitInfo = partitionedTopics.[topic]
+                                            let oldPartitionsCount = consumerInitInfo.Metadata.Partitions
+                                            let newPartitionsCount = partitionedTopicNames.Length
+                                            partitionedTopics.[topic] <-
+                                                {
+                                                    consumerInitInfo with
+                                                        Metadata = {
+                                                            consumerInitInfo.Metadata with Partitions = newPartitionsCount
+                                                        }
+                                                }
                                             let newConsumerTasks =
-                                                seq { consumerInitInfo.Metadata.Partitions..partitionedTopicNames.Length - 1 }
+                                                seq { oldPartitionsCount..newPartitionsCount - 1 }
                                                 |> Seq.map (fun partitionIndex ->
                                                     let partitionedTopic = partitionedTopicNames.[partitionIndex]
                                                     let partititonedConfig = { consumerConfig with
