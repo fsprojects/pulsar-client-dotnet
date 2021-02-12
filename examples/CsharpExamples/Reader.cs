@@ -14,9 +14,9 @@ namespace CsharpExamples
             // retention should be set on topic so messages won't disappear
             var topicName = $"public/retention/my-topic-{DateTime.Now.Ticks}";
 
-            var client = new PulsarClientBuilder()
+            var client = await new PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
-                .Build();
+                .BuildAsync();
 
             var producer = await client.NewProducer()
                 .Topic(topicName)

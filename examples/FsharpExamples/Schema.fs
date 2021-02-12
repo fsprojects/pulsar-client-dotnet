@@ -20,12 +20,12 @@ let runSchema () =
     let subscriptionName = "my-subscription"
     let topicName = sprintf "my-topic-%i" DateTime.Now.Ticks;
 
-    let client =
-        PulsarClientBuilder()
-            .ServiceUrl(serviceUrl)
-            .Build()
-
     task {
+        
+        let! client =
+            PulsarClientBuilder()
+                .ServiceUrl(serviceUrl)
+                .BuildAsync()
 
         let! producer =
             client.NewProducer(Schema.JSON<Product>())

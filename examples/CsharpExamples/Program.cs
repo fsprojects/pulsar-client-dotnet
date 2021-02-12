@@ -22,7 +22,8 @@ namespace CsharpExamples
             // await CustomProps.RunCustomProps();
             // await ReaderApi.RunReader();
             // await RealWorld.RunRealWorld(PulsarClient.Logger);
-            await SchemaExample.RunSchema();
+            // await SchemaExample.RunSchema();
+            await TransactionExample.RunTransaction();
 
             Console.WriteLine("Example ended. Press any key to exit");
             Console.ReadKey();

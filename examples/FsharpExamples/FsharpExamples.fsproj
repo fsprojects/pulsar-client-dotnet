@@ -9,6 +9,7 @@
     <Compile Include="CustomProps.fs" />
     <Compile Include="Reader.fs" />
     <Compile Include="Simple.fs" />
+    <Compile Include="Transaction.fs" />
     <Compile Include="Schema.fs" />
     <Compile Include="RealWorld.fs" />
     <Compile Include="TlsAuthentication.fs" />

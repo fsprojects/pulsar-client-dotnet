@@ -17,13 +17,13 @@ namespace OldDotnetExample
             var ca = new X509Certificate2(@"path-to-ca.crt");
             var userTls = AuthenticationFactory.tls(@"path-to-user.pfx");
                 
-            var client = new PulsarClientBuilder()
+            var client = await new PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
                 .EnableTls(true)
                 .TlsProtocols(SslProtocols.Tls12 | SslProtocols.Tls11)  // for .NET Framework 4.6.*
                 .TlsTrustCertificate(ca)
                 .Authentication(userTls)
-                .Build();
+                .BuildAsync();
 
             var producer = await client.NewProducer()
                 .Topic(topicName)

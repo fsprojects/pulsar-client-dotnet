@@ -25,9 +25,9 @@ namespace CsharpExamples
             const string subscriptionName = "my-subscription";
             var topicName = $"my-topic-{DateTime.Now.Ticks}";
 
-            var client = new PulsarClientBuilder()
+            var client = await new PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
-                .Build();
+                .BuildAsync();
 
             var producer = await client.NewProducer(Schema.JSON<Product>())
                 .Topic(topicName)

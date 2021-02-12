@@ -16,15 +16,15 @@ let runTlsAuthentication () =
     use ca = new X509Certificate2(@"path-to-ca.crt")
     let userTls = AuthenticationFactory.tls(@"path-to-user.pfx")
 
-    let client =
-        PulsarClientBuilder()
-            .ServiceUrl(serviceUrl)
-            .EnableTls(true)
-            .TlsTrustCertificate(ca)
-            .Authentication(userTls)
-            .Build()
-
     task {
+        
+        let! client =
+            PulsarClientBuilder()
+                .ServiceUrl(serviceUrl)
+                .EnableTls(true)
+                .TlsTrustCertificate(ca)
+                .Authentication(userTls)
+                .BuildAsync()
 
         let! producer =
             client.NewProducer()

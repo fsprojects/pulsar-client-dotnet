@@ -9,13 +9,13 @@ namespace OldDotnetExample
     {
         internal static async Task RunSimple()
         {
-            const string serviceUrl = "pulsar://my-pulsar-cluster:30002";
+            const string serviceUrl = "pulsar://my-pulsar-cluster:31004";
             const string subscriptionName = "my-subscription";
             var topicName = $"my-topic-{DateTime.Now.Ticks}";
 
-            var client = new PulsarClientBuilder()
+            var client = await new PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
-                .Build();
+                .BuildAsync();
 
             var producer = await client.NewProducer()
                 .Topic(topicName)

@@ -16,12 +16,12 @@ namespace CsharpExamples
             var ca = new X509Certificate2(@"path-to-ca.crt");
             var userTls = AuthenticationFactory.tls(@"path-to-user.pfx");
                 
-            var client = new PulsarClientBuilder()
+            var client = await new PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
                 .EnableTls(true)
                 .TlsTrustCertificate(ca)
                 .Authentication(userTls)
-                .Build();
+                .BuildAsync();
 
             var producer = await client.NewProducer()
                 .Topic(topicName)

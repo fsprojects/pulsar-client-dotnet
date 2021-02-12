@@ -13,12 +13,11 @@ let runReader () =
     // retention should be set on topic so messages won't disappear
     let topicName = sprintf "public/retention/my-topic-%i" DateTime.Now.Ticks
 
-    let client =
-        PulsarClientBuilder()
-            .ServiceUrl(serviceUrl)
-            .Build()
-
     task {
+        let! client =
+            PulsarClientBuilder()
+                .ServiceUrl(serviceUrl)
+                .BuildAsync()
 
         let! producer =
             client.NewProducer()

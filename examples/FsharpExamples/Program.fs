@@ -7,6 +7,7 @@ open CustomProps
 open ReaderApi
 open RealWorld
 open Schema
+open Transaction
 
 [<EntryPoint>]
 let main _ =
@@ -24,7 +25,8 @@ let main _ =
 //    runCustomProps().Wait()
 //    runReader().Wait()
 //    runRealWorld(PulsarClient.Logger).Wait()
-    runSchema().Wait()
+//    runSchema().Wait()
+    runTransaction().Wait()
 
     printfn "Example ended. Press any key to exit"
     Console.ReadKey() |> ignore
