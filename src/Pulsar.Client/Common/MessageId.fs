@@ -87,8 +87,13 @@ type MessageId =
             match other with
             | :? MessageId as m ->
                 m.LedgerId = this.LedgerId && m.EntryId = this.EntryId && m.Partition = this.Partition &&
-                    m.Type = this.Type
-            | _ -> false
+                    match m.Type, this.Type with
+                    | (Single, Single) -> true
+                    | (Batch (i, _), Batch (j, _)) -> i = j
+                    | (Single, Batch (i, _)) -> i = %(-1)
+                    | (Batch (i, _), Single) -> i = %(-1)
+            | _ ->
+                false
             
         override this.GetHashCode() =
             match this.Type with
@@ -105,17 +110,33 @@ type MessageId =
                     if this.EntryId > other.EntryId then
                         1
                     elif this.EntryId = other.EntryId then
-                        if this.Type > other.Type then
-                            1
-                        elif this.Type = other.Type then
-                            if this.Partition > other.Partition then
+                        let typeComparison =
+                            match this.Type, other.Type with
+                            | (Single, Single) ->
+                                0
+                            | (Batch (i, _), Batch (j, _)) ->
+                                if i > j then 1 elif j > i then -1 else 0
+                            | (Single, Batch (i, _)) ->
+                                if i > %(-1) then -2 else 0
+                            | (Batch (i, _), Single) ->
+                                if i > %(-1) then 2 else 0
+                        let inline comparePartitions (a: MessageId) (b: MessageId) =
+                            if a.Partition > b.Partition then
                                 1
-                            elif this.Partition = other.Partition then
+                            elif a.Partition = b.Partition then
                                 0
                             else
                                 -1
+                        if typeComparison = 0 then
+                            comparePartitions this other
+                        elif typeComparison = 2 || typeComparison = -2 then
+                            let partitionComparision = comparePartitions this other
+                            if partitionComparision = 0 then
+                                typeComparison
+                            else
+                                partitionComparision
                         else
-                            -1
+                            typeComparison
                     else
                         -1
                 else

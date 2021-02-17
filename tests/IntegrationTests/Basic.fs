@@ -21,6 +21,44 @@ open FSharp.UMX
 let tests =
 
     testList "Basic" [
+        
+        testAsync "Sent messageId should be equal to received messageId" {
+
+            Log.Debug("Started Sent messageId should be equal to received messageId")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! producer1 =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .CreateAsync() |> Async.AwaitTask
+                    
+            let! producer2 =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .EnableBatching(false)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() |> Async.AwaitTask
+                    
+            let! msg1Id = producer1.SendAsync([| 0uy |]) |> Async.AwaitTask
+            let! msg2Id = producer2.SendAsync([| 1uy |]) |> Async.AwaitTask
+            let! msg1 = consumer.ReceiveAsync() |> Async.AwaitTask
+            let! msg2 = consumer.ReceiveAsync() |> Async.AwaitTask
+            
+            Expect.isTrue "" (msg1Id = msg1.MessageId)
+            Expect.equal "" [| 0uy |] <| msg1.GetValue()
+            
+            Expect.isTrue "" (msg2Id = msg2.MessageId)
+            Expect.equal "" [| 1uy |] <| msg2.GetValue()
+
+            Log.Debug("Finished Sent messageId should be equal to received messageId")
+        }
+        
         testAsync "Send and receive 100 messages concurrently works fine in default configuration" {
 
             Log.Debug("Started Send and receive 100 messages concurrently works fine in default configuration")
