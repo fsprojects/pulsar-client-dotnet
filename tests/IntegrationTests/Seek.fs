@@ -147,6 +147,48 @@ let tests =
             Expect.equal "" message3.MessageId message3x.MessageId
             
             Log.Debug("Finished Seek in the middle of the batch works properly")
-         }
+        }
+        
+        testAsync "Seek in the middle of the batch works properly 2" {
+
+            Log.Debug("Started Seek in the middle of the batch works properly 2")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let producerName = "seekProducer"
+            let consumerName = "seekConsumer"
+            let numberOfMessages = 3
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(true)
+                    .BatchingMaxMessages(numberOfMessages)
+                    .BatchingMaxPublishDelay(TimeSpan.FromSeconds(50.0))
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() |> Async.AwaitTask
+        
+            let tasks =
+                [|
+                    producer.SendAsync(Encoding.UTF8.GetBytes("1"))
+                    producer.SendAsync(Encoding.UTF8.GetBytes("2"))
+                    producer.SendAsync(Encoding.UTF8.GetBytes("3"))
+                |]
+                
+            let! msgIds = tasks |> Task.WhenAll |> Async.AwaitTask
+            
+            do! consumer.SeekAsync(msgIds.[1]) |> Async.AwaitTask
+            let! msg = consumer.ReceiveAsync() |> Async.AwaitTask
+            
+            Expect.equal "" "3" (msg.GetValue() |> Encoding.UTF8.GetString )
+   
+            Log.Debug("Finished Seek in the middle of the batch works properly 2")
+        }
        
     ]

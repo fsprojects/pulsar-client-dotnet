@@ -1037,6 +1037,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             response |> PulsarResponseType.GetEmpty
                             
                             duringSeek <- Some lastMessage
+                            startMessageId <- duringSeek // fix for #147
                             lastDequeuedMessageId <- MessageId.Earliest
                             
                             acksGroupingTracker.FlushAndClean()

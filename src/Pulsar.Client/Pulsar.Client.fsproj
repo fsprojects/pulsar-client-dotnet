@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>2.0.1</Version>
+    <Version>2.0.2</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Fix for MessageId comparison</PackageReleaseNotes>
+    <PackageReleaseNotes>Fix for seeking in the middle of a batch</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
-    <PackageVersion>2.0.1</PackageVersion>
+    <PackageVersion>2.0.2</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
