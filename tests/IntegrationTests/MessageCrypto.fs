@@ -215,7 +215,7 @@ let tests =
             let! producer =
                 client.NewProducer()
                     .Topic(topicName)
-                    .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(100.0))
+                    .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(400.0))
                     .BatchingMaxMessages(numberOfMessages)
                     .EnableBatching(true)
                     .MessageEncryptor(MessageEncryptor([|"Rsa1024key3"|], ProducerKeyReader()))

@@ -2,6 +2,7 @@ module Pulsar.Client.UnitTests.Internal.SchemaTests
 
 open System
 open System.Collections.Generic
+open System.Diagnostics
 open AvroGenerated
 open Expecto
 open Expecto.Flip
@@ -244,5 +245,52 @@ let tests =
                     |> processor.Value.DecodeKeyValue
                     |> unbox
                 Expect.equal "" input output
+        }        
+        
+        ptest "Serialize schema perf" {
+            let inputs = [{ JsonSchemaTest.X = "X1"; Y= seq { 1; 2 } |> ResizeArray}]
+            let sw = Stopwatch()
+            sw.Start()
+            let jsSchema = Schema.JSON<JsonSchemaTest>()
+            let avroSchema = Schema.AVRO<JsonSchemaTest>()
+            for i in 1..10000 do
+                for input in inputs do
+                    input
+                    |> jsSchema.Encode
+                    |> ignore
+            let jsonTime = sw.Elapsed.TotalSeconds
+            sw.Restart()
+            for i in 1..10000 do
+                for input in inputs do
+                    input
+                    |> avroSchema.Encode
+                    |> ignore
+            sw.Stop()
+            let avroTime = sw.Elapsed.TotalSeconds
+            Console.WriteLine("Encode Json time: {0} Avro time: {1}", jsonTime, avroTime)
+        }
+        
+        ptest "Deserialize schema perf" {
+            let inputs = [{ JsonSchemaTest.X = "X1"; Y= seq { 1; 2 } |> ResizeArray}]
+            let sw = Stopwatch()
+            sw.Start()
+            let jsSchema = Schema.JSON<JsonSchemaTest>()
+            let avroSchema = Schema.AVRO<JsonSchemaTest>()
+            let jsInput = jsSchema.Encode(inputs.[0])
+            let avroInput = avroSchema.Encode(inputs.[0])
+            
+            for i in 1..100000 do
+                    jsInput
+                    |> jsSchema.Decode
+                    |> ignore
+            let jsonTime = sw.Elapsed.TotalSeconds
+            sw.Restart()
+            for i in 1..100000 do
+                    avroInput
+                    |> avroSchema.Decode
+                    |> ignore
+            sw.Stop()
+            let avroTime = sw.Elapsed.TotalSeconds
+            Console.WriteLine("Decode Json time: {0} Avro time: {1}", jsonTime, avroTime)
         }
     ]

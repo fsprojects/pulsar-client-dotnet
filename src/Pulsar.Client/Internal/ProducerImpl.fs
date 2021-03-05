@@ -46,7 +46,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let prefix = $"producer({producerId}, {producerName}, {partitionIndex})"
     let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
-    let mutable schemaVersion = None
+    let mutable schemaVersion: SchemaVersion option = None
     let pendingMessages = Queue<PendingMessage<'T>>()
     let compressionCodec = CompressionCodec.get producerConfig.CompressionType
     let keyValueProcessor = KeyValueProcessor.GetInstance schema
@@ -255,8 +255,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         | None ->
             ()
         match schemaVersion with
-        | Some (SchemaVersion sv) ->
-            metadata.SchemaVersion <- sv
+        | Some sv ->
+            metadata.SchemaVersion <- sv.Bytes
         | None ->
             ()
         match orderingKey with

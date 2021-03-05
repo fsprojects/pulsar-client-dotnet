@@ -45,6 +45,6 @@ type internal GenericJsonSchema (topicSchema: TopicSchema) =
             |> Seq.toArray
         let scemaVersionBytes =
             topicSchema.SchemaVersion
-            |> Option.map (fun (SchemaVersion bytes) -> bytes)
+            |> Option.map (fun sv -> sv.Bytes)
             |> Option.toObj
         GenericRecord(scemaVersionBytes, fields)

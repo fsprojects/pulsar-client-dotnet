@@ -21,7 +21,25 @@ type internal PartitionedTopicMetadata =
     }
     member this.IsMultiPartitioned with get() = this.Partitions > 0
 
-type SchemaVersion = SchemaVersion of byte[]
+
+[<CustomEquality; NoComparison>]
+type SchemaVersion =
+    {
+        Bytes: byte[]
+    }
+    member private this.EqualsInner other =
+        Array.compareWith (fun (x: byte) (y: byte) -> x.CompareTo(y)) this.Bytes other.Bytes = 0
+    
+    override this.Equals obj =
+        obj :?> SchemaVersion |> this.EqualsInner
+        
+    override this.GetHashCode() =
+        this.Bytes |> Array.fold (fun acc el -> acc * 23 + (int el)) 17
+    
+    interface IEquatable<SchemaVersion> with
+        member this.Equals other =
+            this.EqualsInner other
+        
 
 type internal ProducerSuccess =
     {

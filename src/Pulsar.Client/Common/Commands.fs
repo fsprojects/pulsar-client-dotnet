@@ -325,7 +325,7 @@ let newGetLastMessageId (consumerId: ConsumerId) (requestId: RequestId) =
 let newGetSchema (topicName: CompleteTopicName) (requestId : RequestId) (schemaVersion: Option<SchemaVersion>) =
     let request = CommandGetSchema(Topic = %topicName, RequestId = %requestId)
     match schemaVersion with
-    | Some (SchemaVersion sv) -> request.SchemaVersion <- sv
+    | Some sv -> request.SchemaVersion <- sv.Bytes
     | None -> ()        
     let command = BaseCommand(``type`` = CommandType.GetSchema, getSchema = request)
     command |> serializeSimpleCommand

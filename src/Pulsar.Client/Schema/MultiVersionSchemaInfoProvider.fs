@@ -11,9 +11,9 @@ open Pulsar.Client.Common
 type internal MultiVersionSchemaInfoProvider(getSchema : (SchemaVersion -> Task<TopicSchema option>)) =
     let cache = new MemoryCache(MemoryCacheOptions(SizeLimit = Nullable 100000L))
     
+    
     member this.GetSchemaByVersion (schema: ISchema<'T>, schemaVersion) =
-        let (SchemaVersion sv) = schemaVersion
-        cache.GetOrCreateAsync<ISchema<'T> option>(sv, fun (cacheIntry) ->
+        cache.GetOrCreateAsync<ISchema<'T> option>(schemaVersion, fun (cacheIntry) ->
             task {                
                 cacheIntry.AbsoluteExpirationRelativeToNow <- Nullable <| TimeSpan.FromMinutes(30.0)
                 cacheIntry.Size <- Nullable(1L)

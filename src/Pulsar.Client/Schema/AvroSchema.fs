@@ -14,6 +14,7 @@ open Pulsar.Client.Common
 type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T>, avroWriter: DatumWriter<'T>) =
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
+    let defaultValue = Unchecked.defaultof<'T>
     
     new () =
          let tpe = typeof<'T>
@@ -47,7 +48,7 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
         stream.ToArray()
     override this.Decode bytes =
         use stream = new MemoryStream(bytes)
-        avroReader.Read(Unchecked.defaultof<'T>, BinaryDecoder(stream))
+        avroReader.Read(defaultValue, BinaryDecoder(stream))
     override this.GetSpecificSchema stringSchema =
         let writtenSchema = Schema.Parse(stringSchema)
         if avroReader :? SpecificDatumReader<'T> then
@@ -85,6 +86,6 @@ type internal GenericAvroSchema(topicSchema: TopicSchema) =
             |> Seq.toArray
         let scemaVersionBytes =
             topicSchema.SchemaVersion
-            |> Option.map (fun (SchemaVersion bytes) -> bytes)
+            |> Option.map (fun sv -> sv.Bytes)
             |> Option.toObj
         GenericRecord(scemaVersionBytes, fields)

@@ -286,16 +286,7 @@ let tests =
                     .ConsumerName("avroUpgradeSchema1")
                     .SubscriptionName("test-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
-
-            let input = { SimpleRecord.Name = "abc"; Age = 20 }
-            let! _ = producer.SendAsync(input) |> Async.AwaitTask
-
-            let! msg = consumer.ReceiveAsync() |> Async.AwaitTask
-            do! consumer.AcknowledgeAsync msg.MessageId |> Async.AwaitTask
-            Expect.equal "" input (msg.GetValue())
-            
-            do! consumer.UnsubscribeAsync() |> Async.AwaitTask
-            
+                    
             let! producer2 =
                 client.NewProducer(Schema.AVRO<SimpleRecord2>())
                     .Topic(topicName)
@@ -310,6 +301,15 @@ let tests =
                     .SubscriptionName("test-subscription2")
                     .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
                     .SubscribeAsync() |> Async.AwaitTask
+
+            let input = { SimpleRecord.Name = "abc"; Age = 20 }
+            let! _ = producer.SendAsync(input) |> Async.AwaitTask
+
+            let! msg = consumer.ReceiveAsync() |> Async.AwaitTask
+            do! consumer.AcknowledgeAsync msg.MessageId |> Async.AwaitTask
+            Expect.equal "" input (msg.GetValue())
+            
+            do! consumer.UnsubscribeAsync() |> Async.AwaitTask
 
             let input2 = { SimpleRecord2.Name = "abc"; Age = 20; Surname = "Jones" }
             let! _ = producer2.SendAsync(input2) |> Async.AwaitTask

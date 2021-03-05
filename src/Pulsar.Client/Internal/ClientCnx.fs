@@ -437,7 +437,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 this.Close()
 
     let getOptionalSchemaVersion =
-        Option.ofObj >> Option.map SchemaVersion
+        Option.ofObj >> Option.map (fun bytes -> { SchemaVersion.Bytes = bytes })
     
     let getMessageReceived (cmd: CommandMessage) (messageMetadata: MessageMetadata) payload checkSumValid =
         let mapCompressionType = function

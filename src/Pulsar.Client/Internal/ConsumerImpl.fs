@@ -436,8 +436,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 startMsgId.LedgerId = msgId.LedgerId
                 && startMsgId.EntryId = msgId.EntryId
     
-    let getSchemaVersionBytes =
-        Option.map (fun (SchemaVersion bytes) -> bytes) >> Option.defaultValue null
+    let getSchemaVersionBytes (schemaVersion: SchemaVersion option) =
+        schemaVersion
+        |> Option.map (fun sv -> sv.Bytes)
+        |> Option.defaultValue null
     
     let clearDeadLetters() = deadLettersProcessor.ClearMessages()
     
