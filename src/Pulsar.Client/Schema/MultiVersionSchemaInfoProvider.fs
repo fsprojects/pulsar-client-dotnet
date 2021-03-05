@@ -12,13 +12,13 @@ type internal MultiVersionSchemaInfoProvider(getSchema : (SchemaVersion -> Task<
     let cache = new MemoryCache(MemoryCacheOptions(SizeLimit = Nullable 100000L))
     
     
-    member this.GetSchemaByVersion (schema: ISchema<'T>, schemaVersion) =
-        cache.GetOrCreateAsync<ISchema<'T> option>(schemaVersion, fun (cacheIntry) ->
+    member this.GetSchemaByVersion (latestSchema: ISchema<'T>, schemaVersion) =
+        cache.GetOrCreateAsync<ISchema<'T> option>((latestSchema, schemaVersion), fun (cacheIntry) ->
             task {                
                 cacheIntry.AbsoluteExpirationRelativeToNow <- Nullable <| TimeSpan.FromMinutes(30.0)
                 cacheIntry.Size <- Nullable(1L)
                 let! schemaReponse = getSchema schemaVersion
-                return schemaReponse |> Option.map (fun sch -> schema.GetSpecificSchema(sch.SchemaInfo.Schema |> Encoding.UTF8.GetString))
+                return schemaReponse |> Option.map (fun sch -> latestSchema.GetSpecificSchema(sch.SchemaInfo.Schema |> Encoding.UTF8.GetString))
             })
         
     member this.Close() =
