@@ -51,8 +51,10 @@ type MessageId =
             if this.Partition >= 0 then
                 data.Partition <- this.Partition
             match this.Type with
-            | Batch (batchIndex, _) when %batchIndex >= 0 ->
+            | Batch (batchIndex, acker) when %batchIndex >= 0 ->
                 data.BatchIndex <- %batchIndex
+                if acker = BatchMessageAcker.NullAcker |> not then
+                    data.BatchSize <- acker.GetBatchSize()
             | _ ->
                 ()
             use stream = MemoryStreamManager.GetStream()
@@ -62,8 +64,13 @@ type MessageId =
             use stream = new MemoryStream(data)
             let msgData = Serializer.Deserialize<MessageIdData>(stream)
             let msgType =
-                if msgData.BatchIndex >= 0 then
-                    Batch (%msgData.BatchIndex, BatchMessageAcker.NullAcker)
+                if msgData.ShouldSerializeBatchIndex() then
+                    let acker =
+                        if msgData.ShouldSerializeBatchSize() then
+                            BatchMessageAcker(msgData.BatchSize)
+                        else
+                            BatchMessageAcker.NullAcker
+                    Batch (%msgData.BatchIndex, acker)
                 else
                     Single
             {

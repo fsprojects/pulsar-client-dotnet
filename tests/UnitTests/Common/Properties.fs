@@ -11,10 +11,11 @@ type MessageIdGen() =
        let createMessageId entryId ledgerId partition (batchIndex: int option) =
            match batchIndex with
            | Some index ->
+               let batchSize = if index % 2 = 0 then index else index + 1
                {
                    LedgerId = %(int64 ledgerId)
                    EntryId = %(int64 entryId)
-                   Type = Batch (%index, BatchMessageAcker.NullAcker)
+                   Type = Batch (%index, BatchMessageAcker(batchSize))
                    Partition = partition
                    TopicName = %""
                    ChunkMessageIds = None

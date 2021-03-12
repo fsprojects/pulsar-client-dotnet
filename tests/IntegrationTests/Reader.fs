@@ -268,6 +268,7 @@ let tests =
             do! checkReadingFromLastMessageId false |> Async.AwaitTask
         }
 
+        // enable when 2.7.1 server is out
         ptestAsync "Check reading from last messageId with batching" {
             do! checkReadingFromLastMessageId true |> Async.AwaitTask
         }

@@ -218,7 +218,7 @@ let newSeekByMsgId (consumerId: ConsumerId) (requestId : RequestId) (messageId: 
     | Batch (batchIndex, acker) ->
         let batchSize =
             if acker = BatchMessageAcker.NullAcker then
-                0 // should be improved later
+                0
             else
                 acker.GetBatchSize()
         let ackSet = BitArray batchSize
