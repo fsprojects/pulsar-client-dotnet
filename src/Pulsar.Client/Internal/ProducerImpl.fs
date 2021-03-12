@@ -554,6 +554,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                 | ProducerMessage.BeginSendMessage sendRequest ->
 
+                    Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
                     beginSendMessage sendRequest
                     return! loop ()
 

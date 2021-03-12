@@ -5,6 +5,7 @@ open System
 open System.Collections
 open System.Net
 open System
+open System.Threading.Tasks
 open Microsoft.IO
 open System.Runtime.ExceptionServices
 open System.Collections.Generic
@@ -127,6 +128,8 @@ let tryPeek (queue: Queue<'T>) =
         queue.Peek() |> Some
     else
         None
+    
+let falseTaskTask = false |> Task.FromResult |> Task.FromResult
         
 type Result<'T, 'TError> with
     member this.ToStr() =

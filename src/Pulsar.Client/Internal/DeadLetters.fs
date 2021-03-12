@@ -31,8 +31,6 @@ type internal DeadLetterProcessor<'T>
         createProducer policy.RetryLetterTopic
     )
     
-    let cachedFalseTask = false |> Task.FromResult |> Task.FromResult
-    
     let getOptionalKey (message: Message<'T>) = 
             if String.IsNullOrEmpty(%message.Key) then
                 Some { PartitionKey = message.Key; IsBase64Encoded =  message.HasBase64EncodedKey  }
@@ -71,7 +69,7 @@ type internal DeadLetterProcessor<'T>
                         }
                 }
             | false, _ ->
-                cachedFalseTask
+                falseTaskTask
 
         member this.ReconsumeLater (message, deliverAt, acknowledge) =
             let propertiesMap = Dictionary<string, string>()
@@ -108,7 +106,7 @@ type internal DeadLetterProcessor<'T>
             member this.ClearMessages () = ()
             member this.AddMessage (_,_) = ()
             member this.RemoveMessage _ = ()
-            member this.ProcessMessage (_,_) = Task.FromResult(Task.FromResult(false))
+            member this.ProcessMessage (_,_) = falseTaskTask
             member this.MaxRedeliveryCount = UInt32.MaxValue
             member this.TopicName = ""
             member this.ReconsumeLater (_,_,_) = Task.FromResult()
