@@ -652,7 +652,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             None
             
     let handleSingleMessagePayload (rawMessage: RawMessage) msgId payload hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction =
-        if isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
+        if duringSeek.IsSome || (isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId)) then
             // We need to discard entries that were prior to startMessageId
             Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
         else
@@ -1064,7 +1064,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             response |> PulsarResponseType.GetEmpty
                             
                             duringSeek <- Some lastMessage
-                            startMessageId <- duringSeek // fix for #147
                             lastDequeuedMessageId <- MessageId.Earliest
                             
                             acksGroupingTracker.FlushAndClean()
@@ -1269,7 +1268,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
             let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
 
-            if isSameEntry(rawMessage.MessageId) && isPriorBatchIndex(%i) then
+            if duringSeek.IsSome || (isSameEntry(rawMessage.MessageId) && isPriorBatchIndex(%i)) then
                 Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1} in batch", prefix, startMessageId)
                 skippedMessages <- skippedMessages + 1
             elif singleMessageMetadata.CompactedOut then
