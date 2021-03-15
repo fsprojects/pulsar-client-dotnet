@@ -610,7 +610,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let result = TopicsOfNamespace cmd.Topics
             handleSuccess %cmd.RequestId result BaseCommand.Type.GetTopicsOfNamespaceResponse
         | XCommandGetLastMessageIdResponse cmd ->
-            let result = LastMessageId {
+            let lastMessageId = {
                 LedgerId = %(int64 cmd.LastMessageId.ledgerId)
                 EntryId = %(int64 cmd.LastMessageId.entryId)
                 Type =
@@ -620,6 +620,22 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Partition = cmd.LastMessageId.Partition
                 TopicName = %""
                 ChunkMessageIds = None
+            }
+            let markDeletePosition =
+                cmd.ConsumerMarkDeletePosition
+                |> Option.ofObj
+                |> Option.map (fun msgIdData ->
+                    {
+                        LedgerId = %(int64 msgIdData.ledgerId)
+                        EntryId = %(int64 msgIdData.entryId)
+                        Type = MessageIdType.Single
+                        Partition = -1
+                        TopicName = %""
+                        ChunkMessageIds = None
+                    })
+            let result = LastMessageId {
+                LastMessageId = lastMessageId
+                MarkDeletePosition = markDeletePosition
             }
             handleSuccess %cmd.RequestId result BaseCommand.Type.GetLastMessageIdResponse
         | XCommandActiveConsumerChange cmd ->
