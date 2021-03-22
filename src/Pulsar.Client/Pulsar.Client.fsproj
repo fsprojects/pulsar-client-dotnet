@@ -48,8 +48,8 @@
     </None>
     <None Include="paket.references" />
     <Compile Include="Common\UMX.fs" />
+    <Compile Include="Common\Log.fs" />
     <Compile Include="Common\Tools.fs" />
-    <Compile Include="Internal\Log.fs" />
     <Compile Include="Internal\BatchMessageAcker.fs" />
     <Compile Include="Internal\Backoff.fs" />
     <Compile Include="Common\NamespaceName.fs" />

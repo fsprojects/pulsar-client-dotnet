@@ -9,6 +9,7 @@ open System.Threading.Tasks
 open Microsoft.IO
 open System.Runtime.ExceptionServices
 open System.Collections.Generic
+open Microsoft.Extensions.Logging
 
 let MemoryStreamManager = RecyclableMemoryStreamManager()
 let MagicNumber = int16 0x0e01
@@ -87,14 +88,20 @@ let convertToDateTime (msTimestamp: int64) =
 
 let asyncDelay (delay: TimeSpan) work =
     async {
-        do! Async.Sleep delay 
-        work()
+        do! Async.Sleep delay
+        try
+            work()
+        with ex ->
+            Log.Logger.LogError(ex, "Error in delayed action")
     } |> Async.StartImmediate
 
 let asyncDelayMs (delay: int) work =
     async {
         do! Async.Sleep delay 
-        work()
+        try
+            work()
+        with ex ->
+            Log.Logger.LogError(ex, "Error in delayed action")
     } |> Async.StartImmediate
 
 let signSafeMod dividend divisor =

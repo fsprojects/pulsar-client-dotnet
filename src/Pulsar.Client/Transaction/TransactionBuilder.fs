@@ -3,7 +3,7 @@ namespace Pulsar.Client.Transaction
 open System.Threading.Tasks
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
-open Pulsar.Client.Internal
+open Pulsar.Client.Common
 open Microsoft.Extensions.Logging
 
 type TransactionBuilder internal (transactionClient: TransactionCoordinatorClient, config: TransactionConfiguration) =
