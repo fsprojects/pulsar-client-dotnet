@@ -17,7 +17,7 @@ type JsonSchemaTest = { X: string; Y: ResizeArray<int> }
 
 [<CLIMutable>]
 [<ProtoContract>]
-type ProtobufchemaTest = {
+type ProtobufSchemaTest = {
         [<ProtoMember(1)>]X: string
         [<ProtoMember(2)>]Y: ResizeArray<int>
     }
@@ -25,10 +25,17 @@ type ProtobufchemaTest = {
 [<CLIMutable>]
 type AvroSchemaTest = { X: string; Y: ResizeArray<int> }
 
+[<CLIMutable>]
+[<ProtoContract>]
+type ProtobufNativeSchemaTest = {
+        [<ProtoMember(1)>]foo: string
+        [<ProtoMember(2)>]bar: double
+    }
+
 [<Tests>]
 let tests =
     
-    testList "Schema tests" [
+    ftestList "Schema tests" [
 
         test "Bytes schema works fine" {
             let input = [| 1uy; 2uy; 3uy |]
@@ -185,6 +192,18 @@ let tests =
                 Expect.sequenceEqual "" input.Y output.Y
         }
         
+        test "Protobuf native" {
+            let inputs = [{ ProtobufNativeSchemaTest.foo = "X1"; bar = 1.0}]
+            for input in inputs do
+                let schema = Schema.PROTOBUF_NATIVE<ProtobufNativeSchemaTest>()
+                let output =
+                    input
+                    |> schema.Encode
+                    |> schema.Decode
+                Expect.equal "" input.foo output.foo
+                Expect.equal "" input.bar output.bar
+        }
+        
         test "Avro schema works fine with Avro generated classes" {
             let inputs = [ SampleClass(
                                           value1 = 1L,
@@ -220,7 +239,7 @@ let tests =
         }
         
         test "Protobuf schema works fine" {
-            let inputs = [{ ProtobufchemaTest.X = "X1"; Y = seq { 1; 2 } |> ResizeArray}]
+            let inputs = [{ ProtobufSchemaTest.X = "X1"; Y = seq { 1; 2 } |> ResizeArray}]
             for input in inputs do
                 let schema = Schema.PROTOBUF()
                 let output =

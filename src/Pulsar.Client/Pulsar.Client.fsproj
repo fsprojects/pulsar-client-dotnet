@@ -37,6 +37,7 @@
     <PackageIconUrl />
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="protobuf-net.Reflection" Version="3.0.101" />
     <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" PrivateAssets="all" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0" PrivateAssets="All" />
   </ItemGroup>
@@ -105,6 +106,7 @@
     <Compile Include="Schema\AvroSchema.fs" />
     <Compile Include="Schema\AutoProduceBytesSchema.fs" />
     <Compile Include="Schema\AutoConsumeSchema.fs" />
+    <Compile Include="Schema\ProtobufNativeSchema.fs" />
     <Compile Include="Internal\TaskSeq.fs" />
     <Compile Include="Internal\Compression .fs" />
     <Compile Include="Internal\ChunkedMessageTracker.fs" />
