@@ -24,7 +24,7 @@ open Pulsar.Client.Common
     //protobuf v3 rootFileDescriptorName
     member  this.rootFileDescriptorName =rootFileDescriptorName
 
-type internal ProtoBufNativeSchema<'T > private (schema: string) =
+type internal ProtoBufNativeSchema<'T > () =
     inherit ISchema<'T>()    
   
     let getDescriptor( )=       
@@ -34,10 +34,13 @@ type internal ProtoBufNativeSchema<'T > private (schema: string) =
                                     (fun x -> x :? System.Runtime.Serialization.DataContractAttribute)
         match gotClassAttribute with
             Some _ ->
+                let userClassNamespace = typeof<'T>.Namespace
+                let userClassName = typeof<'T>.Name
+                
                 let set = FileDescriptorSet()
                 let protoForType = Serializer.GetProto<'T> () //save it to .proto file nearby
                 let currentPath = Path.GetDirectoryName(typeof<'T>.Assembly.Location)       
-                let protoFileName = Guid.NewGuid().ToString() + ".proto"
+                let protoFileName = userClassName + ".proto"
                 let protoFilePath = Path.Combine (currentPath , protoFileName)
                 File.WriteAllText ( protoFilePath , protoForType)
                 
@@ -46,18 +49,20 @@ type internal ProtoBufNativeSchema<'T > private (schema: string) =
                 set.Process()
                 
                 use stream = MemoryStreamManager.GetStream()
-                Serializer.Serialize(stream, set)
-                    
-                let userClassNamespace = typeof<'T>.Namespace
-                let userClassName = typeof<'T>.Name
+                Serializer.Serialize(stream, set)                    
+            
                 File.Delete protoFilePath
+                
+               
                 ProtobufNativeSchemaData (stream.ToArray (), userClassNamespace + "." + userClassName, protoFileName)
+               //nativeCheck2.XXXMessage XXXMessage.proto
             | _ -> raise (Exception("Please decorate message class and it's members with protobuf attributes"))
 
 
     let stringSchema () =
-        getDescriptor () |> JsonSerializer.Serialize |> Encoding.UTF8.GetBytes   
-
+        let q = getDescriptor () |> JsonSerializer.Serialize |> Encoding.UTF8.GetBytes  
+        File.WriteAllBytes ("D:\\codedFromFsharp",  q)
+        q
     let parameterIsClass =  typeof<'T>.IsClass    
     override this.Decode bytes =
         use stream = new MemoryStream(bytes)   
@@ -68,14 +73,8 @@ type internal ProtoBufNativeSchema<'T > private (schema: string) =
             raise <| SchemaSerializationException "Need Non-Null content value"
         use stream = MemoryStreamManager.GetStream()      
         Serializer.Serialize(stream, value)       
-        stream.ToArray()
-    
-    //если в сообщении какая-то другая схема указывается, то схема скачивается с сервера и по ней строится ISchema
-    override this.GetSpecificSchema stringSchema =     
-        ProtoBufNativeSchema<'T> (stringSchema) :> ISchema<'T>
+        stream.ToArray()  
 
-    new()=
-        ProtoBufNativeSchema<'T>(String.Empty)
     override this.SchemaInfo =
         {
         Name = ""

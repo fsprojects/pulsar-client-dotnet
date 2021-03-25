@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Runtime.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 using ProtoBuf;
 using Pulsar.Client.Api;
@@ -15,6 +16,9 @@ namespace nativeCheck2
         [DataMember(Order = 2)]
         public double bar { get; set; }
         
+        [DataMember(Order = 3)]
+        public double bar3 { get; set; }
+        
     }
     class Program
     {
@@ -24,7 +28,7 @@ namespace nativeCheck2
             Console.WriteLine("Hello World!");
             const string serviceUrl = "pulsar://localhost:6650";
             const string subscriptionName = "my-subscription";
-            var topicName = $"my-topic-{DateTime.Now.Ticks}";
+            var topicName = $"mynativetest4";
 
             var a = Schema.JSON<XXXMessage>();
             var client = await new PulsarClientBuilder()
@@ -39,9 +43,13 @@ namespace nativeCheck2
                 .Topic(topicName)
                 .SubscriptionName(subscriptionName)
                 .SubscribeAsync();
-
-            var messageId = await producer.SendAsync(new XXXMessage{ foo =  "sample", bar = 1.0});
-            Console.WriteLine($"MessageId is: '{messageId}'");
+            // while (true)
+            // {
+            //     var messageId = await producer.SendAsync(new XXXMessage{ foo =  "sample", bar = 1.0});
+            //     Console.WriteLine($"MessageId is: '{messageId}'");
+            //     Thread.Sleep(1000);
+            // }
+           
 
             var message = await consumer.ReceiveAsync();
             Console.WriteLine($"Received: {message.GetValue()}");
