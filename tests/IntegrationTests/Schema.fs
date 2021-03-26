@@ -210,6 +210,37 @@ let tests =
             Log.Debug("Finished Protobuf schema works fine")
         }
         
+        testAsync "ProtobufNative schema works fine" {
+
+            Log.Debug("Start ProtobufNative schema works fine")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let name = "protobufNativeSchema"
+
+            let! producer =
+                client.NewProducer(Schema.PROTOBUF_NATIVE<SimpleProtoRecord>())
+                    .Topic(topicName)
+                    .ProducerName(name)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                client.NewConsumer(Schema.PROTOBUF_NATIVE<SimpleProtoRecord>())
+                    .Topic(topicName)
+                    .ConsumerName(name)
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let input = { SimpleProtoRecord.Name = "abc"; Age = 20  }
+            let! _ = producer.SendAsync(input) |> Async.AwaitTask
+
+            let! msg = consumer.ReceiveAsync() |> Async.AwaitTask
+            do! consumer.AcknowledgeAsync msg.MessageId |> Async.AwaitTask
+
+            Expect.equal "" input (msg.GetValue())
+
+            Log.Debug("Finished ProtobufNative schema works fine")
+        }
+        
         testAsync "Avro schema works fine" {
 
             Log.Debug("Start Avro schema works fine")
