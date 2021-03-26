@@ -2,7 +2,6 @@
 
 
 open System
-open System.Collections.Generic
 open System.IO
 open System.Text
 open System.Text.Json
@@ -13,15 +12,9 @@ open Pulsar.Client.Common
 
  type   ProtobufNativeSchemaData(fileDescriptorSet:byte[],
                                        rootMessageTypeName: string,
-                                       rootFileDescriptorName:string) =
-    
-    //protobuf v3 FileDescriptorSet bytes.   
-    member this.fileDescriptorSet = fileDescriptorSet
-    
-    //protobuf v3 rootMessageTypeName   
-    member  this.rootMessageTypeName =rootMessageTypeName
-  
-    //protobuf v3 rootFileDescriptorName
+                                       rootFileDescriptorName:string) =      
+    member this.fileDescriptorSet = fileDescriptorSet       
+    member  this.rootMessageTypeName =rootMessageTypeName     
     member  this.rootFileDescriptorName =rootFileDescriptorName
 
 type internal ProtoBufNativeSchema<'T > () =
@@ -51,18 +44,15 @@ type internal ProtoBufNativeSchema<'T > () =
                 use stream = MemoryStreamManager.GetStream()
                 Serializer.Serialize(stream, set)                    
             
-                File.Delete protoFilePath
-                
+                File.Delete protoFilePath                
                
-                ProtobufNativeSchemaData (stream.ToArray (), userClassNamespace + "." + userClassName, protoFileName)
-               //nativeCheck2.XXXMessage XXXMessage.proto
+                ProtobufNativeSchemaData (stream.ToArray (), userClassNamespace + "." + userClassName, protoFileName)              
             | _ -> raise (Exception("Please decorate message class and it's members with protobuf attributes"))
 
 
     let stringSchema () =
-        let q = getDescriptor () |> JsonSerializer.Serialize |> Encoding.UTF8.GetBytes  
-        File.WriteAllBytes ("D:\\codedFromFsharp",  q)
-        q
+        getDescriptor () |> JsonSerializer.Serialize |> Encoding.UTF8.GetBytes  
+       
     let parameterIsClass =  typeof<'T>.IsClass    
     override this.Decode bytes =
         use stream = new MemoryStream(bytes)   

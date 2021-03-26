@@ -43,8 +43,7 @@ type Schema =
     static member PROTOBUF<'T> () =
         ProtobufSchema<'T>() :> ISchema<'T>
     static member AVRO<'T> () =
-        AvroSchema<'T>() :> ISchema<'T>
-        
+        AvroSchema<'T>() :> ISchema<'T>        
     static member PROTOBUF_NATIVE<'T > () =
         ProtoBufNativeSchema<'T>() :> ISchema<'T>        
         
