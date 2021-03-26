@@ -36,8 +36,7 @@
     <PackageIcon>pulsar-client-dotnet.png</PackageIcon>
     <PackageIconUrl />
   </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="protobuf-net.Reflection" Version="3.0.101" />
+  <ItemGroup>    
     <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" PrivateAssets="all" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0" PrivateAssets="All" />
   </ItemGroup>

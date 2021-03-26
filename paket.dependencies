@@ -8,6 +8,7 @@ nuget Microsoft.Extensions.Logging
 nuget Microsoft.Extensions.Logging.Abstractions
 nuget Microsoft.IO.RecyclableMemoryStream
 nuget Microsoft.Bcl.AsyncInterfaces
+nuget protobuf-net.Reflection 3.0.101
 nuget System.Text.Json
 nuget System.IO.Pipelines
 nuget Pipelines.Sockets.Unofficial

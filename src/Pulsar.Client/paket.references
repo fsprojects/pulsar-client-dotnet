@@ -19,3 +19,4 @@ AvroSchemaGenerator
 Apache.Avro
 NSec.Cryptography
 PemUtils
+protobuf-net.Reflection
