@@ -207,8 +207,7 @@ let tests =
                 Expect.equal "" input.value5.b output.value5.b
         }
 
-        // Uncomment this test once apache/avro#957 or apache/avro#1013 is merged
-        ptest "Avro schema works fine with long strings (> 256 characters)" {
+        test "Avro schema works fine with long strings (> 256 characters)" {
             let inputs = [{ AvroSchemaTest.X = String('1', 257); Y = [] |> ResizeArray}]
             for input in inputs do
                 let schema = Schema.AVRO()

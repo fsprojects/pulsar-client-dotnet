@@ -645,7 +645,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | _ ->
                 Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandActiveConsumerChange", prefix, %cmd.ConsumerId)
         | XCommandGetSchemaResponse cmd ->
-            if (cmd.ShouldSerializeErrorCode()) then
+            if cmd.ShouldSerializeErrorCode() then
                 if cmd.ErrorCode = ServerError.TopicNotFound then
                     let result = TopicSchema None
                     handleSuccess %cmd.RequestId result BaseCommand.Type.GetSchemaResponse

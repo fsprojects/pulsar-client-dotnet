@@ -1,6 +1,5 @@
 module Pulsar.Client.IntegrationTests.Schema
 
-open System.ComponentModel
 open System.ComponentModel.DataAnnotations
 open AvroSchemaGenerator.Attributes
 open Expecto
@@ -26,6 +25,15 @@ type SimpleRecord2 =
         Name: string
         Age: int
         Surname: string
+    }
+    
+[<CLIMutable>]
+type SimpleRecord3 =
+    {
+        Name: string
+        Age: int
+        [<LogicalType(LogicalTypeKind.Date)>]
+        Date: DateTime
     }
     
 [<CLIMutable>]
@@ -89,20 +97,20 @@ let tests =
             let name = "jsonSchema"
 
             let! producer =
-                client.NewProducer(Schema.JSON<SimpleRecord>())
+                client.NewProducer(Schema.JSON<SimpleRecord3>())
                     .Topic(topicName)
                     .ProducerName(name)
                     .EnableBatching(false)
                     .CreateAsync() |> Async.AwaitTask
 
             let! consumer =
-                client.NewConsumer(Schema.JSON<SimpleRecord>())
+                client.NewConsumer(Schema.JSON<SimpleRecord3>())
                     .Topic(topicName)
                     .ConsumerName(name)
                     .SubscriptionName("test-subscription")
                     .SubscribeAsync() |> Async.AwaitTask
 
-            let input = { SimpleRecord.Name = "abc"; Age = 20 }
+            let input = { SimpleRecord3.Name = "abc"; Age = 20; Date = DateTime.UtcNow }
             let! _ = producer.SendAsync(input) |> Async.AwaitTask
 
             let! msg = consumer.ReceiveAsync() |> Async.AwaitTask
