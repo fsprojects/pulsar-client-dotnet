@@ -20,11 +20,15 @@ open Pulsar.Client.Common
 type internal ProtoBufNativeSchema<'T > () =
     inherit ISchema<'T>()    
   
-    let getDescriptor( )=       
+    let getDescriptor( )=        
+       
        
         let gotClassAttribute = Attribute.GetCustomAttributes(typeof<'T>) |>
-                                Array.tryFind
-                                    (fun x -> x :? System.Runtime.Serialization.DataContractAttribute)
+                                Array.tryFind (fun x -> match x with
+                                                        | :? System.Runtime.Serialization.DataContractAttribute -> true
+                                                        | :? ProtoContractAttribute -> true
+                                                        | _ -> false)
+                                
         match gotClassAttribute with
             Some _ ->
                 let userClassNamespace = typeof<'T>.Namespace
