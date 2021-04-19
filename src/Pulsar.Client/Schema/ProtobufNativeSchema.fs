@@ -10,13 +10,18 @@ open ProtoBuf
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
- type   ProtobufNativeSchemaData(fileDescriptorSet:byte[],
+type   ProtobufNativeSchemaData(fileDescriptorSet:byte[],
                                        rootMessageTypeName: string,
                                        rootFileDescriptorName:string) =      
     member this.fileDescriptorSet = fileDescriptorSet       
     member  this.rootMessageTypeName =rootMessageTypeName     
     member  this.rootFileDescriptorName =rootFileDescriptorName
-
+type VirtualFile(content:string)=
+    member private this.Content = content
+    interface IFileSystem with
+        member this.Exists _ = true
+        member this.OpenText _ =
+            new StringReader(this.Content) :> TextReader
 type internal ProtoBufNativeSchema<'T > () =
     inherit ISchema<'T>()    
   
@@ -32,24 +37,19 @@ type internal ProtoBufNativeSchema<'T > () =
         match gotClassAttribute with
             Some _ ->
                 let userClassNamespace = typeof<'T>.Namespace
-                let userClassName = typeof<'T>.Name
-                
-                let set = FileDescriptorSet()
-                let protoForType = Serializer.GetProto<'T> () //save it to .proto file nearby
-                let currentPath = Path.GetDirectoryName(typeof<'T>.Assembly.Location)       
+                let userClassName = typeof<'T>.Name               
+               
+                let protoForType = Serializer.GetProto<'T> () 
+                let set = FileDescriptorSet( FileSystem = VirtualFile(protoForType))
                 let protoFileName = userClassName + ".proto"
-                let protoFilePath = Path.Combine (currentPath , protoFileName)
-                File.WriteAllText ( protoFilePath , protoForType)
-                
-                set.AddImportPath(currentPath)
+                let baseUri =  Uri("file://" + protoFileName, UriKind.Absolute)
+                set.AddImportPath(baseUri.AbsolutePath)
                 set.Add protoFileName |> ignore
                 set.Process()
                 
                 use stream = MemoryStreamManager.GetStream()
-                Serializer.Serialize(stream, set)                    
+                Serializer.Serialize(stream, set)                  
             
-                File.Delete protoFilePath                
-               
                 ProtobufNativeSchemaData (stream.ToArray (), userClassNamespace + "." + userClassName, protoFileName)              
             | _ -> raise (Exception("Please decorate message class and it's members with protobuf attributes"))
 
