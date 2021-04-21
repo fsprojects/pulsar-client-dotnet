@@ -12,33 +12,40 @@ Supported pulsar cluster versions: **2.4+**
 
 Find examples of usage in [/examples](https://github.com/fsharplang-ru/pulsar-client-dotnet/tree/develop/examples) folder. We are trying to keep api similar to the Java client, so please take a look at [it's documentation](https://pulsar.apache.org/docs/en/client-libraries-java/#connection-urls) to understand possible options available. You can also join telegram chat https://t.me/pro_pulsar for further discussions.
 
-Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix):
+Features list (based on https://github.com/apache/pulsar/wiki/Client-Features-Matrix):
 
 - [X] Basic Producer/Consumer API
 - [X] Partitioned topics
 - [X] Batching
+- [X] Chunking
 - [X] Compression
 - [X] TLS
 - [X] Authentication (token, tls)
 - [X] Reader API
 - [X] Proxy Support
 - [X] Effectively-Once
-- [X] Schema
+- [X] Schema (All types, Multi-version)
 - [X] Consumer seek
 - [X] Multi-topics consumer
 - [X] Topics regex consumer
 - [X] Compacted topics
-- [X] User defined properties producer/consumer
+- [X] User defined properties
 - [X] Reader hasMessageAvailable
 - [X] Hostname verification
-- [X] Multi Hosts Service Url support
-- [X] Key_shared
-- [X] key based batcher
+- [X] Multi Hosts Service Url
+- [X] Key_shared subscription
+- [X] Key based batcher
 - [X] Negative Acknowledge
-- [X] Delayed Delivery Messages
+- [X] Delayed/scheduled messages	
 - [X] Dead Letter Policy
 - [X] Interceptors
-
+- [X] Transactions
+- [X] Statistics
+- [X] End-to-end Encryption
+- [X] SubscriptionInitialPosition
+- [X] Cumulative Ack
+- [X] Batch-Index Ack
+- [ ] SNI Routing
 
 ## Quick contributing guide
 
