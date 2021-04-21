@@ -17,7 +17,7 @@ open System.Security.Cryptography.X509Certificates
 type internal ConnectionPool (config: PulsarClientConfiguration) =
 
 
-    let connections = ConcurrentDictionary<bool*LogicalAddress, Task<ClientCnx>>()
+    let connections = ConcurrentDictionary<bool*LogicalAddress, Lazy<Task<ClientCnx>>>()
 
     // from https://github.com/mgravell/Pipelines.Sockets.Unofficial/blob/master/src/Pipelines.Sockets.Unofficial/SocketConnection.Connect.cs
     let getSocket (endpoint: DnsEndPoint) =
@@ -167,7 +167,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
 
     member this.GetConnection (broker: Broker, maxMessageSize: int, brokerless: bool) =
         let t = connections.GetOrAdd((brokerless, broker.LogicalAddress), fun _ ->
-                connect(broker, maxMessageSize, brokerless))
+                lazy connect(broker, maxMessageSize, brokerless)).Value
         if t.IsFaulted then
             Log.Logger.LogInformation("Removing faulted task to {0}", broker)
             connections.TryRemove((brokerless, broker.LogicalAddress)) |> ignore
@@ -181,7 +181,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         task {
             for KeyValue(_, connectionTask) in connections do
                 try
-                    let! cnx = connectionTask
+                    let! cnx = connectionTask.Value
                     cnx.Dispose()
                 with ex ->
                     Log.Logger.LogError(ex, "Couldn't get connection on close")

@@ -46,7 +46,6 @@ Features list (from https://github.com/apache/pulsar/wiki/Client-Features-Matrix
 
  - Fork and clone locally
  - Install dotnet tools: `dotnet tool restore`
- - Install packages: `dotnet paket install`
  - Restore packages: `dotnet restore`
  
 #### MacOS steps before building:

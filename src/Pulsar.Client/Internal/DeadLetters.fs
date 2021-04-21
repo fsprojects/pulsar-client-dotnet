@@ -47,25 +47,29 @@ type internal DeadLetterProcessor<'T>
         member this.RemoveMessage messageId =
             store.Remove(messageId) |> ignore
 
-        member this.ProcessMessages (messageId, acknowledge) =
-            task {
-                match store.TryGetValue messageId with
-                | true, message ->
-                    Log.Logger.LogInformation("DeadLetter processing topic: {0}, messageId: {1}", dlTopicName, messageId)
-                    try
-                        let! producer = dlProducer.Value
-                        let key = getOptionalKey message
-                        let value = Unchecked.defaultof<'T> // no data decoding is needed
-                        let msg = MessageBuilder(value, message.Data, key, message.Properties)
-                        let! _ = producer.SendAsync(msg)
-                        do! acknowledge messageId
-                        return true
-                    with Flatten ex ->
-                        Log.Logger.LogError(ex, "Send to dead letter topic exception with topic: {0}, messageId: {1}", dlTopicName, messageId)
-                        return false
-                | false, _ ->
-                    return false
-            }
+        member this.ProcessMessage (messageId, acknowledge) =
+            match store.TryGetValue messageId with
+            | true, message ->
+                Log.Logger.LogInformation("DeadLetter processing topic: {0}, messageId: {1}", dlTopicName, messageId)
+                let key = getOptionalKey message
+                let value = Unchecked.defaultof<'T> // no data decoding is needed
+                let msg = MessageBuilder(value, message.Data, key, message.Properties)
+                task {
+                    let! producer = dlProducer.Value
+                    return
+                        task {
+                            let! _ = producer.SendAsync(msg)
+                            try
+                                do! acknowledge messageId
+                                return true
+                            with Flatten ex ->
+                                Log.Logger.LogWarning(ex, "Failed to acknowledge the message topic: {0}, messageId: {1} but send to the DLQ successfully",
+                                                      dlTopicName, messageId)
+                                return true
+                        }
+                }
+            | false, _ ->
+                falseTaskTask
 
         member this.ReconsumeLater (message, deliverAt, acknowledge) =
             let propertiesMap = Dictionary<string, string>()
@@ -84,30 +88,26 @@ type internal DeadLetterProcessor<'T>
                 if reconsumetimes > policy.MaxRedeliveryCount then
                     let dlp = this :> IDeadLetterProcessor<'T>
                     dlp.AddMessage(message.MessageId, message.WithProperties(propertiesMap))
-                    let! dlResult = dlp.ProcessMessages(message.MessageId, acknowledge)
-                    return dlResult
+                    let! _ = dlp.ProcessMessage(message.MessageId, acknowledge)
+                    return ()
                 else
-                    try
-                        let! rlProducer = rlProducer.Value
-                        let key = getOptionalKey message
-                        let msg = MessageBuilder(message.GetValue(), message.Data, key, propertiesMap, deliverAt)
-                        let! _ = rlProducer.SendAsync(msg)
-                        do! acknowledge message.MessageId
-                        return true
-                    with Flatten ex ->
-                        Log.Logger.LogError(ex, "Send to retry topic exception with topic: {0}, messageId: {1}",
-                                            dlTopicName, message.MessageId)
-                        return false
+                    let! rlProducer = rlProducer.Value
+                    let key = getOptionalKey message
+                    let msg = MessageBuilder(message.GetValue(), message.Data, key, propertiesMap, deliverAt)
+                    let! _ = rlProducer.SendAsync(msg)
+                    do! acknowledge message.MessageId
             }
         
         member this.MaxRedeliveryCount = policy.MaxRedeliveryCount |> uint32
+        member this.TopicName = dlTopicName
 
     static member Disabled = {
         new IDeadLetterProcessor<'T> with
             member this.ClearMessages () = ()
             member this.AddMessage (_,_) = ()
             member this.RemoveMessage _ = ()
-            member this.ProcessMessages (_,_) = Task.FromResult(false)
+            member this.ProcessMessage (_,_) = falseTaskTask
             member this.MaxRedeliveryCount = UInt32.MaxValue
-            member this.ReconsumeLater (_,_,_) = Task.FromResult(false)
+            member this.TopicName = ""
+            member this.ReconsumeLater (_,_,_) = Task.FromResult()
     }

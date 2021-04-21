@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Internal
+﻿namespace Pulsar.Client.Common
 
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.Logging.Abstractions

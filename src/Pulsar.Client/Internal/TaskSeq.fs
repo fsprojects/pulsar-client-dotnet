@@ -3,6 +3,7 @@ namespace Pulsar.Client.Internal
 open System.Collections.Generic
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
+open Pulsar.Client.Common
 open Microsoft.Extensions.Logging
 
 type internal TaskGenerator<'T> = unit -> Task<'T>

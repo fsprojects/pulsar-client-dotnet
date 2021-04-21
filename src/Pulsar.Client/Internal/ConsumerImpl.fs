@@ -46,7 +46,7 @@ type internal ConsumerMessage<'T> =
     | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
     | Tick of ConsumerTickType
     | GetStats of AsyncReplyChannel<ConsumerStats>
-    | ReconsumeLater of Message<'T> * AckType * TimeStamp * AsyncReplyChannel<unit>
+    | ReconsumeLater of Message<'T> * AckType * TimeStamp * AsyncReplyChannel<Task<unit>>
     | RemoveWaiter of Waiter<'T>
     | RemoveBatchWaiter of BatchWaiter<'T>
     | AckReceipt of RequestId
@@ -200,15 +200,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         let rec internalGetLastMessageIdAsync(backoff: Backoff, remainingTimeMs: int) =
             async {
                 match connectionHandler.ConnectionState with
-                | Ready clientCnx ->                    
+                | Ready clientCnx ->
                     let requestId = Generators.getNextRequestId()
                     let payload = Commands.newGetLastMessageId consumerId requestId
                     try
                         let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
-                        let lastMessageId = response |> PulsarResponseType.GetLastMessageId
-                        return lastMessageId
+                        return response |> PulsarResponseType.GetLastMessageId
                     with
-                    | ex ->
+                    | Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed getLastMessageId", prefix)
                         return reraize ex
                 | _ ->
@@ -228,7 +227,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         | Closing | Closed ->
             "Consumer is already closed"
             |> AlreadyClosedException
-            |> Task.FromException<MessageId>
+            |> Task.FromException<LastMessageIdResult>
         | _ ->
             let backoff = Backoff { BackoffConfig.Default with
                                         Initial = TimeSpan.FromMilliseconds(100.0)
@@ -453,10 +452,43 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         { messageId with Type = MessageIdType.Single; Partition = partitionIndex; TopicName = %"" }
 
     let processPossibleToDLQ (messageId : MessageId) =
+        let acknowledge = trySendAcknowledge Individual EmptyProperties None
         task {
-            let acknowledge = trySendAcknowledge Individual EmptyProperties None
-            let! deadMessageProcessed = deadLettersProcessor.ProcessMessages(messageId, acknowledge)
-            return deadMessageProcessed
+            try
+                return! deadLettersProcessor.ProcessMessage(messageId, acknowledge)
+            with Flatten ex ->
+                Log.Logger.LogError(ex, "Failed to send DLQ message to {0} for message id {1}",
+                                    deadLettersProcessor.TopicName, messageId)
+                return Task.FromResult(false)
+        }
+        
+    let getRedeliveryMessageIdData ids =
+        
+        task {
+            let isDeadTasks = ResizeArray()
+            for messageId in ids do
+                let! isDeadTask = processPossibleToDLQ messageId
+                isDeadTasks.Add (messageId, isDeadTask)
+            let! results =
+                isDeadTasks
+                |> Seq.map(fun (messageId, isDeadTask) ->
+                        task {
+                            let! isDead = isDeadTask
+                            return
+                                if isDead then
+                                    None
+                                else
+                                    MessageIdData(
+                                        Partition = messageId.Partition,
+                                        ledgerId = uint64 %messageId.LedgerId,
+                                        entryId = uint64 %messageId.EntryId)
+                                    |> Some
+                        }
+                    )
+                |> Task.WhenAll
+            return
+                results
+                |> Array.choose id
         }
 
     let enqueueMessage (msg: Message<'T>) =
@@ -620,7 +652,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             None
             
     let handleSingleMessagePayload (rawMessage: RawMessage) msgId payload hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction =
-        if isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId) then
+        if duringSeek.IsSome || (isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId)) then
             // We need to discard entries that were prior to startMessageId
             Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
         else
@@ -970,28 +1002,21 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         match connectionHandler.ConnectionState with
                         | Ready clientCnx ->
                             let messagesFromQueue = removeExpiredMessagesFromQueue messageIds
-                            let chunks = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
-                            for chunk in chunks do
-                                let nonDeadBatch = ResizeArray<MessageId>()
-                                for messageId in chunk do
-                                    let! isDead = processPossibleToDLQ messageId |> Async.AwaitTask
-                                    if not isDead then
-                                        nonDeadBatch.Add messageId
-                                if nonDeadBatch.Count > 0 then
-                                    let command = Commands.newRedeliverUnacknowledgedMessages consumerId (
-                                                        nonDeadBatch
-                                                        |> Seq.map (fun msgId ->
-                                                            MessageIdData(Partition = msgId.Partition, ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)
-                                                            )
-                                                        |> Some
-                                                    )
-                                    let! success = clientCnx.Send command
-                                    if success then
-                                        Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
-                                    else
-                                        Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
-                                else
-                                    Log.Logger.LogDebug("{0} All messages were dead", prefix)
+                            let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
+                            for ids in batches do
+                                do!
+                                    task {
+                                        let! messageIdData = getRedeliveryMessageIdData ids
+                                        if messageIdData.Length > 0 then
+                                            let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some messageIdData)
+                                            let! success = clientCnx.Send command
+                                            if success then
+                                                Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
+                                            else
+                                                Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
+                                        else
+                                            Log.Logger.LogDebug("{0} All messages were dead", prefix)
+                                    } |> Async.AwaitTask
                             if messagesFromQueue > 0 then
                                 increaseAvailablePermits messagesFromQueue
                         | _ ->
@@ -1039,7 +1064,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             response |> PulsarResponseType.GetEmpty
                             
                             duringSeek <- Some lastMessage
-                            startMessageId <- duringSeek // fix for #147
                             lastDequeuedMessageId <- MessageId.Earliest
                             
                             acksGroupingTracker.FlushAndClean()
@@ -1072,19 +1096,48 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         // allow the last one to be read when read head inclusively.
                         if startMessageId = MessageId.Latest then
                             task {
-                                let! messageId = getLastMessageIdAsync() |> Async.AwaitTask
-                                let! result = this.Mb.PostAndAsyncReply(fun channel -> SeekAsync ((MessageId messageId), channel))
-                                return
-                                    match result with
-                                    | Ok () -> consumerConfig.ResetIncludeHead
-                                    | Error ex -> reraize ex
+                                let! lastMessageIdResult = getLastMessageIdAsync() |> Async.AwaitTask
+                                let lastMessageId = lastMessageIdResult.LastMessageId
+                                // if the consumer is configured to read inclusive then we need to seek to the last message
+                                if consumerConfig.ResetIncludeHead then
+                                    let! result = this.Mb.PostAndAsyncReply(fun channel ->
+                                        SeekAsync (MessageId lastMessageId, channel))
+                                    return
+                                        match result with
+                                        | Ok () -> ()
+                                        | Error ex -> reraize ex
+                                match lastMessageIdResult.MarkDeletePosition with
+                                | Some markDeletePosition ->
+                                    if lastMessageId.EntryId < %0L then
+                                        return false
+                                    else
+                                        // we only care about comparing ledger ids and entry ids as mark delete position doesn't have other ids such as batch index
+                                        let result =
+                                            match markDeletePosition.LedgerId, lastMessageId.LedgerId with
+                                            | x, y when x > y -> 1
+                                            | x, y when x < y -> -1
+                                            | _ ->
+                                                match markDeletePosition.EntryId, lastMessageId.EntryId with
+                                                | x, y when x > y -> 1
+                                                | x, y when x < y -> -1
+                                                | _ -> 0
+                                        return
+                                            if consumerConfig.ResetIncludeHead then
+                                                result <= 0
+                                            else
+                                                result < 0
+                                | None ->
+                                    if lastMessageId.EntryId < %0L then
+                                        return false
+                                    else
+                                        return consumerConfig.ResetIncludeHead
                             } |> channel.Reply
                         elif hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead then
                             channel.Reply(Task.FromResult(true))
                         else
                             task {
-                                let! messageId = getLastMessageIdAsync()
-                                this.LastMessageIdInBroker <- messageId // Concurrent update - handle wisely
+                                let! lastMessageIdResult = getLastMessageIdAsync()
+                                this.LastMessageIdInBroker <- lastMessageIdResult.LastMessageId // Concurrent update - handle wisely
                                 return hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead
                             } |> channel.Reply
 
@@ -1094,8 +1147,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             channel.Reply(Task.FromResult(true))
                         else
                             task {
-                                let! messageId = getLastMessageIdAsync()
-                                this.LastMessageIdInBroker <- messageId // Concurrent update - handle wisely
+                                let! lastMessageIdResult = getLastMessageIdAsync()
+                                this.LastMessageIdInBroker <- lastMessageIdResult.LastMessageId // Concurrent update - handle wisely
                                 return hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false
                             } |> channel.Reply
 
@@ -1123,13 +1176,17 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | ConsumerMessage.ReconsumeLater (msg, ackType, deliverAt, channel) ->
                     
                     let acknowldege = trySendAcknowledge ackType EmptyProperties None
-                    let! success = deadLettersProcessor.ReconsumeLater(msg, deliverAt, acknowldege) |> Async.AwaitTask
-                    if not success then
-                        untrackMessage msg.MessageId
-                        let redeliverSet = RedeliverSet()
-                        redeliverSet.Add(msg.MessageId) |> ignore
-                        redeliverMessages redeliverSet
-                    channel.Reply()
+                    task {
+                        try
+                            do! deadLettersProcessor.ReconsumeLater(msg, deliverAt, acknowldege)
+                        with Flatten ex ->
+                            Log.Logger.LogError(ex, "Send to retry topic exception with topic: {0}, messageId: {1}",
+                                            deadLettersProcessor.TopicName, msg.MessageId)
+                            untrackMessage msg.MessageId
+                            let redeliverSet = RedeliverSet()
+                            redeliverSet.Add(msg.MessageId) |> ignore
+                            redeliverMessages redeliverSet
+                    } |> channel.Reply
                     return! loop ()
                     
                 | ConsumerMessage.ConnectionClosed clientCnx ->
@@ -1240,7 +1297,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
             let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
 
-            if isSameEntry(rawMessage.MessageId) && isPriorBatchIndex(%i) then
+            if duringSeek.IsSome || (isSameEntry(rawMessage.MessageId) && isPriorBatchIndex(%i)) then
                 Log.Logger.LogDebug("{0} Ignoring message from before the startMessageId: {1} in batch", prefix, startMessageId)
                 skippedMessages <- skippedMessages + 1
             elif singleMessageMetadata.CompactedOut then
@@ -1511,7 +1568,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
             
         member this.GetLastMessageIdAsync () =
-            getLastMessageIdAsync()
+            task {
+                let! result = getLastMessageIdAsync()
+                return result.LastMessageId
+            }
 
         member this.UnsubscribeAsync() =
             task {
@@ -1557,7 +1617,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     stats.IncrementNumAcksFailed()
                     interceptors.OnAcknowledge(this, msg.MessageId, exn)
                     raise exn
-                return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, Individual, deliverAt, channel))
+                let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, Individual, deliverAt, channel))
+                return! result
             }
             
         member this.ReconsumeLaterCumulativeAsync (msg: Message<'T>, deliverAt: TimeStamp) =
@@ -1569,7 +1630,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     stats.IncrementNumAcksFailed()
                     interceptors.OnAcknowledgeCumulative(this, msg.MessageId, exn)
                     raise exn
-                return! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, AckType.Cumulative, deliverAt, channel))
+                let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, AckType.Cumulative, deliverAt, channel))
+                return! result
             }
         
         member this.ReconsumeLaterAsync (msgs: Messages<'T>, deliverAt: TimeStamp) =
@@ -1583,7 +1645,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         interceptors.OnAcknowledge(this, msg.MessageId, exn)
                     raise exn
                 for msg in msgs do
-                    do! mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, Individual, deliverAt, channel))
+                    let! result = mb.PostAndAsyncReply(fun channel -> ReconsumeLater(msg, Individual, deliverAt, channel))
+                    do! result
             }
             
         member this.LastDisconnectedTimestamp =

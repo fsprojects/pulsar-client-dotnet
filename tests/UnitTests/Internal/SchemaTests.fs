@@ -226,6 +226,7 @@ let tests =
                 Expect.equal "" input.value5.a output.value5.a
                 Expect.equal "" input.value5.b output.value5.b
         }
+
         test "Protobuf native schema works fine with generated classes" {
             let inputs = [ SearchRequest(
                                     Query = "Sample query",
@@ -245,9 +246,7 @@ let tests =
                 Expect.equal "" input.corpus output.corpus               
         }
 
-        
-        // Uncomment this test once apache/avro#957 or apache/avro#1013 is merged
-        ptest "Avro schema works fine with long strings (> 256 characters)" {
+        test "Avro schema works fine with long strings (> 256 characters)" {
             let inputs = [{ AvroSchemaTest.X = String('1', 257); Y = [] |> ResizeArray}]
             for input in inputs do
                 let schema = Schema.AVRO()
@@ -257,7 +256,7 @@ let tests =
                     |> schema.Decode
                 Expect.equal "" input.X output.X
         }
-        
+
         test "Protobuf schema works fine" {
             let inputs = [{ ProtobufSchemaTest.X = "X1"; Y = seq { 1; 2 } |> ResizeArray}]
             for input in inputs do

@@ -610,7 +610,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let result = TopicsOfNamespace cmd.Topics
             handleSuccess %cmd.RequestId result BaseCommand.Type.GetTopicsOfNamespaceResponse
         | XCommandGetLastMessageIdResponse cmd ->
-            let result = LastMessageId {
+            let lastMessageId = {
                 LedgerId = %(int64 cmd.LastMessageId.ledgerId)
                 EntryId = %(int64 cmd.LastMessageId.entryId)
                 Type =
@@ -621,6 +621,22 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 TopicName = %""
                 ChunkMessageIds = None
             }
+            let markDeletePosition =
+                cmd.ConsumerMarkDeletePosition
+                |> Option.ofObj
+                |> Option.map (fun msgIdData ->
+                    {
+                        LedgerId = %(int64 msgIdData.ledgerId)
+                        EntryId = %(int64 msgIdData.entryId)
+                        Type = MessageIdType.Single
+                        Partition = -1
+                        TopicName = %""
+                        ChunkMessageIds = None
+                    })
+            let result = LastMessageId {
+                LastMessageId = lastMessageId
+                MarkDeletePosition = markDeletePosition
+            }
             handleSuccess %cmd.RequestId result BaseCommand.Type.GetLastMessageIdResponse
         | XCommandActiveConsumerChange cmd ->
             match consumers.TryGetValue %cmd.ConsumerId with
@@ -629,7 +645,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | _ ->
                 Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandActiveConsumerChange", prefix, %cmd.ConsumerId)
         | XCommandGetSchemaResponse cmd ->
-            if (cmd.ShouldSerializeErrorCode()) then
+            if cmd.ShouldSerializeErrorCode() then
                 if cmd.ErrorCode = ServerError.TopicNotFound then
                     let result = TopicSchema None
                     handleSuccess %cmd.RequestId result BaseCommand.Type.GetSchemaResponse

@@ -22,7 +22,6 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
             ProducerBuilder(createProducerAsync, schema)
                 .Topic(deadLetterTopic)
                 .BlockIfQueueFull(false)
-                .EnableBatching(false) // dead letters are sent one by one anyway
                 .CreateAsync()
         DeadLetterProcessor(deadLettersPolicy, getTopicName, c.SubscriptionName, createProducer) :> IDeadLetterProcessor<'T>
     

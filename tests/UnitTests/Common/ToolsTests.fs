@@ -1,5 +1,6 @@
 module Pulsar.Client.UnitTests.Common.ToolsTests
 
+open System
 open System.Collections
 open Expecto
 open Expecto.Flip
@@ -61,6 +62,16 @@ let tests =
             let equalityResult = ba.Xor(result)
             for i in 0..equalityResult.Count-1 do
                 Expect.isFalse "" equalityResult.[i]
+        }
+        
+        testAsync "Async delay shouldn't crash process" {
+            let x = true
+            let f = fun () -> failwith "failure"
+            asyncDelayMs 20 f
+            do! Async.Sleep 100
+            do! Async.Sleep 100
+            Console.WriteLine(x)
+            Expect.isTrue "" x
         }
     ]
     

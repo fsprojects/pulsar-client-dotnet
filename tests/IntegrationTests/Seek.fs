@@ -19,6 +19,48 @@ open Pulsar.Client.IntegrationTests.Common
 [<Tests>]
 let tests =
 
+    let testRandomSeek (enableBatching: bool) =
+        task {
+            Log.Debug("Started Seek randomly works, batching {0}", enableBatching)
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let producerName = "seekRandomProducer"
+            let consumerName = "seekRandomConsumer"
+            let numberOfMessages = 10
+            let numberOfRandomSeeks = 10
+            let producedMessageIds = Array.zeroCreate<MessageId> numberOfMessages;
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(enableBatching)
+                    .CreateAsync()
+
+            let! consumer =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync()
+        
+            for i in 0..(numberOfMessages-1) do
+                let! messageId = producer.SendAsync([| byte i |])
+                producedMessageIds.[i] <- messageId
+                
+            let rand = Random()
+            for _ = 1 to numberOfRandomSeeks do
+                let index = rand.Next(0, numberOfMessages - 1)
+                let messageId = producedMessageIds.[index]
+                Log.Debug("Resetting to index {0}, msgId {1}", index, messageId)
+                do! consumer.SeekAsync(messageId)
+                let! message = consumer.ReceiveAsync()
+                Expect.equal "" (byte (index+1)) message.Data.[0]
+                
+   
+            Log.Debug("Finished Seek randomly works, batching {0}", enableBatching)
+        }
+    
     testList "Seek" [
         
         testAsync "Consumer seek earliest redelivers all messages" {
@@ -189,6 +231,14 @@ let tests =
             Expect.equal "" "3" (msg.GetValue() |> Encoding.UTF8.GetString )
    
             Log.Debug("Finished Seek in the middle of the batch works properly 2")
+        }
+        
+        testAsync "Seek randomly works with batching " {
+            do! testRandomSeek true |> Async.AwaitTask
+        }
+        
+        testAsync "Seek randomly works without batching " {
+            do! testRandomSeek true |> Async.AwaitTask
         }
        
     ]

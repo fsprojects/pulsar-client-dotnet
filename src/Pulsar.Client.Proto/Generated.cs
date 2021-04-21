@@ -2013,6 +2013,9 @@ namespace pulsar.proto
         [global::ProtoBuf.ProtoMember(2, Name = @"request_id", IsRequired = true)]
         internal ulong RequestId { get; set; }
 
+        [global::ProtoBuf.ProtoMember(3, Name = @"consumer_mark_delete_position")]
+        public MessageIdData ConsumerMarkDeletePosition { get; set; }
+
     }
 
     [global::ProtoBuf.ProtoContract()]

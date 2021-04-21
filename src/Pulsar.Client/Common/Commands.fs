@@ -218,7 +218,7 @@ let newSeekByMsgId (consumerId: ConsumerId) (requestId : RequestId) (messageId: 
     | Batch (batchIndex, acker) ->
         let batchSize =
             if acker = BatchMessageAcker.NullAcker then
-                0 // should be improved later
+                0
             else
                 acker.GetBatchSize()
         let ackSet = BitArray batchSize
@@ -309,10 +309,10 @@ let newCloseProducer (producerId: ProducerId) (requestId : RequestId) =
     let command = BaseCommand(``type`` = CommandType.CloseProducer, CloseProducer = request)
     command |> serializeSimpleCommand
 
-let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<seq<MessageIdData>>) =
+let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<MessageIdData[]>) =
     let request = CommandRedeliverUnacknowledgedMessages(ConsumerId = %consumerId)
     match messageIds with
-    | Some ids -> ids |> Seq.iter (fun msgIdData -> request.MessageIds.Add(msgIdData))
+    | Some ids -> ids |> Array.iter request.MessageIds.Add
     | None -> ()
     let command = BaseCommand(``type`` = CommandType.RedeliverUnacknowledgedMessages, redeliverUnacknowledgedMessages = request)
     command |> serializeSimpleCommand

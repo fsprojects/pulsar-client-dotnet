@@ -51,8 +51,10 @@ type MessageId =
             if this.Partition >= 0 then
                 data.Partition <- this.Partition
             match this.Type with
-            | Batch (batchIndex, _) when %batchIndex >= 0 ->
+            | Batch (batchIndex, acker) when %batchIndex >= 0 ->
                 data.BatchIndex <- %batchIndex
+                if acker = BatchMessageAcker.NullAcker |> not then
+                    data.BatchSize <- acker.GetBatchSize()
             | _ ->
                 ()
             use stream = MemoryStreamManager.GetStream()
@@ -62,8 +64,13 @@ type MessageId =
             use stream = new MemoryStream(data)
             let msgData = Serializer.Deserialize<MessageIdData>(stream)
             let msgType =
-                if msgData.BatchIndex >= 0 then
-                    Batch (%msgData.BatchIndex, BatchMessageAcker.NullAcker)
+                if msgData.ShouldSerializeBatchIndex() then
+                    let acker =
+                        if msgData.ShouldSerializeBatchSize() then
+                            BatchMessageAcker(msgData.BatchSize)
+                        else
+                            BatchMessageAcker.NullAcker
+                    Batch (%msgData.BatchIndex, acker)
                 else
                     Single
             {
@@ -106,41 +113,32 @@ type MessageId =
             member this.CompareTo(other) =
                 if this.LedgerId > other.LedgerId then
                     1
-                elif this.LedgerId = other.LedgerId then
+                elif this.LedgerId < other.LedgerId then
+                    -1
+                else
                     if this.EntryId > other.EntryId then
                         1
-                    elif this.EntryId = other.EntryId then
+                    elif this.EntryId < other.EntryId then
+                        -1
+                    else
                         let typeComparison =
                             match this.Type, other.Type with
-                            | (Single, Single) ->
+                            | Single, Single ->
                                 0
-                            | (Batch (i, _), Batch (j, _)) ->
+                            | Batch (i, _), Batch (j, _) ->
                                 if i > j then 1 elif j > i then -1 else 0
-                            | (Single, Batch (i, _)) ->
+                            | Single, Batch (i, _) ->
                                 if i > %(-1) then -2 else 0
-                            | (Batch (i, _), Single) ->
+                            | Batch (i, _), Single ->
                                 if i > %(-1) then 2 else 0
-                        let inline comparePartitions (a: MessageId) (b: MessageId) =
-                            if a.Partition > b.Partition then
-                                1
-                            elif a.Partition = b.Partition then
-                                0
-                            else
-                                -1
-                        if typeComparison = 0 then
-                            comparePartitions this other
-                        elif typeComparison = 2 || typeComparison = -2 then
-                            let partitionComparision = comparePartitions this other
-                            if partitionComparision = 0 then
-                                typeComparison
-                            else
-                                partitionComparision
-                        else
+                        match typeComparison with
+                        | 0 -> compare this.Partition other.Partition
+                        | 2 | -2 ->
+                            match compare this.Partition other.Partition with
+                            | 0 -> typeComparison
+                            | partitionComparison -> partitionComparison
+                        | _ ->
                             typeComparison
-                    else
-                        -1
-                else
-                    -1
                     
         interface IComparable with
             member this.CompareTo(other) =

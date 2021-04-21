@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>2.0.4</Version>
+    <Version>2.1.1</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Fix for schema upgrade</PackageReleaseNotes>
+    <PackageReleaseNotes>Minor fixes for library stability</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
-    <PackageVersion>2.0.4</PackageVersion>
+    <PackageVersion>2.1.1</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
@@ -48,8 +48,8 @@
     </None>
     <None Include="paket.references" />
     <Compile Include="Common\UMX.fs" />
+    <Compile Include="Common\Log.fs" />
     <Compile Include="Common\Tools.fs" />
-    <Compile Include="Internal\Log.fs" />
     <Compile Include="Internal\BatchMessageAcker.fs" />
     <Compile Include="Internal\Backoff.fs" />
     <Compile Include="Common\NamespaceName.fs" />

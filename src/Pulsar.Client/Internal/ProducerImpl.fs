@@ -43,7 +43,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let _this = this :> IProducer<'T>
     let producerId = Generators.getNextProducerId()
     let mutable producerName = producerConfig.ProducerName
-    let prefix = $"producer({producerId}, {producerName}, {partitionIndex})"
+    let mutable prefix = $"producer({producerId}, {producerName}, {partitionIndex})"
     let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
     let mutable schemaVersion: SchemaVersion option = None
@@ -478,7 +478,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             let success = response |> PulsarResponseType.GetProducerSuccess
                             if String.IsNullOrEmpty producerName then
                                 producerName <- success.GeneratedProducerName
-                            Log.Logger.LogInformation("{0} registered with name {1}", prefix, success.GeneratedProducerName)
+                                prefix <- $"producer({producerId}, {producerName}, {partitionIndex})"
+                            Log.Logger.LogInformation("{0} registered", prefix)
                             schemaVersion <- success.SchemaVersion
                             connectionHandler.ResetBackoff()    
 
@@ -880,7 +881,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
         member this.LastSequenceId = %Interlocked.Read(&lastSequenceIdPublished)
 
-        member this.Name = producerConfig.ProducerName
+        member this.Name = producerName
         
         member this.GetStatsAsync() =
             mb.PostAndAsyncReply(ProducerMessage.GetStats) |> Async.StartAsTask
