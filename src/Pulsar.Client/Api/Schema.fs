@@ -5,6 +5,7 @@ open System.Collections.Generic
 open System.Runtime.InteropServices
 open Avro.Generic
 open FSharp.UMX
+open Google.Protobuf
 open Pulsar.Client.Common
 open Pulsar.Client.Schema
 open System.Text
@@ -42,7 +43,10 @@ type Schema =
     static member PROTOBUF<'T> () =
         ProtobufSchema<'T>() :> ISchema<'T>
     static member AVRO<'T> () =
-        AvroSchema<'T>() :> ISchema<'T>
+        AvroSchema<'T>() :> ISchema<'T>        
+    static member PROTOBUF_NATIVE<'T > () =
+        ProtoBufNativeSchema<'T>() :> ISchema<'T>        
+        
     static member KEY_VALUE<'K,'V> (schemaType: SchemaType) =
         match schemaType with
         | SchemaType.JSON -> KeyValueSchema<'K, 'V>(JsonSchema<'K>(), JsonSchema<'V>(), KeyValueEncodingType.INLINE)
@@ -80,8 +84,9 @@ type Schema =
     static member internal GetAutoConsumeSchema (topicSchema: TopicSchema) =
         let schema = topicSchema.SchemaInfo
         match schema.Type with
+        //| SchemaType.PROTOBUF -> ??? 
         | SchemaType.JSON ->
             GenericJsonSchema(topicSchema) :> ISchema<_>
         | SchemaType.AVRO ->
-            GenericAvroSchema(topicSchema) :> ISchema<_>
+            GenericAvroSchema(topicSchema) :> ISchema<_>        
         | _ -> raise <| ArgumentException(sprintf "Auto consumer for type %A is not supported yet" schema.Type)

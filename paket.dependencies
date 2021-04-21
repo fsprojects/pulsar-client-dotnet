@@ -8,6 +8,7 @@ nuget Microsoft.Extensions.Logging
 nuget Microsoft.Extensions.Logging.Abstractions
 nuget Microsoft.IO.RecyclableMemoryStream
 nuget Microsoft.Bcl.AsyncInterfaces
+nuget protobuf-net.Reflection 3.0.101
 nuget System.Text.Json
 nuget System.IO.Pipelines
 nuget Pipelines.Sockets.Unofficial
@@ -39,7 +40,9 @@ group Tests
   nuget Serilog.Enrichers.Thread
   nuget Microsoft.Extensions.DependencyInjection
   nuget Apache.Avro
-
+  nuget protobuf-net
+  nuget protobuf-net.Reflection
+  
 group Examples
   framework: net5.0
   source https://api.nuget.org/v3/index.json

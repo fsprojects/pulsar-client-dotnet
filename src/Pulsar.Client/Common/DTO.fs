@@ -84,6 +84,7 @@ type SchemaType =
     | TIME = 13
     | TIMESTAMP = 14
     | KEY_VALUE = 15
+    | PROTOBUF_NATIVE = 20
     | BYTES = -1
     | AUTO_CONSUME = -3
     | AUTO_PUBLISH = -4

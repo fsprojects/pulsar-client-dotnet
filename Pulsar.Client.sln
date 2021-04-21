@@ -29,6 +29,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Pulsar.Client.Proto", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvroGenerated", "tests\AvroGenerated\AvroGenerated.csproj", "{173C91F0-8FA9-4E48-88B5-6C9A968AACF8}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProtobufNativeGenerated", "tests\ProtobufNativeGenerated\ProtobufNativeGenerated.csproj", "{E78C06BC-7043-4B9C-9EC1-64FADD92227F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -63,6 +65,10 @@ Global
 		{173C91F0-8FA9-4E48-88B5-6C9A968AACF8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{173C91F0-8FA9-4E48-88B5-6C9A968AACF8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{173C91F0-8FA9-4E48-88B5-6C9A968AACF8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E78C06BC-7043-4B9C-9EC1-64FADD92227F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E78C06BC-7043-4B9C-9EC1-64FADD92227F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E78C06BC-7043-4B9C-9EC1-64FADD92227F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E78C06BC-7043-4B9C-9EC1-64FADD92227F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -75,6 +81,7 @@ Global
 		{ED95CEE6-3023-4D09-8570-425390D351B3} = {A69013AE-F033-4D8F-8C84-D238F1E7C45B}
 		{07E28F24-6660-4805-BF92-89EEA4711CA2} = {A69013AE-F033-4D8F-8C84-D238F1E7C45B}
 		{173C91F0-8FA9-4E48-88B5-6C9A968AACF8} = {57300837-ACF8-47EF-9271-E72D12D5D4A4}
+		{E78C06BC-7043-4B9C-9EC1-64FADD92227F} = {57300837-ACF8-47EF-9271-E72D12D5D4A4}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {5F50C1BF-3713-4686-906F-8051FD013D96}
