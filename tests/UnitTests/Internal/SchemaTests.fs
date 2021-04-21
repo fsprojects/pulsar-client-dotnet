@@ -12,6 +12,7 @@ open Pulsar.Client.Common
 open Pulsar.Client.Schema
 open Pulsar.Client.UnitTests
 
+
 [<CLIMutable>]
 type JsonSchemaTest = { X: string; Y: ResizeArray<int> }
 
@@ -225,7 +226,26 @@ let tests =
                 Expect.equal "" input.value5.a output.value5.a
                 Expect.equal "" input.value5.b output.value5.b
         }
+        test "Protobuf native schema works fine with generated classes" {
+            let inputs = [ SearchRequest(
+                                    Query = "Sample query",
+                                    PageNumber = 10,
+                                    ResultPerPage = 20,
+                                    corpus = SearchRequest.Corpus.Images
+                                        )]
+            for input in inputs do
+                let schema = Schema.PROTOBUF_NATIVE<SearchRequest>()
+                let output =
+                    input
+                    |> schema.Encode
+                    |> schema.Decode
+                Expect.equal "" input.Query output.Query
+                Expect.equal "" input.PageNumber output.PageNumber
+                Expect.equal "" input.ResultPerPage output.ResultPerPage
+                Expect.equal "" input.corpus output.corpus               
+        }
 
+        
         // Uncomment this test once apache/avro#957 or apache/avro#1013 is merged
         ptest "Avro schema works fine with long strings (> 256 characters)" {
             let inputs = [{ AvroSchemaTest.X = String('1', 257); Y = [] |> ResizeArray}]
