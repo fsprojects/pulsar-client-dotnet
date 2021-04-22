@@ -36,11 +36,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Avro, Version=1.10.0.0, Culture=neutral, PublicKeyToken=b1248d7eeb9d0814">
-      <HintPath>packages\Apache.Avro.1.10.1\lib\netstandard2.0\Avro.dll</HintPath>
+      <HintPath>packages\Apache.Avro.1.10.2\lib\netstandard2.0\Avro.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="AvroSchemaGenerator, Version=1.8.0.0, Culture=neutral, PublicKeyToken=null">
-      <HintPath>packages\AvroSchemaGenerator.1.8.0\lib\netstandard2.0\AvroSchemaGenerator.dll</HintPath>
+    <Reference Include="AvroSchemaGenerator, Version=1.9.0.0, Culture=neutral, PublicKeyToken=null">
+      <HintPath>packages\AvroSchemaGenerator.1.9.0\lib\netstandard2.0\AvroSchemaGenerator.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="DerConverter, Version=3.0.0.82, Culture=neutral, PublicKeyToken=null">
@@ -115,12 +115,12 @@
       <HintPath>packages\Microsoft.Extensions.Options.ConfigurationExtensions.5.0.0\lib\net461\Microsoft.Extensions.Options.ConfigurationExtensions.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="Microsoft.Extensions.Primitives, Version=5.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60">
-      <HintPath>packages\Microsoft.Extensions.Primitives.5.0.0\lib\net461\Microsoft.Extensions.Primitives.dll</HintPath>
+    <Reference Include="Microsoft.Extensions.Primitives, Version=5.0.0.1, Culture=neutral, PublicKeyToken=adb9793829ddae60">
+      <HintPath>packages\Microsoft.Extensions.Primitives.5.0.1\lib\net461\Microsoft.Extensions.Primitives.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="Microsoft.IO.RecyclableMemoryStream, Version=1.4.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35">
-      <HintPath>packages\Microsoft.IO.RecyclableMemoryStream.1.4.0\lib\net46\Microsoft.IO.RecyclableMemoryStream.dll</HintPath>
+    <Reference Include="Microsoft.IO.RecyclableMemoryStream, Version=2.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35">
+      <HintPath>packages\Microsoft.IO.RecyclableMemoryStream.2.0.0\lib\netstandard2.0\Microsoft.IO.RecyclableMemoryStream.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="Microsoft.Win32.Primitives, Version=4.0.2.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
@@ -129,8 +129,8 @@
       <Private>True</Private>
     </Reference>
     <Reference Include="mscorlib" />
-    <Reference Include="Newtonsoft.Json, Version=12.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed">
-      <HintPath>packages\Newtonsoft.Json.12.0.3\lib\net45\Newtonsoft.Json.dll</HintPath>
+    <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed">
+      <HintPath>packages\Newtonsoft.Json.13.0.1\lib\net45\Newtonsoft.Json.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="NSec.Cryptography, Version=20.2.0.0, Culture=neutral, PublicKeyToken=531c072d5efee047">
@@ -146,19 +146,23 @@
       <Private>True</Private>
     </Reference>
     <Reference Include="protobuf-net, Version=3.0.0.0, Culture=neutral, PublicKeyToken=257b51d87d2e4d67">
-      <HintPath>packages\protobuf-net.3.0.73\lib\net461\protobuf-net.dll</HintPath>
+      <HintPath>packages\protobuf-net.3.0.101\lib\net461\protobuf-net.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="protobuf-net.Core, Version=3.0.0.0, Culture=neutral, PublicKeyToken=257b51d87d2e4d67">
-      <HintPath>packages\protobuf-net.Core.3.0.73\lib\net461\protobuf-net.Core.dll</HintPath>
+      <HintPath>packages\protobuf-net.Core.3.0.101\lib\net461\protobuf-net.Core.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="Pulsar.Client, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null">
-      <HintPath>packages\Pulsar.Client.2.0.0\lib\netstandard2.0\Pulsar.Client.dll</HintPath>
+    <Reference Include="protobuf-net.Reflection, Version=3.0.0.0, Culture=neutral, PublicKeyToken=257b51d87d2e4d67">
+      <HintPath>packages\protobuf-net.Reflection.3.0.101\lib\net461\protobuf-net.Reflection.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="Pulsar.Client, Version=2.2.0.0, Culture=neutral, PublicKeyToken=null">
+      <HintPath>packages\Pulsar.Client.2.2.0\lib\netstandard2.0\Pulsar.Client.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="Pulsar.Client.Proto, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
-      <HintPath>packages\Pulsar.Client.2.0.0\lib\netstandard2.0\Pulsar.Client.Proto.dll</HintPath>
+      <HintPath>packages\Pulsar.Client.2.2.0\lib\netstandard2.0\Pulsar.Client.Proto.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="Snappy.Standard, Version=0.2.0.0, Culture=neutral, PublicKeyToken=null">
@@ -287,8 +291,8 @@
       <HintPath>packages\System.Text.Encodings.Web.5.0.0\lib\net461\System.Text.Encodings.Web.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="System.Text.Json, Version=5.0.0.1, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
-      <HintPath>packages\System.Text.Json.5.0.1\lib\net461\System.Text.Json.dll</HintPath>
+    <Reference Include="System.Text.Json, Version=5.0.0.2, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
+      <HintPath>packages\System.Text.Json.5.0.2\lib\net461\System.Text.Json.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="System.Threading.Tasks.Extensions, Version=4.2.0.1, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
