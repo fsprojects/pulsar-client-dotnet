@@ -84,7 +84,8 @@ type Schema =
     static member internal GetAutoConsumeSchema (topicSchema: TopicSchema) =
         let schema = topicSchema.SchemaInfo
         match schema.Type with
-        //| SchemaType.PROTOBUF -> ??? 
+        | SchemaType.PROTOBUF_NATIVE ->
+            GenericProtobufNativeSchema(topicSchema):> ISchema<_>
         | SchemaType.JSON ->
             GenericJsonSchema(topicSchema) :> ISchema<_>
         | SchemaType.AVRO ->
