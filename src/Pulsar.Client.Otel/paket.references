@@ -1,0 +1,4 @@
+﻿group OTel
+Pulsar.Client
+System.Diagnostics.DiagnosticSource
+OpenTelemetry.Api
