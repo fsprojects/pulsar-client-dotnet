@@ -1,13 +1,26 @@
 ﻿module Pulsar.Client.Otel.OTelProducerInterceptor
 
+open System
+open System.Collections.Generic
 open System.Diagnostics
 open OpenTelemetry
 open Pulsar.Client.Api
 open OpenTelemetry.Context.Propagation
+open Pulsar.Client.Common
 
 //https://github.com/open-telemetry/opentelemetry-dotnet/blob/main/src/OpenTelemetry.Api/README.md#instrumenting-a-libraryapplication-with-net-activity-api
 type OTelProducerInterceptor<'T>() =
     let Propagator = Propagators.DefaultTextMapPropagator
+   
+    let test = Action<MessageBuilder<'T>,string,string>(fun msg key value ->
+         let q= new Dictionary<string,string>()
+         let enum = msg.Properties.GetEnumerator()
+         while (enum.MoveNext()) do q.Add (enum.Current.Key,enum.Current.Value)
+         q.Add(key,value)
+         let newMsg = msg.WithProperties q //no way to return new message from Action
+         ()
+           
+        )
     static let  source = "pulsar.producer"
     member this.activitySource : ActivitySource = new ActivitySource(source)
     static member Source
@@ -26,8 +39,9 @@ type OTelProducerInterceptor<'T>() =
                             |> ignore
                    
                    //add propagator here
-                   let contextToInject = activity.Context;
-                   Propagator.Inject(new PropagationContext(contextToInject, Baggage.Current), message, this.InjectTraceContextIntoBasicProperties);
+                   //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
+                   let contextToInject = activity.Context;                   
+                   Propagator.Inject(new PropagationContext(contextToInject, Baggage.Current), message, test);
                     
                    activity.Stop()
             message
