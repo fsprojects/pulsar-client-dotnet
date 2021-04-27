@@ -11,7 +11,8 @@ open Pulsar.Client.Common
 
 type OTelConsumerInterceptor<'T>() =
 
-    let Propagator = B3Propagator()
+    //let Propagator = B3Propagator()
+    let Propagator =  CompositeTextMapPropagator([| TraceContextPropagator(); BaggagePropagator()|])
     
     static let  source = "pulsar.consumer"
     let endActivity(consumer:IConsumer<'T>, messageID:MessageId, ``exception``:Exception, ackType, 
