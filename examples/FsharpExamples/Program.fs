@@ -8,6 +8,7 @@ open ReaderApi
 open RealWorld
 open Schema
 open Transaction
+open Telemetry
 
 [<EntryPoint>]
 let main _ =
@@ -26,7 +27,8 @@ let main _ =
 //    runReader().Wait()
 //    runRealWorld(PulsarClient.Logger).Wait()
 //    runSchema().Wait()
-    runTransaction().Wait()
+//    runTransaction().Wait()
+    runTelemetry().Wait()
 
     printfn "Example ended. Press any key to exit"
     Console.ReadKey() |> ignore

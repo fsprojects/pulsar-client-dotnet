@@ -1,11 +1,18 @@
 ﻿module Pulsar.Client.Otel.OtelConsumerInterceptor
 
 open System
+open System.Collections.Generic
 open System.Diagnostics
+open System.Linq
+open OpenTelemetry
+open OpenTelemetry.Context.Propagation
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
 type OTelConsumerInterceptor<'T>() =
+
+    let Propagator = B3Propagator()
+    
     static let  source = "pulsar.consumer"
     let endActivity(consumer:IConsumer<'T>, messageID:MessageId, ``exception``:Exception, ackType, 
                             act : ActivitySource)=              
@@ -23,13 +30,23 @@ type OTelConsumerInterceptor<'T>() =
                              SetTag("exception.stacktrace", ``exception``.StackTrace) |> ignore
         activity.Stop()          
         ()
-      
+    let getter = Func<IReadOnlyDictionary<string,string>,string,IEnumerable<string>>(fun dict key ->
+                        match dict.TryGetValue(key) with
+                        | true, v -> [v] :> IEnumerable<string>
+                        | false, _ -> Enumerable.Empty<string>()
+                        )  
     member this.activitySource : ActivitySource = new ActivitySource(source)
     static member Source
         with get() = source
     interface IConsumerInterceptor<'T> with
-        member this.BeforeConsume(consumer, message) =           
-            let activity = this.activitySource.StartActivity(consumer.Topic + " receive",ActivityKind.Consumer)
+        member this.BeforeConsume(consumer, message) =
+            /// Extract the PropagationContext of the upstream parent from the message headers.
+            let mutableDict = message.Properties
+            let contextToInject = Unchecked.defaultof<PropagationContext>   //https://stackoverflow.com/questions/2246206/what-is-the-equivalent-in-f-of-the-c-sharp-default-keyword
+            let parentContext = Propagator.Extract(contextToInject,mutableDict,getter)
+            Baggage.Current <- parentContext.Baggage //baggage is empty for some reason even I parsed metadata from headers
+            let activity = this.activitySource.StartActivity(consumer.Topic + " receive",ActivityKind.Consumer, parentContext.ActivityContext)
+            //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageReceiver.cs#L68
             if activity <> null then                
                 if activity.IsAllDataRequested = true then                   
                    activity.SetTag("messaging.system", "pulsar"). 
@@ -37,7 +54,6 @@ type OTelConsumerInterceptor<'T>() =
                             SetTag("messaging.destination", consumer.Topic).
                             SetTag("messaging.operation", "BeforeConsume") |> ignore
                    activity.Stop()
-                  //extract propagator here
             message
            
            

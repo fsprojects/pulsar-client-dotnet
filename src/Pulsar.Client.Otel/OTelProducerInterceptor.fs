@@ -6,27 +6,19 @@ open System.Diagnostics
 open OpenTelemetry
 open Pulsar.Client.Api
 open OpenTelemetry.Context.Propagation
-open Pulsar.Client.Common
 
 //https://github.com/open-telemetry/opentelemetry-dotnet/blob/main/src/OpenTelemetry.Api/README.md#instrumenting-a-libraryapplication-with-net-activity-api
 type OTelProducerInterceptor<'T>() =
-    let Propagator = Propagators.DefaultTextMapPropagator
-   
-    let test = Action<MessageBuilder<'T>,string,string>(fun msg key value ->
-         let q= new Dictionary<string,string>()
-         let enum = msg.Properties.GetEnumerator()
-         while (enum.MoveNext()) do q.Add (enum.Current.Key,enum.Current.Value)
-         q.Add(key,value)
-         let newMsg = msg.WithProperties q //no way to return new message from Action
-         ()
-           
-        )
+    let Propagator = B3Propagator()
+    
+    let setter = Action<Dictionary<string,string>,string,string>(fun msg key value -> msg.Add(key,value))
     static let  source = "pulsar.producer"
     member this.activitySource : ActivitySource = new ActivitySource(source)
     static member Source
         with get() = source
     interface IProducerInterceptor<'T> with        
-        member this.BeforeSend(producer, message) =           
+        member this.BeforeSend(producer, message) =
+            let mutableDict = Dictionary<string,string>(message.Properties)
             let name = producer.Topic + " send"            
             let activity = this.activitySource.StartActivity(name,ActivityKind.Producer)   
             if activity <> null then     //If there are no listeners interested in this activity, the activity above will be null <..> Ensure that all subsequent calls using this activity are protected with a null check.           
@@ -38,14 +30,13 @@ type OTelProducerInterceptor<'T>() =
                             SetTag("messaging.operation", "BeforeSend")
                             |> ignore
                    
-                   //add propagator here
+                   
                    //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
-                   let contextToInject = activity.Context;                   
-                   Propagator.Inject(new PropagationContext(contextToInject, Baggage.Current), message, test);
-                    
+                   let contextToInject = activity.Context                   
+                   Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)                    
                    activity.Stop()
-            message
-        member this.Close() = () //stop activities from before& ack ?
+            message.WithProperties(mutableDict)
+        member this.Close() = () 
         member this.Eligible _ = true
         member this.OnSendAcknowledgement(producer, _, messageId, ``exception``) =           
             match ``exception`` with
