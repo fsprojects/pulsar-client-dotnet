@@ -50,3 +50,13 @@ group Examples
 
   nuget Pulsar.Client
   nuget Microsoft.Extensions.Logging.Console
+
+group OTel
+  framework: net5.0
+  source https://api.nuget.org/v3/index.json
+  storage: none
+
+  nuget Pulsar.Client
+  nuget Microsoft.Extensions.Logging.Console
+  nuget System.Diagnostics.DiagnosticSource
+  nuget OpenTelemetry.Api
