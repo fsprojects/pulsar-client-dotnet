@@ -9,9 +9,7 @@ open OpenTelemetry.Context.Propagation
 
 //https://github.com/open-telemetry/opentelemetry-dotnet/blob/main/src/OpenTelemetry.Api/README.md#instrumenting-a-libraryapplication-with-net-activity-api
 type OTelProducerInterceptor<'T>() =
-    //let Propagator = B3Propagator()
-    
-    let Propagator =  CompositeTextMapPropagator([| TraceContextPropagator(); BaggagePropagator()|])
+    let Propagator = Propagators.DefaultTextMapPropagator
     
     let setter = Action<Dictionary<string,string>,string,string>(fun msg key value -> msg.Add(key,value))
     static let  source = "pulsar.producer"

@@ -4,3 +4,4 @@ Microsoft.Extensions.Logging.Console
 Pulsar.Client
 OpenTelemetry.Api
 OpenTelemetry.Exporter.Console
+OpenTelemetry

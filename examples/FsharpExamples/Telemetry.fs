@@ -16,13 +16,14 @@ let runTelemetry()=
     let serviceUrl = "pulsar://localhost:6650"
     let subscriptionName = "my-subscription"
     let topicName = sprintf "my-topic-%i" DateTime.Now.Ticks
-    let prodIntercept = OTelProducerInterceptor()
-    let consIntercept = OTelConsumerInterceptor()
+   
     
     let _ = Sdk.CreateTracerProviderBuilder().
                                             AddSource(OTelProducerInterceptor<_>.Source, OTelConsumerInterceptor<_>.Source).
                                             SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("telemetry")).
                                             AddConsoleExporter().Build()
+    let prodIntercept = OTelProducerInterceptor()
+    let consIntercept = OTelConsumerInterceptor()
     task {
         let! client =
             PulsarClientBuilder()                

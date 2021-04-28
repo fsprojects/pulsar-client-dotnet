@@ -49,7 +49,8 @@ group Examples
   storage: none
 
   nuget Pulsar.Client
-  nuget Microsoft.Extensions.Logging.Console  
+  nuget Microsoft.Extensions.Logging.Console
+  nuget OpenTelemetry
   nuget OpenTelemetry.Exporter.Console
   nuget OpenTelemetry.Api
 
