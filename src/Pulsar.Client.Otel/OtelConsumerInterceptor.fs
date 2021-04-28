@@ -1,6 +1,7 @@
 ﻿module Pulsar.Client.Otel.OtelConsumerInterceptor
 
 open System
+open System.Collections.Concurrent
 open System.Collections.Generic
 open System.Diagnostics
 open System.Linq
@@ -9,32 +10,43 @@ open OpenTelemetry.Context.Propagation
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
-type OTelConsumerInterceptor<'T>() =
-
+type OTelConsumerInterceptor<'T>() =    
     let Propagator = Propagators.DefaultTextMapPropagator
     static let  source = "pulsar.consumer"
+    
     let endActivity(consumer:IConsumer<'T>, messageID:MessageId, ``exception``:Exception, ackType, 
-                            act : ActivitySource)=              
-        let activity = act.StartActivity(consumer.Topic + " consumed",ActivityKind.Consumer)                
-        match ``exception`` with
-                | null ->
-                    activity.SetTag("acknowledge.type", ackType).
-                             SetTag("messaging.destination_kind", "topic").
-                             SetTag("messaging.destination", consumer.Topic).
-                             SetTag("messaging.message_id", messageID).
-                             SetTag("messaging.operation", "AfterConsume") |> ignore
-                | _ ->
-                    activity.SetTag("exception.type", ``exception``.Source).
-                             SetTag("exception.message", ``exception``.Message).
-                             SetTag("exception.stacktrace", ``exception``.StackTrace) |> ignore
-        activity.Stop()          
+                            act : ActivitySource, c:ConcurrentDictionary<MessageId,Activity>)=              
+       
+        let gotActFromCache = c.ContainsKey(messageID)
+        let attachOkTagsAndStop (act:Activity) =
+             act.SetTag("acknowledge.type", ackType).
+                                 SetTag("messaging.destination_kind", "topic").
+                                 SetTag("messaging.destination", consumer.Topic).
+                                 SetTag("messaging.message_id", messageID).
+                                 SetTag("messaging.operation", "AfterConsume") |> ignore
+             act.Stop()
+        
+        if gotActFromCache then
+                c.[messageID] |> attachOkTagsAndStop   
+        else
+            let activity = act.StartActivity(consumer.Topic + " consumed",ActivityKind.Consumer)
+            match ``exception`` with
+                    | null ->
+                        activity |> attachOkTagsAndStop   
+                    | _ ->
+                        activity.SetTag("exception.type", ``exception``.Source).
+                                 SetTag("exception.message", ``exception``.Message).
+                                 SetTag("exception.stacktrace", ``exception``.StackTrace) |> ignore
+                        activity.Stop()  
         ()
     let getter = Func<IReadOnlyDictionary<string,string>,string,IEnumerable<string>>(fun dict key ->
                         match dict.TryGetValue(key) with
                         | true, v -> [v] :> IEnumerable<string>
                         | false, _ -> Enumerable.Empty<string>()
-                        )  
+                        )
+    let cache = ConcurrentDictionary<MessageId,Activity>()
     member this.activitySource : ActivitySource = new ActivitySource(source)
+    
     static member Source
         with get() = source
     interface IConsumerInterceptor<'T> with
@@ -52,16 +64,18 @@ type OTelConsumerInterceptor<'T>() =
                             SetTag("messaging.destination_kind", "topic").
                             SetTag("messaging.destination", consumer.Topic).
                             SetTag("messaging.operation", "BeforeConsume") |> ignore
-                   activity.Stop()
+                  
+                   cache.TryAdd(message.MessageId,activity) |> ignore                   
+                   ()
             message
            
            
         member this.Close() = ()
         member this.OnAckTimeoutSend(consumer, messageId) =
-            endActivity(consumer,messageId, null, "AcknowledgeType.Timeout",this.activitySource)
+            endActivity(consumer,messageId, null, "AcknowledgeType.Timeout",this.activitySource,cache)
         member this.OnAcknowledge(consumer, messageId, ``exception``) =
-            endActivity(consumer,messageId, ``exception``, "AcknowledgeType.Ok", this.activitySource)
+            endActivity(consumer,messageId, ``exception``, "AcknowledgeType.Ok", this.activitySource,cache)
         member this.OnAcknowledgeCumulative(consumer, messageId, ``exception``) =
-            endActivity(consumer,messageId, ``exception``, "AcknowledgeType.Cumulative", this.activitySource)
+            endActivity(consumer,messageId, ``exception``, "AcknowledgeType.Cumulative", this.activitySource,cache)
         member this.OnNegativeAcksSend(consumer, messageId) =
-            endActivity(consumer,messageId, null, "AcknowledgeType.Negative", this.activitySource)
+            endActivity(consumer,messageId, null, "AcknowledgeType.Negative", this.activitySource,cache)
