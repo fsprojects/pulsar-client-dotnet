@@ -9,36 +9,47 @@ open OpenTelemetry
 open OpenTelemetry.Context.Propagation
 open Pulsar.Client.Api
 open Pulsar.Client.Common
-
+type AcknowledgeType =
+        | Timeout
+        | Ok
+        | Cumulative
+        | Negative
 type OTelConsumerInterceptor<'T>() =    
     let Propagator = Propagators.DefaultTextMapPropagator
     static let  source = "pulsar.consumer"
     
-    let endActivity(consumer:IConsumer<'T>, messageID:MessageId, ``exception``:Exception, ackType, 
+    
+    let endActivity(consumer:IConsumer<'T>, messageID:MessageId, ``exception``:Exception, ackType:AcknowledgeType, 
                             act : ActivitySource, c:ConcurrentDictionary<MessageId,Activity>)=              
-       
-        let gotActFromCache = c.ContainsKey(messageID)
         let attachOkTagsAndStop (act:Activity) =
              act.SetTag("acknowledge.type", ackType).
-                                 SetTag("messaging.destination_kind", "topic").
-                                 SetTag("messaging.destination", consumer.Topic).
-                                 SetTag("messaging.message_id", messageID).
-                                 SetTag("messaging.operation", "AfterConsume") |> ignore
+                 SetTag("messaging.destination_kind", "topic").
+                 SetTag("messaging.destination", consumer.Topic).
+                 SetTag("messaging.message_id", messageID).
+                 SetTag("messaging.operation", "AfterConsume") |> ignore
              act.Stop()
-        
-        if gotActFromCache then
-                c.[messageID] |> attachOkTagsAndStop   
-        else
-            let activity = act.StartActivity(consumer.Topic + " consumed",ActivityKind.Consumer)
-            match ``exception`` with
-                    | null ->
-                        activity |> attachOkTagsAndStop   
-                    | _ ->
-                        activity.SetTag("exception.type", ``exception``.Source).
-                                 SetTag("exception.message", ``exception``.Message).
-                                 SetTag("exception.stacktrace", ``exception``.StackTrace) |> ignore
-                        activity.Stop()  
-        ()
+        let stopAllPrevAndCurrent =
+            c |> Seq.filter (fun a-> messageID > a.Key) |> //stop all prev act & current
+                                              Seq.iter (fun a -> a.Value |> attachOkTagsAndStop)
+        let stopActFromCache =
+            c.[messageID] |> attachOkTagsAndStop
+        let gotActFromCache = c.ContainsKey(messageID)
+        let createActivity =
+            act.StartActivity(consumer.Topic + " consumed",ActivityKind.Consumer)
+        match (``exception``,ackType,gotActFromCache) with
+             | null,Cumulative,true ->   stopAllPrevAndCurrent
+                                         stopActFromCache
+             | null, _, true ->          stopActFromCache         
+             | null,Cumulative,false ->  createActivity |> attachOkTagsAndStop
+                                         stopAllPrevAndCurrent
+             | null, _, false ->         createActivity |> attachOkTagsAndStop                            
+             | _,_,_      ->             let activity = createActivity 
+                                         activity.SetTag("exception.type", ``exception``.Source).
+                                                  SetTag("exception.message", ``exception``.Message).
+                                                  SetTag("exception.stacktrace", ``exception``.StackTrace) |> ignore
+                                         activity.Stop()     
+        () 
+       
     let getter = Func<IReadOnlyDictionary<string,string>,string,IEnumerable<string>>(fun dict key ->
                         match dict.TryGetValue(key) with
                         | true, v -> [v] :> IEnumerable<string>
@@ -70,12 +81,13 @@ type OTelConsumerInterceptor<'T>() =
            
         member this.Close() =
             activitySource.Dispose()
+            cache.Clear()
             ()
         member this.OnAckTimeoutSend(consumer, messageId) =
-            endActivity(consumer,messageId, null, "AcknowledgeType.Timeout",activitySource,cache)
+            endActivity(consumer,messageId, null, Timeout,activitySource,cache)
         member this.OnAcknowledge(consumer, messageId, ``exception``) =
-            endActivity(consumer,messageId, ``exception``, "AcknowledgeType.Ok", activitySource,cache)
+            endActivity(consumer,messageId, ``exception``, Ok, activitySource,cache)
         member this.OnAcknowledgeCumulative(consumer, messageId, ``exception``) =
-            endActivity(consumer,messageId, ``exception``, "AcknowledgeType.Cumulative", activitySource,cache)
+            endActivity(consumer,messageId, ``exception``, Cumulative, activitySource,cache)
         member this.OnNegativeAcksSend(consumer, messageId) =
-            endActivity(consumer,messageId, null, "AcknowledgeType.Negative", activitySource,cache)
+            endActivity(consumer,messageId, null, Negative, activitySource,cache)
