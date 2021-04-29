@@ -51,19 +51,18 @@ type OTelConsumerInterceptor<'T>() =
         with get() = source
     interface IConsumerInterceptor<'T> with
         member this.BeforeConsume(consumer, message) =
-            /// Extract the PropagationContext of the upstream parent from the message headers.
-            let mutableDict = message.Properties
+            /// Extract the PropagationContext of the upstream parent from the message headers.            
             let contextToInject = Unchecked.defaultof<PropagationContext>   //https://stackoverflow.com/questions/2246206/what-is-the-equivalent-in-f-of-the-c-sharp-default-keyword
-            let parentContext = Propagator.Extract(contextToInject,mutableDict,getter)
+            let parentContext = Propagator.Extract(contextToInject,message.Properties,getter)
             Baggage.Current <- parentContext.Baggage //baggage is empty for some reason even I parsed metadata from headers
             let activity = activitySource.StartActivity(consumer.Topic + " receive",ActivityKind.Consumer, parentContext.ActivityContext)
             //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageReceiver.cs#L68
             if activity <> null then                
                 if activity.IsAllDataRequested = true then                   
-                   activity.SetTag("messaging.system", "pulsar"). 
-                            SetTag("messaging.destination_kind", "topic").
-                            SetTag("messaging.destination", consumer.Topic).
-                            SetTag("messaging.operation", "BeforeConsume") |> ignore                  
+                   activity.SetTag("messaging.system", "pulsar") 
+                           .SetTag("messaging.destination_kind", "topic")
+                           .SetTag("messaging.destination", consumer.Topic)
+                           .SetTag("messaging.operation", "BeforeConsume") |> ignore                  
                    cache.TryAdd(message.MessageId,activity) |> ignore                   
                    ()
             message

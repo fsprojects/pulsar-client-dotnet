@@ -30,10 +30,10 @@ type OTelProducerInterceptor<'T>() =
                                                            // when samplers decide to not record the activity,
                                                            // and this can be used to avoid any expensive operation to retrieve tags.
                    //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/messaging.md
-                   activity.SetTag("messaging.system", "pulsar").
-                            SetTag("messaging.destination_kind", "topic").
-                            SetTag("messaging.destination", producer.Topic).
-                            SetTag("messaging.operation", "BeforeSend")
+                   activity.SetTag("messaging.system", "pulsar")
+                           .SetTag("messaging.destination_kind", "topic")
+                           .SetTag("messaging.destination", producer.Topic)
+                           .SetTag("messaging.operation", "BeforeSend")
                             |> ignore
                    //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
                    let contextToInject = activity.Context                   
@@ -51,17 +51,17 @@ type OTelProducerInterceptor<'T>() =
                      let activity = activitySource.StartActivity(producer.Topic + " OnSendAcknowledgement",ActivityKind.Producer)                    
                      if activity <> null then               
                         if activity.IsAllDataRequested = true then
-                          activity.SetTag("messaging.destination_kind", "topic"). 
-                                   SetTag("messaging.destination", producer.Topic). 
-                                   SetTag("messaging.operation", "OnSendAcknowledgement"). 
-                                   SetTag("messaging.message_id", messageId) |> ignore       
+                          activity.SetTag("messaging.destination_kind", "topic") 
+                                  .SetTag("messaging.destination", producer.Topic) 
+                                  .SetTag("messaging.operation", "OnSendAcknowledgement") 
+                                  .SetTag("messaging.message_id", messageId) |> ignore       
                           activity.Stop()  
                 |  _ ->
                       let activity = activitySource.StartActivity("exception",ActivityKind.Producer)                      
                      //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md                                             
-                      activity.SetTag("exception.type", ``exception``.Source). 
-                               SetTag("exception.message", ``exception``.Message). 
-                               SetTag("exception.stacktrace", ``exception``.StackTrace) |> ignore
+                      activity.SetTag("exception.type", ``exception``.Source) 
+                              .SetTag("exception.message", ``exception``.Message) 
+                              .SetTag("exception.stacktrace", ``exception``.StackTrace) |> ignore
                       activity.Stop()
                 
           

@@ -55,7 +55,7 @@ group Examples
   nuget OpenTelemetry.Api
 
 group OTel
-  framework: net5.0
+  framework: netstandard2.0
   source https://api.nuget.org/v3/index.json
   storage: none
 
