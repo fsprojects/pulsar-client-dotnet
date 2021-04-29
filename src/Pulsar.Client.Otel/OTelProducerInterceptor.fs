@@ -59,7 +59,7 @@ type OTelProducerInterceptor<'T>() =
                 let AddTagsAndStop (act:Activity) =
                     act.SetTag("messaging.destination_kind", "topic") 
                                   .SetTag("messaging.destination", producer.Topic) 
-                                  .SetTag("messaging.customTag", "OnSendAcknowledgement") //because we already set it in beforeSend
+                                  .SetTag("messaging.operation", "OnSendAcknowledgement") //because we already set it in beforeSend
                                   .SetTag("messaging.message_id", messageId) |> ignore       
                     act.Stop()  
                 match ``exception`` with
