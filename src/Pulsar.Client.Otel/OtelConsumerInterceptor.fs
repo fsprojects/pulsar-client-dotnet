@@ -45,7 +45,7 @@ type OTelConsumerInterceptor<'T>() =
                         | false, _ -> Enumerable.Empty<string>()
                         )
     let cache = ConcurrentDictionary<MessageId,Activity>()
-    member this.activitySource : ActivitySource = new ActivitySource(source)
+    let activitySource : ActivitySource = new ActivitySource(source)
     
     static member Source
         with get() = source
@@ -56,26 +56,27 @@ type OTelConsumerInterceptor<'T>() =
             let contextToInject = Unchecked.defaultof<PropagationContext>   //https://stackoverflow.com/questions/2246206/what-is-the-equivalent-in-f-of-the-c-sharp-default-keyword
             let parentContext = Propagator.Extract(contextToInject,mutableDict,getter)
             Baggage.Current <- parentContext.Baggage //baggage is empty for some reason even I parsed metadata from headers
-            let activity = this.activitySource.StartActivity(consumer.Topic + " receive",ActivityKind.Consumer, parentContext.ActivityContext)
+            let activity = activitySource.StartActivity(consumer.Topic + " receive",ActivityKind.Consumer, parentContext.ActivityContext)
             //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageReceiver.cs#L68
             if activity <> null then                
                 if activity.IsAllDataRequested = true then                   
                    activity.SetTag("messaging.system", "pulsar"). 
                             SetTag("messaging.destination_kind", "topic").
                             SetTag("messaging.destination", consumer.Topic).
-                            SetTag("messaging.operation", "BeforeConsume") |> ignore
-                  
+                            SetTag("messaging.operation", "BeforeConsume") |> ignore                  
                    cache.TryAdd(message.MessageId,activity) |> ignore                   
                    ()
             message
            
            
-        member this.Close() = ()
+        member this.Close() =
+            activitySource.Dispose()
+            ()
         member this.OnAckTimeoutSend(consumer, messageId) =
-            endActivity(consumer,messageId, null, "AcknowledgeType.Timeout",this.activitySource,cache)
+            endActivity(consumer,messageId, null, "AcknowledgeType.Timeout",activitySource,cache)
         member this.OnAcknowledge(consumer, messageId, ``exception``) =
-            endActivity(consumer,messageId, ``exception``, "AcknowledgeType.Ok", this.activitySource,cache)
+            endActivity(consumer,messageId, ``exception``, "AcknowledgeType.Ok", activitySource,cache)
         member this.OnAcknowledgeCumulative(consumer, messageId, ``exception``) =
-            endActivity(consumer,messageId, ``exception``, "AcknowledgeType.Cumulative", this.activitySource,cache)
+            endActivity(consumer,messageId, ``exception``, "AcknowledgeType.Cumulative", activitySource,cache)
         member this.OnNegativeAcksSend(consumer, messageId) =
-            endActivity(consumer,messageId, null, "AcknowledgeType.Negative", this.activitySource,cache)
+            endActivity(consumer,messageId, null, "AcknowledgeType.Negative", activitySource,cache)
