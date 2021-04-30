@@ -10,71 +10,27 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 
   type AcknowledgeType =
-    | Timeout of (string*MessageId*ActivitySource*Dictionary<MessageId, Activity>)
-    | Ok of (string*MessageId*ActivitySource*Dictionary<MessageId, Activity>*Exception)
-    | Cumulative of (string*MessageId*ActivitySource*Dictionary<MessageId, Activity>*Exception)
-    | Negative of (string*MessageId*ActivitySource*Dictionary<MessageId, Activity>)
- 
+    | Timeout of (string*MessageId)
+    | Ok of (string*MessageId)
+    | Cumulative of (string*MessageId)
+    | Negative of (string*MessageId)
+    | Stop
 
 type OTelConsumerInterceptor<'T>() =
+    let cache =  Dictionary<MessageId, Activity>()
+    static let source = "pulsar.consumer"  
+    let activitySource : ActivitySource = new ActivitySource(source)
     let Propagator = Propagators.DefaultTextMapPropagator
-    static let source = "pulsar.consumer"   
-    let endActivity(topicName:string, messageID: MessageId,exn: Exception, ackType: string,
-                     act: ActivitySource, c: Dictionary<MessageId, Activity>) =
-        let attachOkTagsAndStop (act: Activity) =
-            act.SetTag("acknowledge.type", ackType)
-               .SetTag("messaging.destination_kind", "topic")
-               .SetTag("messaging.destination", topicName)
-               .SetTag("messaging.message_id", messageID)
-               .SetTag("messaging.operation", "AfterConsume")
-               |> ignore
-            act.Stop()
-        
-        let stopAllPrevAndCurrent () =
-            c
-            |> Seq.filter (fun a -> messageID > a.Key)
-            |> Seq.iter (fun a -> a.Value |> attachOkTagsAndStop)
-
-        let stopActFromCache() = c.[messageID] |> attachOkTagsAndStop
-        let gotActFromCache = c.ContainsKey(messageID)      
-        
-        let createActivity =
-            act.StartActivity(topicName + " consumed", ActivityKind.Consumer)
-
-        match (exn, ackType, gotActFromCache) with
-        | null, "Cumulative", true ->
-            stopAllPrevAndCurrent()
-            stopActFromCache()
-        | null, _, true -> stopActFromCache()
-        | null, "Cumulative", false ->
-            createActivity |> attachOkTagsAndStop
-            stopAllPrevAndCurrent()
-        | null, _, false -> createActivity |> attachOkTagsAndStop
-        | _, _, _ ->
-            let activity = createActivity
+    let createActivity (topicName:string) =
+            activitySource.StartActivity(topicName + " consumed", ActivityKind.Consumer)
+    let workWithException (topicName:string,exn:Exception)=
+            let activity = createActivity(topicName)
             activity.SetTag("exception.type", exn.Source)
                     .SetTag("exception.message", exn.Message)
                     .SetTag("exception.stacktrace", exn.StackTrace)
                     |> ignore
-            activity.Stop()
-        ()
-
-    let mb =  MailboxProcessor<AcknowledgeType>.Start(fun inbox ->                
-                let rec messageLoop() = async{           
-                        let! msg = inbox.Receive()                           
-                        match msg with
-                        | AcknowledgeType.Ok (topicName,msgId,actSource,cache,exn) ->
-                            endActivity (topicName,msgId,exn,"Ok",actSource,cache)
-                        | AcknowledgeType.Negative (topicName,msgId,actSource,cache) ->
-                            endActivity (topicName,msgId,null,"Negative",actSource,cache)
-                        | AcknowledgeType.Timeout (topicName,msgId,actSource,cache) ->
-                            endActivity (topicName,msgId,null,"Timeout",actSource,cache)
-                        | AcknowledgeType.Cumulative (topicName,msgId,actSource,cache,exn) ->
-                            endActivity (topicName,msgId,exn,"Cumulative",actSource,cache)       
-                        return! messageLoop() 
-                        }       
-                messageLoop()
-        )
+            activity.Stop()          
+    
     let getter =
         Func<IReadOnlyDictionary<string, string>, string, IEnumerable<string>>
             (fun dict key ->
@@ -82,10 +38,57 @@ type OTelConsumerInterceptor<'T>() =
                 | true, v -> [ v ] :> IEnumerable<string>
                 | false, _ -> Enumerable.Empty<string>())
 
-    let cache =  Dictionary<MessageId, Activity>()
-    let activitySource : ActivitySource = new ActivitySource(source)
+   
+    
+    let mb =  MailboxProcessor<AcknowledgeType>.Start(fun inbox ->              
+                
+                let attachOkTagsAndStop (act: Activity,ackType:string, topicName:string, messageID:MessageId) =
+                    act.SetTag("acknowledge.type", ackType)
+                       .SetTag("messaging.destination_kind", "topic")
+                       .SetTag("messaging.destination", topicName)
+                       .SetTag("messaging.message_id", messageID)
+                       .SetTag("messaging.operation", "AfterConsume")
+                       |> ignore
+                    act.Stop()
+                let stopAllPrevAndCurrent (ackType:string, topicName:string, messageID:MessageId) =
+                    cache
+                    |> Seq.filter (fun a -> messageID > a.Key)
+                    |> Seq.iter (fun a -> attachOkTagsAndStop (a.Value, ackType, topicName, messageID))
+                    
+                let stopActFromCache(ackType:string, topicName:string, messageID:MessageId) =                     
+                    attachOkTagsAndStop (cache.[messageID], ackType, topicName, messageID)
+                    
+                let gotActFromCache(messageID:MessageId) = cache.ContainsKey(messageID)
+                
+                let stopCachedOrStopNew(ackType:string,msgId:MessageId, topicName:string)=
+                      let cached = gotActFromCache(msgId)
+                      if cached then stopActFromCache(ackType,topicName,msgId)
+                      else attachOkTagsAndStop (cache.[msgId], ackType, topicName, msgId)
+                      
+                let rec messageLoop() = async{
+                        
+                        let! msg = inbox.Receive()                           
+                        match msg with
+                        | AcknowledgeType.Ok (topicName,msgId) ->                            
+                            stopCachedOrStopNew("Ok",msgId,topicName)
+                        | AcknowledgeType.Negative (topicName,msgId) ->                           
+                            stopCachedOrStopNew("Negative",msgId,topicName)
+                        | AcknowledgeType.Timeout (topicName,msgId) ->                         
+                            stopCachedOrStopNew("Timeout",msgId,topicName)
+                        | AcknowledgeType.Cumulative (topicName,msgId) ->
+                            stopAllPrevAndCurrent("Cumulative",topicName,msgId)
+                            stopCachedOrStopNew("Cumulative",msgId,topicName)                          
+                        | AcknowledgeType.Stop ->
+                             cache |> Seq.iter (fun a ->  a.Value.SetTag("messaging.operation", "StoppingOnClose")
+                                                          |> ignore
+                                                          a.Value.Stop())
+                        return! messageLoop() 
+                        }       
+                messageLoop()
+        )
+    
     static member Source = source
-
+    
     interface IConsumerInterceptor<'T> with
         member this.BeforeConsume(consumer, message) =
             /// Extract the PropagationContext of the upstream parent from the message headers.
@@ -103,19 +106,23 @@ type OTelConsumerInterceptor<'T>() =
 
 
         member this.Close() =
+            mb.Post <| AcknowledgeType.Stop
             activitySource.Dispose()
-            cache.Clear()
+            cache.Clear()            
             ()
 
         member this.OnAckTimeoutSend(consumer, messageId) =
-            mb.Post <| AcknowledgeType.Timeout (consumer.Topic,messageId,activitySource,cache)            
+            mb.Post <| AcknowledgeType.Timeout (consumer.Topic,messageId)            
 
         member this.OnAcknowledge(consumer, messageId, exn) =
-            mb.Post <| AcknowledgeType.Ok (consumer.Topic,messageId,activitySource,cache,exn)            
+            match exn with
+            | null -> mb.Post <| AcknowledgeType.Ok (consumer.Topic,messageId)
+            | _ -> workWithException(consumer.Topic,exn)
 
         member this.OnAcknowledgeCumulative(consumer, messageId,exn) =
-            mb.Post <| AcknowledgeType.Cumulative (consumer.Topic,messageId,activitySource,cache,exn)            
-
+             match exn with
+             | null -> mb.Post <| AcknowledgeType.Cumulative (consumer.Topic,messageId)            
+             | _ -> workWithException(consumer.Topic,exn)
         member this.OnNegativeAcksSend(consumer, messageId) =
-            mb.Post <| AcknowledgeType.Negative (consumer.Topic,messageId,activitySource,cache)
+            mb.Post <| AcknowledgeType.Negative (consumer.Topic,messageId)
             
