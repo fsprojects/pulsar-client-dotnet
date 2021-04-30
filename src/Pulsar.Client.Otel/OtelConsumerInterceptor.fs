@@ -50,7 +50,7 @@ type OTelConsumerInterceptor<'T>() =
                        .SetTag("messaging.operation", "AfterConsume")
                        |> ignore
                     act.Stop()
-                let stopAllPrevAndCurrent (ackType:string, topicName:string, messageID:MessageId) =
+                let stopAllPrev (ackType:string, topicName:string, messageID:MessageId) =
                     cache
                     |> Seq.filter (fun a -> messageID > a.Key)
                     |> Seq.iter (fun a -> attachOkTagsAndStop (a.Value, ackType, topicName, messageID))
@@ -76,7 +76,7 @@ type OTelConsumerInterceptor<'T>() =
                         | AcknowledgeType.Timeout (topicName,msgId) ->                         
                             stopCachedOrStopNew("Timeout",msgId,topicName)
                         | AcknowledgeType.Cumulative (topicName,msgId) ->
-                            stopAllPrevAndCurrent("Cumulative",topicName,msgId)
+                            stopAllPrev("Cumulative",topicName,msgId)
                             stopCachedOrStopNew("Cumulative",msgId,topicName)                          
                         | AcknowledgeType.Stop ->
                              cache |> Seq.iter (fun a ->  a.Value.SetTag("messaging.operation", "StoppingOnClose")
