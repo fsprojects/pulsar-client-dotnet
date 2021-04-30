@@ -13,10 +13,10 @@ open Pulsar.Client.Common
 type OTelProducerInterceptor<'T>() =
     let Propagator = Propagators.DefaultTextMapPropagator    
     let setter = Action<Dictionary<string,string>,string,string>(fun msg key value -> msg.Add(key,value))
-    static let  source = "pulsar.producer"    
-    let activitySource = new ActivitySource(source)
-    let cache = ConcurrentDictionary<MessageBuilder<'T>,Activity>()
-    //let cacheWithActivityId = ConcurrentDictionary<string,Activity>()
+    static let  source = "pulsar.producer"
+    static let activityKey = "traceparent"
+    let activitySource = new ActivitySource(source)    
+    let cache = ConcurrentDictionary<string,Activity>()
     static member Source
         with get() = source
     interface IProducerInterceptor<'T> with        
@@ -36,36 +36,30 @@ type OTelProducerInterceptor<'T>() =
                                                            // when samplers decide to not record the activity,
                                                            // and this can be used to avoid any expensive operation to retrieve tags.
                    //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/messaging.md
-                   activity.SetTag("messaging.system", "pulsar")
-                           .SetTag("messaging.destination_kind", "topic")
-                           .SetTag("messaging.destination", producer.Topic)
-                           .SetTag("messaging.operation", "BeforeSend")
-                            |> ignore
                    //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
                    let contextToInject = activity.Context                   
                    Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
-                   let m  = message.WithProperties(mutableDict)
-                   cache.TryAdd(m,activity) |> ignore
-                   //cacheWithActivityId.TryAdd(activity.Id,activity) |> ignore
+                   let m  = message.WithProperties(mutableDict)                   
+                   cache.TryAdd(mutableDict.[activityKey],activity) |> ignore
                    m
                 else
-                    cache.TryAdd(message,activity) |> ignore
-                    message   
+                   cache.TryAdd(mutableDict.[activityKey],activity) |> ignore
+                   message   
         member this.Close() =
             activitySource.Dispose()
+            cache.Clear()
             () 
         member this.Eligible _ = true
-        member this.OnSendAcknowledgement(producer, builder, messageId, ``exception``) =           
+        member this.OnSendAcknowledgement(producer, builder, messageId, exn) =           
                 let AddTagsAndStop (act:Activity) =
                     act.SetTag("messaging.destination_kind", "topic") 
-                                  .SetTag("messaging.destination", producer.Topic) 
-                                  .SetTag("messaging.operation", "OnSendAcknowledgement") //because we already set it in beforeSend
-                                  .SetTag("messaging.message_id", messageId) |> ignore       
+                       .SetTag("messaging.destination", producer.Topic) 
+                       .SetTag("messaging.operation", "OnSendAcknowledgement") //because we already set it in beforeSend
+                       .SetTag("messaging.message_id", messageId) |> ignore       
                     act.Stop()  
-                match ``exception`` with
-                | null ->
-                     let prevActivity = cache.TryGetValue(builder)
-                     //let prevActById = cacheWithActivityId.TryGetValue(???)
+                match exn with
+                | null ->                      
+                     let prevActivity = cache.TryGetValue(builder.Properties.[activityKey])                     
                      match (fst prevActivity) with
                      | true -> AddTagsAndStop (snd prevActivity)
                      |_ ->  let activity = activitySource.StartActivity(producer.Topic + " OnSendAcknowledgement",ActivityKind.Producer)                    
@@ -75,9 +69,9 @@ type OTelProducerInterceptor<'T>() =
                 |  _ ->
                       let activity = activitySource.StartActivity("exception",ActivityKind.Producer)                      
                      //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md                                             
-                      activity.SetTag("exception.type", ``exception``.Source) 
-                              .SetTag("exception.message", ``exception``.Message) 
-                              .SetTag("exception.stacktrace", ``exception``.StackTrace) |> ignore
+                      activity.SetTag("exception.type", exn.Source) 
+                              .SetTag("exception.message", exn.Message) 
+                              .SetTag("exception.stacktrace", exn.StackTrace) |> ignore
                       activity.Stop()
                 
           
