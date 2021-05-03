@@ -4,13 +4,13 @@ open System
 open System.Collections.Concurrent
 open System.Collections.Generic
 open System.Diagnostics
+open Microsoft.Extensions.Logging
 open OpenTelemetry
 open Pulsar.Client.Api
 open OpenTelemetry.Context.Propagation
-open Pulsar.Client.Common
 
 //https://github.com/open-telemetry/opentelemetry-dotnet/blob/main/src/OpenTelemetry.Api/README.md#instrumenting-a-libraryapplication-with-net-activity-api
-type OTelProducerInterceptor<'T>() =
+type OTelProducerInterceptor<'T>(log: ILogger) =
     let Propagator = Propagators.DefaultTextMapPropagator    
     let setter = Action<Dictionary<string,string>,string,string>(fun msg key value -> msg.Add(key,value))
     static let  source = "pulsar.producer"
@@ -27,6 +27,12 @@ type OTelProducerInterceptor<'T>() =
             let name = producer.Topic + " send"            
             let activity = activitySource.StartActivity(name,ActivityKind.Producer)
             
+            let addCache (act:Activity)=
+                let res = cache.TryAdd(mutableDict.[activityKey],act)
+                match res with
+                | true -> ignore
+                | _ -> log.LogError("Error adding activity to concurrentDict cache in OTelProducerInterceptor",activity)
+                       ignore
             
             if activity = null then  message    //If there are no listeners interested in this activity, the activity above will be null <..> Ensure that all subsequent calls using this activity are protected with a null check.                
                 else               
@@ -38,12 +44,11 @@ type OTelProducerInterceptor<'T>() =
                    //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/messaging.md
                    //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
                    let contextToInject = activity.Context                   
-                   Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
-                   let m  = message.WithProperties(mutableDict)                   
-                   cache.TryAdd(mutableDict.[activityKey],activity) |> ignore
-                   m
+                   Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)                                     
+                   addCache(activity) |> ignore 
+                   message.WithProperties(mutableDict) 
                 else
-                   cache.TryAdd(mutableDict.[activityKey],activity) |> ignore
+                   addCache(activity) |> ignore 
                    message   
         member this.Close() =
             activitySource.Dispose()
@@ -60,8 +65,8 @@ type OTelProducerInterceptor<'T>() =
                 match exn with
                 | null ->                      
                      let prevActivity = cache.TryGetValue(builder.Properties.[activityKey])                     
-                     match (fst prevActivity) with
-                     | true -> AddTagsAndStop (snd prevActivity)
+                     match prevActivity with
+                     | true,result -> AddTagsAndStop result
                      |_ ->  let activity = activitySource.StartActivity(producer.Topic + " OnSendAcknowledgement",ActivityKind.Producer)                    
                             if activity <> null then               
                                if activity.IsAllDataRequested = true then

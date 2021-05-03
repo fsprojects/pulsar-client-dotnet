@@ -22,8 +22,8 @@ let runTelemetry()=
                                             AddSource(OTelProducerInterceptor<_>.Source, OTelConsumerInterceptor<_>.Source).
                                             SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("telemetry")).
                                             AddConsoleExporter().Build()
-    let prodIntercept = OTelProducerInterceptor()
-    let consIntercept = OTelConsumerInterceptor()
+    let prodIntercept = OTelProducerInterceptor(PulsarClient.Logger)
+    let consIntercept = OTelConsumerInterceptor(PulsarClient.Logger)
     task {
         let! client =
             PulsarClientBuilder()                

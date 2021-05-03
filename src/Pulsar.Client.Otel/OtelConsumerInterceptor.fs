@@ -4,19 +4,21 @@ open System
 open System.Collections.Generic
 open System.Diagnostics
 open System.Linq
+open Microsoft.Extensions.Logging
 open OpenTelemetry
 open OpenTelemetry.Context.Propagation
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
-  type AcknowledgeType =
+
+type AcknowledgeType =
     | Timeout of (string*MessageId)
     | Ok of (string*MessageId)
     | Cumulative of (string*MessageId)
     | Negative of (string*MessageId)
     | Stop
 
-type OTelConsumerInterceptor<'T>() =
+type OTelConsumerInterceptor<'T>(log: ILogger) =
     let cache =  Dictionary<MessageId, Activity>()
     static let source = "pulsar.consumer"  
     let activitySource : ActivitySource = new ActivitySource(source)
@@ -86,6 +88,7 @@ type OTelConsumerInterceptor<'T>() =
                         }       
                 messageLoop()
         )
+    do mb.Error.Add(fun ex -> log.LogCritical(ex, "{0} mailbox failure"))
     
     static member Source = source
     
