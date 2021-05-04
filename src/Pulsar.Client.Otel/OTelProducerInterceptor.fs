@@ -67,7 +67,7 @@ type OTelProducerInterceptor<'T>(log: ILogger) =
                      let prevActivity = cache.TryGetValue(builder.Properties.[activityKey])                     
                      match prevActivity with
                      | true,result -> AddTagsAndStop result
-                     |_ ->  let activity = activitySource.StartActivity(producer.Topic + " OnSendAcknowledgement",ActivityKind.Producer)                    
+                     | _ -> let activity = activitySource.StartActivity(producer.Topic + " OnSendAcknowledgement",ActivityKind.Producer)                    
                             if activity <> null then               
                                if activity.IsAllDataRequested = true then
                                   AddTagsAndStop activity

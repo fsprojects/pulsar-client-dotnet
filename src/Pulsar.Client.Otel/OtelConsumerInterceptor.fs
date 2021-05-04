@@ -73,18 +73,21 @@ type OTelConsumerInterceptor<'T>(log: ILogger) =
                         match msg with
                         | AcknowledgeType.Ok (topicName,msgId) ->                            
                             stopCachedOrStopNew("Ok",msgId,topicName)
+                            return! messageLoop()
                         | AcknowledgeType.Negative (topicName,msgId) ->                           
                             stopCachedOrStopNew("Negative",msgId,topicName)
+                            return! messageLoop()
                         | AcknowledgeType.Timeout (topicName,msgId) ->                         
                             stopCachedOrStopNew("Timeout",msgId,topicName)
+                            return! messageLoop()
                         | AcknowledgeType.Cumulative (topicName,msgId) ->
-                            stopAllPrev("Cumulative",topicName,msgId)
-                            stopCachedOrStopNew("Cumulative",msgId,topicName)                          
+                            stopAllPrev("Cumulative",topicName,msgId)                            
+                            stopCachedOrStopNew("Cumulative",msgId,topicName)
+                            return! messageLoop()
                         | AcknowledgeType.Stop ->
                              cache |> Seq.iter (fun a ->  a.Value.SetTag("messaging.operation", "StoppingOnClose")
                                                           |> ignore
-                                                          a.Value.Stop())
-                        return! messageLoop() 
+                                                          a.Value.Stop())                         
                         }       
                 messageLoop()
         )
