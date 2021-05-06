@@ -13,7 +13,7 @@ open Pulsar.Client.Common
 type AckResult = Result<string, exn>
 
 type InterceptorCommand =
-    | BeforeConsume of MessageId * Activity
+    | BeforeConsume of MessageId * Activity * Baggage
     | Timeout of MessageId * AckResult
     | Ack of MessageId * AckResult
     | CumulativeAck of MessageId * AckResult
@@ -79,6 +79,13 @@ type OTelConsumerInterceptor<'T>(log: ILogger) =
                 | InterceptorCommand.CumulativeAck (msgId, ackResult) ->
                     endPreviousActivities msgId ackResult
                     return! messageLoop()
+                | InterceptorCommand.BeforeConsume (msgId, activity,baggage)->                   
+                     let bag = baggage.GetBaggage().ToList()
+                     for item in bag do
+                         activity.AddBaggage(item.Key, item.Value) |> ignore //Returns Activity (this) for convenient chaining.
+                                                                             //https://docs.microsoft.com/en-us/dotnet/api/system.diagnostics.activity.addbaggage?view=net-5.0
+                     cache.Add(msgId, activity)    
+                     return! messageLoop()
                 | InterceptorCommand.Stop ->
                     cache
                     |> Seq.iter (fun (KeyValue(_, value)) ->
@@ -98,8 +105,8 @@ type OTelConsumerInterceptor<'T>(log: ILogger) =
             // Extract the PropagationContext of the upstream parent from the message headers.
             let contextToInject = Unchecked.defaultof<PropagationContext>
             let parentContext = Propagator.Extract(contextToInject, message.Properties, getter)
-            Baggage.Current <- parentContext.Baggage //baggage is empty for some reason even I parsed metadata from headers
-
+            //Baggage.Current <- parentContext.Baggage //baggage is empty for some reason even I parsed metadata from headers
+            
             // https://github.com/open-telemetry/opentelemetry-dotnet/blob/main/examples/MicroserviceExample/Utils/Messaging/MessageReceiver.cs#L68
             let activity =
                 activitySource.StartActivity(consumer.Topic + " receive",
@@ -110,9 +117,9 @@ type OTelConsumerInterceptor<'T>(log: ILogger) =
                     .SetTag("messaging.message_id", message.MessageId)
                     .SetTag("messaging.operation", "Consume")
             
-            if activity <> null then
+            if activity <> null then                
                 if activity.IsAllDataRequested = true then
-                    cache.Add(message.MessageId, activity)                   
+                    mb.Post <| InterceptorCommand.BeforeConsume(message.MessageId, activity,parentContext.Baggage)                   
             message
 
 

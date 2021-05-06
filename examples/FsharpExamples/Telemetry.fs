@@ -12,8 +12,8 @@ open OpenTelemetry.Resources
 open OpenTelemetry.Trace
 
 let runTelemetry()=
-    let serviceUrl = "pulsar://my-pulsar-cluster:32268"
-    // let serviceUrl = "pulsar://localhost:6650"
+   // let serviceUrl = "pulsar://my-pulsar-cluster:32268"
+    let serviceUrl = "pulsar://localhost:6650"
     let subscriptionName = "my-subscription"
     let topicName = sprintf "my-topic-%i" DateTime.Now.Ticks
    
