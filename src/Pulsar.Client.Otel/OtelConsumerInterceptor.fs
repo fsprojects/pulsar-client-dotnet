@@ -3,9 +3,7 @@
 open System
 open System.Collections.Generic
 open System.Diagnostics
-open System.Linq
 open Microsoft.Extensions.Logging
-open OpenTelemetry
 open OpenTelemetry.Context.Propagation
 open Pulsar.Client.Api
 open Pulsar.Client.Common
@@ -13,24 +11,23 @@ open Pulsar.Client.Common
 type AckResult = Result<string, exn>
 
 type InterceptorCommand =
-    | BeforeConsume of MessageId * Activity * Baggage
+    | BeforeConsume of MessageId * Activity
     | Timeout of MessageId * AckResult
     | Ack of MessageId * AckResult
     | CumulativeAck of MessageId * AckResult
     | NegativeAck of MessageId * AckResult
     | Stop
 
-type OTelConsumerInterceptor<'T>(log: ILogger) =
+type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
     let cache =  Dictionary<MessageId, Activity>()
-    static let source = "pulsar.consumer"
-    let activitySource = new ActivitySource(source)
+    let activitySource = new ActivitySource(sourceName)
     let Propagator = Propagators.DefaultTextMapPropagator
-
+    static let prefix = "OtelConsumerInterceptor:"
     
     let stopActivitySuccessfully (activity: Activity) ackType =
         activity
             .SetTag("acknowledge.type", ackType)
-            .Stop()
+            .Dispose()
     
     let endActivity messageId (ackResult: AckResult) =
         match cache.TryGetValue messageId with
@@ -44,9 +41,9 @@ type OTelConsumerInterceptor<'T>(log: ILogger) =
                     .SetTag("exception.type", exn.Source)
                     .SetTag("exception.message", exn.Message)
                     .SetTag("exception.stacktrace", exn.StackTrace)
-                    .Stop()
+                    .Dispose()
         | _ ->
-            log.LogWarning("Can't find start of activity for msgId={0}", messageId)
+            log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
     
     let endPreviousActivities msgId (ackResult: AckResult) =
         cache.Keys
@@ -58,8 +55,7 @@ type OTelConsumerInterceptor<'T>(log: ILogger) =
             (fun dict key ->
                 match dict.TryGetValue(key) with
                 | true, v -> seq { v }
-                | false, _ -> Seq.empty)    
-
+                | false, _ -> Seq.empty)
     
     let mb =  MailboxProcessor<InterceptorCommand>.Start (fun inbox ->
               
@@ -79,33 +75,33 @@ type OTelConsumerInterceptor<'T>(log: ILogger) =
                 | InterceptorCommand.CumulativeAck (msgId, ackResult) ->
                     endPreviousActivities msgId ackResult
                     return! messageLoop()
-                | InterceptorCommand.BeforeConsume (msgId, activity,baggage)->                   
-                     let bag = baggage.GetBaggage().ToList()
-                     for item in bag do
-                         activity.AddBaggage(item.Key, item.Value) |> ignore //Returns Activity (this) for convenient chaining.
-                                                                             //https://docs.microsoft.com/en-us/dotnet/api/system.diagnostics.activity.addbaggage?view=net-5.0
-                     cache.Add(msgId, activity)    
-                     return! messageLoop()
+                | InterceptorCommand.BeforeConsume (msgId, activity) ->
+                    match cache.TryGetValue msgId with
+                    | true, _ ->
+                        activity
+                            .SetTag("acknowledge.type", "Duplicate")
+                            .Dispose()
+                    | _ ->
+                        cache.Add(msgId, activity)
+                    return! messageLoop()
                 | InterceptorCommand.Stop ->
-                    cache
-                    |> Seq.iter (fun (KeyValue(_, value)) ->
-                        value.SetTag("acknowledge.type", "InterceptorStopped")|> ignore
-                        value.Stop())
+                    for KeyValue(_, activity) in cache do 
+                        activity
+                            .SetTag("acknowledge.type", "InterceptorStopped")
+                            .Dispose()
                     activitySource.Dispose()
                     cache.Clear()
+                    log.LogInformation("{0} Closed", prefix)
             }       
         messageLoop()
     )
-    do mb.Error.Add(fun ex -> log.LogCritical(ex, "{0} otel consumer mailbox failure"))
-    
-    static member Source = source
+    do mb.Error.Add(fun ex -> log.LogCritical(ex, "{0} mailbox failure", prefix))
     
     interface IConsumerInterceptor<'T> with
         member this.BeforeConsume(consumer, message) =
             // Extract the PropagationContext of the upstream parent from the message headers.
             let contextToInject = Unchecked.defaultof<PropagationContext>
             let parentContext = Propagator.Extract(contextToInject, message.Properties, getter)
-            //Baggage.Current <- parentContext.Baggage //baggage is empty for some reason even I parsed metadata from headers
             
             // https://github.com/open-telemetry/opentelemetry-dotnet/blob/main/examples/MicroserviceExample/Utils/Messaging/MessageReceiver.cs#L68
             let activity =
@@ -117,9 +113,12 @@ type OTelConsumerInterceptor<'T>(log: ILogger) =
                     .SetTag("messaging.message_id", message.MessageId)
                     .SetTag("messaging.operation", "Consume")
             
-            if activity <> null then                
-                if activity.IsAllDataRequested = true then
-                    mb.Post <| InterceptorCommand.BeforeConsume(message.MessageId, activity,parentContext.Baggage)                   
+            if activity |> isNull |> not then
+                if activity.IsAllDataRequested then
+                    parentContext.Baggage.GetBaggage()
+                    |> Seq.iter (fun (KeyValue kv) -> 
+                        activity.AddBaggage kv |> ignore) 
+                    mb.Post <| InterceptorCommand.BeforeConsume(message.MessageId, activity)
             message
 
 
