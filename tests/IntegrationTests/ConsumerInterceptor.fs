@@ -15,7 +15,7 @@ type ConsumerInterceptorBeforeConsume() =
     member val BeforeMessages = ResizeArray<MessageBuilder<byte[]>>() with get
 
     interface IConsumerInterceptor<byte[]> with
-        member this.Close() = ()
+        member this.Dispose() = ()
         member this.BeforeConsume(_, message)  =
             let msgValue = message.Data |> Encoding.UTF8.GetString
             let newProp = Dictionary(message.Properties)
@@ -35,7 +35,7 @@ type ConsumerInterceptorOnAcknowledge() =
     member val AckTimeoutMessageIds = ResizeArray<MessageId>() with get
 
     interface IConsumerInterceptor<byte[]> with
-        member this.Close() =
+        member this.Dispose() =
             this.Closed <- true
         member this.BeforeConsume(_, message) = message
         member this.OnAcknowledge(_, messageId, _) =
@@ -58,7 +58,7 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
             let messageIds = ResizeArray<MessageId>()
-            let consumerInterceptor = ConsumerInterceptorOnAcknowledge()
+            let consumerInterceptor = new ConsumerInterceptorOnAcknowledge()
             let interceptName = "OnClose"
             
             let! producer =
@@ -113,7 +113,7 @@ let tests =
                     .Topic(topicName)
                     .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
-                    .Intercept(ConsumerInterceptorBeforeConsume())
+                    .Intercept(new ConsumerInterceptorBeforeConsume())
                     .SubscribeAsync() |> Async.AwaitTask
 
             let producerTask =
@@ -144,7 +144,7 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
             let messageIds = ResizeArray<MessageId>()
-            let consumerInterceptor = ConsumerInterceptorOnAcknowledge()
+            let consumerInterceptor = new ConsumerInterceptorOnAcknowledge()
             let interceptName = "OnAcknowledge"
             
             let! producer =
@@ -191,7 +191,7 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 9
             let messageIds = ResizeArray<MessageId>()
-            let consumerInterceptor = ConsumerInterceptorOnAcknowledge()
+            let consumerInterceptor = new ConsumerInterceptorOnAcknowledge()
             let interceptName = "OnAcknowledgeCumulative"
             
             let! producer =
@@ -259,7 +259,7 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
             let messageIds = ResizeArray<MessageId>()
-            let consumerInterceptor = ConsumerInterceptorOnAcknowledge()
+            let consumerInterceptor = new ConsumerInterceptorOnAcknowledge()
             let interceptName = "OnNegativeAcksSend"
             
             let! producer =
@@ -308,7 +308,7 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
             let messageIds = ResizeArray<MessageId>()
-            let consumerInterceptor = ConsumerInterceptorOnAcknowledge()
+            let consumerInterceptor = new ConsumerInterceptorOnAcknowledge()
             let interceptName = "OnAckTimeoutSend"
             
             let! producer =
@@ -350,6 +350,6 @@ let tests =
             do! consumer.UnsubscribeAsync() |> Async.AwaitTask
             if not (inMessagesIdSet - ackMessagesIdSet).IsEmpty then
                 let diff = inMessagesIdSet - ackMessagesIdSet |> Set.map(fun m -> string m.EntryId) |> String.concat ";"
-                failwith (sprintf "MessageIds in AckTimeoutMessageIds not equal to send messageIds: %s" diff)
+                failwith $"MessageIds in AckTimeoutMessageIds not equal to send messageIds: {diff}"
         }
     ]

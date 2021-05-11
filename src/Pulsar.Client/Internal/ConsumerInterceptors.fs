@@ -51,6 +51,6 @@ type internal ConsumerInterceptors<'T>(interceptors: IConsumerInterceptor<'T> ar
      member this.Close() =
           for interceptor in interceptors do
                try
-                    interceptor.Close()
+                    interceptor.Dispose()
                with e ->
                     Log.Logger.LogWarning("Fail to close consumer interceptor", e);
