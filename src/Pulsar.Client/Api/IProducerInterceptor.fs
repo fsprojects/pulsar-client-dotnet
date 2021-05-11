@@ -5,7 +5,7 @@ open Pulsar.Client.Common
 
 type IProducerInterceptor<'T> =
     
-    abstract member Close: unit -> unit
+    inherit IDisposable
     
     abstract member Eligible: message:MessageBuilder<'T> -> bool
     

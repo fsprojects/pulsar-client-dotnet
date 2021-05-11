@@ -9,12 +9,11 @@ open System.Text
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open Pulsar.Client.IntegrationTests.Common
-open FSharp.UMX
 
 type ProducerInterceptorEligible() =
     member val BeforeMessages = ResizeArray<MessageBuilder<byte[]>>() with get
     interface IProducerInterceptor<byte[]> with
-        member this.Close() = ()
+        member this.Dispose() = ()
         
         member this.Eligible(message) =
             match message.Properties.GetValueOrDefault("Eligible") with
@@ -29,11 +28,11 @@ type ProducerInterceptorEligible() =
 
 type ProducerInterceptorBefore() =
     interface IProducerInterceptor<byte[]> with
-        member this.Close() = ()
+        member this.Dispose() = ()
         
-        member this.Eligible(_) = true
+        member this.Eligible _ = true
         
-        member this.BeforeSend(producer, message) =
+        member this.BeforeSend(_, message) =
             let msgValue = message.Value |> Encoding.UTF8.GetString    
             let newProp = Dictionary(message.Properties)
             newProp.Add("BeforeSend", msgValue)
@@ -47,10 +46,10 @@ type ProducerInterceptorSendAck() =
     member val AckMessageIds = ResizeArray<MessageId>() with get
 
     interface IProducerInterceptor<byte[]> with
-        member this.Close() =
+        member this.Dispose() =
             this.Closed <- true
         
-        member this.Eligible(_) = true
+        member this.Eligible _ = true
         
         member this.BeforeSend(_, message) = message
         
@@ -67,7 +66,7 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
             let messageIds = ResizeArray<MessageId>()
-            let prodInterceptor = ProducerInterceptorSendAck()
+            let prodInterceptor = new ProducerInterceptorSendAck()
             let interceptName = "OnClose"
             
             let! producer =
@@ -113,7 +112,7 @@ let tests =
             let client = getClient()
             let numberOfMessages = 10
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let prodInterceptor = ProducerInterceptorEligible()
+            let prodInterceptor = new ProducerInterceptorEligible()
             let interceptName = "Eligible"
 
             
@@ -176,7 +175,7 @@ let tests =
             let numberOfMessages = 10
             let interceptName = "BeforeSend"
             
-            let prodInterceptor = ProducerInterceptorBefore()
+            let prodInterceptor = new ProducerInterceptorBefore()
             let! producer =
                 client.NewProducer()
                     .ProducerName(interceptName)
@@ -219,7 +218,7 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
             let messageIds = ResizeArray<MessageId>()
-            let prodInterceptor = ProducerInterceptorSendAck()
+            let prodInterceptor = new ProducerInterceptorSendAck()
             let interceptName = "OnSendAcknowledgement"
             
             let! producer =

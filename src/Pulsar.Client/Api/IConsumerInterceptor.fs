@@ -5,7 +5,7 @@ open Pulsar.Client.Common
 
 type IConsumerInterceptor<'T> =
     
-    abstract member Close: unit -> unit
+    inherit IDisposable
     
     abstract member BeforeConsume: consumer:IConsumer<'T> * message:Message<'T> -> Message<'T>  
 
