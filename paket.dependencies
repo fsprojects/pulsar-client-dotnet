@@ -49,4 +49,17 @@ group Examples
   storage: none
 
   nuget Pulsar.Client
+  nuget Pulsar.Client.Otel
   nuget Microsoft.Extensions.Logging.Console
+  nuget OpenTelemetry
+  nuget OpenTelemetry.Exporter.Console
+
+group OTel
+  framework: netstandard2.0
+  source https://api.nuget.org/v3/index.json
+  storage: none
+
+  nuget Pulsar.Client
+  nuget Microsoft.Extensions.Logging.Console
+  nuget System.Diagnostics.DiagnosticSource
+  nuget OpenTelemetry.Api

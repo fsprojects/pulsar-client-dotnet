@@ -23,7 +23,8 @@ namespace CsharpExamples
             // await ReaderApi.RunReader();
             // await RealWorld.RunRealWorld(PulsarClient.Logger);
             // await SchemaExample.RunSchema();
-            await TransactionExample.RunTransaction();
+            // await TransactionExample.RunTransaction();
+            await Telemerty.RunTelemetry();
 
             Console.WriteLine("Example ended. Press any key to exit");
             Console.ReadKey();

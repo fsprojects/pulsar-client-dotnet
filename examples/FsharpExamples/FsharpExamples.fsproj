@@ -13,7 +13,9 @@
     <Compile Include="Schema.fs" />
     <Compile Include="RealWorld.fs" />
     <Compile Include="TlsAuthentication.fs" />
+    <Compile Include="Telemetry.fs" />
     <Compile Include="Program.fs" />
+    <Content Include="paket.references" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>
