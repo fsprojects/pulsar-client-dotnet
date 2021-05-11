@@ -2,6 +2,6 @@ group Examples
 FSharp.Core
 Microsoft.Extensions.Logging.Console
 Pulsar.Client
-OpenTelemetry.Api
+Pulsar.Client.Otel
 OpenTelemetry.Exporter.Console
 OpenTelemetry

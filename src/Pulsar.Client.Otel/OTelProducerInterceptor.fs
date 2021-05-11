@@ -38,13 +38,15 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                         
             let activity =
                 activitySource.StartActivity(producer.Topic + " send", ActivityKind.Producer)
-                    .SetTag("messaging.destination_kind", "topic") 
-                    .SetTag("messaging.destination", producer.Topic) 
-                    .SetTag("messaging.operation", "Produce")
             
             if isNull activity then
                 message    //If there are no listeners interested in this activity, the activity above will be null <..> Ensure that all subsequent calls using this activity are protected with a null check.                
-            else               
+            else
+                activity
+                    .SetTag("messaging.destination_kind", "topic") 
+                    .SetTag("messaging.destination", producer.Topic) 
+                    .SetTag("messaging.operation", "Produce")
+                    |> ignore                
                 if activity.IsAllDataRequested then
                    // It is highly recommended to check activity.IsAllDataRequested,
                    // before populating any tags which are not readily available.
@@ -61,7 +63,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                    addToCache activity 
                    message
                    
-        member this.Close() =
+        member this.Dispose() =
             for KeyValue(_, activity) in cache do 
                 activity
                     .SetTag("acknowledge.type", "InterceptorStopped")
@@ -73,21 +75,25 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
         member this.Eligible _ = true
         
         member this.OnSendAcknowledgement(_, builder, messageId, exn) =
-                match cache.TryGetValue(builder.Properties.[activityKey]) with
-                | true, activity ->
-                    match exn with
-                    | null ->
-                         activity
-                            .SetTag("acknowledge.type", "Success")
-                            .SetTag("messaging.message_id", messageId)
-                            .Dispose()
-                    |  _ ->
-                        //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md                                             
-                        activity
-                            .SetTag("acknowledge.type", "Error")
-                            .SetTag("exception.type", exn.Source) 
-                            .SetTag("exception.message", exn.Message) 
-                            .SetTag("exception.stacktrace", exn.StackTrace)
-                            .Dispose()
+                match builder.Properties.TryGetValue(activityKey) with
+                | true, activityId ->
+                    match cache.TryGetValue(activityId) with
+                    | true, activity ->
+                        match exn with
+                        | null ->
+                             activity
+                                .SetTag("acknowledge.type", "Success")
+                                .SetTag("messaging.message_id", messageId)
+                                .Dispose()
+                        |  _ ->
+                            //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md                                             
+                            activity
+                                .SetTag("acknowledge.type", "Error")
+                                .SetTag("exception.type", exn.Source) 
+                                .SetTag("exception.message", exn.Message) 
+                                .SetTag("exception.stacktrace", exn.StackTrace)
+                                .Dispose()
+                    | _ ->
+                        log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
                 | _ ->
-                    log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
+                    log.LogWarning("{0} activity id is missing for msgId={1}", prefix, messageId)

@@ -13,8 +13,7 @@ open OpenTelemetry.Resources
 open OpenTelemetry.Trace
 
 let runTelemetry()=
-    let serviceUrl = "pulsar://my-pulsar-cluster:32268"
-    // let serviceUrl = "pulsar://localhost:6650"
+    let serviceUrl = "pulsar://localhost:6650"
     let subscriptionName = "my-subscription"
     let topicName = $"my-topic-{DateTime.Now.Ticks}"
     let producerSourceName = "pulsar.producer"
@@ -24,13 +23,13 @@ let runTelemetry()=
                 .AddSource(producerSourceName, consumerSourceName)
                 .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("telemetry"))
                 .AddConsoleExporter().Build()
-    let prodIntercept = OTelProducerInterceptor(producerSourceName, PulsarClient.Logger)
-    let consIntercept = OTelConsumerInterceptor(consumerSourceName, PulsarClient.Logger)
     task {
         let! client =
-            PulsarClientBuilder()                
+            PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
                 .BuildAsync()
+        use prodIntercept = new OTelProducerInterceptor<byte[]>(producerSourceName, PulsarClient.Logger)
+        use consIntercept = new OTelConsumerInterceptor<byte[]>(consumerSourceName, PulsarClient.Logger)
 
         let! producer =
             client.NewProducer()
@@ -44,7 +43,7 @@ let runTelemetry()=
                 .Intercept(consIntercept)
                 .SubscriptionName(subscriptionName)
                 .SubscriptionType(SubscriptionType.Exclusive)
-                .SubscribeAsync()        
+                .SubscribeAsync()
         let! _ =
             [|
                 producer.SendAsync(Encoding.UTF8.GetBytes("Sent 1 from F# at " + DateTime.Now.ToString()))
@@ -60,7 +59,4 @@ let runTelemetry()=
         for message in msgs do
             message.Data |> Encoding.UTF8.GetString |> Console.WriteLine
         do! consumer.AcknowledgeCumulativeAsync(msgs.[1].MessageId)
-        
-        (prodIntercept :> IProducerInterceptor<_>).Close()
-        (consIntercept :> IConsumerInterceptor<_>).Close()
     }

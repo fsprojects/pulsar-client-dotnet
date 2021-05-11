@@ -2,6 +2,23 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>Pulsar.Client.Otel</PackageId>
+    <Title>Pulsar.Client.Otel</Title>
+    <RootNamespace>Pulsar.Client.Otel</RootNamespace>
+    <AssemblyName>Pulsar.Client.Otel</AssemblyName>
+    <Version>0.1.0</Version>
+    <Company>F# community</Company>
+    <Description>OpenTelemetry plugin for Pulsar.Client</Description>
+    <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
+    <PackageReleaseNotes>Initial release</PackageReleaseNotes>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</PackageProjectUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>pulsar</PackageTags>
+    <Authors>F# community</Authors>
+    <PackageVersion>0.1.0</PackageVersion>
+    <DebugType>portable</DebugType>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
     <Content Include="paket.references" />

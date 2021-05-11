@@ -107,13 +107,14 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
             let activity =
                 activitySource.StartActivity(consumer.Topic + " receive",
                                              ActivityKind.Consumer,
-                                             parentContext.ActivityContext)
+                                             parentContext.ActivityContext)            
+            if activity |> isNull |> not then
+                activity
                     .SetTag("messaging.destination_kind", "topic")
                     .SetTag("messaging.destination", consumer.Topic)
                     .SetTag("messaging.message_id", message.MessageId)
                     .SetTag("messaging.operation", "Consume")
-            
-            if activity |> isNull |> not then
+                    |> ignore
                 if activity.IsAllDataRequested then
                     parentContext.Baggage.GetBaggage()
                     |> Seq.iter (fun (KeyValue kv) -> 
@@ -122,7 +123,7 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
             message
 
 
-        member this.Close() =
+        member this.Dispose() =
             mb.Post InterceptorCommand.Stop
 
         member this.OnAckTimeoutSend(_, messageId) =

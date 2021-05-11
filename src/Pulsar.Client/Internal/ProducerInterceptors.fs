@@ -16,7 +16,7 @@ type internal ProducerInterceptors<'T>(interceptors: IProducerInterceptor<'T> ar
                     try
                          interceptorMessage <- interceptor.BeforeSend(producer, interceptorMessage)
                     with e ->
-                         Log.Logger.LogWarning("Error executing interceptor beforeSend callback topic: {0}", producer.Topic, e)
+                         Log.Logger.LogWarning(e, "Error executing interceptor beforeSend callback topic: {0}", producer.Topic)
           interceptorMessage
         
      member this.OnSendAcknowledgement (producer: IProducer<'T>, message: MessageBuilder<'T>, msgId: MessageId, exn: Exception) =
@@ -25,11 +25,11 @@ type internal ProducerInterceptors<'T>(interceptors: IProducerInterceptor<'T> ar
                     try
                          interceptor.OnSendAcknowledgement(producer, message, msgId, exn)
                     with e ->
-                         Log.Logger.LogWarning("Error executing interceptor onSendAcknowledgement callback topic: {0}", producer.Topic, e);
+                         Log.Logger.LogWarning(e, "Error executing interceptor onSendAcknowledgement callback topic: {0}", producer.Topic);
           
      member this.Close() =
           for interceptor in interceptors do
                try
                     interceptor.Dispose()
                with e ->
-                    Log.Logger.LogWarning("Fail to close producer interceptor", e);
+                    Log.Logger.LogWarning(e, "Fail to close producer interceptor");

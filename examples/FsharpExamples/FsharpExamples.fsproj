@@ -15,9 +15,7 @@
     <Compile Include="TlsAuthentication.fs" />
     <Compile Include="Telemetry.fs" />
     <Compile Include="Program.fs" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\Pulsar.Client.Otel\Pulsar.Client.Otel.fsproj" />
+    <Content Include="paket.references" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>

@@ -1,3 +1,6 @@
 group Examples
 Microsoft.Extensions.Logging.Console
 Pulsar.Client
+Pulsar.Client.Otel
+OpenTelemetry.Exporter.Console
+OpenTelemetry
