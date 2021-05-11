@@ -20,7 +20,7 @@ namespace CsharpExamples
             
             var topicName = $"my-topic-{DateTime.Now.Ticks}";
 
-            var traceProvider = Sdk.CreateTracerProviderBuilder()
+            Sdk.CreateTracerProviderBuilder()
                 .AddSource(producerSourceName, consumerSourceName)
                 .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("telemetry"))
                 .AddConsoleExporter().Build();

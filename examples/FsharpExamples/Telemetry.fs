@@ -19,10 +19,10 @@ let runTelemetry()=
     let producerSourceName = "pulsar.producer"
     let consumerSourceName = "pulsar.consumer"
     
-    let _ = Sdk.CreateTracerProviderBuilder()
+    Sdk.CreateTracerProviderBuilder()
                 .AddSource(producerSourceName, consumerSourceName)
                 .SetResourceBuilder(ResourceBuilder.CreateDefault().AddService("telemetry"))
-                .AddConsoleExporter().Build()
+                .AddConsoleExporter().Build() |> ignore
     task {
         let! client =
             PulsarClientBuilder()
@@ -48,13 +48,13 @@ let runTelemetry()=
             [|
                 producer.SendAsync(Encoding.UTF8.GetBytes("Sent 1 from F# at " + DateTime.Now.ToString()))
                 producer.SendAsync(Encoding.UTF8.GetBytes("Sent 2 from F# at " + DateTime.Now.ToString()))
-            |] |> Task.WhenAll |> Async.AwaitTask
+            |] |> Task.WhenAll
        
         let! msgs =
             [|
                 consumer.ReceiveAsync()
                 consumer.ReceiveAsync()
-            |] |> Task.WhenAll |> Async.AwaitTask
+            |] |> Task.WhenAll
             
         for message in msgs do
             message.Data |> Encoding.UTF8.GetString |> Console.WriteLine
