@@ -401,7 +401,7 @@ let tests =
             for i in 1..20 do
                 do! producer2.SendAndForgetAsync(producer2.NewMessage($"TXN2.2-{i}", txn = txn2)) |> Async.AwaitTask
             
-            let cts = new CancellationTokenSource(500)
+            let cts = new CancellationTokenSource(1000)
             let getNextMessage() =
                 task{
                     let t1 = consumer1.ReceiveAsync(cts.Token)
@@ -420,12 +420,8 @@ let tests =
             Expect.isFalse "" receiveTask.IsCompleted
             
             do! txn1.Commit() |> Async.AwaitTask
-            do! Async.Sleep 150
             let! message1 = receiveTask |> Async.AwaitTask
-            Expect.stringStarts "" "TXN1" (message1.GetValue())
-            
-            
-            do! Async.Sleep 500
+            Expect.stringStarts "" "TXN1" (message1.GetValue())            
             
             do! Task.WhenAll [| txn2.Abort() ; txn3.Commit() |] |> Async.AwaitTask |> Async.Ignore
             
