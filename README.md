@@ -6,7 +6,8 @@
 
 ### Contributions and stars ★ are most welcome!
 
-[Pulsar.Client nuget](https://www.nuget.org/packages/Pulsar.Client)
+[Pulsar.Client nuget](https://www.nuget.org/packages/Pulsar.Client) |
+[OpenTelemetry nuget](https://www.nuget.org/packages/Pulsar.Client.Otel/)
 
 Supported pulsar cluster versions: **2.4+**
 
