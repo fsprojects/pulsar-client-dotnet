@@ -4,23 +4,23 @@ framework: netstandard2.0
 
 nuget FSharp.UMX
 nuget FSharp.Core
+nuget Microsoft.Extensions.Caching.Memory
 nuget Microsoft.Extensions.Logging
 nuget Microsoft.Extensions.Logging.Abstractions
 nuget Microsoft.IO.RecyclableMemoryStream
 nuget Microsoft.Bcl.AsyncInterfaces
-nuget protobuf-net.Reflection 3.0.101
 nuget System.Text.Json
 nuget System.IO.Pipelines
 nuget Pipelines.Sockets.Unofficial
 nuget TaskBuilder.fs
 nuget protobuf-net
+nuget protobuf-net.Reflection
 nuget NETStandard.Library
 nuget zlib.net-mutliplatform
 nuget K4os.Compression.LZ4
 nuget Snappy.Standard
 nuget ZstdNet
 nuget AvroSchemaGenerator
-nuget Microsoft.Extensions.Caching.Memory
 nuget Apache.Avro
 nuget NSec.Cryptography
 nuget PemUtils

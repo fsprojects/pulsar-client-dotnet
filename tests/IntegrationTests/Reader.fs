@@ -1,6 +1,7 @@
 ﻿module Pulsar.Client.IntegrationTests.Reader
 
 open System
+open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Api
@@ -10,6 +11,7 @@ open Pulsar.Client.Common
 open Serilog
 open Pulsar.Client.IntegrationTests.Common
 open FSharp.Control
+open FSharp.UMX
 
 [<Tests>]
 let tests =
@@ -235,6 +237,38 @@ let tests =
             Expect.equal "" 3 result.Count
             Log.Debug("Finished StartMessageFromRollbackDuration. Batching: " + batching.ToString())
         }
+        
+    let checkReadingFromFuture batching =
+        task {
+            Log.Debug("Started CheckReadingFromFuture. Batching: " + batching.ToString())
+
+            let client = getClient()
+            let topicName = "public/retention/" + Guid.NewGuid().ToString("N")
+            let producerName = "futureProducer"
+            let readerName = "futureReader"
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(batching)
+                    .CreateAsync()
+
+            let! _ = producer.SendAsync("Hello world1" |> Encoding.UTF8.GetBytes)
+            do! Task.Delay(4000)
+
+            let! reader =
+                client.NewReader()
+                    .Topic(topicName)
+                    .ReaderName(readerName)
+                    .StartMessageId(MessageId.Latest)
+                    .CreateAsync()
+
+            do! reader.SeekAsync(%(DateTimeOffset.UtcNow.AddSeconds(-1.0).ToUnixTimeMilliseconds()))
+            let! hasSomeMessages = reader.HasMessageAvailableAsync()
+            Expect.equal "" false hasSomeMessages
+            Log.Debug("Finished CheckReadingFromFuture. Batching: " + batching.ToString())
+        }
 
     
 
@@ -278,5 +312,13 @@ let tests =
         
         testAsync "Check StartMessageFromRollbackDuration with batching" {
             do! checkReadingFromRollback true |> Async.AwaitTask
+        }
+        
+        testAsync "Check StartMessageFromFuturePoint without batching" {
+            do! checkReadingFromFuture false |> Async.AwaitTask
+        }
+        
+        testAsync "Check StartMessageFromFuturePoint with batching" {
+            do! checkReadingFromFuture true |> Async.AwaitTask
         }
     ]
