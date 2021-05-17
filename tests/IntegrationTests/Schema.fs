@@ -32,7 +32,7 @@ type SimpleRecord3 =
     {
         Name: string
         Age: int
-        [<LogicalType(LogicalTypeKind.Date)>]
+        // [<LogicalType(LogicalTypeKind.Date)>] not supported yet
         Date: DateTime
     }
     

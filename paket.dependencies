@@ -4,12 +4,16 @@ framework: netstandard2.0
 
 nuget FSharp.UMX
 nuget FSharp.Core
-nuget Microsoft.Extensions.Caching.Memory
-nuget Microsoft.Extensions.Logging
-nuget Microsoft.Extensions.Logging.Abstractions
+nuget Microsoft.Extensions.Caching.Memory 3.1.9
+nuget Microsoft.Extensions.Caching.Abstractions 3.1.9
+nuget Microsoft.Extensions.Logging 3.1.9
+nuget Microsoft.Extensions.Logging.Abstractions 3.1.9
+nuget Microsoft.Extensions.DependencyInjection.Abstractions 3.1.9
+nuget Microsoft.Extensions.Configuration.Abstractions 3.1.9
+nuget Microsoft.Extensions.Primitives 3.1.9
 nuget Microsoft.IO.RecyclableMemoryStream
-nuget Microsoft.Bcl.AsyncInterfaces
-nuget System.Text.Json
+nuget Microsoft.Bcl.AsyncInterfaces 1.1.1
+nuget System.Text.Json 4.7.2
 nuget System.IO.Pipelines
 nuget Pipelines.Sockets.Unofficial
 nuget TaskBuilder.fs
