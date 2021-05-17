@@ -3,14 +3,10 @@ storage: none
 framework: netstandard2.0
 
 nuget FSharp.UMX
-nuget FSharp.Core
 nuget Microsoft.Extensions.Caching.Memory
 nuget Microsoft.Extensions.Logging
-nuget Microsoft.Extensions.Logging.Abstractions
 nuget Microsoft.IO.RecyclableMemoryStream
-nuget Microsoft.Bcl.AsyncInterfaces
 nuget System.Text.Json
-nuget System.IO.Pipelines
 nuget Pipelines.Sockets.Unofficial
 nuget TaskBuilder.fs
 nuget protobuf-net
