@@ -14,6 +14,7 @@ type Authentication() =
     default this.GetAuthData brokerHostName =
         this.GetAuthData()
 
+    
     static member AuthenticationDisabled =
         {
             new Authentication() with
