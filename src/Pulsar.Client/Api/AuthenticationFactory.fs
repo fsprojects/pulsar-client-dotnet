@@ -2,6 +2,7 @@
 
 open System
 open Pulsar.Client.Auth
+open Pulsar.Client.Auth.Oauth2
 
 let token (token: string) : Authentication =
     DefaultImplementation.newAuthenticationToken token :> Authentication
@@ -9,6 +10,6 @@ let token (token: string) : Authentication =
 let tls (certFilePath: string) : Authentication =
     DefaultImplementation.newAuthenticationTls certFilePath :> Authentication
     
-let oauth2 (issuerUrl : Uri, credentialsJson: string, audience: Uri) =
+let oauth2 (issuerUrl : Uri, credentialsJson: Credentials, audience: Uri) =
     DefaultImplementation.newAuthenticationOauth2 (issuerUrl, credentialsJson, audience)
     :> Authentication
