@@ -1,4 +1,4 @@
-﻿module Pulsar.Client.Auth.Tokens
+﻿module Pulsar.Client.Auth.Token
 
 open System
 open System.Collections.Generic

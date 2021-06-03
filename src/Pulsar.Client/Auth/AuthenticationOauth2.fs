@@ -1,4 +1,4 @@
-﻿module Pulsar.Client.Auth
+﻿module Pulsar.Client.Auth.Oauth2
 
 open System
 open System.Text.Json
@@ -6,7 +6,7 @@ open System.Net.Http
 open System.Text.Json.Serialization
 open Pulsar.Client.Api
 open Pulsar.Client.Auth.Metadata    
-open Pulsar.Client.Auth.Tokens
+open Pulsar.Client.Auth.Token
 
 type Credentials =
     [<JsonPropertyName("type")>]

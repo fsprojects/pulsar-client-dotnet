@@ -1,6 +1,7 @@
 ﻿module internal Pulsar.Client.Auth.DefaultImplementation
 
 open System
+open Pulsar.Client.Auth.Oauth2
 
 let newAuthenticationToken (token: string) =
     AuthenticationToken token
