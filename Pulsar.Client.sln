@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProtobufNativeGenerated", "
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Pulsar.Client.Otel", "src\Pulsar.Client.Otel\Pulsar.Client.Otel.fsproj", "{C23D4DAC-8612-49C7-B8D6-0A44318BE48B}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "OauthTest", "examples\OauthTest\OauthTest.fsproj", "{17CBE439-18AA-435D-A0A4-3496F66D0034}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -75,6 +77,10 @@ Global
 		{C23D4DAC-8612-49C7-B8D6-0A44318BE48B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C23D4DAC-8612-49C7-B8D6-0A44318BE48B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C23D4DAC-8612-49C7-B8D6-0A44318BE48B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{17CBE439-18AA-435D-A0A4-3496F66D0034}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{17CBE439-18AA-435D-A0A4-3496F66D0034}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{17CBE439-18AA-435D-A0A4-3496F66D0034}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{17CBE439-18AA-435D-A0A4-3496F66D0034}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -89,6 +95,7 @@ Global
 		{173C91F0-8FA9-4E48-88B5-6C9A968AACF8} = {57300837-ACF8-47EF-9271-E72D12D5D4A4}
 		{E78C06BC-7043-4B9C-9EC1-64FADD92227F} = {57300837-ACF8-47EF-9271-E72D12D5D4A4}
 		{C23D4DAC-8612-49C7-B8D6-0A44318BE48B} = {A69013AE-F033-4D8F-8C84-D238F1E7C45B}
+		{17CBE439-18AA-435D-A0A4-3496F66D0034} = {F63757F9-A836-40E7-A1D1-108AAA14707C}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {5F50C1BF-3713-4686-906F-8051FD013D96}

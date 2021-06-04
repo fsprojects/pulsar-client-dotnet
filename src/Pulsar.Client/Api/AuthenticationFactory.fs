@@ -10,6 +10,6 @@ let token (token: string) : Authentication =
 let tls (certFilePath: string) : Authentication =
     DefaultImplementation.newAuthenticationTls certFilePath :> Authentication
     
-let oauth2 (issuerUrl : Uri, credentialsJson: Credentials, audience: Uri) =
+let oauth2 (issuerUrl : Uri, credentialsJson: Uri, audience: Uri) =
     DefaultImplementation.newAuthenticationOauth2 (issuerUrl, credentialsJson, audience)
     :> Authentication

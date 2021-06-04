@@ -8,29 +8,27 @@ open System.Net.Http.Headers
 open System.Text.Json.Serialization
 open System.Text.Json
 
-type TokenError =
+type TokenError = {
     [<JsonPropertyName("error")>]
-    member x.error:string =  String.Empty
+    error:string 
     
     [<JsonPropertyName("error_description")>]
-    member x.errorDescription:string =  String.Empty
+    errorDescription:string 
     
     [<JsonPropertyName("error_uri")>]
-    member x.errorUri:string =  String.Empty
+    errorUri:string 
+    }
 
-type TokenResult =
+type TokenResult ={
     [<JsonPropertyName("access_token")>]
-    member x.accessToken:string =  String.Empty
-    
+    accessToken:string     
     [<JsonPropertyName("id_token")>]
-    member x.idToken:string =  String.Empty
-    
+    idToken:string     
     [<JsonPropertyName("refresh_token")>]
-    member x.refreshToken:string =  String.Empty
-    
+    refreshToken:string     
     [<JsonPropertyName("expires_in")>]
-    member x.expiresIn:int =  0
-
+    expiresIn:int 
+    }
 type TokenExchangeResult =
     | Result of TokenResult*DateTime
     | OauthError of TokenError
