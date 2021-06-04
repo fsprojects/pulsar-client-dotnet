@@ -44,19 +44,21 @@ type TokenExchangeResult =
 let Exchange (uri:Uri,clientId:string, clientSecret:string, audience:Uri) : TokenExchangeResult=
      async{
              use client = new HttpClient()
-             let userAgent =  ProductInfoHeaderValue("Pulsar-Java-v2.7.1")  //where to get current ver?
+             //let userAgent =  ProductInfoHeaderValue("Pulsar-Java-v2.7.1")  //where to get current ver?
              //...setUserAgent(String.format("Pulsar-Java-v%s", PulsarVersion.getVersion()));
              
              let request = new HttpRequestMessage(HttpMethod.Post,uri)
-             request.Headers.UserAgent.Add userAgent
+            // request.Headers.UserAgent.Add userAgent
              request.Headers.Accept.Add(MediaTypeWithQualityHeaderValue("application/json"))
-             request.Headers.Add("Content-Type","application/x-www-form-urlencoded")
+             
+             request.Headers.Add("User-Agent","Pulsar-Java-v2.7.1")
              let body = [KeyValuePair("grant_type","client_credentials");
                          KeyValuePair("client_id",clientId);
                          KeyValuePair("client_secret",clientSecret);
                          KeyValuePair("audience",audience.ToString())]           
            
              request.Content <- new FormUrlEncodedContent(body)
+            // request.Content.Headers.Add("Content-Type","application/x-www-form-urlencoded")
              let! response = client.SendAsync request |> Async.AwaitTask
              let! resultContent = response.Content.ReadAsStringAsync() |> Async.AwaitTask
              match response.StatusCode with
