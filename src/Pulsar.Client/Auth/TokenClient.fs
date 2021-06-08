@@ -55,7 +55,9 @@ let Exchange (uri:Uri,clientId:string, clientSecret:string, audience:Uri) : Toke
              let body = [KeyValuePair("grant_type","client_credentials");
                          KeyValuePair("client_id",clientId);
                          KeyValuePair("client_secret",clientSecret);
-                         KeyValuePair("audience",audience.ToString())]           
+                         KeyValuePair("audience",audience.ToString())//;
+                         //KeyValuePair("scope","https://pulsar.com/hello")
+                         ]           
            
              request.Content <- new FormUrlEncodedContent(body)
             // request.Content.Headers.Add("Content-Type","application/x-www-form-urlencoded")
