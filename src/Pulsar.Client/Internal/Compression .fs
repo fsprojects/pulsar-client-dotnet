@@ -19,7 +19,7 @@ module internal CompressionCodec =
 
     type ZLibCompression() =
         
-        let zlib isEncode capacity (bytes : byte[]) payloadLength =
+        let zlib isEncode (capacity: int) (bytes : byte[]) payloadLength =
             use ms = MemoryStreamManager.GetStream(null, capacity)
             use zlib =
                 if isEncode then
