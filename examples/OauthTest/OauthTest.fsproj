@@ -14,8 +14,10 @@
         </Content>
         <Content Include="keys.json" />
         <Content Include="oauth_public.key" />
-        <Content Include="Dockerfile.dockerfile" />
         <Content Include="standalone.conf" />
+        <Content Include="oauth_public2.key" />
+        <Content Include="credentials_file_server.json" />
+        <Content Include="docker-compose.yml" />
     </ItemGroup>
 
     <ItemGroup>
