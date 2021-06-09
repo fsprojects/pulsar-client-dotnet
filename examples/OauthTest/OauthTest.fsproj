@@ -12,6 +12,10 @@
         <Content Include="credentials_file.json">
           <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         </Content>
+        <Content Include="keys.json" />
+        <Content Include="oauth_public.key" />
+        <Content Include="Dockerfile.dockerfile" />
+        <Content Include="standalone.conf" />
     </ItemGroup>
 
     <ItemGroup>
