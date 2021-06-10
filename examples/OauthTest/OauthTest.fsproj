@@ -18,6 +18,8 @@
         <Content Include="oauth_public2.key" />
         <Content Include="credentials_file_server.json" />
         <Content Include="docker-compose.yml" />
+        <Content Include="client.conf" />
+        <Content Include="Dockerfile" />
     </ItemGroup>
 
     <ItemGroup>

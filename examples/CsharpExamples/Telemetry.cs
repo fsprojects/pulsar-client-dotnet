@@ -9,7 +9,7 @@ using Pulsar.Client.Otel;
 
 namespace CsharpExamples
 {
-    internal class Telemerty
+    internal class Telemetry
     {
         internal static async Task RunTelemetry()
         {

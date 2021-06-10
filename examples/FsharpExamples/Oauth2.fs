@@ -1,4 +1,4 @@
-﻿module OauthTest.runOauth
+﻿module Oauth2
 
 open System
 open Pulsar.Client.Api
@@ -6,15 +6,25 @@ open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Common
 open System.Text
 
-
-let runOauth() =    
-    
+let configFilePath() =
     let configFolderName = "Oauth2Files"
-    let privateKeyFileName = "credentials_file.json"    
+    let privateKeyFileName = "credentials_file.json"
     let startup = System.IO.Path.GetDirectoryName (System.Reflection.Assembly.GetExecutingAssembly().Location)
-    let startupWithCreds = System.IO.Path.Combine (startup, privateKeyFileName)    
-    let fileUri = Uri(startupWithCreds)
-    
+    let indexOfConfigDir = startup.IndexOf "examples"
+    let examplesFolder = startup.Substring(0,startup.Length - indexOfConfigDir - 3)
+    let configFolder = System.IO.Path.Combine(examplesFolder,configFolderName)
+    let ret = System.IO.Path.Combine (configFolder, privateKeyFileName)
+    if (System.IO.File.Exists(ret))
+    then ret
+    else raise (System.IO.FileNotFoundException("can't find credentials file"))
+        
+//In order to run this example one has to have authentication on broker
+//There is docker-compose file, which creates sample standalone pulsar instance
+//Check configuration files to see how to set up authentication in broker
+//In this example Auth0 server is used, look at it's response in Auth0response file  
+let runOauth() =     
+      
+    let fileUri = Uri(configFilePath())    
     let issuerUrl = Uri("https://pulsar-sample.us.auth0.com")
     let audience = Uri("https://pulsar-sample.us.auth0.com/api/v2/")
     
@@ -25,7 +35,7 @@ let runOauth() =
         let! client =
             PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
-                //.Authentication(AuthenticationFactory.oauth2(issuerUrl,fileUri,audience))
+                //.Authentication(AuthenticationFactory.oauth2(issuerUrl,fileUri,audience))  //try to comment out this line
                 .BuildAsync()
 
         let! producer =

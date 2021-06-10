@@ -85,7 +85,6 @@
     <Compile Include="Auth\AuthenticationDataTls.fs" />
     <Compile Include="Auth\AuthenticationToken.fs" />
     <Compile Include="Auth\AuthenticationTls.fs" />
-    <Compile Include="Auth\Metadata.fs" />
     <Compile Include="Auth\TokenClient.fs" />
     <Compile Include="Auth\AuthenticationOauth2.fs" />
     <Compile Include="Auth\DefaultImplementation.fs" />
