@@ -7,6 +7,7 @@ open System.Net.Http
 open System.Net.Http.Headers
 open System.Text.Json.Serialization
 open System.Text.Json
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 type TokenError =
     {    
@@ -38,45 +39,48 @@ type TokenResult =
 type TokenExchangeResult =
     | Result of TokenResult * DateTime
     | OauthError of TokenError
-    | OtherError of string
+    | HttpError of string
     
 
-let Exchange (uri:Uri,clientId:string, clientSecret:string, audience:Uri) : TokenExchangeResult =
-     async{
+let exchange (uri:Uri) clientId clientSecret (audience:Uri)  =
+     task{
              use client = new HttpClient()            
              let request = new HttpRequestMessage(HttpMethod.Post,uri)
            
              request.Headers.Accept.Add(MediaTypeWithQualityHeaderValue("application/json"))             
-             request.Headers.Add("User-Agent","Pulsar-Java-v2.7.1")
-             
+                         
              let body = [
-                         KeyValuePair("grant_type","client_credentials");
-                         KeyValuePair("client_id",clientId);
-                         KeyValuePair("client_secret",clientSecret);
+                         KeyValuePair("grant_type","client_credentials")
+                         KeyValuePair("client_id",clientId)
+                         KeyValuePair("client_secret",clientSecret)
                          KeyValuePair("audience",audience.ToString())
                         ]           
            
              request.Content <- new FormUrlEncodedContent(body)
             
              let! response = client.SendAsync request |> Async.AwaitTask
-             let! resultContent = response.Content.ReadAsStringAsync() |> Async.AwaitTask
+             let! resultContent = response.Content.ReadAsStreamAsync() 
              
              match response.StatusCode with
                 | HttpStatusCode.OK ->                   
-                    let result =  JsonSerializer.Deserialize<TokenResult>(resultContent)
+                    let! result =  JsonSerializer.DeserializeAsync<TokenResult>(resultContent)
                     return TokenExchangeResult.Result (result, DateTime.Now)
                 | HttpStatusCode.BadRequest
                 | HttpStatusCode.Unauthorized ->
-                    let! resultContent = response.Content.ReadAsStringAsync() |> Async.AwaitTask
-                    let result =  JsonSerializer.Deserialize<TokenError>(resultContent)
+                    let! resultContent = response.Content.ReadAsStreamAsync() 
+                    let! result =  JsonSerializer.DeserializeAsync<TokenError>(resultContent)
                     return TokenExchangeResult.OauthError result
-                | _ -> return TokenExchangeResult.OtherError ("Failed to perform request to oauth server "
-                                                              + response.StatusCode.ToString()
-                                                              + " " +    response.ReasonPhrase)   
-          } |> Async.RunSynchronously
+                | _ -> return TokenExchangeResult.HttpError $"Failed to perform request to oauth server {response.StatusCode.ToString()} {response.ReasonPhrase}"
+                                                                
+          } 
      
 type TokenClient(tokenUrl : Uri) =
-      member x.exchangeClientCredentials(clientId:string, clientSecret:string, audience:Uri)=
-          Exchange (tokenUrl,clientId,clientSecret,audience)
+      member this.ExchangeClientCredentials(clientId:string, clientSecret:string, audience:Uri)=
+          task{
+                return! exchange tokenUrl clientId clientSecret audience                
+          } 
+        
+        
+          
           
     

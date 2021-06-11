@@ -19,7 +19,6 @@ let configFilePath() =
     else raise (System.IO.FileNotFoundException("can't find credentials file"))
         
 //In order to run this example one has to have authentication on broker
-//There is docker-compose file, which creates sample standalone pulsar instance
 //Check configuration files to see how to set up authentication in broker
 //In this example Auth0 server is used, look at it's response in Auth0response file  
 let runOauth() =     

@@ -1,12 +1,13 @@
 ﻿module Pulsar.Client.Auth.Oauth2
 
 open System
+open System.IO
 open System.Text.Json
 open System.Net.Http
 open System.Text.Json.Serialization
 open Pulsar.Client.Api
 open Pulsar.Client.Auth.Oauth2Token
-
+open FSharp.Control.Tasks.V2.ContextInsensitive
 type Metadata =
    {
         [<JsonPropertyName("issuer")>]
@@ -50,26 +51,30 @@ type Credentials =
 let getWellKnownMetadataUrl (issuerUrl: Uri) : Uri =
     Uri(issuerUrl.AbsoluteUri + ".well-known/openid-configuration")
 
-let getMetadata (issuerUrl: Uri) : Async<Metadata> =
-    async {
-        use client = new HttpClient()
+let getMetadata (issuerUrl: Uri)  =
+    task {
+        use client = new HttpClient()        
         let metadataDataUrl = getWellKnownMetadataUrl issuerUrl        
-        let! response = client.GetStringAsync metadataDataUrl |> Async.AwaitTask
-        return JsonSerializer.Deserialize<Metadata> response        
+        let! response = client.GetStreamAsync metadataDataUrl 
+        return! JsonSerializer.DeserializeAsync<Metadata> response        
     }
-
 let createClient issuerUrl =
-    let data = getMetadata issuerUrl |> Async.RunSynchronously  
-    TokenClient(Uri(data.TokenEndpoint))
-
+    task {
+        let! data = getMetadata issuerUrl 
+        return TokenClient(Uri(data.TokenEndpoint))
+    }
+    
 let openAndDeserializeCreds uri =
-    let text = System.IO.File.ReadAllText uri    
-    JsonSerializer.Deserialize<Credentials>(text)    
-
+    task{
+        use fs = new FileStream(uri, FileMode.Open)
+        let! temp = JsonSerializer.DeserializeAsync<Credentials>(fs)
+        return temp
+    }
+    
 type AuthenticationOauth2(issuerUrl: Uri, credentials: Uri, audience: Uri) =
     inherit Authentication()
-    let tokenClient  = createClient issuerUrl
-    let credentials = openAndDeserializeCreds(credentials.LocalPath) 
+    let tokenClient  = (createClient issuerUrl).GetAwaiter().GetResult()
+    let credentials = openAndDeserializeCreds(credentials.LocalPath).GetAwaiter().GetResult() 
     let mutable token : Option<TokenResult * DateTime> = None   
 
     //https://datatracker.ietf.org/doc/html/rfc6749#section-4.2.2
@@ -78,40 +83,34 @@ type AuthenticationOauth2(issuerUrl: Uri, credentials: Uri, audience: Uri) =
         | Some v ->
             let tokenDuration = TimeSpan.FromSeconds(float (fst v).ExpiresIn)
             let tokenExpiration = (snd v).Add tokenDuration
-            DateTime.Now > tokenExpiration
-        | _ -> true    
-      
+            DateTime.UtcNow > tokenExpiration
+        | _ -> true
+        
     override this.GetAuthMethodName() = "token"
     override this.GetAuthData() =
         
-        let returnTokenAsProvider () =
-            AuthenticationDataToken(fun () -> (fst token.Value).AccessToken) :> AuthenticationDataProvider
+            let returnTokenAsProvider () =
+              AuthenticationDataToken(fun () -> (fst token.Value).AccessToken) :> AuthenticationDataProvider
+                   
+            match isTokenExpiredOrEmpty () with
+            | true ->
+                
+                let newToken1 =
+                            tokenClient.ExchangeClientCredentials
+                               (
+                                credentials.ClientId,
+                                credentials.ClientSecret,
+                                audience
+                               )
+                let newToken = newToken1.GetAwaiter().GetResult()               
+                
+                match newToken with
+                | Result (v, d) ->
+                    token <- Some(v, d)
+                    returnTokenAsProvider()
+                | OauthError e ->  TokenExchangeException $"{e.Error}{Environment.NewLine} {e.ErrorDescription} {Environment.NewLine}{e.ErrorUri}" |> raise                      
+                | HttpError  e ->  Exception(e) |> raise
 
-        match isTokenExpiredOrEmpty () with
-        | true ->
-            let newToken =
-                    tokenClient.exchangeClientCredentials
-                       (
-                        credentials.ClientId,
-                        credentials.ClientSecret,
-                        audience
-                       )
-
-            match newToken with
-            | Result (v, d) ->
-                token <- Some(v, d)
-                returnTokenAsProvider()
-            | OauthError e ->
-                raise (
-                    TokenExchangeException
-                        (                        
-                        e.Error
-                        + Environment.NewLine
-                        + e.ErrorDescription
-                        + Environment.NewLine
-                        + e.ErrorUri
-                        )
-                     )
-            | OtherError e -> failwith e
-
-        | false -> returnTokenAsProvider()
+            | false ->  returnTokenAsProvider()
+              
+       
