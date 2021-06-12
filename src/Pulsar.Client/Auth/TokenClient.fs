@@ -47,7 +47,8 @@ let exchange (uri:Uri) clientId clientSecret (audience:Uri)  =
              use client = new HttpClient()            
              let request = new HttpRequestMessage(HttpMethod.Post,uri)
            
-             request.Headers.Accept.Add(MediaTypeWithQualityHeaderValue("application/json"))             
+             request.Headers.Accept.Add(MediaTypeWithQualityHeaderValue("application/json"))
+             request.Headers.Add("User-Agent", "Pulsar.Client")
                          
              let body = [
                          KeyValuePair("grant_type","client_credentials")
