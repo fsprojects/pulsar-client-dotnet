@@ -37,7 +37,7 @@ namespace CsharpExamples
             
             var client = await new PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
-                //.Authentication(AuthenticationFactory.oauth2(issuerUrl,fileUri,audience))  //try to comment out this line
+                //.Authentication(AuthenticationFactoryOAuth2.clientCredentials(issuerUrl,fileUri,audience))  //try to comment out this line
                 .BuildAsync();
             
             var producer = await client.NewProducer()

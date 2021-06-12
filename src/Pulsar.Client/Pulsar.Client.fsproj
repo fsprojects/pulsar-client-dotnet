@@ -131,6 +131,7 @@
     <Compile Include="Internal\TransactionMetaStoreHandler.fs" />
     <Compile Include="Api\Schema.fs" />
     <Compile Include="Api\AuthenticationFactory.fs" />
+    <Compile Include="Api\AuthenticationFactoryOAuth2.fs" />
     <Compile Include="Crypto\ICryptoKeyReader.fs" />
     <Compile Include="Crypto\MessageCrypto.fs" />
     <Compile Include="Transaction\TransactionCoordinatorClient.fs" />
