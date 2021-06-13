@@ -5,6 +5,7 @@ open System.IO
 open System.Text.Json
 open System.Net.Http
 open System.Text.Json.Serialization
+open System.Threading.Tasks
 open Pulsar.Client.Api
 open Pulsar.Client.Auth.Oauth2Token
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -93,17 +94,20 @@ type AuthenticationOauth2(issuerUrl: Uri, privateKey: Uri, audience: string) =
                    
             match isTokenExpiredOrEmpty () with
             | true ->
-                let credentials = openAndDeserializeCreds(privateKey.LocalPath).GetAwaiter().GetResult()
-                let tokenTaskResult = tokenClientTask.GetAwaiter().GetResult()
-                let newToken =
-                            tokenTaskResult.ExchangeClientCredentials
-                               (
-                                credentials.ClientId,
-                                credentials.ClientSecret,
-                                audience
-                               )
-                let newToken = newToken.GetAwaiter().GetResult()               
-                
+                let prettyTask = task{
+                    let! credentials = openAndDeserializeCreds(privateKey.LocalPath)
+                    let! tokenTaskResult = tokenClientTask
+                    
+                    let newToken =
+                                tokenTaskResult.ExchangeClientCredentials
+                                   (
+                                    credentials.ClientId,
+                                    credentials.ClientSecret,
+                                    audience
+                                   )
+                    return! newToken                
+                }
+                let newToken = prettyTask.GetAwaiter().GetResult()
                 match newToken with
                 | Result (v, d) ->
                     token <- Some(v, d)
