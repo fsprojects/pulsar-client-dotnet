@@ -71,9 +71,9 @@ let openAndDeserializeCreds uri =
         return temp
     }
     
-type AuthenticationOauth2(issuerUrl: Uri, credentials: Uri, audience: Uri) =
+type AuthenticationOauth2(issuerUrl: Uri, privateKey: Uri, audience: string) =
     inherit Authentication()
-    let tokenClient  = (createClient issuerUrl).GetAwaiter().GetResult()     
+    let tokenClientTask  = createClient issuerUrl     
     let mutable token : Option<TokenResult * DateTime> = None  
 
     //https://datatracker.ietf.org/doc/html/rfc6749#section-4.2.2
@@ -82,7 +82,7 @@ type AuthenticationOauth2(issuerUrl: Uri, credentials: Uri, audience: Uri) =
         | Some (res, exp) ->
             let tokenDuration = TimeSpan.FromSeconds(float res.ExpiresIn)
             let tokenExpiration = exp.Add tokenDuration
-            DateTime.UtcNow > tokenExpiration
+            DateTime.Now > tokenExpiration
         | _ -> true
         
     override this.GetAuthMethodName() = "token"
@@ -93,9 +93,10 @@ type AuthenticationOauth2(issuerUrl: Uri, credentials: Uri, audience: Uri) =
                    
             match isTokenExpiredOrEmpty () with
             | true ->
-                let credentials = openAndDeserializeCreds(credentials.LocalPath).GetAwaiter().GetResult()
+                let credentials = openAndDeserializeCreds(privateKey.LocalPath).GetAwaiter().GetResult()
+                let tokenTaskResult = tokenClientTask.GetAwaiter().GetResult()
                 let newToken =
-                            tokenClient.ExchangeClientCredentials
+                            tokenTaskResult.ExchangeClientCredentials
                                (
                                 credentials.ClientId,
                                 credentials.ClientSecret,

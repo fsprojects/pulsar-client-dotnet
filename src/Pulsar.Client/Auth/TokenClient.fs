@@ -42,7 +42,7 @@ type TokenExchangeResult =
     | HttpError of string
     
 
-let exchange (uri:Uri) clientId clientSecret (audience:Uri)  =
+let exchange (uri:Uri) clientId clientSecret audience  =
      task{
              use client = new HttpClient()            
              let request = new HttpRequestMessage(HttpMethod.Post,uri)
@@ -76,7 +76,7 @@ let exchange (uri:Uri) clientId clientSecret (audience:Uri)  =
           } 
      
 type TokenClient(tokenUrl : Uri) =
-      member this.ExchangeClientCredentials(clientId:string, clientSecret:string, audience:Uri)=
+      member this.ExchangeClientCredentials(clientId:string, clientSecret:string, audience:string)=
           task{
                 return! exchange tokenUrl clientId clientSecret audience                
           } 
