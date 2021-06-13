@@ -54,7 +54,7 @@ let exchange (uri:Uri) clientId clientSecret audience  =
                          KeyValuePair("grant_type","client_credentials")
                          KeyValuePair("client_id",clientId)
                          KeyValuePair("client_secret",clientSecret)
-                         KeyValuePair("audience",audience.ToString())
+                         KeyValuePair("audience",audience)
                         ]           
            
              request.Content <- new FormUrlEncodedContent(body)
