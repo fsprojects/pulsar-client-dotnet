@@ -81,12 +81,12 @@
     <Compile Include="Internal\ProducerStatsImpl.fs" />
     <Compile Include="Internal\ConsumerStatsImpl.fs" />
     <Compile Include="Api\Configuration.fs" />
-    <Compile Include="Auth\AuthenticationDataToken.fs" />
     <Compile Include="Auth\AuthenticationDataTls.fs" />
+    <Compile Include="Auth\AuthenticationDataToken.fs" />
     <Compile Include="Auth\AuthenticationToken.fs" />
     <Compile Include="Auth\AuthenticationTls.fs" />
-    <Compile Include="Auth\TokenClient.fs" />
-    <Compile Include="Auth\AuthenticationOauth2.fs" />
+    <Compile Include="Auth\Oauth2\TokenClient.fs" />
+    <Compile Include="Auth\Oauth2\AuthenticationOauth2.fs" />
     <Compile Include="Auth\DefaultImplementation.fs" />
     <Compile Include="Schema\MultiVersionSchemaInfoProvider.fs" />
     <Compile Include="Schema\BytesSchema.fs" />

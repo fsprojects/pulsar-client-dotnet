@@ -4,8 +4,6 @@ open System
 
 [<AbstractClass>]
 type Authentication() =
-    interface IDisposable with
-          member this.Dispose() = ()
             
     /// Return the identifier for this authentication method
     abstract member GetAuthMethodName: unit -> string
@@ -17,7 +15,11 @@ type Authentication() =
     abstract member GetAuthData: string -> AuthenticationDataProvider
     default this.GetAuthData brokerHostName =
         this.GetAuthData()
-
+        
+    // Dispose unmanaged resources
+    abstract member Dispose: unit -> unit
+    default this.Dispose () =
+        ()
     
     static member AuthenticationDisabled =
         {
@@ -25,3 +27,8 @@ type Authentication() =
                 member this.GetAuthMethodName() = "none"
                 member this.GetAuthData() = AuthenticationDataProvider()
         }
+        
+    
+
+    interface IDisposable with
+          member this.Dispose() = this.Dispose()

@@ -6,7 +6,7 @@ type internal AuthenticationToken (supplier: unit -> string) =
     inherit Authentication()
 
     new(token: string) =
-        AuthenticationToken (fun () -> token)
+        new AuthenticationToken (fun () -> token)
 
     override this.GetAuthMethodName() =
         "token"
