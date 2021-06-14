@@ -9,7 +9,7 @@ open System.Text.Json.Serialization
 open System.Text.Json
 open FSharp.Control.Tasks.V2.ContextInsensitive
 
-type internal TokenError =
+type TokenError =
     {    
         [<JsonPropertyName("error")>]
         Error:string 
@@ -21,7 +21,7 @@ type internal TokenError =
         ErrorUri:string 
     }
 
-type internal TokenResult =
+type TokenResult =
     {    
         [<JsonPropertyName("access_token")>]
         AccessToken:string

@@ -8,7 +8,7 @@ open System.Text.Json.Serialization
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Auth
-type internal Metadata =
+type Metadata =
     {
         [<JsonPropertyName("issuer")>]
         Issuer:string
@@ -28,7 +28,7 @@ type internal Metadata =
         [<JsonPropertyName("device_authorization_endpoint")>]
         DeviceAuthorizationEndpoint:string 
     }
-type internal Credentials =
+type Credentials =
     {  
         [<JsonPropertyName("type")>]
         CredsType : string
