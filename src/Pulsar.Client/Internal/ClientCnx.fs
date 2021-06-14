@@ -829,6 +829,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         
     member this.Close() =
         connection.Dispose()
+        (config.Authentication :> IDisposable).Dispose()
 
     member this.Dispose() =
         sendMb.Post(SocketMessage.Stop)

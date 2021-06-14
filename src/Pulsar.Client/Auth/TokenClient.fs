@@ -42,9 +42,9 @@ type TokenExchangeResult =
     | HttpError of string
     
 
-let exchange (uri:Uri) clientId clientSecret audience  =
+let exchange (uri:Uri) clientId clientSecret audience (client:HttpClient) =
      task{
-             use client = new HttpClient()            
+                     
              let request = new HttpRequestMessage(HttpMethod.Post,uri)
            
              request.Headers.Accept.Add(MediaTypeWithQualityHeaderValue("application/json"))
@@ -75,10 +75,12 @@ let exchange (uri:Uri) clientId clientSecret audience  =
                                                                 
           } 
      
-type TokenClient(tokenUrl : Uri) =
+type TokenClient (tokenUrl : Uri,client:HttpClient)  =
+      interface IDisposable with
+          member this.Dispose() = client.Dispose()
       member this.ExchangeClientCredentials(clientId:string, clientSecret:string, audience:string)=
           task{
-                return! exchange tokenUrl clientId clientSecret audience                
+                return! exchange tokenUrl clientId clientSecret audience client               
           } 
         
         

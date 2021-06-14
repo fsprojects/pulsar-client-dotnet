@@ -54,15 +54,16 @@ let getWellKnownMetadataUrl (issuerUrl: Uri) : Uri =
 
 let getMetadata (issuerUrl: Uri)  =
     task {
-        use client = new HttpClient()        
+        let client = new HttpClient()        
         let metadataDataUrl = getWellKnownMetadataUrl issuerUrl        
-        let! response = client.GetStreamAsync metadataDataUrl 
-        return! JsonSerializer.DeserializeAsync<Metadata> response        
+        let! response = client.GetStreamAsync metadataDataUrl
+        let! deserialized = JsonSerializer.DeserializeAsync<Metadata> response
+        return (client,deserialized)         
     }
 let createClient issuerUrl =
     task {
-        let! data = getMetadata issuerUrl 
-        return TokenClient(Uri(data.TokenEndpoint))
+        let! client,data = getMetadata issuerUrl 
+        return new TokenClient(Uri(data.TokenEndpoint),client)
     }
     
 let openAndDeserializeCreds uri =
@@ -72,8 +73,8 @@ let openAndDeserializeCreds uri =
         return temp
     }
     
-type AuthenticationOauth2(issuerUrl: Uri, privateKey: Uri, audience: string) =
-    inherit Authentication()
+type AuthenticationOauth2(issuerUrl: Uri, privateKey: Uri, audience: string) =  
+    inherit Authentication()  
     let tokenClientTask  = createClient issuerUrl     
     let mutable token : Option<TokenResult * DateTime> = None  
 
@@ -89,8 +90,8 @@ type AuthenticationOauth2(issuerUrl: Uri, privateKey: Uri, audience: string) =
     override this.GetAuthMethodName() = "token"
     override this.GetAuthData() =
         
-            let returnTokenAsProvider () =
-              AuthenticationDataToken(fun () -> (fst token.Value).AccessToken) :> AuthenticationDataProvider
+            let returnTokenAsProvider (token:TokenResult) =
+              AuthenticationDataToken(fun () -> token.AccessToken) :> AuthenticationDataProvider
                    
             match isTokenExpiredOrEmpty () with
             | true ->
@@ -111,10 +112,14 @@ type AuthenticationOauth2(issuerUrl: Uri, privateKey: Uri, audience: string) =
                 match newToken with
                 | Result (v, d) ->
                     token <- Some(v, d)
-                    returnTokenAsProvider()
+                    returnTokenAsProvider(v)
                 | OauthError e ->  TokenExchangeException $"{e.Error}{Environment.NewLine} {e.ErrorDescription} {Environment.NewLine}{e.ErrorUri}" |> raise                      
                 | HttpError  e ->  Exception(e) |> raise
 
-            | false ->  returnTokenAsProvider()
+            | false ->  returnTokenAsProvider(fst(token.Value))
               
-       
+    interface IDisposable with
+          member this.Dispose() =
+              let token =tokenClientTask.GetAwaiter().GetResult()
+              (token :> IDisposable).Dispose()
+              

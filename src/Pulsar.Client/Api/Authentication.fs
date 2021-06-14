@@ -1,8 +1,12 @@
 ﻿namespace Pulsar.Client.Api
 
+open System
+
 [<AbstractClass>]
 type Authentication() =
-
+    interface IDisposable with
+          member this.Dispose() = ()
+            
     /// Return the identifier for this authentication method
     abstract member GetAuthMethodName: unit -> string
 

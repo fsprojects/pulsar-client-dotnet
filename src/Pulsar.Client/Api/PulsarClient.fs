@@ -158,7 +158,7 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
     member this.CloseAsync() =
         task {
             checkIfActive()
-            let! t = mb.PostAndAsyncReply(Close)
+            let! t = mb.PostAndAsyncReply(Close)            
             return! t
         }
     
