@@ -1,8 +1,10 @@
 ﻿namespace Pulsar.Client.Api
 
+open System
+
 [<AbstractClass>]
 type Authentication() =
-
+            
     /// Return the identifier for this authentication method
     abstract member GetAuthMethodName: unit -> string
 
@@ -13,10 +15,20 @@ type Authentication() =
     abstract member GetAuthData: string -> AuthenticationDataProvider
     default this.GetAuthData brokerHostName =
         this.GetAuthData()
-
+        
+    // Dispose unmanaged resources
+    abstract member Dispose: unit -> unit
+    default this.Dispose () =
+        ()
+    
     static member AuthenticationDisabled =
         {
             new Authentication() with
                 member this.GetAuthMethodName() = "none"
                 member this.GetAuthData() = AuthenticationDataProvider()
         }
+        
+    
+
+    interface IDisposable with
+          member this.Dispose() = this.Dispose()

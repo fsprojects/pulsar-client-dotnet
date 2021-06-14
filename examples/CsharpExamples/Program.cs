@@ -24,7 +24,8 @@ namespace CsharpExamples
             // await RealWorld.RunRealWorld(PulsarClient.Logger);
             // await SchemaExample.RunSchema();
             // await TransactionExample.RunTransaction();
-            await Telemerty.RunTelemetry();
+            //await Oauth2.RunOauth();
+            await Telemetry.RunTelemetry();
 
             Console.WriteLine("Example ended. Press any key to exit");
             Console.ReadKey();

@@ -111,6 +111,7 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                             try
                                 let! _ = Task.WhenAll (seq { yield! producersTasks; yield! consumerTasks })
                                 schemaProviders |> Seq.iter (fun (KeyValue (_, provider)) -> provider.Close())
+                                config.Authentication.Dispose()
                                 tryStopMailbox()
                             with ex ->
                                 Log.Logger.LogError(ex, "Couldn't stop client")
@@ -158,7 +159,7 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
     member this.CloseAsync() =
         task {
             checkIfActive()
-            let! t = mb.PostAndAsyncReply(Close)
+            let! t = mb.PostAndAsyncReply(Close)            
             return! t
         }
     

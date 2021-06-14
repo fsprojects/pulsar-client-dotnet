@@ -9,6 +9,7 @@ open RealWorld
 open Schema
 open Transaction
 open Telemetry
+open Oauth2
 
 [<EntryPoint>]
 let main _ =
@@ -28,7 +29,8 @@ let main _ =
 //    runRealWorld(PulsarClient.Logger).Wait()
 //    runSchema().Wait()
 //    runTransaction().Wait()
-    runTelemetry().Wait()
+//    runTelemetry().Wait()
+    runOauth().Wait()
 
     printfn "Example ended. Press any key to exit"
     Console.ReadKey() |> ignore

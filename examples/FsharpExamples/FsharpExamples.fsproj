@@ -14,6 +14,7 @@
     <Compile Include="RealWorld.fs" />
     <Compile Include="TlsAuthentication.fs" />
     <Compile Include="Telemetry.fs" />
+    <Compile Include="Oauth2.fs" />
     <Compile Include="Program.fs" />
     <Content Include="paket.references" />
   </ItemGroup>

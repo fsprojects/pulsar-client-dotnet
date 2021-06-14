@@ -7,3 +7,4 @@ let token (token: string) : Authentication =
 
 let tls (certFilePath: string) : Authentication =
     DefaultImplementation.newAuthenticationTls certFilePath :> Authentication
+    

@@ -53,6 +53,8 @@ type TransactionNotFoundException (msg) = inherit Exception(msg)
 type MetaStoreHandlerNotExistsException (msg) = inherit Exception(msg)
 type MetaStoreHandlerNotReadyException (msg) = inherit Exception(msg)
 type RequestTimeoutException (msg) = inherit Exception(msg)
+type TokenExchangeException (msg) = inherit Exception(msg)
+
 
 module PulsarClientException =
     let isRetriableError (ex: exn) =
