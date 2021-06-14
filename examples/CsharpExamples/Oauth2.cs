@@ -29,7 +29,7 @@ namespace CsharpExamples
         {
             var fileUri = new Uri(GetConfigFilePath());
             var issuerUrl = new Uri("https://pulsar-sample.us.auth0.com");
-            var audience = new Uri("https://pulsar-sample.us.auth0.com/api/v2/");
+            var audience = "https://pulsar-sample.us.auth0.com/api/v2/";
 
             var serviceUrl = "pulsar://localhost:6650";
             var subscriptionName = "my-subscription";
@@ -37,7 +37,7 @@ namespace CsharpExamples
             
             var client = await new PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
-                //.Authentication(AuthenticationFactoryOAuth2.clientCredentials(issuerUrl,fileUri,audience))  //try to comment out this line
+                .Authentication(AuthenticationFactoryOAuth2.clientCredentials(issuerUrl,fileUri, audience))
                 .BuildAsync();
             
             var producer = await client.NewProducer()

@@ -22,7 +22,7 @@ let main _ =
         )
     PulsarClient.Logger <- loggerFactory.CreateLogger("PulsarLogger") 
 
-//    runSimple().Wait()
+    runSimple().Wait()
 //    runTlsAuthentication().Wait()
 //    runCustomProps().Wait()
 //    runReader().Wait()
@@ -30,7 +30,7 @@ let main _ =
 //    runSchema().Wait()
 //    runTransaction().Wait()
 //    runTelemetry().Wait()
-    runOauth().Wait()
+//    runOauth().Wait()
 
     printfn "Example ended. Press any key to exit"
     Console.ReadKey() |> ignore

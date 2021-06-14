@@ -21,7 +21,7 @@ Features list (based on https://github.com/apache/pulsar/wiki/Client-Features-Ma
 - [X] Chunking
 - [X] Compression
 - [X] TLS
-- [X] Authentication (token, tls)
+- [X] Authentication (token, tls, oauth2)
 - [X] Reader API
 - [X] Proxy Support
 - [X] Effectively-Once

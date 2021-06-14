@@ -17,15 +17,15 @@ namespace CsharpExamples
                );
             PulsarClient.Logger = loggerFactory.CreateLogger("PulsarLogger");
 
-            // await Simple.RunSimple();
+             await Simple.RunSimple();
             // await TlsAuthentication.RunTlsAuthentication();
             // await CustomProps.RunCustomProps();
             // await ReaderApi.RunReader();
             // await RealWorld.RunRealWorld(PulsarClient.Logger);
             // await SchemaExample.RunSchema();
             // await TransactionExample.RunTransaction();
-            //await Oauth2.RunOauth();
-            await Telemetry.RunTelemetry();
+            // await Telemetry.RunTelemetry();
+            // await Oauth2.RunOauth();
 
             Console.WriteLine("Example ended. Press any key to exit");
             Console.ReadKey();
