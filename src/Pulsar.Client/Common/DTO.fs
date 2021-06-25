@@ -143,14 +143,25 @@ type internal SendReceipt =
         HighestSequenceId: int64
     }
 
-type internal LogicalAddress = LogicalAddress of DnsEndPoint
-type internal PhysicalAddress = PhysicalAddress of DnsEndPoint
+type internal LogicalAddress =
+    LogicalAddress of DnsEndPoint
+        override this.ToString() =
+            let (LogicalAddress l) = this
+            $"LogicalAddres {l.ToString()}"
+        
+type internal PhysicalAddress =
+    PhysicalAddress of DnsEndPoint
+        override this.ToString() =
+            let (PhysicalAddress l) = this
+            $"PhysicalAddress {l.ToString()}"
 
 type internal Broker =
     {
         LogicalAddress: LogicalAddress
         PhysicalAddress: PhysicalAddress
     }
+    override this.ToString() =
+        $"Broker ({this.LogicalAddress.ToString()}, {this.PhysicalAddress.ToString()})"
 
 type CompressionType =
     | None = 0

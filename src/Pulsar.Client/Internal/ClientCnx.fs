@@ -55,7 +55,8 @@ and internal RequestsOperation =
     | AddRequest of RequestId * BaseCommand.Type * TaskCompletionSource<PulsarResponseType>
     | CompleteRequest of RequestId * BaseCommand.Type * PulsarResponseType
     | FailRequest of RequestId * BaseCommand.Type * exn
-    | FailAllRequestsAndStop
+    | FailAllRequests
+    | Stop
     | Tick
     
 and internal CnxOperation =
@@ -128,7 +129,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     let requests = Dictionary<RequestId, TaskCompletionSource<PulsarResponseType>>()
     let requestTimeoutQueue = Queue<RequestTime>()
     let clientCnxId = Generators.getNextClientCnxId()
-    let prefix = sprintf "clientCnx(%i, %A)" %clientCnxId broker.LogicalAddress
+    let prefix = $"clientCnx({clientCnxId}, {broker.LogicalAddress})"
     let maxNumberOfRejectedRequestPerConnection = config.MaxNumberOfRejectedRequestPerConnection
     let rejectedRequestResetTimeSec = 60
     let mutable numberOfRejectedRequests = 0
@@ -150,16 +151,16 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             if not isTimeout then
                 Log.Logger.LogWarning(ex, "{0} fail non-existent request {1} type {2}, ignoring", prefix, reqId, commandType)
     
-    let rec hanleTimeoutedMessages() =
+    let rec handleTimeoutedMessages() =
         if requestTimeoutQueue.Count > 0 then
             let request = requestTimeoutQueue.Peek()
             let currentDiff = DateTime.Now - request.RequestStartTime
             if currentDiff >= config.OperationTimeout then
                 let request = requestTimeoutQueue.Dequeue()
-                let ex = TimeoutException <| String.Format("{0} request {1} type {2} timedout after {3}ms",
+                let ex = TimeoutException <| String.Format("{0} request {1} type {2} timed out after {3}ms",
                                                 prefix, request.RequestId, request.CommandType, currentDiff.TotalMilliseconds)
                 failRequest request.RequestId request.CommandType ex true
-                hanleTimeoutedMessages()
+                handleTimeoutedMessages()
             else
                 // if there is no request that is timed out then exit the loop
                 ()
@@ -170,6 +171,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | ServerError.InvalidTxnStatus -> InvalidTxnStatusException msg :> exn
         | ServerError.TransactionNotFound -> TransactionNotFoundException msg :> exn
         | _ -> Exception(msg)
+    
+    let failAllRequests() =
+        for KeyValue(_, rspTask) in requests do
+            rspTask.SetException(ConnectException "Disconnected.")
+        requests.Clear()
     
     let requestsMb = MailboxProcessor<RequestsOperation>.Start(fun inbox ->
         let rec loop () =
@@ -192,13 +198,17 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 | FailRequest (reqId, commandType, ex) ->
                     failRequest reqId commandType ex false
                     return! loop()
-                | FailAllRequestsAndStop ->
-                    Log.Logger.LogDebug("{0} fail requests and stop", prefix)
-                    requests |> Seq.iter (fun kv ->
-                        kv.Value.SetException(ConnectException("Disconnected.")))
-                    requests.Clear()
-                 | Tick ->
-                    hanleTimeoutedMessages()
+                | FailAllRequests ->
+                    Log.Logger.LogDebug("{0} fail requests", prefix)
+                    failAllRequests()
+                    return! loop ()
+                | RequestsOperation.Stop ->
+                    Log.Logger.LogDebug("{0} has stopped", prefix)
+                    failAllRequests()
+                    requestTimeoutTimer.Stop()
+                | Tick ->
+                    Log.Logger.LogTrace("{0} timeout tick", prefix)
+                    handleTimeoutedMessages()
                     return! loop ()
             }
         loop ()
@@ -208,6 +218,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         if consumers.Count = 0 && producers.Count = 0 && transactionMetaStores.Count = 0 then
             this.SendMb.Post(SocketMessage.Stop)
             this.OperationsMb.Post(CnxOperation.Stop)
+            this.RequestsMb.Post(RequestsOperation.Stop)
 
     let operationsMb = MailboxProcessor<CnxOperation>.Start(fun inbox ->
         let rec loop () =
@@ -228,33 +239,33 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 | RemoveConsumer consumerId ->
                     Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
                     consumers.Remove(consumerId) |> ignore
-                    if isActive |> not then
+                    if this.IsActive |> not then
                         tryStopMailboxes()
                     return! loop()
                 | RemoveProducer producerId ->
                     Log.Logger.LogDebug("{0} removing producer {1}", prefix, producerId)
                     producers.Remove(producerId) |> ignore
-                    if isActive |> not then
+                    if this.IsActive |> not then
                         tryStopMailboxes()
                     return! loop()
                 | RemoveTransactionMetaStoreHandler transactionMetaStoreId ->
                     Log.Logger.LogDebug("{0} removing transactionMetaStore {1}", prefix, transactionMetaStoreId)
                     transactionMetaStores.Remove(transactionMetaStoreId) |> ignore
-                    if isActive |> not then
+                    if this.IsActive |> not then
                         tryStopMailboxes()
                     return! loop()
                 | ChannelInactive ->
-                    if isActive then
+                    if this.IsActive then
                         Log.Logger.LogDebug("{0} ChannelInactive", prefix)
-                        isActive <- false
+                        this.IsActive <- false
                         unregisterClientCnx(broker)
-                        requestsMb.Post(FailAllRequestsAndStop)
                         consumers |> Seq.iter(fun (KeyValue(_,consumerOperation)) ->
                             consumerOperation.ConnectionClosed(this))
                         producers |> Seq.iter(fun (KeyValue(_,producerOperation)) ->
                             producerOperation.ConnectionClosed(this))
                         transactionMetaStores |> Seq.iter(fun (KeyValue(_,transactionMetaStoreOperation)) ->
                             transactionMetaStoreOperation.ConnectionClosed(this))
+                        requestsMb.Post(FailAllRequests)
                     return! loop()
                 | CnxOperation.Stop ->
                     Log.Logger.LogDebug("{0} operationsMb stopped", prefix)
@@ -320,7 +331,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | BaseCommand.Type.SendReceipt ->
             Ok (XCommandSendReceipt command.SendReceipt)
         | BaseCommand.Type.Message ->
-            let (metadata,payload,checksumValid) = readMessage reader stream frameLength
+            let metadata,payload,checksumValid = readMessage reader stream frameLength
             Ok (XCommandMessage (command.Message, metadata, payload, checksumValid))
         | BaseCommand.Type.LookupResponse ->
             Ok (XCommandLookupResponse command.lookupTopicResponse)
@@ -419,13 +430,13 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | _ -> exn errorMsg
 
     let handleError requestId error msg commandType =
-        let exc = getPulsarClientException error msg
-        requestsMb.Post(FailRequest(requestId, commandType, exc))
+        let ex = getPulsarClientException error msg
+        requestsMb.Post <| FailRequest(requestId, commandType, ex)
 
     let checkServerError serverError errMsg =
         if (serverError = ServerError.ServiceNotReady) then
             Log.Logger.LogError("{0} Close connection because received internal-server error {1}", prefix, errMsg);
-            this.Close()
+            this.Dispose()
         elif (serverError = ServerError.TooManyRequests) then
             let rejectedRequests = Interlocked.Increment(&numberOfRejectedRequests)
             if (rejectedRequests = 1) then
@@ -434,7 +445,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             elif (rejectedRequests >= maxNumberOfRejectedRequestPerConnection) then
                 Log.Logger.LogError("{0} Close connection because received {1} rejected request in {2} seconds ", prefix,
                         rejectedRequests, rejectedRequestResetTimeSec);
-                this.Close()
+                this.Dispose()
 
     let getOptionalSchemaVersion =
         Option.ofObj >> Option.map (fun bytes -> { SchemaVersion.Bytes = bytes })
@@ -555,7 +566,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 | _ ->
                     // By default, for transient error, let the reconnection logic
                     // to take place and re-establish the produce again
-                    this.Close()
+                    this.Dispose()
             | _ ->
                 Log.Logger.LogWarning("{0} producer {1} wasn't found on CommandSendError", prefix, %cmd.ProducerId)
         | XCommandPing _ ->
@@ -790,6 +801,10 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     member this.MaxMessageSize with get() = maxMessageSize
 
     member this.ClientCnxId with get() = clientCnxId
+    
+    member this.IsActive
+        with get() = Volatile.Read(&isActive)
+        and private set(value) = Volatile.Write(&isActive, value)
 
     member internal this.NewConnectCommand() =
         let authData = authenticationDataProvider.Authenticate(AuthData.INIT_AUTH_DATA)
@@ -797,42 +812,48 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         Commands.newConnect authMethodName authData clientVersion protocolVersion proxyToBroker
     
     member this.Send payload =
-        sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
+        if this.IsActive then
+            sendMb.PostAndAsyncReply(fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
+        else
+            async.Return false
         
     member this.SendAndForget (payload: Payload) =
-        sendMb.Post(SocketMessageWithoutReply payload)
+        if this.IsActive then
+            sendMb.Post(SocketMessageWithoutReply payload)
 
     member this.SendAndWaitForReply reqId payload =
-        task {
-            let! task = sendMb.PostAndAsyncReply(fun replyChannel -> SocketRequestMessageWithReply(reqId, payload, replyChannel))
-            return! task
-        }
+        if this.IsActive then
+            task {
+                let! task = sendMb.PostAndAsyncReply(fun replyChannel -> SocketRequestMessageWithReply(reqId, payload, replyChannel))
+                return! task
+            }
+        else
+            Task.FromException<PulsarResponseType> <| ConnectException "Disconnected."
 
     member this.RemoveConsumer (consumerId: ConsumerId) =
-        operationsMb.Post(RemoveConsumer(consumerId))
+        if this.IsActive then
+            operationsMb.Post(RemoveConsumer(consumerId))
 
     member this.RemoveProducer (consumerId: ProducerId) =
-        operationsMb.Post(RemoveProducer(consumerId))
+        if this.IsActive then
+            operationsMb.Post(RemoveProducer(consumerId))
         
     member this.RemoveTransactionMetaStoreHandler (transactionMetaStoreId: TransactionCoordinatorId) =
-        operationsMb.Post(RemoveTransactionMetaStoreHandler(transactionMetaStoreId))
+        if this.IsActive then
+            operationsMb.Post(RemoveTransactionMetaStoreHandler(transactionMetaStoreId))
 
     member this.AddProducer (producerId: ProducerId, producerOperations: ProducerOperations) =
-        operationsMb.Post(AddProducer (producerId, producerOperations))
+        if this.IsActive then
+            operationsMb.Post(AddProducer (producerId, producerOperations))
 
     member this.AddConsumer (consumerId: ConsumerId, consumerOperations: ConsumerOperations) =
-        operationsMb.Post(AddConsumer (consumerId, consumerOperations))
+        if this.IsActive then
+            operationsMb.Post(AddConsumer (consumerId, consumerOperations))
 
     member this.AddTransactionMetaStoreHandler(transactionMetaStoreId: TransactionCoordinatorId,
                                                transactionMetaStoreOperations: TransactionMetaStoreOperations) =
-        operationsMb.Post(AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations))
+        if this.IsActive then
+            operationsMb.Post(AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations))
         
-    member this.Close() =
-        connection.Dispose()
-        (config.Authentication :> IDisposable).Dispose()
-
     member this.Dispose() =
-        sendMb.Post(SocketMessage.Stop)
-        operationsMb.Post(CnxOperation.Stop)
-        requestsMb.Post(FailAllRequestsAndStop)
-        this.Close()
+        connection.Dispose()

@@ -118,6 +118,12 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             Log.Logger.LogError("Unknown ssl error: {0}", error)
             false
 
+    let unregisterClientCnx brokerless (broker: Broker) =
+        let key = (brokerless, broker.LogicalAddress)
+        match connections.TryRemove(key) with
+        | true, _ ->  Log.Logger.LogInformation("Connection task {0} removed", key)
+        | false, _ -> Log.Logger.LogDebug("Connection task {0} was not removed", key)
+    
     let connect (broker: Broker, maxMessageSize: int, brokerless: bool) =
         Log.Logger.LogInformation("Connecting to {0} with maxMessageSize: {1}, brokerless: {2}",
                                   broker, maxMessageSize, brokerless)
@@ -152,11 +158,11 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                                 Dispose = pipeConnection.Dispose
                             }
                 }
-
+            Log.Logger.LogDebug("Connection established for {0}", physicalAddress)
             let initialConnectionTsc = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
-            let unregisterClientCnx (broker: Broker) =
-                connections.TryRemove((brokerless, broker.LogicalAddress)) |> ignore
-            let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, brokerless, initialConnectionTsc, unregisterClientCnx)
+            
+            let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, brokerless, initialConnectionTsc,
+                                      unregisterClientCnx brokerless)
             let connectPayload = clientCnx.NewConnectCommand()
             let! success = clientCnx.Send connectPayload
             if not success then
@@ -169,8 +175,10 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         let t = connections.GetOrAdd((brokerless, broker.LogicalAddress), fun _ ->
                 lazy connect(broker, maxMessageSize, brokerless)).Value
         if t.IsFaulted then
-            Log.Logger.LogInformation("Removing faulted task to {0}", broker)
-            connections.TryRemove((brokerless, broker.LogicalAddress)) |> ignore
+            let key = (brokerless, broker.LogicalAddress)
+            match connections.TryRemove(key) with
+            | true, _ -> Log.Logger.LogInformation("Removed faulted connection task to {0}", key)
+            | false, _ -> Log.Logger.LogDebug("Faulted connection task to {0} wasn't removed", key)
         t
             
     member this.GetBrokerlessConnection (address: DnsEndPoint) =

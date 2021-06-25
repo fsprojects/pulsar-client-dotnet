@@ -435,6 +435,91 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             Log.Logger.LogDebug("{0} BatchFormed with size {1}", prefix, messages.Size)
             ch.Reply <| Ok messages
 
+    let handlePartitions() =
+        task {
+            let! newPartitionsOption = getAllPartitions() 
+            match newPartitionsOption with
+            | Some newPartitions ->
+                let oldConsumersCount = consumers.Count
+                let mutable totalConsumersCount = oldConsumersCount
+                let topicsToUpdate =
+                    newPartitions
+                    |> Array.filter(fun (topic, partitionedTopicNames) ->
+                        let consumerInitInfo = partitionedTopics.[topic]
+                        let oldPartitionsCount = consumerInitInfo.Metadata.Partitions
+                        let newPartitionsCount = partitionedTopicNames.Length
+                        if (oldPartitionsCount < newPartitionsCount) then
+                            Log.Logger.LogDebug("{0} partitions number. old: {1}, new: {2}, topic {3}",
+                                                prefix, oldPartitionsCount, newPartitionsCount, topic)
+                            true
+                        elif (oldPartitionsCount > newPartitionsCount) then
+                            Log.Logger.LogError("{0} not support shrink topic partitions. old: {1}, new: {2}, topic: {3}",
+                                                prefix, oldPartitionsCount, newPartitionsCount, topic)
+                            false
+                        else
+                            false)
+                if topicsToUpdate.Length > 0 then
+                    Log.Logger.LogInformation("{0} adding subscription to {1} new partitions", prefix, topicsToUpdate.Length)
+                    let receiverQueueSize = Math.Min(consumerConfig.ReceiverQueueSize, consumerConfig.MaxTotalReceiverQueueSizeAcrossPartitions / totalConsumersCount)
+                    let newConsumerTasks =
+                        seq {
+                            for (topic, partitionedTopicNames) in topicsToUpdate do
+                                let consumerInitInfo = partitionedTopics.[topic]
+                                let oldPartitionsCount = consumerInitInfo.Metadata.Partitions
+                                let newPartitionsCount = partitionedTopicNames.Length
+                                totalConsumersCount <- totalConsumersCount + (newPartitionsCount - oldPartitionsCount)
+                                partitionedTopics.[topic] <-
+                                    {
+                                        consumerInitInfo with
+                                            Metadata = {
+                                                consumerInitInfo.Metadata with Partitions = newPartitionsCount
+                                            }
+                                    }
+                                let newConsumerTasks =
+                                    seq { oldPartitionsCount..newPartitionsCount - 1 }
+                                    |> Seq.map (fun partitionIndex ->
+                                        let partitionedTopic = partitionedTopicNames.[partitionIndex]
+                                        let partititonedConfig = { consumerConfig with
+                                                                    ReceiverQueueSize = receiverQueueSize
+                                                                    Topics = seq { partitionedTopic } |> Seq.cache }
+                                        task {
+                                            let! result =
+                                                 ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic,
+                                                                   connectionPool, partitionIndex, true, startMessageId, startMessageRollbackDuration,
+                                                                   lookup, true, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider,
+                                                                   interceptors, fun _ -> ())
+                                            return (partitionedTopic, result)
+                                        })
+                                yield! newConsumerTasks
+                        }                            
+                    try
+                        let! newConsumerResults =
+                            newConsumerTasks
+                            |> Task.WhenAll
+                        let newStreams =
+                            newConsumerResults
+                            |> Seq.map (fun (topic, consumer) ->
+                                let stream = getStream topic.CompleteTopicName consumer
+                                consumers.Add(topic.CompleteTopicName, (consumer :> IConsumer<'T>, stream))
+                                stream)
+                        currentStream.AddGenerators(newStreams)
+                        Log.Logger.LogDebug("{0} success create consumers for extended partitions. old: {1}, new: {2}",
+                            prefix, oldConsumersCount, totalConsumersCount )
+                    with Flatten ex ->
+                        Log.Logger.LogWarning(ex, "{0} fail create consumers for extended partitions. old: {1}, new: {2}",
+                            prefix, oldConsumersCount, totalConsumersCount )
+                        do! newConsumerTasks
+                            |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
+                            |> Seq.map (fun t ->
+                               let (_, consumer) = t.Result
+                               (consumer :> IConsumer<'T>).DisposeAsync().AsTask())
+                            |> Task.WhenAll
+                        Log.Logger.LogInformation("{0} disposed partially created consumers", prefix)
+                        
+            | None ->
+                ()
+        }
+    
     let replyWithMessage (channel: AsyncReplyChannel<ResultOrException<Message<'T>>>) (message: ResultOrException<Message<'T>>) =
         match message with
         | Ok msg -> unAckedMessageTracker.Add msg.MessageId |> ignore
@@ -760,92 +845,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     match this.ConnectionState with
                     | Ready ->
                         // Check partitions changes of passed in topics, and add new topic partitions.
-                        let! newPartitionsOption =
-                            getAllPartitions() 
-                            |> Async.AwaitTask
-                        match newPartitionsOption with
-                        | Some newPartitions ->
-                            let oldConsumersCount = consumers.Count
-                            let mutable totalConsumersCount = oldConsumersCount
-                            let topicsToUpdate =
-                                newPartitions
-                                |> Array.filter(fun (topic, partitionedTopicNames) ->
-                                    let consumerInitInfo = partitionedTopics.[topic]
-                                    let oldPartitionsCount = consumerInitInfo.Metadata.Partitions
-                                    let newPartitionsCount = partitionedTopicNames.Length
-                                    if (oldPartitionsCount < newPartitionsCount) then
-                                        Log.Logger.LogDebug("{0} partitions number. old: {1}, new: {2}, topic {3}",
-                                                            prefix, oldPartitionsCount, newPartitionsCount, topic)
-                                        true
-                                    elif (oldPartitionsCount > newPartitionsCount) then
-                                        Log.Logger.LogError("{0} not support shrink topic partitions. old: {1}, new: {2}, topic: {3}",
-                                                            prefix, oldPartitionsCount, newPartitionsCount, topic)
-                                        false
-                                    else
-                                        false)
-                            if topicsToUpdate.Length > 0 then
-                                Log.Logger.LogInformation("{0} adding subscription to {1} new partitions", prefix, topicsToUpdate.Length)
-                                let receiverQueueSize = Math.Min(consumerConfig.ReceiverQueueSize, consumerConfig.MaxTotalReceiverQueueSizeAcrossPartitions / totalConsumersCount)
-                                let newConsumerTasks =
-                                    seq {
-                                        for (topic, partitionedTopicNames) in topicsToUpdate do
-                                            let consumerInitInfo = partitionedTopics.[topic]
-                                            let oldPartitionsCount = consumerInitInfo.Metadata.Partitions
-                                            let newPartitionsCount = partitionedTopicNames.Length
-                                            totalConsumersCount <- totalConsumersCount + (newPartitionsCount - oldPartitionsCount)
-                                            partitionedTopics.[topic] <-
-                                                {
-                                                    consumerInitInfo with
-                                                        Metadata = {
-                                                            consumerInitInfo.Metadata with Partitions = newPartitionsCount
-                                                        }
-                                                }
-                                            let newConsumerTasks =
-                                                seq { oldPartitionsCount..newPartitionsCount - 1 }
-                                                |> Seq.map (fun partitionIndex ->
-                                                    let partitionedTopic = partitionedTopicNames.[partitionIndex]
-                                                    let partititonedConfig = { consumerConfig with
-                                                                                ReceiverQueueSize = receiverQueueSize
-                                                                                Topics = seq { partitionedTopic } |> Seq.cache }
-                                                    task {
-                                                        let! result =
-                                                             ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic,
-                                                                               connectionPool, partitionIndex, true, startMessageId, startMessageRollbackDuration,
-                                                                               lookup, true, consumerInitInfo.Schema, consumerInitInfo.SchemaProvider,
-                                                                               interceptors, fun _ -> ())
-                                                        return (partitionedTopic, result)
-                                                    })
-                                            yield! newConsumerTasks
-                                    }                            
-                                try
-                                    let! newConsumerResults =
-                                        newConsumerTasks
-                                        |> Task.WhenAll
-                                        |> Async.AwaitTask
-                                    let newStreams =
-                                        newConsumerResults
-                                        |> Seq.map (fun (topic, consumer) ->
-                                            let stream = getStream topic.CompleteTopicName consumer
-                                            consumers.Add(topic.CompleteTopicName, (consumer :> IConsumer<'T>, stream))
-                                            stream)
-                                    currentStream.AddGenerators(newStreams)
-                                    Log.Logger.LogDebug("{0} success create consumers for extended partitions. old: {1}, new: {2}",
-                                        prefix, oldConsumersCount, totalConsumersCount )
-                                with Flatten ex ->
-                                    Log.Logger.LogWarning(ex, "{0} fail create consumers for extended partitions. old: {1}, new: {2}",
-                                        prefix, oldConsumersCount, totalConsumersCount )
-                                    do! newConsumerTasks
-                                        |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
-                                        |> Seq.map (fun t ->
-                                           let (_, consumer) = t.Result
-                                           (consumer :> IConsumer<'T>).DisposeAsync().AsTask())
-                                        |> Task.WhenAll
-                                        |> Async.AwaitTask
-                                        |> Async.Ignore
-                                    Log.Logger.LogInformation("{0} disposed partially created consumers", prefix)
-                                    
-                        | None ->
-                            ()
+                        do! handlePartitions() |> Async.AwaitTask
                     | _ ->
                         ()
                     return! loop ()

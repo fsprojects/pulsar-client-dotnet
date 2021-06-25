@@ -118,7 +118,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             let msg = pendingMessages.Dequeue()
             failPendingMessage msg ex
         while blockedRequests.Count > 0 do
-            let (_, ch) = blockedRequests.Dequeue()
+            let _, ch = blockedRequests.Dequeue()
             ch.Reply(Task.FromException<MessageId>(ex))
         if producerConfig.BatchingEnabled then
             failPendingBatchMessages ex
@@ -282,7 +282,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         
     let processOpSendMsg { OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId;
                           PartitionKey = partitionKey; OrderingKey = orderingKey; TxnId = txnId } =
-        let (batchPayload, batchCallbacks) = opSendMsg;
+        let batchPayload, batchCallbacks = opSendMsg;
         let batchSize = batchCallbacks.Length
         let metadata = createMessageMetadata lowestSequenceId txnId (Some batchSize)
                            batchPayload partitionKey EmptyProps None orderingKey None
@@ -290,7 +290,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         if (compressedBatchPayload.Length > maxMessageSize) then
             batchCallbacks
             |> Seq.iter (fun (_, message, tcs) ->
-                let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
+                let ex = InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes"
                 failMessage message tcs ex)
         else
             let encryptResult = encrypt metadata compressedBatchPayload
@@ -346,7 +346,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             true
         
     let beginSendMessage (sendRequest: SendMessageRequest<'T>) =
-        let (message, channel) = sendRequest
+        let message, channel = sendRequest
         if canEnqueueRequest channel sendRequest 1 then
             let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
             let sequenceId =
@@ -388,7 +388,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             else
                 let compressedPayload = compressionCodec.Encode message.Payload
                 if compressedPayload.Length > maxMessageSize && not producerConfig.ChunkingEnabled then
-                    let ex = InvalidMessageException <| sprintf "Message size is bigger than %i bytes" maxMessageSize
+                    let ex = InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes"
                     failMessage message tcs ex
                 else
                     let totalChunks =
@@ -450,11 +450,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         Log.Logger.LogInformation("{0} stopped", prefix)
         
     let producerOperations = {
-        AckReceived = fun (sendReceipt) -> this.Mb.Post(AckReceived sendReceipt)
+        AckReceived = fun sendReceipt -> this.Mb.Post(AckReceived sendReceipt)
         TopicTerminatedError = fun () -> this.Mb.Post(TopicTerminatedError)
-        RecoverChecksumError = fun (seqId) -> this.Mb.Post(RecoverChecksumError seqId)
-        RecoverNotAllowedError = fun (seqId) -> this.Mb.Post(RecoverNotAllowedError seqId)
-        ConnectionClosed = fun (clientCnx) -> this.Mb.Post(ConnectionClosed clientCnx)
+        RecoverChecksumError = fun seqId -> this.Mb.Post(RecoverChecksumError seqId)
+        RecoverNotAllowedError = fun seqId -> this.Mb.Post(RecoverNotAllowedError seqId)
+        ConnectionClosed = fun clientCnx -> this.Mb.Post(ConnectionClosed clientCnx)
     }
 
     let mb = MailboxProcessor<ProducerMessage<'T>>.Start(fun inbox ->
@@ -572,7 +572,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 receipt.SequenceId, receipt.HighestSequenceId, pendingMessages.Count)
                             // Force connection closing so that messages can be re-transmitted in a new connection
                             match connectionHandler.ConnectionState with
-                            | Ready clientCnx -> clientCnx.Close()
+                            | Ready clientCnx -> clientCnx.Dispose()
                             | _ -> ()
                         elif sequenceId < expectedSequenceId then
                             Log.Logger.LogInformation("{0} Got ack for timed out msg. expecting: {1} - {2} - got: {3} - {4}",
@@ -622,7 +622,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                                       receipt.SequenceId, receipt.HighestSequenceId, pendingMessages.Count)
                                 // Force connection closing so that messages can be re-transmitted in a new connection
                                 match connectionHandler.ConnectionState with
-                                | Ready clientCnx -> clientCnx.Close()
+                                | Ready clientCnx -> clientCnx.Dispose()
                                 | _ -> ()
                     else
                         Log.Logger.LogInformation("{0} Got ack for timed out msg {1} - {2}", prefix, sequenceId, highestSequenceId)

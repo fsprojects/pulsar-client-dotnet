@@ -71,7 +71,8 @@ let tests =
             Log.Debug("Finished Failover consumer works fine")
         }
 
-        testAsync "Failover consumer with PriorityLevel works fine" {
+        // TODO: uncomment and check in 2.8
+        ptestAsync "Failover consumer with PriorityLevel works fine" {
 
             Log.Debug("Started Failover consumer with PriorityLevel works fine")
             let client = getClient()

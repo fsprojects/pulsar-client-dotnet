@@ -22,7 +22,7 @@ type internal PulsarClientMessage =
     | RemoveConsumer of IAsyncDisposable // IConsumer
     | AddProducer of IAsyncDisposable // IProducer
     | AddConsumer of IAsyncDisposable // IConsumer
-    | GetSchemaProvider of AsyncReplyChannel<MultiVersionSchemaInfoProvider> * CompleteTopicName
+    | GetSchemaProvider of AsyncReplyChannel<ResultOrException<MultiVersionSchemaInfoProvider>> * CompleteTopicName
     | Close of AsyncReplyChannel<Task>
     | Stop
 
@@ -92,13 +92,17 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                     return! loop ()
                 | GetSchemaProvider (channel, topicName) ->
                     match schemaProviders.TryGetValue(topicName) with
-                    | true, provider -> channel.Reply(provider)
+                    | true, provider ->
+                        channel.Reply <| Ok provider
                     | false, _ ->
-                        let provider = 
-                           MultiVersionSchemaInfoProvider(fun schemaVersion ->
-                               lookupService.GetSchema(topicName, schemaVersion))
-                        schemaProviders.Add(topicName, provider)
-                        channel.Reply(provider)
+                        try 
+                            let provider = 
+                                MultiVersionSchemaInfoProvider(fun schemaVersion ->
+                                    lookupService.GetSchema(topicName, schemaVersion))
+                            schemaProviders.Add(topicName, provider)
+                            channel.Reply <| Ok provider
+                        with Flatten exn ->
+                            channel.Reply <| Error exn
                     return! loop()                    
                 | Close channel ->
                     match this.ClientState with
@@ -166,8 +170,13 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
     member private this.PreProcessSchemaBeforeSubscribe(schema: ISchema<'T>, topicName) =
         task {
             if schema.SupportSchemaVersioning then
-                let! provider = mb.PostAndAsyncReply(fun (channel) -> GetSchemaProvider(channel, topicName))
-                return Some provider
+                let! providerResult = mb.PostAndAsyncReply(fun channel -> GetSchemaProvider(channel, topicName))
+                return 
+                    match providerResult with
+                    | Ok provider ->
+                        Some provider
+                    | Error exn ->
+                        reraize exn
             else
                 return None
         }

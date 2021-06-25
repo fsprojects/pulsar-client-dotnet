@@ -218,7 +218,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             |> TimeoutException
                             |> raise
                     else
-                        Log.Logger.LogWarning("Could not get connection while GetLastMessageId -- Will try again in {0} ms", nextDelay)    
+                        Log.Logger.LogWarning("{0} Could not get connection while GetLastMessageId -- Will try again in {1} ms",
+                                              prefix, nextDelay)    
                         do! Async.Sleep nextDelay
                         return! internalGetLastMessageIdAsync(backoff, remainingTimeMs - nextDelay)
             }
