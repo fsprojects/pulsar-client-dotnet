@@ -42,9 +42,18 @@ module ProducerBuilderTests =
                 let checkMaxPendingMessages maxPendingMessages =
                     builder()
                     |> configure(fun b -> b.MaxPendingMessages maxPendingMessages)
-                    |> Expect.throwsWithMessage<ArgumentException> "MaxPendingMessages needs to be greater than 0."
+                    |> Expect.throwsWithMessage<ArgumentException> "MaxPendingMessages needs to be >= 0."
 
-                [-1; 0] |> List.iter checkMaxPendingMessages
+                -1 |> checkMaxPendingMessages
+            }
+            
+            test "MaxPendingMessagesActossPartitions throws an exception for non positive integer" {
+                let checkMaxPendingMessages maxPendingMessages =
+                    builder()
+                    |> configure(fun b -> b.MaxPendingMessagesAcrossPartitions maxPendingMessages)
+                    |> Expect.throwsWithMessage<ArgumentException> "MaxPendingMessagesAcrossPartitions needs to be >= 0."
+
+                -1 |> checkMaxPendingMessages
             }
 
             test "CreateAsync throws an exception if Topic is blank" {

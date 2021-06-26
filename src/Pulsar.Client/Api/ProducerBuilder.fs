@@ -49,14 +49,14 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
         { config with
             MaxPendingMessages =
                 maxPendingMessages
-                |> invalidArgIfNotGreaterThanZero "MaxPendingMessages needs to needs to be >= 0." }
+                |> invalidArgIfLessThanZero "MaxPendingMessages needs to be >= 0." }
         |> this.With
 
     member this.MaxPendingMessagesAcrossPartitions maxPendingMessagesAcrossPartitions =
         { config with
             MaxPendingMessagesAcrossPartitions =
                 maxPendingMessagesAcrossPartitions
-                |> invalidArgIfNotGreaterThanZero "MaxPendingMessagesAcrossPartitions needs to be >= 0." }
+                |> invalidArgIfLessThanZero "MaxPendingMessagesAcrossPartitions needs to be >= 0." }
         |> this.With
 
     member this.EnableBatching enableBatching =
