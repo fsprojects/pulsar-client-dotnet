@@ -52,6 +52,7 @@
     <Compile Include="Common\Tools.fs" />
     <Compile Include="Internal\BatchMessageAcker.fs" />
     <Compile Include="Internal\Backoff.fs" />
+    <Compile Include="Internal\Generators.fs" />
     <Compile Include="Common\NamespaceName.fs" />
     <Compile Include="Common\TopicName.fs" />
     <Compile Include="Common\MessageId.fs" />
@@ -115,7 +116,6 @@
     <Compile Include="Internal\Routing.fs" />
     <Compile Include="Internal\UnAckedMessageTracker.fs" />
     <Compile Include="Internal\NegativeAcksTracker.fs" />
-    <Compile Include="Internal\Generators.fs" />
     <Compile Include="Internal\ClientCnx.fs" />
     <Compile Include="Internal\ConnectionPool.fs" />
     <Compile Include="Internal\EndPointResolver.fs" />

@@ -3,6 +3,8 @@ module Pulsar.Client.Common.ConsumerBase
 open System.Collections.Generic
 open System.Threading
 open Pulsar.Client.Api
+open Pulsar.Client.Internal
+open System
 
 type UserCancellation = CancellationTokenRegistration option
 type BatchCancellation = CancellationTokenSource
@@ -33,3 +35,9 @@ let dequeueBatchWaiter (batchWaiters: LinkedList<BatchWaiter<'T>>) =
     cts.Cancel()
     cts.Dispose()
     ch
+    
+let getConsumerName configName =
+    if String.IsNullOrEmpty configName then
+        Generators.getRandomName()
+    else
+        configName

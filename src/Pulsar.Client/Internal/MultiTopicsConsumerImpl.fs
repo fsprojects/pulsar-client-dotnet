@@ -76,7 +76,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
     let _this = this :> IConsumer<'T>
     let consumerId = Generators.getNextConsumerId()
-    let prefix = $"mt/consumer({consumerId}, {consumerConfig.ConsumerName})"
+    let consumerName = getConsumerName consumerConfig.ConsumerName
+    let prefix = $"mt/consumer({consumerId}, {consumerName})"
     let consumers = Dictionary<CompleteTopicName,IConsumer<'T> * TaskGenerator<ResultOrException<Message<'T>>>>()
     let consumerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let pollerCts = new CancellationTokenSource()
@@ -1127,7 +1128,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
         member this.Topic = "MultiTopicsConsumer-" + Generators.getRandomName()
 
-        member this.Name = consumerConfig.ConsumerName
+        member this.Name = consumerName
 
         member this.GetStatsAsync() =
             task {

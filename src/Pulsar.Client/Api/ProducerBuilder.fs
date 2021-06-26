@@ -21,6 +21,9 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
         |> invalidArgIf (fun c ->
                 c.MessageRoutingMode = MessageRoutingMode.CustomPartition && Option.isNone config.CustomMessageRouter
             ) "Valid router should be set with CustomPartition routing mode."
+        |> invalidArgIf (fun c ->
+                c.MaxPendingMessagesAcrossPartitions < c.MaxPendingMessages
+            ) "MaxPendingMessagesAcrossPartitions needs to be >= MaxPendingMessages."
 
     internal new(сreateProducerAsync, schema: ISchema<'T>) = ProducerBuilder(сreateProducerAsync, ProducerConfiguration.Default, ProducerInterceptors.Empty, schema)
 
@@ -46,14 +49,14 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
         { config with
             MaxPendingMessages =
                 maxPendingMessages
-                |> invalidArgIfNotGreaterThanZero "MaxPendingMessages needs to be greater than 0." }
+                |> invalidArgIfNotGreaterThanZero "MaxPendingMessages needs to needs to be >= 0." }
         |> this.With
 
     member this.MaxPendingMessagesAcrossPartitions maxPendingMessagesAcrossPartitions =
         { config with
             MaxPendingMessagesAcrossPartitions =
                 maxPendingMessagesAcrossPartitions
-                |> invalidArgIfNotGreaterThanZero "MaxPendingMessagesAcrossPartitions needs to be greater than 0." }
+                |> invalidArgIfNotGreaterThanZero "MaxPendingMessagesAcrossPartitions needs to be >= 0." }
         |> this.With
 
     member this.EnableBatching enableBatching =

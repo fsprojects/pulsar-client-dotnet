@@ -73,13 +73,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     [<Literal>]
     let MAX_REDELIVER_UNACKNOWLEDGED = 1000
     let _this = this :> IConsumer<'T>
+    let consumerName = getConsumerName consumerConfig.ConsumerName
     let consumerId = Generators.getNextConsumerId()
     let incomingMessages = Queue<Message<'T>>()
     let waiters = LinkedList<Waiter<'T>>()
     let batchWaiters = LinkedList<BatchWaiter<'T>>()
     let subscribeTsc = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
     let ackRequests = Dictionary<RequestId, MessageId * TxnId * TaskCompletionSource<unit>>()
-    let prefix = $"consumer({consumerId}, {consumerConfig.ConsumerName}, {partitionIndex})"
+    let prefix = $"consumer({consumerId}, {consumerName}, {partitionIndex})"
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable hasReachedEndOfTopic = false
     let mutable avalablePermits = 0
@@ -784,7 +785,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         let payload =
                             Commands.newSubscribe
                                 topicName.CompleteTopicName consumerConfig.SubscriptionName
-                                consumerId requestId consumerConfig.ConsumerName consumerConfig.SubscriptionType
+                                consumerId requestId consumerName consumerConfig.SubscriptionType
                                 consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted msgIdData isDurable
                                 startMessageRollbackDuration createTopicIfDoesNotExist consumerConfig.KeySharedPolicy
                                 schema.SchemaInfo consumerConfig.PriorityLevel
@@ -1599,7 +1600,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
         member this.Topic = %topicName.CompleteTopicName
 
-        member this.Name = consumerConfig.ConsumerName
+        member this.Name = consumerName
 
         member this.GetStatsAsync() =
             task {
@@ -1682,6 +1683,8 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
                              schema, schemaProvider, interceptors, cleanup)
 
     let _this = this :> IConsumer<'T>
+
+    let prefix = $"consumer({this.ConsumerId}, {_this.Name}, {partitionIndex})"
     
     override this.ConsumerIsReconnectedToBroker() =
         base.ConsumerIsReconnectedToBroker()
@@ -1689,7 +1692,6 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
             this.SendFlowPermits this.Waiters.Count
         
     override this.ReceiveIndividualMessagesFromBatch (_: RawMessage) _ =
-        let prefix = $"consumer({this.ConsumerId}, {consumerConfig.ConsumerName}, {partitionIndex})"
         Log.Logger.LogError("{0} Closing consumer due to unsupported received batch-message with zero receiver queue size", prefix)
         let _ = this.Mb.PostAndReply(ConsumerMessage.Close) 
         let exn = 

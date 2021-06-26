@@ -265,10 +265,8 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: SubscriptionName)
         | SubscriptionInitialPosition.Latest -> CommandSubscribe.InitialPosition.Latest
         | _ -> failwith "Unknown initialPosition type"
     let request = CommandSubscribe(Topic = %topicName, Subscription = %subscription, subType = subType, ConsumerId = %consumerId,
-                    RequestId = %requestId, initialPosition = initialPosition, ReadCompacted = readCompacted,
+                    ConsumerName = consumerName, RequestId = %requestId, initialPosition = initialPosition, ReadCompacted = readCompacted,
                     StartMessageId = startMessageId, Durable = durable, ForceTopicCreation = createTopicIfDoesNotExist, PriorityLevel = %priorityLevel)
-    if consumerName |> String.IsNullOrEmpty |> not then
-        request.ConsumerName <- consumerName
     match keySharedPolicy with
     | Some keySharedPolicy ->
         let meta = KeySharedMeta()
