@@ -11,10 +11,12 @@ open Pulsar.Client.Schema
 type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                          schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: BinaryLookupService) =
     let subscriptionName =
-        if String.IsNullOrEmpty readerConfig.SubscriptionRolePrefix then
-            "reader-" + Guid.NewGuid().ToString("N").Substring(22)
-        else
+        if String.IsNullOrEmpty readerConfig.SubscriptionRolePrefix |> not then
             readerConfig.SubscriptionRolePrefix + "-reader-" + Guid.NewGuid().ToString("N").Substring(22)
+        elif String.IsNullOrEmpty readerConfig.SubscriptionName |> not then
+            readerConfig.SubscriptionName
+        else
+            "reader-" + Guid.NewGuid().ToString("N").Substring(22)
 
     let consumerConfig = {
         ConsumerConfiguration<'T>.Default with

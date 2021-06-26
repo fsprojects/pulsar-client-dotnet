@@ -85,6 +85,11 @@ type ReaderBuilder<'T> private (createReaderAsync, config: ReaderConfiguration, 
                 policy.Validate()
                 policy :> KeySharedPolicy |> Some }
         |> this.With
+        
+    member this.SubscriptionName subscriptionName  =
+        { config with
+            SubscriptionName = subscriptionName }
+        |> this.With
     
     member this.CreateAsync(): Task<IReader<'T>> =
         createReaderAsync(verify config, schema)

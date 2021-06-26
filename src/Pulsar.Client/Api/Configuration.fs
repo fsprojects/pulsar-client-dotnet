@@ -177,6 +177,7 @@ type ReaderConfiguration =
         StartMessageFromRollbackDuration: TimeSpan
         MessageDecryptor: IMessageDecryptor option
         KeySharedPolicy: KeySharedPolicy option
+        SubscriptionName: string
     }
     static member Default =
         {
@@ -190,6 +191,7 @@ type ReaderConfiguration =
             StartMessageFromRollbackDuration = TimeSpan.Zero
             MessageDecryptor = None
             KeySharedPolicy = None
+            SubscriptionName = ""
         }
 
 type TransactionConfiguration =
