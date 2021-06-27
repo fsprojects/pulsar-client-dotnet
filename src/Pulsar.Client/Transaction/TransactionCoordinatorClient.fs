@@ -1,7 +1,6 @@
 namespace Pulsar.Client.Transaction
 
 open System
-open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 open FSharp.UMX
@@ -9,7 +8,7 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
-open FSharp.Control.Tasks.V2.ContextInsensitive
+open pulsar.proto
 
 type internal TransactionCoordinatorState =
     | NONE
@@ -130,19 +129,19 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
         let handler = handlers.[handlerId]
         handler.AddSubscriptionToTxnAsync(txnId, topic, subscription)
         
-    member this.CommitAsync(txnId: TxnId, msgIds: MessageId seq) =
+    member this.CommitAsync(txnId: TxnId) =
         let handlerId = int txnId.MostSigBits
         if handlerId >= handlers.Count then
             raise <| MetaStoreHandlerNotExistsException $"Transaction meta store handler for transaction meta store {txnId.MostSigBits} not exists."
         let handler = handlers.[handlerId]
-        handler.CommitAsync(txnId, msgIds)
+        handler.EdTxnAsync(txnId, TxnAction.Commit)
 
-    member this.AbortAsync(txnId: TxnId, msgIds: MessageId seq) =
+    member this.AbortAsync(txnId: TxnId) =
         let handlerId = int txnId.MostSigBits
         if handlerId >= handlers.Count then
             raise <| MetaStoreHandlerNotExistsException $"Transaction meta store handler for transaction meta store {txnId.MostSigBits} not exists."
         let handler = handlers.[handlerId]
-        handler.AbortAsync(txnId, msgIds)
+        handler.EdTxnAsync(txnId, TxnAction.Abort)
         
     member this.Close() =
         mb.Post(Close)

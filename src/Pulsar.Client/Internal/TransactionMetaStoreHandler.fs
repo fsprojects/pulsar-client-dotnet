@@ -6,7 +6,6 @@ open System.Threading.Tasks
 open System.Timers
 open Pulsar.Client.Api
 open Pulsar.Client.Common
-open Pulsar.Client.Common.Tools
 open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Transaction
@@ -27,7 +26,7 @@ type internal TransactionMetaStoreMessage =
     | AddPartitionToTxnResponse of RequestId * ResultOrException<unit>
     | AddSubscriptionToTxn of TxnId * CompleteTopicName * SubscriptionName * AsyncReplyChannel<Task<unit>>
     | AddSubscriptionToTxnResponse of RequestId * ResultOrException<unit>
-    | EndTxn of TxnId * MessageId seq * TxnAction * AsyncReplyChannel<Task<unit>>
+    | EndTxn of TxnId * TxnAction * AsyncReplyChannel<Task<unit>>
     | EndTxnResponse of RequestId * ResultOrException<unit>
     | TimeoutTick
     | Close
@@ -166,6 +165,8 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                             Log.Logger.LogDebug("{0} NewTransactionResponse reqId={1} txnId={2}", prefix, reqId, txnId)
                             op.SetResult(NewTransaction txnId)
                         | Error ex ->
+                            if ex :? CoordinatorNotFoundException then
+                                connectionHandler.ReconnectLater ex
                             Log.Logger.LogError(ex, "{0} NewTransactionResponse reqId={1}", prefix, reqId)
                             op.SetException(ex)
                     | _ ->
@@ -201,6 +202,8 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                             Log.Logger.LogDebug("{0} AddPartitionToTxnResponse reqId={1}", prefix, reqId)
                             op.SetResult(Empty)
                         | Error ex ->
+                            if ex :? CoordinatorNotFoundException then
+                                connectionHandler.ReconnectLater ex
                             Log.Logger.LogError(ex, "{0} AddPartitionToTxnResponse reqId={1}", prefix, reqId)
                             op.SetException(ex)
                     | _ ->
@@ -236,6 +239,8 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                             Log.Logger.LogDebug("{0} AddSubscriptionToTxnResponse reqId={1}", prefix, reqId)
                             op.SetResult(Empty)
                         | Error ex ->
+                            if ex :? CoordinatorNotFoundException then
+                                connectionHandler.ReconnectLater ex
                             Log.Logger.LogError(ex, "{0} AddSubscriptionToTxnResponse reqId={1}", prefix, reqId)
                             op.SetException(ex)
                     | _ ->
@@ -243,7 +248,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                                                 prefix, reqId, result.ToStr())
                     return! loop ()
                 
-                | TransactionMetaStoreMessage.EndTxn (txnId, msgIds, txnAction, ch) ->
+                | TransactionMetaStoreMessage.EndTxn (txnId, txnAction, ch) ->
                     
                     match connectionHandler.ConnectionState with
                     | ConnectionState.Ready clientCnx ->
@@ -251,7 +256,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                         let requestId = Generators.getNextRequestId()
                         Log.Logger.LogDebug("{0} EndTxn txnId {1}, action {2}, requestId {3}",
                                             prefix, txnId, txnAction, requestId)
-                        let command = Commands.newEndTxn txnId requestId msgIds txnAction
+                        let command = Commands.newEndTxn txnId requestId txnAction
                         task {
                             let! result = startRequest clientCnx requestId msg command
                             return TxnRequest.GetEmpty result
@@ -271,6 +276,8 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                             Log.Logger.LogDebug("{0} EndTxnResponse reqId={1}", prefix, reqId)
                             op.SetResult(Empty)
                         | Error ex ->
+                            if ex :? CoordinatorNotFoundException then
+                                connectionHandler.ReconnectLater ex
                             Log.Logger.LogError(ex, "{0} EndTxnResponse reqId={1}", prefix, reqId)
                             op.SetException(ex)
                     | _ ->
@@ -323,19 +330,11 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
             return! t
         }
         
-    member this.CommitAsync(txnId: TxnId, msgIds: MessageId seq) =
+    member this.EdTxnAsync(txnId: TxnId, txnAction: TxnAction) =
         connectionHandler.CheckIfActive() |> throwIfNotNull
         task {
             let! t = mb.PostAndAsyncReply(fun ch ->
-                TransactionMetaStoreMessage.EndTxn(txnId, msgIds, TxnAction.Commit, ch))
-            return! t
-        }
-        
-    member this.AbortAsync(txnId: TxnId, msgIds: MessageId seq) =
-        connectionHandler.CheckIfActive() |> throwIfNotNull
-        task {
-            let! t = mb.PostAndAsyncReply(fun ch ->
-                TransactionMetaStoreMessage.EndTxn(txnId, msgIds, TxnAction.Abort, ch))
+                TransactionMetaStoreMessage.EndTxn(txnId, txnAction, ch))
             return! t
         }
         

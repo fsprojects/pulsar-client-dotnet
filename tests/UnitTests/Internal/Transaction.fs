@@ -22,8 +22,8 @@ let tests =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
                     AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
-                    Commit = fun (_, _) -> Task.FromResult()
-                    Abort = fun (_, _) -> Task.FromResult()
+                    Commit = fun _ -> Task.FromResult()
+                    Abort = fun _ -> Task.FromResult()
                 }
             let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
             
@@ -46,8 +46,8 @@ let tests =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
                     AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
-                    Commit = fun (_, _) -> Task.FromResult()
-                    Abort = fun (_, _) -> Task.FromResult()
+                    Commit = fun _ -> Task.FromResult()
+                    Abort = fun _ -> Task.FromResult()
                 }
             let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
             
@@ -74,8 +74,8 @@ let tests =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
                     AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
-                    Commit = fun (_, _) -> Task.FromResult()
-                    Abort = fun (_, _) -> Task.FromResult()
+                    Commit = fun _ -> Task.FromResult()
+                    Abort = fun _ -> Task.FromResult()
                 }
             let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
             
@@ -97,8 +97,8 @@ let tests =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
                     AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
-                    Commit = fun (_, _) -> Task.FromResult()
-                    Abort = fun (_, _) -> Task.FromResult()
+                    Commit = fun _ -> Task.FromResult()
+                    Abort = fun _ -> Task.FromResult()
                 }
             let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
             
@@ -122,8 +122,8 @@ let tests =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
                     AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
-                    Commit = fun (_, _) -> commited <- true; Task.FromResult()
-                    Abort = fun (_, _) -> Task.FromResult()
+                    Commit = fun _ -> commited <- true; Task.FromResult()
+                    Abort = fun _ -> Task.FromResult()
                 }
             let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
             let tcs = TaskCompletionSource<Unit>()
@@ -146,8 +146,8 @@ let tests =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
                     AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
-                    Commit = fun (_, _) -> commited <- true; Task.FromResult()
-                    Abort = fun (_, _) -> Task.FromResult()
+                    Commit = fun _ -> commited <- true; Task.FromResult()
+                    Abort = fun _ -> Task.FromResult()
                 }
             let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
             let tcs = TaskCompletionSource<MessageId>()
@@ -170,8 +170,8 @@ let tests =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
                     AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
-                    Commit = fun (_, _) -> Task.FromResult()
-                    Abort = fun (_, _) -> aborted <- true;  Task.FromResult()
+                    Commit = fun _ -> Task.FromResult()
+                    Abort = fun _ -> aborted <- true;  Task.FromResult()
                 }
             let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
             let tcs = TaskCompletionSource<Unit>()
@@ -194,8 +194,8 @@ let tests =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
                     AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
-                    Commit = fun (_, _) -> Task.FromResult()
-                    Abort = fun (_, _) -> aborted <- true;  Task.FromResult()
+                    Commit = fun _ -> Task.FromResult()
+                    Abort = fun _ -> aborted <- true;  Task.FromResult()
                 }
             let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
             let tcs = TaskCompletionSource<MessageId>()
@@ -218,8 +218,8 @@ let tests =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
                     AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
-                    Commit = fun (_, _) -> Task.FromResult()
-                    Abort = fun (_, _) -> Task.FromResult()
+                    Commit = fun _ -> Task.FromResult()
+                    Abort = fun _ -> Task.FromResult()
                 }
             let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
             let ts = Transaction(timeout, operations, txnId)
@@ -241,8 +241,8 @@ let tests =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
                     AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
-                    Commit = fun (_, _) -> Task.FromResult()
-                    Abort = fun (_, _) -> Task.FromResult()
+                    Commit = fun _ -> Task.FromResult()
+                    Abort = fun _ -> Task.FromResult()
                 }
             let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
             let ts = Transaction(timeout, operations, txnId)
@@ -263,8 +263,8 @@ let tests =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
                     AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
-                    Commit = fun (_, _) -> Task.FromResult()
-                    Abort = fun (_, _) -> Task.FromResult()
+                    Commit = fun _ -> Task.FromResult()
+                    Abort = fun _ -> Task.FromResult()
                 }
             let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
             let ts = Transaction(timeout, operations, txnId)

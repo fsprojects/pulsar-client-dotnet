@@ -5,7 +5,7 @@
 // </auto-generated>
 
 #region Designer generated code
-#pragma warning disable CS0612, CS0618, CS1591, CS3021, IDE1006, RCS1036, RCS1057, RCS1085, RCS1192
+#pragma warning disable CS0612, CS0618, CS1591, CS3021, IDE0079, IDE1006, RCS1036, RCS1057, RCS1085, RCS1192
 namespace pulsar.proto
 {
 
@@ -530,6 +530,35 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
+    internal partial class BrokerEntryMetadata : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"broker_timestamp")]
+        internal ulong BrokerTimestamp
+        {
+            get => __pbn__BrokerTimestamp.GetValueOrDefault();
+            set => __pbn__BrokerTimestamp = value;
+        }
+        internal bool ShouldSerializeBrokerTimestamp() => __pbn__BrokerTimestamp != null;
+        internal void ResetBrokerTimestamp() => __pbn__BrokerTimestamp = null;
+        private ulong? __pbn__BrokerTimestamp;
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"index")]
+        internal ulong Index
+        {
+            get => __pbn__Index.GetValueOrDefault();
+            set => __pbn__Index = value;
+        }
+        internal bool ShouldSerializeIndex() => __pbn__Index != null;
+        internal void ResetIndex() => __pbn__Index = null;
+        private ulong? __pbn__Index;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
     internal partial class CommandConnect : global::ProtoBuf.IExtensible
     {
         private global::ProtoBuf.IExtension __pbn__extensionData;
@@ -648,6 +677,17 @@ namespace pulsar.proto
         internal bool ShouldSerializeSupportsAuthRefresh() => __pbn__SupportsAuthRefresh != null;
         internal void ResetSupportsAuthRefresh() => __pbn__SupportsAuthRefresh = null;
         private bool? __pbn__SupportsAuthRefresh;
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"supports_broker_entry_metadata")]
+        [global::System.ComponentModel.DefaultValue(false)]
+        internal bool SupportsBrokerEntryMetadata
+        {
+            get => __pbn__SupportsBrokerEntryMetadata ?? false;
+            set => __pbn__SupportsBrokerEntryMetadata = value;
+        }
+        internal bool ShouldSerializeSupportsBrokerEntryMetadata() => __pbn__SupportsBrokerEntryMetadata != null;
+        internal void ResetSupportsBrokerEntryMetadata() => __pbn__SupportsBrokerEntryMetadata = null;
+        private bool? __pbn__SupportsBrokerEntryMetadata;
 
     }
 
@@ -1289,6 +1329,27 @@ namespace pulsar.proto
         internal void ResetUserProvidedProducerName() => __pbn__UserProvidedProducerName = null;
         private bool? __pbn__UserProvidedProducerName;
 
+        [global::ProtoBuf.ProtoMember(10, Name = @"producer_access_mode")]
+        [global::System.ComponentModel.DefaultValue(ProducerAccessMode.Shared)]
+        internal ProducerAccessMode ProducerAccessMode
+        {
+            get => __pbn__ProducerAccessMode ?? ProducerAccessMode.Shared;
+            set => __pbn__ProducerAccessMode = value;
+        }
+        internal bool ShouldSerializeProducerAccessMode() => __pbn__ProducerAccessMode != null;
+        internal void ResetProducerAccessMode() => __pbn__ProducerAccessMode = null;
+        private ProducerAccessMode? __pbn__ProducerAccessMode;
+
+        [global::ProtoBuf.ProtoMember(11, Name = @"topic_epoch")]
+        internal ulong TopicEpoch
+        {
+            get => __pbn__TopicEpoch.GetValueOrDefault();
+            set => __pbn__TopicEpoch = value;
+        }
+        internal bool ShouldSerializeTopicEpoch() => __pbn__TopicEpoch != null;
+        internal void ResetTopicEpoch() => __pbn__TopicEpoch = null;
+        private ulong? __pbn__TopicEpoch;
+
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -1774,6 +1835,27 @@ namespace pulsar.proto
         internal void ResetSchemaVersion() => __pbn__SchemaVersion = null;
         private byte[] __pbn__SchemaVersion;
 
+        [global::ProtoBuf.ProtoMember(5, Name = @"topic_epoch")]
+        internal ulong TopicEpoch
+        {
+            get => __pbn__TopicEpoch.GetValueOrDefault();
+            set => __pbn__TopicEpoch = value;
+        }
+        internal bool ShouldSerializeTopicEpoch() => __pbn__TopicEpoch != null;
+        internal void ResetTopicEpoch() => __pbn__TopicEpoch = null;
+        private ulong? __pbn__TopicEpoch;
+
+        [global::ProtoBuf.ProtoMember(6, Name = @"producer_ready")]
+        [global::System.ComponentModel.DefaultValue(true)]
+        internal bool ProducerReady
+        {
+            get => __pbn__ProducerReady ?? true;
+            set => __pbn__ProducerReady = value;
+        }
+        internal bool ShouldSerializeProducerReady() => __pbn__ProducerReady != null;
+        internal void ResetProducerReady() => __pbn__ProducerReady = null;
+        private bool? __pbn__ProducerReady;
+
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -2014,7 +2096,7 @@ namespace pulsar.proto
         internal ulong RequestId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"consumer_mark_delete_position")]
-        public MessageIdData ConsumerMarkDeletePosition { get; set; }
+        internal MessageIdData ConsumerMarkDeletePosition { get; set; }
 
     }
 
@@ -2538,9 +2620,6 @@ namespace pulsar.proto
         internal void ResetTxnAction() => __pbn__TxnAction = null;
         private TxnAction? __pbn__TxnAction;
 
-        [global::ProtoBuf.ProtoMember(5, Name = @"message_id")]
-        internal global::System.Collections.Generic.List<MessageIdData> MessageIds { get; } = new global::System.Collections.Generic.List<MessageIdData>();
-
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -2653,8 +2732,15 @@ namespace pulsar.proto
         internal void ResetTxnAction() => __pbn__TxnAction = null;
         private TxnAction? __pbn__TxnAction;
 
-        [global::ProtoBuf.ProtoMember(6, Name = @"message_id")]
-        internal global::System.Collections.Generic.List<MessageIdData> MessageIds { get; } = new global::System.Collections.Generic.List<MessageIdData>();
+        [global::ProtoBuf.ProtoMember(6, Name = @"txnid_least_bits_of_low_watermark")]
+        internal ulong TxnidLeastBitsOfLowWatermark
+        {
+            get => __pbn__TxnidLeastBitsOfLowWatermark.GetValueOrDefault();
+            set => __pbn__TxnidLeastBitsOfLowWatermark = value;
+        }
+        internal bool ShouldSerializeTxnidLeastBitsOfLowWatermark() => __pbn__TxnidLeastBitsOfLowWatermark != null;
+        internal void ResetTxnidLeastBitsOfLowWatermark() => __pbn__TxnidLeastBitsOfLowWatermark = null;
+        private ulong? __pbn__TxnidLeastBitsOfLowWatermark;
 
     }
 
@@ -2759,6 +2845,16 @@ namespace pulsar.proto
         internal bool ShouldSerializeTxnAction() => __pbn__TxnAction != null;
         internal void ResetTxnAction() => __pbn__TxnAction = null;
         private TxnAction? __pbn__TxnAction;
+
+        [global::ProtoBuf.ProtoMember(6, Name = @"txnid_least_bits_of_low_watermark")]
+        internal ulong TxnidLeastBitsOfLowWatermark
+        {
+            get => __pbn__TxnidLeastBitsOfLowWatermark.GetValueOrDefault();
+            set => __pbn__TxnidLeastBitsOfLowWatermark = value;
+        }
+        internal bool ShouldSerializeTxnidLeastBitsOfLowWatermark() => __pbn__TxnidLeastBitsOfLowWatermark != null;
+        internal void ResetTxnidLeastBitsOfLowWatermark() => __pbn__TxnidLeastBitsOfLowWatermark = null;
+        private ulong? __pbn__TxnidLeastBitsOfLowWatermark;
 
     }
 
@@ -3106,6 +3202,14 @@ namespace pulsar.proto
     }
 
     [global::ProtoBuf.ProtoContract()]
+    internal enum ProducerAccessMode
+    {
+        Shared = 0,
+        Exclusive = 1,
+        WaitForExclusive = 2,
+    }
+
+    [global::ProtoBuf.ProtoContract()]
     internal enum ServerError
     {
         UnknownError = 0,
@@ -3133,6 +3237,7 @@ namespace pulsar.proto
         NotAllowedError = 22,
         TransactionConflict = 23,
         TransactionNotFound = 24,
+        ProducerFenced = 25,
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -3178,6 +3283,10 @@ namespace pulsar.proto
         V14 = 14,
         [global::ProtoBuf.ProtoEnum(Name = @"v15")]
         V15 = 15,
+        [global::ProtoBuf.ProtoEnum(Name = @"v16")]
+        V16 = 16,
+        [global::ProtoBuf.ProtoEnum(Name = @"v17")]
+        V17 = 17,
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -3200,5 +3309,5 @@ namespace pulsar.proto
 
 }
 
-#pragma warning restore CS0612, CS0618, CS1591, CS3021, IDE1006, RCS1036, RCS1057, RCS1085, RCS1192
+#pragma warning restore CS0612, CS0618, CS1591, CS3021, IDE0079, IDE1006, RCS1036, RCS1057, RCS1085, RCS1192
 #endregion

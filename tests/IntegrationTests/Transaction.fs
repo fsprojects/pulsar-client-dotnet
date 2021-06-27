@@ -246,7 +246,7 @@ let tests =
         }
         
 
-    testList "Transaction" [
+    ftestList "Transaction" [
         
         testAsync "Produce 10 messages within txn with batch works fine" {
             do! produceTest true |> Async.AwaitTask

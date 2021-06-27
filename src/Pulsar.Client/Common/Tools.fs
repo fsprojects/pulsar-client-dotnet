@@ -94,6 +94,15 @@ let asyncDelay (delay: TimeSpan) work =
         with ex ->
             Log.Logger.LogError(ex, "Error in delayed action")
     } |> Async.StartImmediate
+    
+let asyncDelayTask (delay: TimeSpan) work =
+    async {
+        do! Async.Sleep delay
+        try
+            return! work() |> Async.AwaitTask
+        with ex ->
+            Log.Logger.LogError(ex, "Error in delayed action")
+    } |> Async.StartImmediate
 
 let asyncDelayMs (delay: int) work =
     async {

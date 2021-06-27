@@ -324,7 +324,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
     member private this.ConnectionState
         with get() = Volatile.Read(&connectionState)
-        and set(value) = Volatile.Write(&connectionState, value)
+        and set value = Volatile.Write(&connectionState, value)
 
     member private this.InitInternal() =
        task {

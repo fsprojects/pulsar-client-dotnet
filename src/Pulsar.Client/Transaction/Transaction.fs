@@ -1,13 +1,12 @@
 namespace Pulsar.Client.Transaction
 
 open System
-open System.Collections.Concurrent
 open System.Collections.Generic
+open System.Threading
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open System.Threading.Tasks
 open Pulsar.Client.Common
-open Pulsar.Client.Common.UMX
-open Pulsar.Client.Internal
+open Pulsar.Client.Api
 open Microsoft.Extensions.Logging
 
 type TxnId = {
@@ -22,8 +21,8 @@ type TxnOperations =
     {
         AddPublishPartitionToTxn: TxnId * CompleteTopicName -> Task<unit>
         AddSubscriptionToTxn: TxnId * CompleteTopicName * SubscriptionName -> Task<unit>
-        Commit: TxnId * MessageId seq -> Task<unit>
-        Abort: TxnId * MessageId seq -> Task<unit>
+        Commit: TxnId -> Task<unit>
+        Abort: TxnId -> Task<unit>
     }
     
 type ConsumerTxnOperations =
@@ -31,16 +30,24 @@ type ConsumerTxnOperations =
         ClearIncomingMessagesAndGetMessageNumber: unit -> Async<int>
         IncreaseAvailablePermits: int -> unit
     }
+    
+type State =
+    | OPEN
+    | COMMITTING
+    | ABORTING
+    | COMMITTED
+    | ABORTED
+    | ERROR
 
 [<AllowNullLiteral>]
 type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnId: TxnId) as this =
     
-    let producedTopics = ConcurrentDictionary<CompleteTopicName, Task<unit>>()
-    let ackedTopics = ConcurrentDictionary<CompleteTopicName * SubscriptionName, Task<unit>>()
+    let mutable state = OPEN    
+    let registerPartitionMap = Dictionary<CompleteTopicName, Task<unit>>()
+    let registerSubscriptionMap = Dictionary<CompleteTopicName * SubscriptionName, Task<unit>>()
     let sendTasks = ResizeArray<Task<MessageId>>()
     let ackTasks = ResizeArray<Task<Unit>>()
     let cumulativeAckConsumers = Dictionary<ConsumerId, ConsumerTxnOperations>()
-    let mutable allowOperations = true
     let lockObj = Object()
     
     let allOpComplete() =
@@ -50,100 +57,131 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             for ackTask in ackTasks do
                 yield (ackTask :> Task)
         } |> Task.WhenAll
-        
-    let executeInsideLock f errorMsg =
-        if allowOperations then
-            lock lockObj (fun () ->
-                if allowOperations then
-                    f()
-                else
-                    failwith errorMsg
-            )
+       
+       
+    let checkIfOpen f =
+        if this.State = OPEN then
+            f()
         else
-            failwith errorMsg
+            raise <| InvalidTxnStatusException $"{txnId} with unexpected state {state}, expected OPEN state!"
+        
+    let executeInsideLockIfOpen f =
+        checkIfOpen (fun () ->
+            lock lockObj (fun () ->
+                checkIfOpen f
+        ))        
             
-    do asyncDelay timeout (fun () ->
-            if allowOperations then
-                try
-                    this.Abort().GetAwaiter().GetResult()
-                with ex ->
-                    Log.Logger.LogError(ex, "Failure while aborting txn {0} by timeout", txnId)
-        )
+    do asyncDelayTask timeout (fun () ->
+        match this.State with
+        | OPEN ->
+            this.Abort()
+        | _ ->
+            Task.FromResult()
+    )
+
+    member this.State
+        with get() = Volatile.Read(&state)
+        and private set value = Volatile.Write(&state, value)
     
     member internal this.RegisterProducedTopic(topic: CompleteTopicName) =
-        producedTopics.GetOrAdd(topic, fun _ ->
-            txnOperations.AddPublishPartitionToTxn(txnId, topic))
-        
-    member internal this.RegisterAckedTopic(topic: CompleteTopicName, subscription: SubscriptionName) =
-        ackedTopics.GetOrAdd((topic, subscription), fun _ ->
-            txnOperations.AddSubscriptionToTxn(txnId, topic, subscription))
-            
-    member internal this.RegisterCumulativeAckConsumer(consumerId: ConsumerId, consumerOperations: ConsumerTxnOperations) =
-        executeInsideLock (fun () ->
-            cumulativeAckConsumers.[consumerId] <- consumerOperations
-        ) "Can't ack message cumulatively in closed transaction"
+        executeInsideLockIfOpen (fun () ->
+            match registerPartitionMap.TryGetValue topic with
+            | true, t -> t
+            | false, _ ->
+                let t = txnOperations.AddPublishPartitionToTxn(txnId, topic)
+                registerPartitionMap.Add(topic, t)
+                t
+        )
     
     member internal this.RegisterSendOp(sendTask: Task<MessageId>) =
-        executeInsideLock (fun () ->
+        lock lockObj (fun () ->
             sendTasks.Add(sendTask)
-        ) "Can't send message in closed transaction"
+        )
+        
+    member internal this.RegisterAckedTopic(topic: CompleteTopicName, subscription: SubscriptionName) =
+        executeInsideLockIfOpen (fun () ->
+            let key = topic, subscription
+            match registerSubscriptionMap.TryGetValue key with
+            | true, t -> t
+            | false, _ ->
+                let t = txnOperations.AddSubscriptionToTxn(txnId, topic, subscription)
+                registerSubscriptionMap.Add(key, t)
+                t
+        )
        
     member internal this.RegisterAckOp(ackTask: Task<Unit>) =
-        executeInsideLock (fun () ->
+        lock lockObj (fun () ->
             ackTasks.Add(ackTask)
-        ) "Can't ack message in closed transaction"
+        )
+            
+    member internal this.RegisterCumulativeAckConsumer(consumerId: ConsumerId, consumerOperations: ConsumerTxnOperations) =
+        lock lockObj (fun () ->
+            cumulativeAckConsumers.[consumerId] <- consumerOperations
+        )
     
-    member this.Id = txnId
+    member this.Id = txnId    
     
+    member private this.CommitInner() =
+        let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
+        this.State <- COMMITTING
+        task {
+            try
+                do! allOpComplete()
+            with Flatten ex ->
+                do! this.AbortInner()
+                tcs.SetException ex
+            try
+                do! txnOperations.Commit(txnId)
+                this.State <- COMMITTED
+                tcs.SetResult ()
+            with Flatten ex ->
+                if (ex :? TransactionNotFoundException) || (ex :? InvalidTxnStatusException) then
+                    this.State <- ERROR
+                tcs.SetException ex
+            return! tcs.Task
+        }
+        
     member private this.AbortInner() =
+        let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
+        this.State <- ABORTING
         task {
             try
                 do! allOpComplete()
             with ex ->
                 Log.Logger.LogError(ex, "Error during abort txnId={0}", txnId)
-            let msgIds =
-                sendTasks
-                |> Seq.where (fun t -> t.IsCompleted)
-                |> Seq.map (fun t -> t.Result)
             let! cumulativeConsumersData =
                 cumulativeAckConsumers
-                |> Seq.map(fun (KeyValue(_, v)) ->
+                |> Seq.map(fun (KeyValue(_, consumer)) ->
                     async {
-                        let! permits = v.ClearIncomingMessagesAndGetMessageNumber()
-                        return (permits, v)
+                        let! permits = consumer.ClearIncomingMessagesAndGetMessageNumber()
+                        return (consumer, permits)
                     })
                 |> Async.Parallel
             try
-                return! txnOperations.Abort(txnId, msgIds)
+                try
+                    do! txnOperations.Abort(txnId)
+                    this.State <- ABORTED
+                    tcs.SetResult ()
+                with Flatten ex ->
+                    if (ex :? TransactionNotFoundException) || (ex :? InvalidTxnStatusException) then
+                        this.State <- ERROR
+                    tcs.SetException ex
             finally
-                cumulativeConsumersData
-                |> Seq.iter(fun (permits, consumer) -> consumer.IncreaseAvailablePermits(permits))
+                for consumer, permits in cumulativeConsumersData do
+                    consumer.IncreaseAvailablePermits permits
                 cumulativeAckConsumers.Clear()
         }
     
-    member private this.CommitInner() =
-        task {
-            try
-                do! allOpComplete()
-            with ex ->
-                do! this.AbortInner()
-                reraize ex
-            let msgIds =
-                sendTasks |> Seq.map (fun t -> t.Result)
-            return! txnOperations.Commit(txnId, msgIds)
-        }
-    
     member this.Commit() : Task<unit> =
-        executeInsideLock (fun () ->
-            allowOperations <- false
+        checkIfOpen (fun () ->
             this.CommitInner()
-        ) "Can't commit a closed transaction"
+        )
+        
         
     member this.Abort(): Task<unit> =
-        executeInsideLock (fun () ->
-            allowOperations <- false
+        checkIfOpen (fun () ->
             this.AbortInner()
-        ) "Can't abort a closed transaction"
+        )
         
     override this.ToString() =
         $"Txn({txnId})"

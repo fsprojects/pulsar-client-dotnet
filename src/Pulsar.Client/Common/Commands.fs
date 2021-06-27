@@ -331,7 +331,7 @@ let newGetSchema (topicName: CompleteTopicName) (requestId : RequestId) (schemaV
     command |> serializeSimpleCommand
     
 let newTxn (tcId: TransactionCoordinatorId) (requestId: RequestId) (ttl: TimeSpan) =
-    let request = CommandNewTxn(TcId = %tcId, RequestId = %requestId, TxnTtlSeconds = uint64 ttl.TotalSeconds)
+    let request = CommandNewTxn(TcId = %tcId, RequestId = %requestId, TxnTtlSeconds = uint64 ttl.TotalMilliseconds)
     let command = BaseCommand(``type`` = CommandType.NewTxn, newTxn = request)
     command |> serializeSimpleCommand
     
@@ -347,17 +347,9 @@ let newAddSubscriptionToTxn (txn: TxnId) (requestId: RequestId) (topic: Complete
     let command = BaseCommand(``type`` = CommandType.AddSubscriptionToTxn, addSubscriptionToTxn = request)
     command |> serializeSimpleCommand
     
-let newEndTxn (txn: TxnId) (requestId: RequestId) (msgIds: MessageId seq) (action: TxnAction)  =
-    let request = CommandEndTxn(TxnidLeastBits = txn.LeastSigBits, TxnidMostBits = txn.MostSigBits, RequestId = %requestId)
-    request.TxnAction <- action
-    msgIds
-    |> Seq.map (fun messageId ->
-            MessageIdData(
-                ledgerId = uint64(%messageId.LedgerId),
-                entryId = uint64(%messageId.EntryId),
-                Partition = messageId.Partition
-            ))
-    |> request.MessageIds.AddRange
+let newEndTxn (txn: TxnId) (requestId: RequestId)  (action: TxnAction)  =
+    let request = CommandEndTxn(TxnidLeastBits = txn.LeastSigBits, TxnidMostBits = txn.MostSigBits, RequestId = %requestId,
+                                TxnAction = action)    
     let command = BaseCommand(``type`` = CommandType.EndTxn, endTxn = request)
     command |> serializeSimpleCommand
     

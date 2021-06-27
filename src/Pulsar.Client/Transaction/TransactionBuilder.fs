@@ -1,6 +1,5 @@
 namespace Pulsar.Client.Transaction
 
-open System.Threading.Tasks
 open Pulsar.Client.Api
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Common
@@ -13,10 +12,10 @@ type TransactionBuilder internal (transactionClient: TransactionCoordinatorClien
             transactionClient.AddPublishPartitionToTxnAsync(txnId, topicName)
         AddSubscriptionToTxn = fun (txnId, topicName, subscription) ->
             transactionClient.AddSubscriptionToTxnAsync(txnId, topicName, subscription)
-        Commit = fun (txnId, msgIds) ->
-            transactionClient.CommitAsync(txnId, msgIds)
-        Abort = fun (txnId, msgIds) ->
-            transactionClient.AbortAsync(txnId, msgIds)
+        Commit = fun txnId ->
+            transactionClient.CommitAsync(txnId)
+        Abort = fun txnId ->
+            transactionClient.AbortAsync(txnId)
     }
     
     internal new(transactionClient) =
