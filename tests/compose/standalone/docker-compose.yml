@@ -19,7 +19,7 @@ services:
       PULSAR_PREFIX_transactionCoordinatorEnabled: "true"
 
   init:
-    image: apachepulsar/pulsar:2.8.0
+    image: apachepulsar/pulsar:2.7.1
     volumes:
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone.sh:/pulsar/bin/init-standalone.sh
@@ -33,7 +33,8 @@ services:
     ports:
       - "6651:6651"
     command: >
-      bash -c "bin/apply-config-from-env.py conf/standalone.conf &&
+      bash -c "bin/set_python_version.sh &&
+               bin/apply-config-from-env.py conf/standalone.conf &&
                bin/pulsar standalone -nfw"
     environment:
       PULSAR_PREFIX_brokerServicePortTls: 6651
