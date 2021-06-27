@@ -226,10 +226,8 @@ let tests =
             ts.Commit() |> ignore
             Expect.throws "" (fun () -> ts.Commit().Result)
             Expect.throws "" (fun () -> ts.Abort().Result)
-            Expect.throws "" (fun () -> ts.RegisterSendOp(TaskCompletionSource<MessageId>().Task))
-            Expect.throws "" (fun () -> ts.RegisterAckOp(TaskCompletionSource<Unit>().Task))
-            Expect.throws "" (fun () -> ts.RegisterCumulativeAckConsumer(Unchecked.defaultof<ConsumerId>,
-                                                                         Unchecked.defaultof<ConsumerTxnOperations>))
+            Expect.throws "" (fun () -> ts.RegisterAckedTopic(%"topic", %"subscription").Result)
+            Expect.throws "" (fun () -> ts.RegisterProducedTopic(%"topic").Result)
             
         }
         
@@ -249,10 +247,8 @@ let tests =
             ts.Abort() |> ignore
             Expect.throws "" (fun () -> ts.Commit().Result)
             Expect.throws "" (fun () -> ts.Abort().Result)
-            Expect.throws "" (fun () -> ts.RegisterSendOp(TaskCompletionSource<MessageId>().Task))
-            Expect.throws "" (fun () -> ts.RegisterAckOp(TaskCompletionSource<Unit>().Task))
-            Expect.throws "" (fun () -> ts.RegisterCumulativeAckConsumer(Unchecked.defaultof<ConsumerId>,
-                                                                         Unchecked.defaultof<ConsumerTxnOperations>))
+            Expect.throws "" (fun () -> ts.RegisterAckedTopic(%"topic", %"subscription").Result)
+            Expect.throws "" (fun () -> ts.RegisterProducedTopic(%"topic").Result)
             
         }
         
