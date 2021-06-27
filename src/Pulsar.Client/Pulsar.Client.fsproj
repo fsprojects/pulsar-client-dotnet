@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>2.4.1</Version>
+    <Version>2.5.0</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Stability fixes</PackageReleaseNotes>
+    <PackageReleaseNotes>Transactions update to work with 2.8 cluster</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
-    <PackageVersion>2.4.1</PackageVersion>
+    <PackageVersion>2.5.0</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
