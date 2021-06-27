@@ -248,11 +248,12 @@ let tests =
 
     testList "Transaction" [
         
-        testAsync "Produce 10 messages within txn with batch works fine" {
+        // TODO: uncomment for 2.8 cluster
+        ptestAsync "Produce 10 messages within txn with batch works fine" {
             do! produceTest true |> Async.AwaitTask
         }
-        
-        testAsync "Produce 10 messages within txn without batch works fine" {
+        // TODO: uncomment for 2.8 cluster
+        ptestAsync "Produce 10 messages within txn without batch works fine" {
             do! produceTest false |> Async.AwaitTask
         }
         
@@ -271,8 +272,8 @@ let tests =
         testAsync "Consume cumulative 10 messages within txn without batch works fine" {
             do! consumeCumulativeTest false |> Async.AwaitTask
         }
-        
-        testAsync "Consume and Produce within txn works fine" {
+        // TODO: uncomment for 2.8 cluster
+        ptestAsync "Consume and Produce within txn works fine" {
 
             Log.Debug("Started Consume and Produce within txn works fine")
             let client = getTxnClient()
@@ -348,8 +349,8 @@ let tests =
             
             Log.Debug("Finished Consume and Produce within txn works fine")
         }
-        
-        testAsync "Concurrent transactions works fine" {
+        // TODO: uncomment for 2.8 cluster
+        ptestAsync "Concurrent transactions works fine" {
 
             Log.Debug("Started Concurrent transactions works fine")
             let client = getTxnClient()

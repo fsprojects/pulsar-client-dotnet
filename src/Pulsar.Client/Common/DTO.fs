@@ -142,6 +142,8 @@ type internal SendReceipt =
         EntryId: EntryId
         HighestSequenceId: int64
     }
+    override this.ToString() =
+        $"(SequenceId={this.SequenceId},LedgerId={this.LedgerId},EntryId={this.EntryId},HighestSequenceId={this.HighestSequenceId})"
 
 type internal LogicalAddress =
     LogicalAddress of DnsEndPoint

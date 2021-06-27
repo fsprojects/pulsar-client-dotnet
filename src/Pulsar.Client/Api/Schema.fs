@@ -80,7 +80,7 @@ type Schema =
             fun bytes ->
                 keyValidation bytes
                 dataValidation bytes
-        | _ -> raise <| ArgumentException(sprintf "Retrieve schema instance from schema info for type %A is not supported yet" schema.Type)        
+        | _ -> raise <| ArgumentException $"Retrieve schema instance from schema info for type {schema.Type} is not supported yet"        
     static member internal GetAutoConsumeSchema (topicSchema: TopicSchema) =
         let schema = topicSchema.SchemaInfo
         match schema.Type with
@@ -90,4 +90,4 @@ type Schema =
             GenericJsonSchema(topicSchema) :> ISchema<_>
         | SchemaType.AVRO ->
             GenericAvroSchema(topicSchema) :> ISchema<_>        
-        | _ -> raise <| ArgumentException(sprintf "Auto consumer for type %A is not supported yet" schema.Type)
+        | _ -> raise <| ArgumentException $"Auto consumer for type {schema.Type} is not supported yet"

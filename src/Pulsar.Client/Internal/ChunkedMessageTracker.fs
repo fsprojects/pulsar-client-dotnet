@@ -65,13 +65,11 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
                 if metadata.ChunkId <> ctx.LastChunkId + %1 || %metadata.ChunkId > metadata.NumChunks then
                     ctx.Dispose()
                     chunkedMessagesMap.Remove(metadata.Uuid) |> ignore
-                    Error <| sprintf "Received unexpected chunk uuid = %A, last-chunk-id = %A, chunkId = %A, total-chunks = %A"
-                                 metadata.Uuid ctx.LastChunkId metadata.ChunkId metadata.NumChunks
+                    Error <| $"Received unexpected chunk uuid = {metadata.Uuid}, last-chunk-id = {ctx.LastChunkId}, chunkId = {metadata.ChunkId}, total-chunks = {metadata.NumChunks}"
                 else
                     Ok ctx
             | _ ->
-                Error <| sprintf "Received unexpected chunk uuid = %A, chunkId = %A, total-chunks = %A"
-                            metadata.Uuid metadata.ChunkId metadata.NumChunks
+                Error <| $"Received unexpected chunk uuid = %A{metadata.Uuid}, chunkId = %A{metadata.ChunkId}, total-chunks = %A{metadata.NumChunks}"
     member this.MessageReceived (rawMessage, msgId: MessageId, ctx: ChunkedMessageCtx, codec: ICompressionCodec) =
         ctx.MessageReceived rawMessage
         // if final chunk is not received yet then release payload and return
