@@ -133,6 +133,7 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
         batchItems.Clear()
         this.CurrentBatchSizeBytes <- 0
         this.NumMessagesInBatch <- 0
+        this.CurrentTxnId <- None
     override this.IsMultiBatches = false
     override this.Discard ex =
         batchItems |> Seq.iter(fun batchItem -> batchItem.Tcs.SetException(ex))

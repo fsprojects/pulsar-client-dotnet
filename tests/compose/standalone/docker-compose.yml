@@ -6,12 +6,13 @@ version: '2.1'
 services:
   standalone:
     hostname: standalone
-    image: apachepulsar/pulsar:2.8.0
+    image: apachepulsar/pulsar:2.7.1
     ports:
       - "6650:6650"
       - "2181:2181"
     command: >
-      bash -c "bin/apply-config-from-env.py conf/standalone.conf &&
+      bash -c "bin/set_python_version.sh &&
+               bin/apply-config-from-env.py conf/standalone.conf &&
                bin/pulsar standalone"
     environment:
       PULSAR_PREFIX_acknowledgmentAtBatchIndexLevelEnabled: "true"
