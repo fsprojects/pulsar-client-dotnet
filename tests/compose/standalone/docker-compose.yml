@@ -11,8 +11,7 @@ services:
       - "6650:6650"
       - "2181:2181"
     command: >
-      bash -c "bin/set_python_version.sh &&
-               bin/apply-config-from-env.py conf/standalone.conf &&
+      bash -c "bin/apply-config-from-env.py conf/standalone.conf &&
                bin/pulsar standalone"
     environment:
       PULSAR_PREFIX_acknowledgmentAtBatchIndexLevelEnabled: "true"
@@ -34,8 +33,7 @@ services:
     ports:
       - "6651:6651"
     command: >
-      bash -c "bin/set_python_version.sh &&
-               bin/apply-config-from-env.py conf/standalone.conf &&
+      bash -c "bin/apply-config-from-env.py conf/standalone.conf &&
                bin/pulsar standalone -nfw"
     environment:
       PULSAR_PREFIX_brokerServicePortTls: 6651
