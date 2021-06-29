@@ -623,11 +623,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 schemaDecodeFunction <- schema.Decode
             else
                 let schemaVersion = metadata.SchemaVersion.Value
-                let! specificSchemaOption = schemaProvider.Value.GetSchemaByVersion(schema, schemaVersion) |> Async.AwaitTask
-                schemaDecodeFunction <-
-                    match specificSchemaOption with
-                    | Some specificSchema -> specificSchema.Decode
-                    | None -> schema.Decode
+                try
+                    let! specificSchemaOption = schemaProvider.Value.GetSchemaByVersion(schema, schemaVersion) |> Async.AwaitTask
+                    schemaDecodeFunction <-
+                        match specificSchemaOption with
+                        | Some specificSchema -> specificSchema.Decode
+                        | None -> schema.Decode
+                with Flatten ex ->
+                    Log.Logger.LogError(ex, "{0} Couldn't get schema by version", prefix)
+                    schemaDecodeFunction <- fun _ -> raise <| SchemaSerializationException ex.Message
             return schemaDecodeFunction
         }
            
