@@ -248,12 +248,10 @@ let tests =
 
     testList "Transaction" [
         
-        // TODO: uncomment for 2.8 cluster
-        ptestAsync "Produce 10 messages within txn with batch works fine" {
+        testAsync "Produce 10 messages within txn with batch works fine" {
             do! produceTest true |> Async.AwaitTask
         }
-        // TODO: uncomment for 2.8 cluster
-        ptestAsync "Produce 10 messages within txn without batch works fine" {
+        testAsync "Produce 10 messages within txn without batch works fine" {
             do! produceTest false |> Async.AwaitTask
         }
         
@@ -272,8 +270,8 @@ let tests =
         testAsync "Consume cumulative 10 messages within txn without batch works fine" {
             do! consumeCumulativeTest false |> Async.AwaitTask
         }
-        // TODO: uncomment for 2.8 cluster
-        ptestAsync "Consume and Produce within txn works fine" {
+        
+        testAsync "Consume and Produce within txn works fine" {
 
             Log.Debug("Started Consume and Produce within txn works fine")
             let client = getTxnClient()
@@ -349,8 +347,8 @@ let tests =
             
             Log.Debug("Finished Consume and Produce within txn works fine")
         }
-        // TODO: uncomment for 2.8 cluster
-        ptestAsync "Concurrent transactions works fine" {
+        
+        testAsync "Concurrent transactions works fine" {
 
             Log.Debug("Started Concurrent transactions works fine")
             let client = getTxnClient()
@@ -453,5 +451,20 @@ let tests =
             do! Async.Sleep 110
             
             Log.Debug("Finished Concurrent transactions works fine")
+        }
+        
+        ptestAsync "Test with txn works fine" {
+
+            Log.Debug("Started Consume and Produce within txn works fine")
+            let client = getTxnClient()
+            let! txn = client.NewTransaction().BuildAsync() |> Async.AwaitTask
+            try
+                let! txn2 = client.NewTransaction().BuildAsync() |> Async.AwaitTask
+                ()
+            with ex ->
+                Log.Error(ex, "Error")
+                let! txn3 = client.NewTransaction().BuildAsync() |> Async.AwaitTask
+                let! txn4 = client.NewTransaction().BuildAsync() |> Async.AwaitTask
+                ()
         }
     ]

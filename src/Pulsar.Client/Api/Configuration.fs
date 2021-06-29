@@ -197,10 +197,8 @@ type ReaderConfiguration =
 type TransactionConfiguration =
     {
         TxnTimeout: TimeSpan
-        TxnRequestTimeout: TimeSpan
     }
     static member Default =
         {
             TxnTimeout = TimeSpan.FromMinutes(1.0)
-            TxnRequestTimeout = TimeSpan.FromSeconds(30.0)
         }

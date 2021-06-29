@@ -6,13 +6,12 @@ version: '2.1'
 services:
   standalone:
     hostname: standalone
-    image: apachepulsar/pulsar:2.7.1
+    image: apachepulsar/pulsar:2.8.0
     ports:
       - "6650:6650"
       - "2181:2181"
     command: >
-      bash -c "bin/set_python_version.sh &&
-               bin/apply-config-from-env.py conf/standalone.conf &&
+      bash -c "bin/apply-config-from-env.py conf/standalone.conf &&
                bin/pulsar standalone"
     environment:
       PULSAR_PREFIX_acknowledgmentAtBatchIndexLevelEnabled: "true"
@@ -20,11 +19,18 @@ services:
       PULSAR_PREFIX_transactionCoordinatorEnabled: "true"
 
   init:
-    image: apachepulsar/pulsar:2.7.1
+    image: apachepulsar/pulsar:2.8.0
     volumes:
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone.sh:/pulsar/bin/init-standalone.sh
-    command: bin/wait-for-it.sh standalone:8080 -t 120 -- bin/wait-for-it.sh standalone:2181 -t 120 -- bin/init-standalone.sh
+    command: >
+      bash -c "tr -d '\r' < bin/init-standalone.sh > bin/init-standalone-fixed.sh &&
+               tr -d '\r' < bin/wait-for-it.sh > bin/wait-for-it-fixed.sh &&
+               chmod u+x bin/wait-for-it-fixed.sh &&
+               chmod u+x bin/init-standalone-fixed.sh &&
+               bin/wait-for-it-fixed.sh standalone:8080 -t 120 &&
+               bin/wait-for-it-fixed.sh standalone:2181 -t 120 &&
+               bin/init-standalone-fixed.sh"
     environment:
       webServiceUrl: http://standalone:8080/
 
@@ -60,7 +66,13 @@ services:
     volumes:
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone-tls.sh:/pulsar/bin/init-standalone-tls.sh
-    command: bin/wait-for-it.sh standaloneTls:8443 -t 120 -- bin/init-standalone-tls.sh
+    command: >
+      bash -c "tr -d '\r' < bin/init-standalone-tls.sh > bin/init-standalone-tls-fixed.sh &&
+               tr -d '\r' < bin/wait-for-it.sh > bin/wait-for-it-fixed.sh &&
+               chmod u+x bin/wait-for-it-fixed.sh &&
+               chmod u+x bin/init-standalone-tls-fixed.sh &&
+               bin/wait-for-it-fixed.sh standaloneTls:8443 -t 120 &&
+               bin/init-standalone-tls-fixed.sh"
     environment:
       webServiceUrl: https://standaloneTls:8443/
       authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls

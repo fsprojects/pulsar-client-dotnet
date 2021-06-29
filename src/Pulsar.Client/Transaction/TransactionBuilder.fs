@@ -32,7 +32,7 @@ type TransactionBuilder internal (transactionClient: TransactionCoordinatorClien
         
     member this.BuildAsync() =
         task {
-            let! txnId = transactionClient.NewTransactionAsync(config.TxnRequestTimeout)
+            let! txnId = transactionClient.NewTransactionAsync(config.TxnTimeout)
             Log.Logger.LogDebug("Success to new txn. txnID: {0}", txnId)
             return Transaction(config.TxnTimeout, txnOperations, txnId)
         }
