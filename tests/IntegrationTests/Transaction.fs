@@ -246,7 +246,7 @@ let tests =
         }
         
 
-    testList "Transaction" [
+    ptestList "Transaction" [
         
         testAsync "Produce 10 messages within txn with batch works fine" {
             do! produceTest true |> Async.AwaitTask
@@ -453,7 +453,7 @@ let tests =
             Log.Debug("Finished Concurrent transactions works fine")
         }
         
-        ptestAsync "Test with txn works fine" {
+        testAsync "Test with txn works fine" {
 
             Log.Debug("Started Consume and Produce within txn works fine")
             let client = getTxnClient()
