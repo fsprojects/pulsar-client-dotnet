@@ -36,7 +36,7 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
         handlers.[index]
     
     let getTCAssignTopicName partition =
-        if partition > 0 then
+        if partition >=0 then
             TopicName.TRANSACTION_COORDINATOR_ASSIGN.ToString() + TopicNameHelpers.PartitionTopicSuffix + partition.ToString()
         else
             TopicName.TRANSACTION_COORDINATOR_ASSIGN.ToString()

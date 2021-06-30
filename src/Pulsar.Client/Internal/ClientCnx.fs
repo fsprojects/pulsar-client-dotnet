@@ -234,7 +234,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     return! loop()
                 | AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations) ->
                     Log.Logger.LogDebug("{0} adding transaction metastore {1}", prefix, transactionMetaStoreId)
-                    transactionMetaStores.Add(transactionMetaStoreId, transactionMetaStoreOperations)
+                    transactionMetaStores.[transactionMetaStoreId] <- transactionMetaStoreOperations
                     return! loop()
                 | RemoveConsumer consumerId ->
                     Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
