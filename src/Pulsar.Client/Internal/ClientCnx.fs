@@ -857,3 +857,6 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         
     member this.Dispose() =
         connection.Dispose()
+        
+    override this.ToString() =
+        prefix

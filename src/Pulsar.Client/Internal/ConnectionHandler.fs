@@ -58,6 +58,7 @@ type internal ConnectionHandler( parentPrefix: string,
                                 let! broker = lookup.GetBroker(topic) |> Async.AwaitTask
                                 let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize, false) |> Async.AwaitTask
                                 this.ConnectionState <- Ready clientCnx
+                                Log.Logger.LogDebug("{0} Successfuly reconnected to {1}, {2}", prefix, topic, clientCnx)
                                 connectionOpened epoch
                             with Flatten ex ->
                                 match ex with
