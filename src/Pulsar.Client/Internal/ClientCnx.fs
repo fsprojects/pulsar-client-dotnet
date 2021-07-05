@@ -68,6 +68,7 @@ and internal CnxOperation =
     | RemoveTransactionMetaStoreHandler of TransactionCoordinatorId
     | ChannelInactive
     | Stop
+    | Tick
     
 and internal PulsarCommand =
     | XCommandConnected of CommandConnected
@@ -75,6 +76,7 @@ and internal PulsarCommand =
     | XCommandSendReceipt of CommandSendReceipt
     | XCommandMessage of (CommandMessage * MessageMetadata * byte[] * bool )
     | XCommandPing of CommandPing
+    | XCommandPong of CommandPong
     | XCommandLookupResponse of CommandLookupTopicResponse
     | XCommandProducerSuccess of CommandProducerSuccess
     | XCommandSuccess of CommandSuccess
@@ -134,12 +136,20 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     let rejectedRequestResetTimeSec = 60
     let mutable numberOfRejectedRequests = 0
     let mutable isActive = true
+    let mutable waitingForPingResponse = false
     let requestTimeoutTimer = new Timer()
+    let keepAliveTimer = new Timer()
     let startRequestTimeoutTimer () =
         requestTimeoutTimer.Interval <- config.OperationTimeout.TotalMilliseconds
         requestTimeoutTimer.AutoReset <- true
-        requestTimeoutTimer.Elapsed.Add(fun _ -> this.RequestsMb.Post(Tick))
+        requestTimeoutTimer.Elapsed.Add(fun _ -> this.RequestsMb.Post(RequestsOperation.Tick))
         requestTimeoutTimer.Start()
+        
+    let startKeepAliveTimer () =
+        keepAliveTimer.Interval <- config.KeepAliveInterval.TotalMilliseconds
+        keepAliveTimer.AutoReset <- true
+        keepAliveTimer.Elapsed.Add(fun _ -> this.OperationsMb.Post(CnxOperation.Tick))
+        keepAliveTimer.Start()
     
     let failRequest reqId commandType (ex: exn) isTimeout =
         match requests.TryGetValue(reqId) with
@@ -164,6 +174,13 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             else
                 // if there is no request that is timed out then exit the loop
                 ()
+                
+    let handleKeepAliveTimeout() =
+        if this.WaitingForPingResponse then
+            this.OperationsMb.Post(ChannelInactive)
+        else
+            this.WaitingForPingResponse <- true
+            Commands.newPing() |> SocketMessageWithoutReply |> this.SendMb.Post
                 
     let getTransactionExceptionByServerError error msg =
         match error with
@@ -206,7 +223,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     Log.Logger.LogDebug("{0} has stopped", prefix)
                     failAllRequests()
                     requestTimeoutTimer.Stop()
-                | Tick ->
+                | RequestsOperation.Tick ->
                     Log.Logger.LogTrace("{0} timeout tick", prefix)
                     handleTimeoutedMessages()
                     return! loop ()
@@ -269,11 +286,17 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     return! loop()
                 | CnxOperation.Stop ->
                     Log.Logger.LogDebug("{0} operationsMb stopped", prefix)
+                    keepAliveTimer.Stop()
+                | CnxOperation.Tick ->
+                    Log.Logger.LogDebug("{0} keepalive tick", prefix)
+                    handleKeepAliveTimeout()
+                    return! loop()
             }
         loop ()
     )
 
     let sendSerializedPayload (writePayload, commandType) =
+        Log.Logger.LogDebug("{0} Sending message of type {1}", prefix, commandType)
         task {
             try
                 do! connection.Output |> writePayload
@@ -337,6 +360,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             Ok (XCommandLookupResponse command.lookupTopicResponse)
         | BaseCommand.Type.Ping ->
             Ok (XCommandPing command.Ping)
+        | BaseCommand.Type.Pong ->
+            Ok (XCommandPong command.Pong)
         | BaseCommand.Type.ProducerSuccess ->
             Ok (XCommandProducerSuccess command.ProducerSuccess)
         | BaseCommand.Type.Success ->
@@ -516,6 +541,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         }
 
     let handleCommand xcmd =
+        this.WaitingForPingResponse <- false
         match xcmd with
         | XCommandConnected cmd ->
             Log.Logger.LogInformation("{0} Connected ProtocolVersion: {1} ServerVersion: {2} MaxMessageSize: {3} Brokerless: {4}",
@@ -571,6 +597,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogWarning("{0} producer {1} wasn't found on CommandSendError", prefix, %cmd.ProducerId)
         | XCommandPing _ ->
             Commands.newPong() |> SocketMessageWithoutReply |> sendMb.Post
+        | XCommandPong _ ->
+            ()
         | XCommandMessage (cmd, metadata, payload, checkSumValid) ->
             match consumers.TryGetValue %cmd.ConsumerId with
             | true, consumerOperations ->
@@ -790,6 +818,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     do operationsMb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} operationsMb mailbox failure", prefix))
     do sendMb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} sendMb mailbox failure", prefix))
     do startRequestTimeoutTimer()
+    do startKeepAliveTimer()
     do Task.Run(fun () -> readSocket()) |> ignore
 
     member private this.SendMb with get(): MailboxProcessor<SocketMessage> = sendMb
@@ -804,7 +833,12 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     
     member this.IsActive
         with get() = Volatile.Read(&isActive)
-        and private set(value) = Volatile.Write(&isActive, value)
+        and private set value = Volatile.Write(&isActive, value)
+        
+    member this.WaitingForPingResponse
+        with get() = Volatile.Read(&waitingForPingResponse)
+        and private set value = Volatile.Write(&waitingForPingResponse, value)
+
 
     member internal this.NewConnectCommand() =
         let authData = authenticationDataProvider.Authenticate(AuthData.INIT_AUTH_DATA)

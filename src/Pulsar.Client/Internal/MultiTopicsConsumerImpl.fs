@@ -94,6 +94,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let partitionsTimer = new Timer(consumerConfig.AutoUpdatePartitionsInterval.TotalMilliseconds)
     let patternTimer = new Timer(consumerConfig.PatternAutoDiscoveryPeriod.TotalMilliseconds)
     let sharedQueueResumeThreshold = consumerConfig.ReceiverQueueSize / 2
+    let dummyTopicName = "MultiTopicsConsumer-" + Generators.getRandomName()
     
     let redeliverMessages messages =
         task {
@@ -1126,7 +1127,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
         member this.ConsumerId = consumerId
 
-        member this.Topic = "MultiTopicsConsumer-" + Generators.getRandomName()
+        member this.Topic = dummyTopicName
 
         member this.Name = consumerName
 

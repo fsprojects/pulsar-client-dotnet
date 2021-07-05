@@ -37,7 +37,6 @@ let private processSimpleCommand (command : BaseCommand) (stream: Stream) (binar
     binaryWriter.Write(int32ToBigEndian totalSize)
     stream.Seek(0L, SeekOrigin.Begin) |> ignore
 
-    Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
     stream.CopyToAsync(output)
     
 let private processComplexCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[])
@@ -85,8 +84,6 @@ let private processComplexCommand (command : BaseCommand) (metadata: MessageMeta
     binaryWriter.Write(int32ToBigEndian totalSize)
 
     stream.Seek(0L, SeekOrigin.Begin) |> ignore
-
-    Log.Logger.LogDebug("Sending message of type {0}", command.``type``)
     stream.CopyToAsync(output)
 
 let serializeSimpleCommand(command : BaseCommand) =
@@ -179,6 +176,11 @@ let newConnect (authMethodName: string) (authData: AuthData) (clientVersion: str
     | Some logicalAddress -> request.ProxyToBrokerUrl <- sprintf "%s:%d" logicalAddress.Host logicalAddress.Port
     | None -> ()
     let command = BaseCommand(``type`` = CommandType.Connect, Connect = request)
+    command |> serializeSimpleCommand
+
+let newPing () : Payload =
+    let request = CommandPing()
+    let command = BaseCommand(``type`` = CommandType.Ping, Ping = request)
     command |> serializeSimpleCommand
 
 let newPong () : Payload =

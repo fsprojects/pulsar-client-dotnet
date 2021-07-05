@@ -92,6 +92,11 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
             { config with
                 EnableTransaction = enableTransaction }
             
+    member this.KeepAliveInterval keepAliveInterval =
+        PulsarClientBuilder
+            { config with
+                KeepAliveInterval = keepAliveInterval }
+            
     member this.BuildAsync() =
         let client =
             config

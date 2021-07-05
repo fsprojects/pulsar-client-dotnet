@@ -24,6 +24,7 @@ type PulsarClientConfiguration =
         EnableTransaction: bool
         InitialBackoffInterval: TimeSpan
         MaxBackoffInterval: TimeSpan
+        KeepAliveInterval: TimeSpan
     }
     static member Default =
         {
@@ -42,6 +43,7 @@ type PulsarClientConfiguration =
             EnableTransaction = false
             InitialBackoffInterval = TimeSpan.FromMilliseconds(100.0)
             MaxBackoffInterval = TimeSpan.FromSeconds(60.0)
+            KeepAliveInterval = TimeSpan.FromSeconds(30.0)
         }
 
 type ConsumerConfiguration<'T> =

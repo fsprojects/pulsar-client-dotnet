@@ -165,7 +165,7 @@ let tests =
                                 let time = DateTime.Now.ToShortTimeString()
                                 try
                                     let! msgId = producer.SendAsync(time |> Encoding.UTF8.GetBytes)
-                                    Log.Logger.Information("{0} sent: {1}", msgId, time)
+                                    Log.Logger.Information("MessageId {0} sent: {1}", msgId, time)
                                 with Flatten ex ->
                                     Log.Logger.Error(ex, "{0} failed: {1}", "Sending", time)
                     }:> Task)
@@ -176,9 +176,9 @@ let tests =
                         try
                             while true do
                                 let! msg = consumer.ReceiveAsync()
-                                Log.Logger.Information("{0} received: {1}", msg.MessageId, msg.Data |> Encoding.UTF8.GetString)
+                                Log.Logger.Information("MessageId {0} received: {1}", msg.MessageId, msg.Data |> Encoding.UTF8.GetString)
                                 do! consumer.AcknowledgeAsync(msg.MessageId)
-                                Log.Logger.Information("{0} acknowledged: {1}", msg.MessageId, msg.Data |> Encoding.UTF8.GetString)
+                                Log.Logger.Information("MessageId {0} acknowledged: {1}", msg.MessageId, msg.Data |> Encoding.UTF8.GetString)
                         with ex ->
                             Log.Logger.Error(ex, "Receive failed")
                     }:> Task)
