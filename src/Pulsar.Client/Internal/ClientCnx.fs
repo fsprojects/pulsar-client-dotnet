@@ -177,7 +177,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 
     let handleKeepAliveTimeout() =
         if this.WaitingForPingResponse then
-            this.OperationsMb.Post(ChannelInactive)
+            connection.Dispose()
         else
             this.WaitingForPingResponse <- true
             Commands.newPing() |> SocketMessageWithoutReply |> this.SendMb.Post
