@@ -7,6 +7,7 @@
   </PropertyGroup>
   <PropertyGroup>
     <NoWarn>3186</NoWarn>
+    <DefineConstants>TRACE;NOTLS</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Expect.fs" />
