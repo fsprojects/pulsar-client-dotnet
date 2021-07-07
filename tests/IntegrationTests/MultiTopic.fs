@@ -258,7 +258,7 @@ let tests =
             let subscriptionName = "testPulsar"
             let prefix = sprintf "persistent://public/default/%s" (Guid.NewGuid().ToString("N"))
             let topicPattern = $"{prefix}-*"
-            let messageNumber = 200
+            let messageNumber = 2000
 
             let client = getClient()
               
