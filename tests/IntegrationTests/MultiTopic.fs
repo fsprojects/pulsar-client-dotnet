@@ -249,5 +249,66 @@ let tests =
             do! Task.WhenAll(send2, receiveAll) |> Async.AwaitTask
             
             Log.Debug("Finished Subscribe to new topic")
-    }
-]
+        }
+        
+        ptestAsync "2К of topics" {
+    
+            Log.Debug("Started 2К of topics")
+            let subscriptionName = "testPulsar"
+            let prefix = sprintf "persistent://public/default/%s" (Guid.NewGuid().ToString("N"))
+            let topicPattern = $"{prefix}-*"
+            let messageNumber = 2000
+
+            let client = getClient()
+              
+            let producers =
+                [|
+                    for i in 1..messageNumber do
+                        task {
+                                let! producer =
+                                    client
+                                        .NewProducer()
+                                        .Topic($"{prefix}-{i}")
+                                        .ProducerName($"multitopic-{i}")
+                                        .EnableBatching(false)
+                                        .CreateAsync()
+                                return producer
+                        } 
+                |]
+                
+            let! _ = Task.WhenAll(producers) |> Async.AwaitTask
+
+            let! consumer =
+                client.NewConsumer()
+                    .TopicsPattern(topicPattern)
+                    .PatternAutoDiscoveryPeriod(TimeSpan.FromSeconds(2.0))
+                    .SubscriptionName(subscriptionName)
+                    .SubscribeAsync() |> Async.AwaitTask
+                    
+            do! Async.Sleep(30000)
+            Log.Warning("Finished sleeping")
+            
+            let mutable i = 0
+            [|
+                for producer in producers do
+                    task {
+                            let i1 = i
+                            let! p = producer
+                            Log.Information("{0} before send", i1)
+                            let! msgId = p.SendAsync([|2uy|])
+                            Log.Information("{0} after send", i1)
+                            return ()
+                    } :> Task
+                    i <- i + 1
+            |] |> Task.WaitAll
+            Log.Warning("Messages sent")
+            for i in 1..messageNumber do
+                let! message = consumer.ReceiveAsync() |> Async.AwaitTask
+                Log.Warning($"{i} I've got message")
+                do! consumer.AcknowledgeAsync(message.MessageId) |> Async.AwaitTask
+            
+            Log.Debug("Finished 2К of topics")
+        }
+        
+       
+    ]
