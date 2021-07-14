@@ -29,16 +29,17 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
     let whenAnyTask () =
         let tasksCount = tasks.Count
         let randIndex = random.Next(0, tasksCount)
-        let mutable i = (randIndex + 1) % tasksCount
+        let mutable i = 0
         let mutable completedFound = false
         let mutable result = null
-        while (i <> randIndex && completedFound = false) do
-            let t = tasks.[i]
+        while (i < tasksCount && completedFound = false) do
+            let index = (randIndex + i) % tasksCount
+            let t = tasks.[index]
             if t.IsCompleted then
                 completedFound <- true
                 result <- t
             else
-                i <- (i + 1) % tasksCount
+                i <- i + 1
         if completedFound then
             result |> Task.FromResult
         else
