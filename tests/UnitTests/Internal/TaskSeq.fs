@@ -185,4 +185,19 @@ let tests =
             Expect.equal "" 500 result3Task.Result
             Expect.equal "" 550 result4
         }
+        
+        testAsync "Completed tasks come in unpredicted order" {
+            
+            let gen1 = fun () -> Task.FromResult(1)
+            let gen2 = fun () -> Task.FromResult(2)
+            let gen3 = fun () -> Task.FromResult(3)
+            let gen4 = fun () -> Task.FromResult(4)
+            
+            
+            let ts = TaskSeq<int>([gen1; gen2; gen3; gen4])
+            let results1 = [ ts.Next().Result; ts.Next().Result; ts.Next().Result; ts.Next().Result; ts.Next().Result  ]
+            let results2 = [ ts.Next().Result; ts.Next().Result; ts.Next().Result; ts.Next().Result; ts.Next().Result  ]
+            
+            Expect.notEqual "" results1 results2 
+        }
     ]

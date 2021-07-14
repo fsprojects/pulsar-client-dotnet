@@ -1,5 +1,6 @@
 namespace Pulsar.Client.Internal
 
+open System
 open System.Collections.Generic
 open System.Threading.Tasks
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -23,6 +24,25 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
     let mutable nextWaiting = false
     let waitingQueue = Queue()
     let mutable resetWhenAnyTcs = TaskCompletionSource()
+    let random = Random()
+    
+    let whenAnyTask () =
+        let tasksCount = tasks.Count
+        let randIndex = random.Next(0, tasksCount)
+        let mutable i = (randIndex + 1) % tasksCount
+        let mutable completedFound = false
+        let mutable result = null
+        while (i <> randIndex && completedFound = false) do
+            let t = tasks.[i]
+            if t.IsCompleted then
+                completedFound <- true
+                result <- t
+            else
+                i <- (i + 1) % tasksCount
+        if completedFound then
+            result |> Task.FromResult
+        else
+            tasks |> Task.WhenAny
     
     let mb = MailboxProcessor<TaskSeqMessage<'T>>.Start(fun inbox ->
 
@@ -33,7 +53,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 | WhenAnyTask channel ->
                     
                     Log.Logger.LogTrace("TaskSeq.WhenAnyTask nextWaiting:{0}", nextWaiting)
-                    tasks |> Task.WhenAny |> channel.Reply
+                    whenAnyTask() |> channel.Reply
                     return! loop ()
                 
                 | Next channel ->
@@ -47,7 +67,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                         waitingQueue.Enqueue channel
                     else
                         nextWaiting <- true
-                        tasks |> Task.WhenAny |> channel.Reply
+                        whenAnyTask() |> channel.Reply
                     return! loop ()
                         
                 | NextComplete completedTask ->
@@ -60,7 +80,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                         Log.Logger.LogWarning("TaskSeq: generator was removed, but task has completed")
                     if tasks.Count > 1 && waitingQueue.Count > 0 then
                         let channel = waitingQueue.Dequeue()
-                        tasks |> Task.WhenAny |> channel.Reply
+                        whenAnyTask() |> channel.Reply
                     else
                         nextWaiting <- false
                     return! loop ()
@@ -85,7 +105,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                     if noGenerators && waitingQueue.Count > 0 && not nextWaiting then
                         nextWaiting <- true
                         let channel = waitingQueue.Dequeue()
-                        tasks |> Task.WhenAny |> channel.Reply
+                        whenAnyTask() |> channel.Reply
                     else
                         resetWhenAnyTcs.SetCanceled()
                         resetWhenAnyTcs <- TaskCompletionSource()
