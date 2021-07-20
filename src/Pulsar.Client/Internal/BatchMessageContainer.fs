@@ -60,7 +60,7 @@ type internal OpSendMsgWrapper<'T> = {
     PartitionKey: MessageKey option
     OrderingKey: byte[] option
     TxnId: TxnId option
-    ReplicateToes: IEnumerable<string> option
+    ReplicationClusters: IEnumerable<string> option
 }
 
 [<AbstractClass>]
@@ -104,7 +104,7 @@ type internal MessageContainer<'T>(config: ProducerConfiguration) =
     member val MaxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE with get, set
     member val NumMessagesInBatch = 0 with get, set
     member val CurrentTxnId = None with get, set
-    member val ReplicateToes = None with get, set
+    member val ReplicationClusters = None with get, set
 
 open BatchHelpers
 
@@ -128,7 +128,7 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
             PartitionKey = batchItems.[0].Message.Key
             OrderingKey = batchItems.[0].Message.OrderingKey
             TxnId = this.CurrentTxnId
-            ReplicateToes = this.ReplicateToes
+            ReplicationClusters = this.ReplicationClusters
         }
     override this.CreateOpSendMsgs () =
         raise <| NotSupportedException()
@@ -183,7 +183,7 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
                 PartitionKey = batchItems.[0].Message.Key
                 OrderingKey = batchItems.[0].Message.OrderingKey
                 TxnId = this.CurrentTxnId
-                ReplicateToes = this.ReplicateToes
+                ReplicationClusters = this.ReplicationClusters
             })
     override this.Clear() =
         keyBatchItems.Clear()

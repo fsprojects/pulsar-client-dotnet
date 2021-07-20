@@ -226,7 +226,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
     let createMessageMetadata (sequenceId: SequenceId) (txnId: TxnId option) (numMessagesInBatch: int option)
         (payload: byte[]) (key: MessageKey option) (properties: IReadOnlyDictionary<string, string>) (deliverAt: TimeStamp option)
-        (orderingKey: byte[] option) (eventTime: TimeStamp option) (replicateToes: IEnumerable<string> option) =
+        (orderingKey: byte[] option) (eventTime: TimeStamp option) (replicationClusters: IEnumerable<string> option) =
         let metadata =
             MessageMetadata (
                 SequenceId = (sequenceId |> uint64),
@@ -275,10 +275,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             metadata.TxnidMostBits <- txnId.MostSigBits
         | None ->
             ()
-        match replicateToes with
-        | Some replicateToes ->
-            metadata.ReplicateToes.Clear()
-            metadata.ReplicateToes.AddRange(replicateToes)
+        match replicationClusters with
+        | Some replicationClusters ->
+            metadata.ReplicateToes.AddRange(replicationClusters)
         | None ->
             ()
                 
@@ -288,11 +287,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         %Math.Max(%pendingMessage.SequenceId, %pendingMessage.HighestSequenceId)
         
     let processOpSendMsg { OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId;
-                          PartitionKey = partitionKey; OrderingKey = orderingKey; TxnId = txnId; ReplicateToes = replicateToes } =
+                          PartitionKey = partitionKey; OrderingKey = orderingKey; TxnId = txnId; ReplicationClusters = replicationClusters } =
         let batchPayload, batchCallbacks = opSendMsg;
         let batchSize = batchCallbacks.Length
         let metadata = createMessageMetadata lowestSequenceId txnId (Some batchSize)
-                           batchPayload partitionKey EmptyProps None orderingKey None replicateToes
+                           batchPayload partitionKey EmptyProps None orderingKey None replicationClusters
         let compressedBatchPayload = compressionCodec.Encode batchPayload 
         if (compressedBatchPayload.Length > maxMessageSize) then
             batchCallbacks
@@ -411,7 +410,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     while chunkId < totalChunks && not chunkError do
                         let metadata = createMessageMetadata sequenceId txnId None
                                            message.Payload message.Key message.Properties message.DeliverAt
-                                           message.OrderingKey message.EventTime message.ReplicateToes 
+                                           message.OrderingKey message.EventTime message.ReplicationClusters 
                         let chunkPayload = 
                             if isChunked && producerConfig.Topic.IsPersistent then
                                 metadata.Uuid <- uuid
