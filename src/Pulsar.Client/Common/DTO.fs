@@ -348,7 +348,8 @@ type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey 
             ?sequenceId : SequenceId,
             ?orderingKey: byte[],
             ?eventTime: TimeStamp,
-            ?txn: Transaction) =
+            ?txn: Transaction,
+            ?replicateToes: IEnumerable<string>) =
             
     let properties = defaultArg properties0 EmptyProps
     member this.Value = value
@@ -360,26 +361,37 @@ type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey 
     member this.OrderingKey = orderingKey
     member this.EventTime = eventTime
     member this.Txn = txn
+    member this.ReplicateToes = replicateToes
             
     /// Get a new instance of the message with updated properties
     member this.WithProperties properties =
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
-                       ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn)
+                       ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn,
+                       ?replicateToes =  replicateToes)
     /// Get a new instance of the message with updated deliverAt
     member this.WithDeliverAt (deliverAt: Nullable<TimeStamp>) =
         MessageBuilder(value, payload, key, properties, ?deliverAt = Option.ofNullable deliverAt,
-                       ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn)
+                       ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn,
+                       ?replicateToes =  replicateToes)
     member this.WithEventTime (eventTime: Nullable<TimeStamp>) =
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
-                       ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = Option.ofNullable eventTime, ?txn = txn)
+                       ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = Option.ofNullable eventTime, ?txn = txn,
+                       ?replicateToes =  replicateToes)
     /// Get a new instance of the message with updated sequenceId
     member this.WithSequenceId (sequenceId: Nullable<SequenceId>) =
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
-                       ?sequenceId = Option.ofNullable sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn)
+                       ?sequenceId = Option.ofNullable sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn,
+                       ?replicateToes =  replicateToes)
     /// Get a new instance of the message with updated orderingKey
     member this.WithOrderingKey (orderingKey: byte[]) =
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
-                       ?sequenceId = sequenceId, ?orderingKey = Option.ofObj orderingKey, ?eventTime = eventTime, ?txn = txn)
+                       ?sequenceId = sequenceId, ?orderingKey = Option.ofObj orderingKey, ?eventTime = eventTime, ?txn = txn,
+                       ?replicateToes =  replicateToes)
+    /// Get a new instance of the message with replication to
+    member this.WithReplicateTo (replicateToes: IEnumerable<string>) =
+        MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
+                       ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn,
+                       ?replicateToes =  Option.ofObj replicateToes)
         
         
 type internal WriterStream = Stream

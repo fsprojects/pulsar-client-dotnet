@@ -226,7 +226,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
     let createMessageMetadata (sequenceId: SequenceId) (txnId: TxnId option) (numMessagesInBatch: int option)
         (payload: byte[]) (key: MessageKey option) (properties: IReadOnlyDictionary<string, string>) (deliverAt: TimeStamp option)
-        (orderingKey: byte[] option) (eventTime: TimeStamp option)=
+        (orderingKey: byte[] option) (eventTime: TimeStamp option) (replicateToes: IEnumerable<string> option) =
         let metadata =
             MessageMetadata (
                 SequenceId = (sequenceId |> uint64),
@@ -275,18 +275,25 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             metadata.TxnidMostBits <- txnId.MostSigBits
         | None ->
             ()
+        match replicateToes with
+        | Some replicateToes ->
+            metadata.ReplicateToes.Clear()
+            metadata.ReplicateToes.AddRange(replicateToes)
+        | None ->
+            ()
+                
         metadata
 
     let getHighestSequenceId (pendingMessage: PendingMessage<'T>): SequenceId =
         %Math.Max(%pendingMessage.SequenceId, %pendingMessage.HighestSequenceId)
         
     let processOpSendMsg { OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId;
-                          PartitionKey = partitionKey; OrderingKey = orderingKey; TxnId = txnId } =
+                          PartitionKey = partitionKey; OrderingKey = orderingKey; TxnId = txnId; ReplicateToes = replicateToes } =
         let batchPayload, batchCallbacks = opSendMsg;
         let batchSize = batchCallbacks.Length
         let metadata = createMessageMetadata lowestSequenceId txnId (Some batchSize)
-                           batchPayload partitionKey EmptyProps None orderingKey None
-        let compressedBatchPayload = compressionCodec.Encode batchPayload
+                           batchPayload partitionKey EmptyProps None orderingKey None replicateToes
+        let compressedBatchPayload = compressionCodec.Encode batchPayload 
         if (compressedBatchPayload.Length > maxMessageSize) then
             batchCallbacks
             |> Seq.iter (fun (_, message, tcs) ->
@@ -404,7 +411,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     while chunkId < totalChunks && not chunkError do
                         let metadata = createMessageMetadata sequenceId txnId None
                                            message.Payload message.Key message.Properties message.DeliverAt
-                                           message.OrderingKey message.EventTime
+                                           message.OrderingKey message.EventTime message.ReplicateToes 
                         let chunkPayload = 
                             if isChunked && producerConfig.Topic.IsPersistent then
                                 metadata.Uuid <- uuid
