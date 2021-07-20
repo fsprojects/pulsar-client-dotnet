@@ -798,7 +798,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             keyBytes:byte[],
             orderingKey:byte[],
             eventTime: Nullable<TimeStamp>,
-            txn:Transaction) =
+            txn:Transaction,
+            replicationClusters: string seq) =
             keyValueProcessor
             |> Option.map(fun kvp -> kvp.EncodeKeyValue value)
             |> Option.map(fun struct(k, v) ->
@@ -809,7 +810,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     ?sequenceId = (sequenceId |> Option.ofNullable),
                     ?orderingKey = (orderingKey |> Option.ofObj),
                     ?eventTime = (eventTime |> Option.ofNullable),
-                    ?txn = (txn |> Option.ofObj)))
+                    ?txn = (txn |> Option.ofObj),
+                    ?replicationClusters = (replicationClusters |> Option.ofObj)))
             |> Option.defaultWith (fun () ->
                 let keyObj =
                     if String.IsNullOrEmpty(key) && (isNull keyBytes || keyBytes.Length = 0) then
@@ -824,7 +826,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     ?sequenceId = (sequenceId |> Option.ofNullable),
                     ?orderingKey = (orderingKey |> Option.ofObj),
                     ?eventTime = (eventTime |> Option.ofNullable),
-                    ?txn = (txn |> Option.ofObj)))
+                    ?txn = (txn |> Option.ofObj),
+                    ?replicationClusters = (replicationClusters |> Option.ofObj)))
 
     interface IProducer<'T> with
         member this.SendAndForgetAsync (message: 'T) =
@@ -873,13 +876,14 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             [<Optional; DefaultParameterValue(null:byte[])>]keyBytes:byte[],
             [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[],
             [<Optional; DefaultParameterValue(Nullable():Nullable<TimeStamp>)>]eventTime:Nullable<TimeStamp>,
-            [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction) =
+            [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction,
+            [<Optional; DefaultParameterValue(null:string seq)>]replicationClusters:string seq) =
             
             if (txn |> isNull |> not) && producerConfig.SendTimeout > TimeSpan.Zero then
                 raise <| ArgumentException "Only producers disabled sendTimeout are allowed to produce transactional messages"
             
             ProducerImpl.NewMessage(keyValueProcessor, schema, value, key, properties,
-                                    deliverAt, sequenceId, keyBytes, orderingKey, eventTime, txn)
+                                    deliverAt, sequenceId, keyBytes, orderingKey, eventTime, txn, replicationClusters)
                 
         member this.ProducerId = producerId
 

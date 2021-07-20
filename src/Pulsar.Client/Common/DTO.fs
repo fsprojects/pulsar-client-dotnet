@@ -8,12 +8,9 @@ open pulsar.proto
 open System.IO.Pipelines
 open System.IO
 open System.Threading.Tasks
-open FSharp.UMX
-open Pulsar.Client.Internal
 open System.Collections.Generic
 open System.Runtime.InteropServices
 open System.Text
-open ProtoBuf
 
 type internal PartitionedTopicMetadata =
     {
@@ -182,12 +179,12 @@ type EncryptionKey(name: string, value: byte [],
     member this.Metadata = metadata
    
     static member internal ToProto(encKey: EncryptionKey) =
-        let result = pulsar.proto.EncryptionKeys(Key = encKey.Name, Value = encKey.Value)
+        let result = EncryptionKeys(Key = encKey.Name, Value = encKey.Value)
         for KeyValue(k, v) in encKey.Metadata do
              result.Metadatas.Add(KeyValue(Key = k, Value = v))
         result
     
-    static member internal FromProto(encKey: pulsar.proto.EncryptionKeys) =
+    static member internal FromProto(encKey: EncryptionKeys) =
         let metadata =
             if encKey.Metadatas.Count > 0 then
                 encKey.Metadatas
@@ -335,7 +332,7 @@ type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 
     interface IEnumerable<Message<'T>> with
         member this.GetEnumerator() =
-            messageList.GetEnumerator() :> Collections.IEnumerator
+            messageList.GetEnumerator() :> IEnumerator
         member this.GetEnumerator() =
             messageList.GetEnumerator() :> IEnumerator<Message<'T>>
 
@@ -349,7 +346,7 @@ type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey 
             ?orderingKey: byte[],
             ?eventTime: TimeStamp,
             ?txn: Transaction,
-            ?replicationClusters: IEnumerable<string>) =
+            ?replicationClusters: string seq) =
             
     let properties = defaultArg properties0 EmptyProps
     member this.Value = value
@@ -367,33 +364,37 @@ type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey 
     member this.WithProperties properties =
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
                        ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn,
-                       ?replicationClusters =  replicationClusters)
+                       ?replicationClusters = replicationClusters)
     /// Get a new instance of the message with updated deliverAt
     member this.WithDeliverAt (deliverAt: Nullable<TimeStamp>) =
         MessageBuilder(value, payload, key, properties, ?deliverAt = Option.ofNullable deliverAt,
                        ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn,
-                       ?replicationClusters =  replicationClusters)
+                       ?replicationClusters = replicationClusters)
     member this.WithEventTime (eventTime: Nullable<TimeStamp>) =
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
                        ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = Option.ofNullable eventTime, ?txn = txn,
-                       ?replicationClusters =  replicationClusters)
+                       ?replicationClusters = replicationClusters)
     /// Get a new instance of the message with updated sequenceId
     member this.WithSequenceId (sequenceId: Nullable<SequenceId>) =
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
                        ?sequenceId = Option.ofNullable sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn,
-                       ?replicationClusters =  replicationClusters)
+                       ?replicationClusters = replicationClusters)
     /// Get a new instance of the message with updated orderingKey
     member this.WithOrderingKey (orderingKey: byte[]) =
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
                        ?sequenceId = sequenceId, ?orderingKey = Option.ofObj orderingKey, ?eventTime = eventTime, ?txn = txn,
-                       ?replicationClusters =  replicationClusters)
-    /// Get a new instance of the message with replication to
+                       ?replicationClusters = replicationClusters)
+    /// Get a new instance of the message with updated replicationClusters
     member this.WithReplicateTo (replicationClusters: IEnumerable<string>) =
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
                        ?sequenceId = sequenceId, ?orderingKey = orderingKey, ?eventTime = eventTime, ?txn = txn,
-                       ?replicationClusters =  Option.ofObj replicationClusters)
-        
-        
+                       ?replicationClusters = Option.ofObj replicationClusters)
+
+type MessageBuilder =
+    /// Set replicationClusters to this value to disable replication on message
+    static member DisableReplication =
+        DisableReplication
+
 type internal WriterStream = Stream
 type internal Payload = (WriterStream -> Task<unit>) * BaseCommand.Type
 type internal Connection =
