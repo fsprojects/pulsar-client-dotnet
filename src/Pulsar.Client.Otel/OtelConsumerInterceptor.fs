@@ -3,10 +3,12 @@
 open System
 open System.Collections.Generic
 open System.Diagnostics
+open System.Threading.Channels
 open Microsoft.Extensions.Logging
 open OpenTelemetry.Context.Propagation
 open Pulsar.Client.Api
 open Pulsar.Client.Common
+open FSharp.Control.Tasks.V2
 
 type AckResult = Result<string, exn>
 
@@ -57,24 +59,20 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                 | true, v -> seq { v }
                 | false, _ -> Seq.empty)
     
-    let mb =  MailboxProcessor<InterceptorCommand>.Start (fun inbox ->
-              
-        let rec messageLoop() =
-            async {
-                let! msg = inbox.Receive() 
-                match msg with
+    let mb = Channel.CreateUnbounded<InterceptorCommand>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    do task {
+        let mutable continueLoop = true
+        while continueLoop do
+            try
+                match! mb.Reader.ReadAsync() with
                 | InterceptorCommand.Ack (msgId, ackResult) ->
                     endActivity msgId ackResult
-                    return! messageLoop()
                 | InterceptorCommand.NegativeAck (msgId, ackResult) ->
                     endActivity msgId ackResult
-                    return! messageLoop()
                 | InterceptorCommand.Timeout (msgId, ackResult) ->
                     endActivity msgId ackResult
-                    return! messageLoop()
                 | InterceptorCommand.CumulativeAck (msgId, ackResult) ->
                     endPreviousActivities msgId ackResult
-                    return! messageLoop()
                 | InterceptorCommand.BeforeConsume (msgId, activity) ->
                     match cache.TryGetValue msgId with
                     | true, _ ->
@@ -83,7 +81,6 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                             .Dispose()
                     | _ ->
                         cache.Add(msgId, activity)
-                    return! messageLoop()
                 | InterceptorCommand.Stop ->
                     for KeyValue(_, activity) in cache do 
                         activity
@@ -92,10 +89,11 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     activitySource.Dispose()
                     cache.Clear()
                     log.LogInformation("{0} Closed", prefix)
-            }       
-        messageLoop()
-    )
-    do mb.Error.Add(fun ex -> log.LogCritical(ex, "{0} mailbox failure", prefix))
+                    continueLoop <- false
+            with ex -> log.LogCritical(ex, "{0} mailbox failure", prefix)
+        } |> ignore
+
+    let postMb msg = mb.Writer.TryWrite(msg) |> ignore
     
     interface IConsumerInterceptor<'T> with
         member this.BeforeConsume(consumer, message) =
@@ -119,15 +117,15 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     parentContext.Baggage.GetBaggage()
                     |> Seq.iter (fun (KeyValue kv) -> 
                         activity.AddBaggage kv |> ignore) 
-                    mb.Post <| InterceptorCommand.BeforeConsume(message.MessageId, activity)
+                    postMb (InterceptorCommand.BeforeConsume(message.MessageId, activity))
             message
 
 
         member this.Dispose() =
-            mb.Post InterceptorCommand.Stop
+            postMb InterceptorCommand.Stop
 
         member this.OnAckTimeoutSend(_, messageId) =
-            mb.Post <| InterceptorCommand.Timeout(messageId, nameof InterceptorCommand.Timeout |> Ok)
+            postMb (InterceptorCommand.Timeout(messageId, nameof InterceptorCommand.Timeout |> Ok))
 
         member this.OnAcknowledge(_, messageId, exn) =
             let ackResult =
@@ -136,7 +134,7 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     nameof InterceptorCommand.Ack |> Ok
                 | _ ->
                     exn |> Error
-            mb.Post <| InterceptorCommand.Ack(messageId, ackResult)
+            postMb (InterceptorCommand.Ack(messageId, ackResult))
 
         member this.OnAcknowledgeCumulative(_, messageId, exn) =
             let ackResult =
@@ -145,8 +143,8 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     nameof InterceptorCommand.CumulativeAck |> Ok
                 | _ ->
                     exn |> Error
-            mb.Post <| InterceptorCommand.CumulativeAck(messageId, ackResult)
+            postMb (InterceptorCommand.CumulativeAck(messageId, ackResult))
             
         member this.OnNegativeAcksSend(_, messageId) =
-            mb.Post <| InterceptorCommand.NegativeAck(messageId, nameof InterceptorCommand.NegativeAck |> Ok)
+            postMb (InterceptorCommand.NegativeAck(messageId, nameof InterceptorCommand.NegativeAck |> Ok))
             
