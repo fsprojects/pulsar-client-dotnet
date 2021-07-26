@@ -60,7 +60,6 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                         try
                             let! partitionMeta =
                                 lookup.GetPartitionedTopicMetadata(TopicName.TRANSACTION_COORDINATOR_ASSIGN.CompleteTopicName)
-                                |> Async.AwaitTask
                             let tasks = 
                                 if partitionMeta.Partitions > 0 then
                                     seq {
@@ -76,8 +75,8 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                                     let handler = TransactionMetaStoreHandler(clientConfig, %0UL,
                                                                               getTCAssignTopicName(-1), connectionPool, lookup, tcs)
                                     handlers.Add(handler)
-                                    seq { tcs.Task }                                
-                            do! tasks |> Task.WhenAll |> Async.AwaitTask |> Async.Ignore
+                                    seq { tcs.Task }
+                            let! _ = Task.WhenAll(tasks)
                             Log.Logger.LogInformation("{0} connected with partitions count {1}", prefix, partitionMeta.Partitions)
                             state <- TransactionCoordinatorState.READY
                             ch.SetResult(Ok ())
