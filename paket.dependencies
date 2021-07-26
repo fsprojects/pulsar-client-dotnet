@@ -65,3 +65,4 @@ group OTel
   nuget Microsoft.Extensions.Logging.Console
   nuget System.Diagnostics.DiagnosticSource
   nuget OpenTelemetry.Api
+  nuget System.Threading.Channels
