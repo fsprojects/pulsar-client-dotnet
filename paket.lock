@@ -131,6 +131,8 @@ NUGET
       System.Runtime.CompilerServices.Unsafe (>= 5.0)
       System.Text.Encodings.Web (>= 5.0.1)
       System.Threading.Tasks.Extensions (>= 4.5.4)
+    System.Threading.Channels (5.0)
+      System.Threading.Tasks.Extensions (>= 4.5.4)
     System.Threading.Tasks (4.3)
       Microsoft.NETCore.Platforms (>= 1.1)
       Microsoft.NETCore.Targets (>= 1.1)

@@ -24,6 +24,7 @@ nuget AvroSchemaGenerator
 nuget Apache.Avro
 nuget NSec.Cryptography
 nuget PemUtils
+nuget System.Threading.Channels
 
 group Tests
   framework: net5.0
