@@ -46,10 +46,9 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
     
 
     let mb = Channel.CreateUnbounded<TransactionCoordinatorMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do task {
+    do (task {
         let mutable continueLoop = true
         while continueLoop do
-            try
                 match! mb.Reader.ReadAsync() with
                 | TransactionCoordinatorMessage.Start ch ->
                     
@@ -100,8 +99,10 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                         handlers.Clear()
                         state <- TransactionCoordinatorState.CLOSED
                     continueLoop <- false
-            with ex -> Log.Logger.LogCritical(ex, "transaction coordinator mailbox failure")
-        } |> ignore
+        } :> Task).ContinueWith(fun t ->
+                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "transaction coordinator mailbox failure")
+                                    else Log.Logger.LogInformation("transaction coordinator mailbox has stopped normally"))
+        |> ignore
 
     member this.Mb: Channel<TransactionCoordinatorMessage> = mb
     

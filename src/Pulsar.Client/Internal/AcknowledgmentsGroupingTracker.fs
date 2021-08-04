@@ -182,10 +182,9 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         }
     
     let mb = Channel.CreateUnbounded<GroupingTrackerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do task {
+    do (task {
         let mutable continueLoop = true
         while continueLoop do
-            try
                 match! mb.Reader.ReadAsync() with
                 | GroupingTrackerMessage.IsDuplicate (msgId, channel) ->
                 
@@ -244,8 +243,10 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                 
                     do! flush()
                     continueLoop <- false
-            with ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
-        } |> ignore
+        } :> Task).ContinueWith(fun t ->
+                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
+                                    else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+        |> ignore
 
     let timer = new Timer()
     let tryLaunchTimer() =

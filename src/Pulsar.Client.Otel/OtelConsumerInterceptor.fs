@@ -9,6 +9,7 @@ open OpenTelemetry.Context.Propagation
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open FSharp.Control.Tasks.V2
+open System.Threading.Tasks
 
 type AckResult = Result<string, exn>
 
@@ -60,38 +61,39 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                 | false, _ -> Seq.empty)
     
     let mb = Channel.CreateUnbounded<InterceptorCommand>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do task {
+    do (task {
         let mutable continueLoop = true
         while continueLoop do
-            try
-                match! mb.Reader.ReadAsync() with
-                | InterceptorCommand.Ack (msgId, ackResult) ->
-                    endActivity msgId ackResult
-                | InterceptorCommand.NegativeAck (msgId, ackResult) ->
-                    endActivity msgId ackResult
-                | InterceptorCommand.Timeout (msgId, ackResult) ->
-                    endActivity msgId ackResult
-                | InterceptorCommand.CumulativeAck (msgId, ackResult) ->
-                    endPreviousActivities msgId ackResult
-                | InterceptorCommand.BeforeConsume (msgId, activity) ->
-                    match cache.TryGetValue msgId with
-                    | true, _ ->
-                        activity
-                            .SetTag("acknowledge.type", "Duplicate")
-                            .Dispose()
-                    | _ ->
-                        cache.Add(msgId, activity)
-                | InterceptorCommand.Stop ->
-                    for KeyValue(_, activity) in cache do 
-                        activity
-                            .SetTag("acknowledge.type", "InterceptorStopped")
-                            .Dispose()
-                    activitySource.Dispose()
-                    cache.Clear()
-                    log.LogInformation("{0} Closed", prefix)
-                    continueLoop <- false
-            with ex -> log.LogCritical(ex, "{0} mailbox failure", prefix)
-        } |> ignore
+            match! mb.Reader.ReadAsync() with
+            | InterceptorCommand.Ack (msgId, ackResult) ->
+                endActivity msgId ackResult
+            | InterceptorCommand.NegativeAck (msgId, ackResult) ->
+                endActivity msgId ackResult
+            | InterceptorCommand.Timeout (msgId, ackResult) ->
+                endActivity msgId ackResult
+            | InterceptorCommand.CumulativeAck (msgId, ackResult) ->
+                endPreviousActivities msgId ackResult
+            | InterceptorCommand.BeforeConsume (msgId, activity) ->
+                match cache.TryGetValue msgId with
+                | true, _ ->
+                    activity
+                        .SetTag("acknowledge.type", "Duplicate")
+                        .Dispose()
+                | _ ->
+                    cache.Add(msgId, activity)
+            | InterceptorCommand.Stop ->
+                for KeyValue(_, activity) in cache do 
+                    activity
+                        .SetTag("acknowledge.type", "InterceptorStopped")
+                        .Dispose()
+                activitySource.Dispose()
+                cache.Clear()
+                log.LogInformation("{0} Closed", prefix)
+                continueLoop <- false
+        } :> Task).ContinueWith(fun t ->
+                                    if t.IsFaulted then log.LogCritical(t.Exception, "{0} mailbox failure", prefix)
+                                    else log.LogInformation("{0} mailbox has stopped normally", prefix))
+        |> ignore
 
     let postMb msg = mb.Writer.TryWrite(msg) |> ignore
     
