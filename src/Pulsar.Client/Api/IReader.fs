@@ -16,6 +16,10 @@ type IReader<'T> =
     abstract member SeekAsync : messageId:MessageId -> Task<unit>
     /// Reset the subscription associated with this consumer to a specific message publish time (Unix timestamp in ms).    
     abstract member SeekAsync : timestamp:TimeStamp -> Task<unit>
+    /// Reset the subscription associated with this consumer to a specific message id, returned by resolver function.
+    abstract member SeekAsync: resolver: Func<string, MessageId> -> Task<unit>
+    /// Reset the subscription associated with this consumer to a specific message publish time (unix timestamp), returned by resolver function.
+    abstract member SeekAsync: resolver: Func<string, TimeStamp> -> Task<unit>    
     /// Return true if the topic was terminated and this consumer has already consumed all the messages in the topic.
     abstract member HasReachedEndOfTopic: bool
     /// Check if there is any message available to read from the current position.

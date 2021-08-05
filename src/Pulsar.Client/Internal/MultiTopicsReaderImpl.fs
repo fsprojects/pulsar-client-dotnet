@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Internal
 
+open System.Threading.Tasks
 open FSharp.UMX
 open Pulsar.Client.Common
 open Pulsar.Client.Api
@@ -71,7 +72,12 @@ type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfigurati
 
         member this.SeekAsync(timestamp: TimeStamp) =
             castedConsumer.SeekAsync(timestamp)
+            
+        member this.SeekAsync (resolver: Func<string, MessageId>) : Task<Unit>  =
+            castedConsumer.SeekAsync(resolver)
 
+        member this.SeekAsync (resolver: Func<string, TimeStamp>) : Task<Unit>  =
+            castedConsumer.SeekAsync(resolver)
         member this.HasReachedEndOfTopic with get() =
             castedConsumer.HasReachedEndOfTopic
 
