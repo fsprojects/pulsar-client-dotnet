@@ -1116,14 +1116,14 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 return! result
             }
             
-        member this.SeekAsync (resolver: string -> MessageId) : Task<Unit>  =
-            let inline resolveInternal topic = resolver %topic |> SeekData.MessageId 
+        member this.SeekAsync (resolver: Func<string, MessageId>) : Task<Unit>  =
+            let inline resolveInternal topic = resolver.Invoke %topic |> SeekData.MessageId 
             task {
                 let! result = mb.PostAndAsyncReply(fun channel -> SeekWithResolver(resolveInternal, channel))
                 return! result                
             }
-        member this.SeekAsync (resolver: string -> TimeStamp) : Task<Unit>  =
-            let inline resolveInternal topic = resolver %topic |> SeekData.Timestamp
+        member this.SeekAsync (resolver: Func<string, TimeStamp>) : Task<Unit>  =
+            let inline resolveInternal topic = resolver.Invoke %topic |> SeekData.Timestamp
             task {
                 let! result = mb.PostAndAsyncReply(fun channel -> SeekWithResolver(resolveInternal, channel))
                 return! result                
