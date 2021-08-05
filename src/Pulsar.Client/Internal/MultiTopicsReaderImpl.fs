@@ -73,11 +73,9 @@ type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfigurati
         member this.SeekAsync(timestamp: TimeStamp) =
             castedConsumer.SeekAsync(timestamp)
             
-        member this.SeekAsync (resolver: Func<string, MessageId>) : Task<Unit>  =
+        member this.SeekAsync (resolver: Func<string, SeekData>) : Task<Unit>  =
             castedConsumer.SeekAsync(resolver)
 
-        member this.SeekAsync (resolver: Func<string, TimeStamp>) : Task<Unit>  =
-            castedConsumer.SeekAsync(resolver)
         member this.HasReachedEndOfTopic with get() =
             castedConsumer.HasReachedEndOfTopic
 

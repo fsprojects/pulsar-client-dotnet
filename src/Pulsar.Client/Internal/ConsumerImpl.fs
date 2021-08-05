@@ -1573,15 +1573,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (Timestamp timestamp, channel))
             }
             
-        member this.SeekAsync (resolver: Func<string, MessageId>) : Task<Unit>  =
-            let messageId = resolver.Invoke %topicName.CompleteTopicName
+        member this.SeekAsync (resolver: Func<string, SeekData>) : Task<Unit>  =
+            let startFrom = resolver.Invoke %topicName.CompleteTopicName
             task {
-                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (MessageId messageId, channel))
-            }
-        member this.SeekAsync (resolver: Func<string, TimeStamp>) : Task<Unit>  =
-            let timestamp = resolver.Invoke %topicName.CompleteTopicName
-            task {
-                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (Timestamp timestamp, channel))
+                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (startFrom, channel))
             }
                         
         member this.GetLastMessageIdAsync () =

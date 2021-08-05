@@ -52,7 +52,7 @@ type internal MultiTopicConsumerMessage<'T> =
     | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
     | HasReachedEndOfTheTopic of AsyncReplyChannel<bool>
     | Seek of SeekData * AsyncReplyChannel<Task>
-    | SeekWithResolver of (CompleteTopicName -> SeekData) *  AsyncReplyChannel<Task> 
+    | SeekWithResolver of Func<string, SeekData> *  AsyncReplyChannel<Task> 
     | PatternTickTime
     | PartitionTickTime
     | GetStats of AsyncReplyChannel<Task<ConsumerStats array>>
@@ -818,12 +818,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
                     let seekTask = 
                         consumers
-                        |> Seq.map (fun (KeyValue(key, (consumer, _))) ->
-                            let seekData = resolver key 
-                            Log.Logger.LogDebug("{0} Seek {1}", prefix, seekData)
-                            match seekData with
-                            | Timestamp ts -> consumer.SeekAsync(ts)
-                            | MessageId msgId -> consumer.SeekAsync(msgId))
+                        |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))
                         |> Task.WhenAll
                     unAckedMessageTracker.Clear()
                     incomingMessages.Clear()
@@ -1116,19 +1111,12 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 return! result
             }
             
-        member this.SeekAsync (resolver: Func<string, MessageId>) : Task<Unit>  =
-            let inline resolveInternal topic = resolver.Invoke %topic |> SeekData.MessageId 
+        member this.SeekAsync (resolver: Func<string, SeekData>) : Task<Unit>  =
             task {
-                let! result = mb.PostAndAsyncReply(fun channel -> SeekWithResolver(resolveInternal, channel))
+                let! result = mb.PostAndAsyncReply(fun channel -> SeekWithResolver(resolver, channel))
                 return! result                
             }
-        member this.SeekAsync (resolver: Func<string, TimeStamp>) : Task<Unit>  =
-            let inline resolveInternal topic = resolver.Invoke %topic |> SeekData.Timestamp
-            task {
-                let! result = mb.PostAndAsyncReply(fun channel -> SeekWithResolver(resolveInternal, channel))
-                return! result                
-            }
-            
+           
         member this.GetLastMessageIdAsync () =
             Task.FromException<MessageId>(exn "GetLastMessageId operation not supported on multitopics consumer")
 

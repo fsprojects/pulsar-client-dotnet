@@ -81,10 +81,7 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
         member this.SeekAsync(timestamp: TimeStamp) =
             castedConsumer.SeekAsync(timestamp)
             
-        member this.SeekAsync (resolver: Func<string, MessageId>) : Task<Unit>  =
-            castedConsumer.SeekAsync(resolver)
-
-        member this.SeekAsync (resolver: Func<string, TimeStamp>) : Task<Unit>  =
+        member this.SeekAsync (resolver: Func<string, SeekData>) : Task<Unit>  =
             castedConsumer.SeekAsync(resolver)
 
         member this.HasReachedEndOfTopic with get() =
