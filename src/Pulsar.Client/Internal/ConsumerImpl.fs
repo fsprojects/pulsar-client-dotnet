@@ -39,7 +39,7 @@ type internal ConsumerMessage<'T> =
     | NegativeAcknowledge of MessageId
     | RedeliverUnacknowledged of RedeliverSet * AsyncReplyChannel<unit>
     | RedeliverAllUnacknowledged of AsyncReplyChannel<unit>
-    | SeekAsync of SeekData * AsyncReplyChannel<ResultOrException<unit>>
+    | SeekAsync of SeekType * AsyncReplyChannel<ResultOrException<unit>>
     | HasMessageAvailable of AsyncReplyChannel<Task<bool>>
     | ActiveConsumerChanged of bool
     | Close of AsyncReplyChannel<ResultOrException<unit>>
@@ -1573,7 +1573,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (Timestamp timestamp, channel))
             }
             
-        member this.SeekAsync (resolver: Func<string, SeekData>) : Task<Unit>  =
+        member this.SeekAsync (resolver: Func<string, SeekType>) : Task<Unit>  =
             let startFrom = resolver.Invoke %topicName.CompleteTopicName
             task {
                 return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (startFrom, channel))

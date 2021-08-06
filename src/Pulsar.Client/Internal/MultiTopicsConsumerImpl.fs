@@ -51,8 +51,8 @@ type internal MultiTopicConsumerMessage<'T> =
     | Close of AsyncReplyChannel<ResultOrException<unit>>
     | Unsubscribe of AsyncReplyChannel<ResultOrException<unit>>
     | HasReachedEndOfTheTopic of AsyncReplyChannel<bool>
-    | Seek of SeekData * AsyncReplyChannel<Task>
-    | SeekWithResolver of Func<string, SeekData> *  AsyncReplyChannel<Task> 
+    | Seek of SeekType * AsyncReplyChannel<Task>
+    | SeekWithResolver of Func<string, SeekType> *  AsyncReplyChannel<Task> 
     | PatternTickTime
     | PartitionTickTime
     | GetStats of AsyncReplyChannel<Task<ConsumerStats array>>
@@ -1111,7 +1111,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 return! result
             }
             
-        member this.SeekAsync (resolver: Func<string, SeekData>) : Task<Unit>  =
+        member this.SeekAsync (resolver: Func<string, SeekType>) : Task<Unit>  =
             task {
                 let! result = mb.PostAndAsyncReply(fun channel -> SeekWithResolver(resolver, channel))
                 return! result                
