@@ -2,6 +2,7 @@ module Pulsar.Client.Common.ConsumerBase
 
 open System.Collections.Generic
 open System.Threading
+open System.Threading.Tasks
 open Pulsar.Client.Api
 open Pulsar.Client.Internal
 open System
@@ -10,10 +11,10 @@ type UserCancellation = CancellationTokenRegistration option
 type BatchCancellation = CancellationTokenSource
 
 type Waiter<'T> =
-    UserCancellation * AsyncReplyChannel<ResultOrException<Message<'T>>>
+    UserCancellation * TaskCompletionSource<ResultOrException<Message<'T>>>
     
 type BatchWaiter<'T> =
-    BatchCancellation * UserCancellation * AsyncReplyChannel<ResultOrException<Messages<'T>>>
+    BatchCancellation * UserCancellation * TaskCompletionSource<ResultOrException<Messages<'T>>>
 
 let hasEnoughMessagesForBatchReceive (batchReceivePolicy: BatchReceivePolicy) incomingMessagesCount incomingMessagesSize =
     if (batchReceivePolicy.MaxNumMessages <= 0 && batchReceivePolicy.MaxNumBytes <= 0L) then
