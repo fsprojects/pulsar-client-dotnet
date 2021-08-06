@@ -360,9 +360,9 @@ let tests =
             
             do! consumer.SeekAsync(fun topicName ->
                     match topicName with
-                    | t when t = topicName1 -> MessageId ids1.[3] 
-                    | t when t = topicName2 -> Timestamp times.[5]
-                    | _ -> MessageId MessageId.Latest
+                    | t when t = topicName1 -> SeekType.MessageId ids1.[3] 
+                    | t when t = topicName2 -> SeekType.Timestamp times.[5]
+                    | _ -> SeekType.MessageId MessageId.Latest
                 )    
                 |> Async.AwaitTask
                 
