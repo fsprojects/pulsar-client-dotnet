@@ -477,6 +477,7 @@ type internal PulsarResponseType =
 
 type internal ResultOrException<'T> = Result<'T, exn>
 
+[<RequireQualifiedAccess>]
 type SeekType =
     | MessageId of MessageId
     | Timestamp of TimeStamp

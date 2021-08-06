@@ -1064,8 +1064,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         try
                             let (payload, lastMessage) =
                                 match seekData with
-                                | Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
-                                | MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
+                                | SeekType.Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
+                                | SeekType.MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
                             let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                             response |> PulsarResponseType.GetEmpty
                             
@@ -1107,7 +1107,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 // if the consumer is configured to read inclusive then we need to seek to the last message
                                 if consumerConfig.ResetIncludeHead then
                                     let! result = this.Mb.PostAndAsyncReply(fun channel ->
-                                        SeekAsync (MessageId lastMessageId, channel))
+                                        SeekAsync (SeekType.MessageId lastMessageId, channel))
                                     return
                                         match result with
                                         | Ok () -> ()
@@ -1564,13 +1564,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.SeekAsync (messageId: MessageId) =
             task {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
-                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (MessageId messageId, channel))
+                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (SeekType.MessageId messageId, channel))
             }
 
         member this.SeekAsync (timestamp: TimeStamp) =
             task {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
-                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (Timestamp timestamp, channel))
+                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (SeekType.Timestamp timestamp, channel))
             }
             
         member this.SeekAsync (resolver: Func<string, SeekType>) : Task<Unit>  =
