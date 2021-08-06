@@ -1,6 +1,7 @@
 module Pulsar.Client.IntegrationTests.MultiTopic
 
 open System
+open System.Collections.Generic
 open System.Text
 open Expecto
 open FSharp.Control.Tasks.V2.ContextInsensitive
@@ -8,6 +9,7 @@ open System.Threading.Tasks
 open Pulsar.Client.Common
 open Pulsar.Client.IntegrationTests.Common
 open Serilog
+open FSharp.UMX
 
 [<Tests>]
 let tests =
@@ -310,5 +312,88 @@ let tests =
             Log.Debug("Finished 2К of topics")
         }
         
-       
+        testAsync "Multiple topic seek by function" {
+            let prefix = $"persistent://public/default/topic-seektest-{Guid.NewGuid():N}-"
+            let topicName1 = prefix + "1"
+            let topicName2 = prefix + "2"
+            let client = getClient()
+
+            let name = "MultiConsumer"
+
+            let! producer1 =
+                client.NewProducer()
+                    .Topic(topicName1)
+                    .ProducerName(name + "1")
+                    .EnableBatching(false)
+                    .CreateAsync() |> Async.AwaitTask
+                    
+            let! producer2 =
+                client.NewProducer()
+                    .Topic(topicName2)
+                    .ProducerName(name + "2")
+                    .EnableBatching(false)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let messages1 = generateMessages 10 (name + "1")
+            let messages2 = generateMessages 10 (name + "2")
+            let ids1 = List<MessageId>()
+            let ids2 = List<MessageId>()
+            let times = List<TimeStamp>()
+            
+            let! consumer =
+                client.NewConsumer()
+                    .Topics([ topicName1; topicName2])
+                    .SubscriptionName("test-seektest-subscription")
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+                    .SubscribeAsync() |> Async.AwaitTask
+                    
+            for msg in messages1 do
+                let! messageIdSent = producer1.SendAsync(Encoding.UTF8.GetBytes(msg)) |> Async.AwaitTask
+                ids1.Add(messageIdSent)
+                
+            for msg in messages2 do
+                let! messageIdSent = producer2.SendAsync(Encoding.UTF8.GetBytes(msg))  |> Async.AwaitTask
+                DateTime.UtcNow |> extractTimeStamp |> times.Add
+                ids2.Add(messageIdSent)
+                do! Async.Sleep(100)
+            
+            do! consumer.SeekAsync(fun topicName ->
+                    match topicName with
+                    | t when t = topicName1 -> MessageId ids1.[3] 
+                    | t when t = topicName2 -> Timestamp times.[5]
+                    | _ -> MessageId MessageId.Latest
+                )    
+                |> Async.AwaitTask
+                
+            let rec consumerLoop (msg1, msg2) = async {
+
+                match msg1, msg2 with
+                | Some _, Some _ -> return msg1, msg2
+                | _ -> 
+                    let! msg = consumer.ReceiveAsync() |> Async.AwaitTask
+                    
+                    let next =
+                        match msg1, msg2 with
+                        | None, _ when msg.MessageId.TopicName = %topicName1 -> Some msg, msg2
+                        | _, None when msg.MessageId.TopicName = %topicName2 -> msg1, Some msg
+                        | _ -> msg1, msg2
+                        
+                    return! consumerLoop next
+                
+            }
+            
+            let! msg1, msg2 = consumerLoop (None, None)
+                                                    
+            do! producer1.DisposeAsync().AsTask() |> Async.AwaitTask
+            do! producer2.DisposeAsync().AsTask() |> Async.AwaitTask
+            do! consumer.UnsubscribeAsync() |> Async.AwaitTask
+            
+            Expect.equal msg1.IsSome true "The message from topic1 is found" 
+            Expect.equal msg2.IsSome true "The message from topic2 is found"
+            Expect.equal msg1.Value.MessageId ids1.[4] "Topic started from message 3"
+            Expect.equal msg2.Value.MessageId ids2.[6] "Topic started from message 6"
+            
+            Log.Debug("Finished Multiple topic seek with resolver function")
+        }
     ]

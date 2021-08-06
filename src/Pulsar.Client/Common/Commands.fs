@@ -336,7 +336,7 @@ let newTxn (tcId: TransactionCoordinatorId) (requestId: RequestId) (ttl: TimeSpa
     let request = CommandNewTxn(TcId = %tcId, RequestId = %requestId, TxnTtlSeconds = uint64 ttl.TotalMilliseconds)
     let command = BaseCommand(``type`` = CommandType.NewTxn, newTxn = request)
     command |> serializeSimpleCommand
-    
+     
 let newAddPartitionToTxn (txn: TxnId) (requestId: RequestId) (partition: CompleteTopicName) =
     let request = CommandAddPartitionToTxn(TxnidLeastBits = txn.LeastSigBits, TxnidMostBits = txn.MostSigBits, RequestId = %requestId)
     request.Partitions.Add(%partition)
