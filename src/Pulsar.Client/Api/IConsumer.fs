@@ -53,6 +53,8 @@ type IConsumer<'T> =
     abstract member SeekAsync: messageId:MessageId -> Task<unit>
     /// Reset the subscription associated with this consumer to a specific message publish time (unix timestamp).
     abstract member SeekAsync: timestamp:TimeStamp -> Task<unit>
+    /// Reset the subscription associated with this consumer to a specific message ID or publish time (unix timestamp), returned by resolver function.
+    abstract member SeekAsync: resolver: Func<string, SeekType> -> Task<unit>
     /// Get the last message id available for consume.
     abstract member GetLastMessageIdAsync: unit -> Task<MessageId>
     /// Acknowledge the failure to process a single message.

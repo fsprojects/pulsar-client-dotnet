@@ -52,6 +52,10 @@ let commonClient =
 
 let getClient() = commonClient
 
+let extractTimeStamp (date: DateTime) : TimeStamp =
+    let mss = (date - DateTime.UnixEpoch).TotalMilliseconds |> int64
+    %mss
+
 #if !NOTLS
 let sslClient =
     PulsarClientBuilder()

@@ -5,7 +5,6 @@ open System.Collections.Generic
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open System.Runtime.InteropServices
-open FSharp.UMX
 open Pulsar.Client.Transaction
 
 type IProducer<'T> =
@@ -50,6 +49,8 @@ type IProducer<'T> =
     ///     After the transaction commit, it will be made visible to consumer.
     ///     After the transaction abort, it will never be visible to consumer.
     /// </param>
+    /// <param name="replicationClusters">Geo-replication clusters for this message.
+    ///     Set this value to MessageBuilder.DisableReplication to disable replication for the message.</param>
     abstract member NewMessage:
         value:'T
         * [<Optional; DefaultParameterValue(null:string)>]key:string
@@ -60,6 +61,7 @@ type IProducer<'T> =
         * [<Optional; DefaultParameterValue(null:byte[])>]orderingKey:byte[]
         * [<Optional; DefaultParameterValue(Nullable():Nullable<TimeStamp>)>]eventTime:Nullable<TimeStamp>
         * [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction
+        * [<Optional; DefaultParameterValue(null:IEnumerable<string>)>]replicationClusters:IEnumerable<string>
         -> MessageBuilder<'T>
     /// The last sequence id that was published by this producer.
     /// This represent either the automatically assigned

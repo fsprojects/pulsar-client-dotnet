@@ -40,7 +40,7 @@ type internal ConsumerMessage<'T> =
     | NegativeAcknowledge of MessageId
     | RedeliverUnacknowledged of RedeliverSet * TaskCompletionSource<unit>
     | RedeliverAllUnacknowledged of TaskCompletionSource<unit>
-    | SeekAsync of SeekData * TaskCompletionSource<ResultOrException<unit>>
+    | SeekAsync of SeekType * TaskCompletionSource<ResultOrException<unit>>
     | HasMessageAvailable of TaskCompletionSource<Task<bool>>
     | ActiveConsumerChanged of bool
     | Close of TaskCompletionSource<ResultOrException<unit>>
@@ -749,524 +749,545 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         AckReceipt = fun (reqId) -> post this.Mb (AckReceipt(reqId))
     }
     
-    let mb = Channel.CreateUnbounded<ConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
-        let mutable continueLoop = true
-        while continueLoop do
-            match! mb.Reader.ReadAsync() with
-            | ConsumerMessage.ConnectionOpened ->
+    let mb = MailboxProcessor<ConsumerMessage<'T>>.Start(fun inbox ->
+
+        let rec loop () =
+            async {
+                match! inbox.Receive() with
                 
-                match connectionHandler.ConnectionState with
-                | Ready clientCnx ->
-                    Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, topicName)
-                    clientCnx.AddConsumer(consumerId, consumerOperations)
-                    let requestId = Generators.getNextRequestId()
-                    startMessageId <- clearReceiverQueue()
-                    clearDeadLetters()
-                    let msgIdData =
-                        if isDurable then
-                            null
-                        else
-                            match startMessageId with
-                            | None ->
-                                Log.Logger.LogWarning("{0} Start messageId is missing", prefix)
-                                null
-                            | Some msgId ->
-                                let data = MessageIdData(ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)
-                                match msgId.Type with
-                                | MessageIdType.Single ->
-                                    ()
-                                | Batch (index, _) ->
-                                    data.BatchIndex <- %index
-                                data
-                    // startMessageRollbackDurationInSec should be consider only once when consumer connects to first time
-                    let startMessageRollbackDuration =
-                        if startMessageRollbackDuration > TimeSpan.Zero && startMessageId = initialStartMessageId then
-                            startMessageRollbackDuration
-                        else
-                            TimeSpan.Zero
-                    let payload =
-                        Commands.newSubscribe
-                            topicName.CompleteTopicName consumerConfig.SubscriptionName
-                            consumerId requestId consumerName consumerConfig.SubscriptionType
-                            consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted msgIdData isDurable
-                            startMessageRollbackDuration createTopicIfDoesNotExist consumerConfig.KeySharedPolicy
-                            schema.SchemaInfo consumerConfig.PriorityLevel
-                    try
-                        let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
-                        response |> PulsarResponseType.GetEmpty
-                        this.ConsumerIsReconnectedToBroker()
-                        connectionHandler.ResetBackoff()
-                        let initialFlowCount = consumerConfig.ReceiverQueueSize
-                        subscribeTsc.TrySetResult() |> ignore
-                        if initialFlowCount <> 0 then
-                            this.SendFlowPermits initialFlowCount
-                    with Flatten ex ->
-                        clientCnx.RemoveConsumer consumerId
-                        Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
-                        match ex with
-                        | _ when (PulsarClientException.isRetriableError ex && DateTime.Now < subscribeTimeout) ->
-                            connectionHandler.ReconnectLater ex
-                        | _ when not subscribeTsc.Task.IsCompleted ->
-                            // unable to create new consumer, fail operation
-                            connectionHandler.Failed()
-                            subscribeTsc.SetException(ex)
-                            stopConsumer()
-                        | :? TopicDoesNotExistException ->
-                            // The topic was deleted after the consumer was created, and we're
-                            // not allowed to recreate the topic. This can happen in few cases:
-                            //  * Regex consumer getting error after topic gets deleted
-                            //  * Regular consumer after topic is manually delete and with
-                            //    auto-topic-creation set to false
-                            // No more retries are needed in this case.
-                            connectionHandler.Failed()
-                            stopConsumer()
-                            Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
-                        | _ ->
-                            // consumer was subscribed and connected but we got some error, keep trying
-                            connectionHandler.ReconnectLater ex
-                | _ ->
-                    Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
-                                
-                if connectionHandler.ConnectionState = Failed then
-                    continueLoop <- false
-                                
-            | ConsumerMessage.MessageReceived (rawMessage, clientCnx) ->
-                                
-                let hasWaitingChannel = waiters.Count > 0
-                let hasWaitingBatchChannel = batchWaiters.Count > 0
-                let msgId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
-                Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
-                    prefix, msgId, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
-            
-                if rawMessage.CheckSumValid then
-                    if msgId |> acksGroupingTracker.IsDuplicate |> not then
-                        let! schemaDecodeFunction = getSchemaDecodeFunction rawMessage.Metadata
-                        let isChunked = rawMessage.Metadata.NumChunks > 1 && consumerConfig.SubscriptionType <> SubscriptionType.Shared
-                        match decryptMessage rawMessage with
-                        | Ok decryptedMessage ->
-                            if decryptedMessage.Payload.Length <= clientCnx.MaxMessageSize then
-                                match decompressMessage decryptedMessage isChunked with
-                                | Ok decompressedMessage ->
-                                    do! tryHandleMessagePayload
-                                            decompressedMessage msgId hasWaitingChannel hasWaitingBatchChannel false
-                                            isChunked schemaDecodeFunction clientCnx
-                                | Error _ ->
-                                    do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecompressionError
-                            else
-                                do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.UncompressedSizeCorruption
-                        | Error _ ->
-                            match consumerConfig.ConsumerCryptoFailureAction with
-                            | ConsumerCryptoFailureAction.CONSUME ->
-                                Log.Logger.LogWarning("{0} {1} Decryption failed. Consuming encrypted message.",
-                                                        prefix, msgId)
-                                do! tryHandleMessagePayload
-                                        rawMessage msgId hasWaitingChannel hasWaitingBatchChannel true
-                                        isChunked schemaDecodeFunction clientCnx
-                            | ConsumerCryptoFailureAction.DISCARD ->
-                                Log.Logger.LogWarning("{0} {1}. Decryption failed. Discarding encrypted message.",
-                                                        prefix, msgId)
-                                do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecryptionError
-                            | ConsumerCryptoFailureAction.FAIL ->
-                                Log.Logger.LogError("{0} {1}. Decryption failed. Failing encrypted message.",
-                                                        prefix, msgId)
-                                unAckedMessageTracker.Add msgId |> ignore
-                            | _ ->
-                                failwith "Unknown ConsumerCryptoFailureAction"
-                    else
-                        Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
-                        increaseAvailablePermits rawMessage.Metadata.NumMessages
-                else
-                    do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.ChecksumMismatch
-            
-            | ConsumerMessage.Receive (cancellationToken, ch) ->
-            
-                Log.Logger.LogDebug("{0} Receive", prefix)
-                if cancellationToken.IsCancellationRequested then
-                    ch.SetResult(Error(TaskCanceledException() :> exn))
-                else
-                    if incomingMessages.Count > 0 then
-                        replyWithMessage ch <| dequeueMessage()
-                    else
-                        let tokenRegistration =
-                            if cancellationToken.CanBeCanceled then
-                                let rec cancellationTokenRegistration =
-                                    cancellationToken.Register((fun () ->
-                                        Log.Logger.LogDebug("{0} receive cancelled", prefix)
-                                        TaskCanceledException() :> exn |> Error |> ch.SetResult
-                                        post this.Mb (RemoveWaiter(cancellationTokenRegistration, ch))
-                                    ), false) |> Some
-                                cancellationTokenRegistration
-                            else
-                                None
-                        waiters.AddLast((tokenRegistration, ch)) |> ignore
-                        Log.Logger.LogDebug("{0} Receive waiting", prefix)
-                            
-            | ConsumerMessage.Acknowledge (messageId, ackType, txnOption, chOption) ->
-            
-                Log.Logger.LogDebug("{0} Acknowledge {1} {2} {3}", prefix, messageId, ackType, txnOption)
-                let task = trySendAcknowledge ackType EmptyProperties txnOption messageId
-                chOption |> Option.iter (fun ch -> ch.SetResult(task))
-                                
-            | ConsumerMessage.BatchReceive (cancellationToken, ch) ->
-            
-                Log.Logger.LogDebug("{0} BatchReceive", prefix)
-                if cancellationToken.IsCancellationRequested then
-                    ch.SetResult(Error (TaskCanceledException() :> exn))
-                else
-                    if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
-                        replyWithBatch ch
-                    else
-                        let batchCts = new CancellationTokenSource()
-                        let registration =
-                            if cancellationToken.CanBeCanceled then
-                                let rec cancellationTokenRegistration =
-                                    cancellationToken.Register((fun () ->
-                                        Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
-                                        batchCts.Cancel()
-                                        TaskCanceledException() :> exn |> Error |> ch.SetResult
-                                        post this.Mb (RemoveBatchWaiter(batchCts, cancellationTokenRegistration, ch))
-                                    ), false) |> Some
-                                cancellationTokenRegistration
-                            else
-                                None
-                        batchWaiters.AddLast((batchCts, registration, ch)) |> ignore
-                        asyncDelay
-                            consumerConfig.BatchReceivePolicy.Timeout
-                            (fun () ->
-                                if not batchCts.IsCancellationRequested then
-                                    post this.Mb SendBatchByTimeout
-                                else
-                                    batchCts.Dispose())
-                        Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
-                                
-            | ConsumerMessage.SendBatchByTimeout ->
-                                
-                Log.Logger.LogDebug("{0} SendBatchByTimeout", prefix)
-                if batchWaiters.Count > 0 then
-                    let ch = batchWaiters |> dequeueBatchWaiter
-                    replyWithBatch ch
-                                
-            | ConsumerMessage.NegativeAcknowledge messageId ->
-            
-                Log.Logger.LogDebug("{0} NegativeAcknowledge {1}", prefix, messageId)
-                negativeAcksTracker.Add(messageId) |> ignore
-                // Ensure the message is not redelivered for ack-timeout, since we did receive an "ack"
-                untrackMessage messageId
-                                                
-            | ConsumerMessage.RemoveWaiter waiter ->
-                                
-                waiters.Remove(waiter) |> ignore
-                let (ctrOpt, _) = waiter
-                ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
-                                
-            | ConsumerMessage.RemoveBatchWaiter batchWaiter ->
-                                
-                batchWaiters.Remove(batchWaiter) |> ignore
-                let (cts, ctrOpt, _) = batchWaiter
-                ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
-                cts.Dispose()
-                                
-            | ConsumerMessage.AckReceipt reqId ->
-                                
-                match ackRequests.TryGetValue(reqId) with
-                | true, (msgId, txnId, tcs) ->
-                    ackRequests.Remove(reqId) |> ignore
-                    tcs.SetResult()
-                    Log.Logger.LogDebug("{0} MessageId : {1} has ack receipt by TxnId : {2}", prefix, msgId, txnId)
-                | _ ->
-                    Log.Logger.LogInformation("{0} Ack request has been handled requestId : {1}", prefix, reqId)
-                                
-            | ConsumerMessage.AckError (reqId, ex) ->
-                                
-                match ackRequests.TryGetValue(reqId) with
-                | true, (msgId, txnId, tcs) ->
-                    ackRequests.Remove(reqId) |> ignore
-                    stats.IncrementNumAcksFailed()
-                    tcs.SetException(ex)
-                    Log.Logger.LogWarning("{0} MessageId : {1} has ack error by TxnId : {2}", prefix, msgId, txnId)
-                | _ ->
-                    Log.Logger.LogInformation("{0} Ack request has been handled requestId : {1}", prefix, reqId)
-            
-            | ConsumerMessage.RedeliverUnacknowledged (messageIds, channel) ->
-            
-                Log.Logger.LogDebug("{0} RedeliverUnacknowledged", prefix)
-                match consumerConfig.SubscriptionType with
-                | SubscriptionType.Shared | SubscriptionType.KeyShared ->
+                | ConsumerMessage.ConnectionOpened ->
+
                     match connectionHandler.ConnectionState with
                     | Ready clientCnx ->
-                        let messagesFromQueue = removeExpiredMessagesFromQueue messageIds
-                        let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
-                        for ids in batches do
-                            do!
-                                task {
-                                    let! messageIdData = getRedeliveryMessageIdData ids
-                                    if messageIdData.Length > 0 then
-                                        let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some messageIdData)
-                                        let! success = clientCnx.Send command
-                                        if success then
-                                            Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
-                                        else
-                                            Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
+                        Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, topicName)
+                        clientCnx.AddConsumer(consumerId, consumerOperations)
+                        let requestId = Generators.getNextRequestId()
+                        startMessageId <- clearReceiverQueue()
+                        clearDeadLetters()
+                        let msgIdData =
+                            if isDurable then
+                                null
+                            else
+                                match startMessageId with
+                                | None ->
+                                    Log.Logger.LogWarning("{0} Start messageId is missing", prefix)
+                                    null
+                                | Some msgId ->
+                                    let data = MessageIdData(ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)
+                                    match msgId.Type with
+                                    | MessageIdType.Single ->
+                                        ()
+                                    | Batch (index, _) ->
+                                        data.BatchIndex <- %index
+                                    data
+                        // startMessageRollbackDurationInSec should be consider only once when consumer connects to first time
+                        let startMessageRollbackDuration =
+                            if startMessageRollbackDuration > TimeSpan.Zero && startMessageId = initialStartMessageId then
+                                startMessageRollbackDuration
+                            else
+                                TimeSpan.Zero
+                        let payload =
+                            Commands.newSubscribe
+                                topicName.CompleteTopicName consumerConfig.SubscriptionName
+                                consumerId requestId consumerName consumerConfig.SubscriptionType
+                                consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted msgIdData isDurable
+                                startMessageRollbackDuration createTopicIfDoesNotExist consumerConfig.KeySharedPolicy
+                                schema.SchemaInfo consumerConfig.PriorityLevel
+                        try
+                            let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                            response |> PulsarResponseType.GetEmpty
+                            this.ConsumerIsReconnectedToBroker()
+                            connectionHandler.ResetBackoff()
+                            let initialFlowCount = consumerConfig.ReceiverQueueSize
+                            subscribeTsc.TrySetResult() |> ignore
+                            if initialFlowCount <> 0 then
+                                this.SendFlowPermits initialFlowCount
+                        with Flatten ex ->
+                            clientCnx.RemoveConsumer consumerId
+                            Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
+                            match ex with
+                            | _ when (PulsarClientException.isRetriableError ex && DateTime.Now < subscribeTimeout) ->
+                                connectionHandler.ReconnectLater ex
+                            | _ when not subscribeTsc.Task.IsCompleted ->
+                                // unable to create new consumer, fail operation
+                                connectionHandler.Failed()
+                                subscribeTsc.SetException(ex)
+                                stopConsumer()
+                            | :? TopicDoesNotExistException ->
+                                // The topic was deleted after the consumer was created, and we're
+                                // not allowed to recreate the topic. This can happen in few cases:
+                                //  * Regex consumer getting error after topic gets deleted
+                                //  * Regular consumer after topic is manually delete and with
+                                //    auto-topic-creation set to false
+                                // No more retries are needed in this case.
+                                connectionHandler.Failed()
+                                stopConsumer()
+                                Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
+                            | _ ->
+                                // consumer was subscribed and connected but we got some error, keep trying
+                                connectionHandler.ReconnectLater ex
+                    | _ ->
+                        Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
+                    
+                    if connectionHandler.ConnectionState <> Failed then
+                        return! loop ()
+                    
+                | ConsumerMessage.MessageReceived (rawMessage, clientCnx) ->
+                    
+                    let hasWaitingChannel = waiters.Count > 0
+                    let hasWaitingBatchChannel = batchWaiters.Count > 0
+                    let msgId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
+                    Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
+                        prefix, msgId, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
+
+                    if rawMessage.CheckSumValid then
+                        if msgId |> acksGroupingTracker.IsDuplicate |> not then
+                            let! schemaDecodeFunction = getSchemaDecodeFunction rawMessage.Metadata
+                            let isChunked = rawMessage.Metadata.NumChunks > 1 && consumerConfig.SubscriptionType <> SubscriptionType.Shared
+                            match decryptMessage rawMessage with
+                            | Ok decryptedMessage ->
+                                if decryptedMessage.Payload.Length <= clientCnx.MaxMessageSize then
+                                    match decompressMessage decryptedMessage isChunked with
+                                    | Ok decompressedMessage ->
+                                        do! tryHandleMessagePayload
+                                                decompressedMessage msgId hasWaitingChannel hasWaitingBatchChannel false
+                                                isChunked schemaDecodeFunction clientCnx
+                                    | Error _ ->
+                                        do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecompressionError
+                                else
+                                    do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.UncompressedSizeCorruption
+                            | Error _ ->
+                                match consumerConfig.ConsumerCryptoFailureAction with
+                                | ConsumerCryptoFailureAction.CONSUME ->
+                                    Log.Logger.LogWarning("{0} {1} Decryption failed. Consuming encrypted message.",
+                                                          prefix, msgId)
+                                    do! tryHandleMessagePayload
+                                            rawMessage msgId hasWaitingChannel hasWaitingBatchChannel true
+                                            isChunked schemaDecodeFunction clientCnx
+                                | ConsumerCryptoFailureAction.DISCARD ->
+                                    Log.Logger.LogWarning("{0} {1}. Decryption failed. Discarding encrypted message.",
+                                                          prefix, msgId)
+                                    do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecryptionError
+                                | ConsumerCryptoFailureAction.FAIL ->
+                                    Log.Logger.LogError("{0} {1}. Decryption failed. Failing encrypted message.",
+                                                            prefix, msgId)
+                                    unAckedMessageTracker.Add msgId |> ignore
+                                | _ ->
+                                    failwith "Unknown ConsumerCryptoFailureAction"
+                        else
+                            Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
+                            increaseAvailablePermits rawMessage.Metadata.NumMessages
+                    else
+                        do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.ChecksumMismatch
+                    return! loop ()
+
+                | ConsumerMessage.Receive (cancellationToken, ch) ->
+
+                    Log.Logger.LogDebug("{0} Receive", prefix)
+                    if cancellationToken.IsCancellationRequested then
+                        TaskCanceledException() :> exn |> Error |> ch.Reply
+                    else
+                        if incomingMessages.Count > 0 then
+                            replyWithMessage ch <| dequeueMessage()
+                        else
+                            let tokenRegistration =
+                                if cancellationToken.CanBeCanceled then
+                                    let rec cancellationTokenRegistration =
+                                        cancellationToken.Register((fun () ->
+                                            Log.Logger.LogDebug("{0} receive cancelled", prefix)
+                                            TaskCanceledException() :> exn |> Error |> ch.Reply
+                                            this.Mb.Post(RemoveWaiter(cancellationTokenRegistration, ch))
+                                        ), false) |> Some
+                                    cancellationTokenRegistration
+                                else
+                                    None
+                            waiters.AddLast((tokenRegistration, ch)) |> ignore
+                            Log.Logger.LogDebug("{0} Receive waiting", prefix)
+                    return! loop ()
+                
+                | ConsumerMessage.Acknowledge (messageId, ackType, txnOption, chOption) ->
+
+                    Log.Logger.LogDebug("{0} Acknowledge {1} {2} {3}", prefix, messageId, ackType, txnOption)
+                    let task = trySendAcknowledge ackType EmptyProperties txnOption messageId
+                    chOption |> Option.iter (fun ch -> ch.Reply(task))
+                    return! loop ()
+                    
+                | ConsumerMessage.BatchReceive (cancellationToken, ch) ->
+
+                    Log.Logger.LogDebug("{0} BatchReceive", prefix)
+                    if cancellationToken.IsCancellationRequested then
+                        TaskCanceledException() :> exn |> Error |> ch.Reply
+                    else
+                        if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
+                            replyWithBatch ch
+                        else
+                            let batchCts = new CancellationTokenSource()
+                            let registration =
+                                if cancellationToken.CanBeCanceled then
+                                    let rec cancellationTokenRegistration =
+                                        cancellationToken.Register((fun () ->
+                                            Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
+                                            batchCts.Cancel()
+                                            TaskCanceledException() :> exn |> Error |> ch.Reply
+                                            this.Mb.Post(RemoveBatchWaiter(batchCts, cancellationTokenRegistration, ch))
+                                        ), false) |> Some
+                                    cancellationTokenRegistration
+                                else
+                                    None
+                            batchWaiters.AddLast((batchCts, registration, ch)) |> ignore
+                            asyncDelay
+                                consumerConfig.BatchReceivePolicy.Timeout
+                                (fun () ->
+                                    if not batchCts.IsCancellationRequested then
+                                        this.Mb.Post(SendBatchByTimeout)
                                     else
-                                        Log.Logger.LogDebug("{0} All messages were dead", prefix)
-                                }
-                        if messagesFromQueue > 0 then
-                            increaseAvailablePermits messagesFromQueue
+                                        batchCts.Dispose())
+                            Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
+                    return! loop ()
+                    
+                | ConsumerMessage.SendBatchByTimeout ->
+                    
+                    Log.Logger.LogDebug("{0} SendBatchByTimeout", prefix)
+                    if batchWaiters.Count > 0 then
+                        let ch = batchWaiters |> dequeueBatchWaiter
+                        replyWithBatch ch
+                    return! loop ()
+
+                    
+                | ConsumerMessage.NegativeAcknowledge messageId ->
+
+                    Log.Logger.LogDebug("{0} NegativeAcknowledge {1}", prefix, messageId)
+                    negativeAcksTracker.Add(messageId) |> ignore
+                    // Ensure the message is not redelivered for ack-timeout, since we did receive an "ack"
+                    untrackMessage messageId
+                    return! loop ()
+                                    
+                | ConsumerMessage.RemoveWaiter waiter ->
+                    
+                    waiters.Remove(waiter) |> ignore
+                    let (ctrOpt, _) = waiter
+                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+                    return! loop ()
+                    
+                | ConsumerMessage.RemoveBatchWaiter batchWaiter ->
+                    
+                    batchWaiters.Remove(batchWaiter) |> ignore
+                    let (cts, ctrOpt, _) = batchWaiter
+                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+                    cts.Dispose()
+                    return! loop ()
+                    
+                | ConsumerMessage.AckReceipt reqId ->
+                    
+                    match ackRequests.TryGetValue(reqId) with
+                    | true, (msgId, txnId, tcs) ->
+                        ackRequests.Remove(reqId) |> ignore
+                        tcs.SetResult()
+                        Log.Logger.LogDebug("{0} MessageId : {1} has ack receipt by TxnId : {2}", prefix, msgId, txnId)
+                    | _ ->
+                        Log.Logger.LogInformation("{0} Ack request has been handled requestId : {1}", prefix, reqId)
+                    return! loop ()
+                    
+                | ConsumerMessage.AckError (reqId, ex) ->
+                    
+                    match ackRequests.TryGetValue(reqId) with
+                    | true, (msgId, txnId, tcs) ->
+                        ackRequests.Remove(reqId) |> ignore
+                        stats.IncrementNumAcksFailed()
+                        tcs.SetException(ex)
+                        Log.Logger.LogWarning("{0} MessageId : {1} has ack error by TxnId : {2}", prefix, msgId, txnId)
+                    | _ ->
+                        Log.Logger.LogInformation("{0} Ack request has been handled requestId : {1}", prefix, reqId)
+                    return! loop ()
+
+                | ConsumerMessage.RedeliverUnacknowledged (messageIds, channel) ->
+
+                    Log.Logger.LogDebug("{0} RedeliverUnacknowledged", prefix)
+                    match consumerConfig.SubscriptionType with
+                    | SubscriptionType.Shared | SubscriptionType.KeyShared ->
+                        match connectionHandler.ConnectionState with
+                        | Ready clientCnx ->
+                            let messagesFromQueue = removeExpiredMessagesFromQueue messageIds
+                            let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
+                            for ids in batches do
+                                do!
+                                    task {
+                                        let! messageIdData = getRedeliveryMessageIdData ids
+                                        if messageIdData.Length > 0 then
+                                            let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some messageIdData)
+                                            let! success = clientCnx.Send command
+                                            if success then
+                                                Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
+                                            else
+                                                Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
+                                        else
+                                            Log.Logger.LogDebug("{0} All messages were dead", prefix)
+                                    } |> Async.AwaitTask
+                            if messagesFromQueue > 0 then
+                                increaseAvailablePermits messagesFromQueue
+                        | _ ->
+                            Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
+                        channel.Reply()
+                    | _ ->
+                        this.Mb.Post(RedeliverAllUnacknowledged channel)
+                        Log.Logger.LogInformation("{0} We cannot redeliver single messages if subscription type is not Shared", prefix)
+                    return! loop ()
+
+                | ConsumerMessage.RedeliverAllUnacknowledged channel ->
+
+                    Log.Logger.LogDebug("{0} RedeliverAllUnacknowledged", prefix)
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
+                        let! success = clientCnx.Send command
+                        if success then
+                            let currentSize = incomingMessages.Count
+                            if currentSize > 0 then
+                                incomingMessages.Clear()
+                                increaseAvailablePermits currentSize
+                                unAckedMessageTracker.Clear()
+                            Log.Logger.LogDebug("{0} RedeliverAllUnacknowledged complete", prefix)
+                        else
+                            Log.Logger.LogWarning("{0} RedeliverAllUnacknowledged was not complete", prefix)
                     | _ ->
                         Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
-                    channel.SetResult()
-                | _ ->
-                    post this.Mb (RedeliverAllUnacknowledged channel)
-                    Log.Logger.LogInformation("{0} We cannot redeliver single messages if subscription type is not Shared", prefix)
-            
-            | ConsumerMessage.RedeliverAllUnacknowledged channel ->
-            
-                Log.Logger.LogDebug("{0} RedeliverAllUnacknowledged", prefix)
-                match connectionHandler.ConnectionState with
-                | Ready clientCnx ->
-                    let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
-                    let! success = clientCnx.Send command
-                    if success then
-                        let currentSize = incomingMessages.Count
-                        if currentSize > 0 then
+                    channel.Reply()
+                    return! loop ()
+
+                | ConsumerMessage.SeekAsync (seekData, channel) ->
+
+                    Log.Logger.LogDebug("{0} SeekAsync", prefix)
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        let requestId = Generators.getNextRequestId()
+                        Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData)
+                        try
+                            let (payload, lastMessage) =
+                                match seekData with
+                                | SeekType.Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
+                                | SeekType.MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
+                            let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                            response |> PulsarResponseType.GetEmpty
+                            
+                            duringSeek <- Some lastMessage
+                            lastDequeuedMessageId <- MessageId.Earliest
+                            
+                            acksGroupingTracker.FlushAndClean()
                             incomingMessages.Clear()
-                            increaseAvailablePermits currentSize
-                            unAckedMessageTracker.Clear()
-                        Log.Logger.LogDebug("{0} RedeliverAllUnacknowledged complete", prefix)
-                    else
-                        Log.Logger.LogWarning("{0} RedeliverAllUnacknowledged was not complete", prefix)
-                | _ ->
-                    Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
-                channel.SetResult()
-            
-            | ConsumerMessage.SeekAsync (seekData, channel) ->
-            
-                Log.Logger.LogDebug("{0} SeekAsync", prefix)
-                match connectionHandler.ConnectionState with
-                | Ready clientCnx ->
-                    let requestId = Generators.getNextRequestId()
-                    Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData)
-                    try
-                        let (payload, lastMessage) =
-                            match seekData with
-                            | Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
-                            | MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
-                        let! response = clientCnx.SendAndWaitForReply requestId payload
-                        response |> PulsarResponseType.GetEmpty
-                                        
-                        duringSeek <- Some lastMessage
-                        lastDequeuedMessageId <- MessageId.Earliest
-                                        
-                        acksGroupingTracker.FlushAndClean()
-                        incomingMessages.Clear()
-                        Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
-                        channel.SetResult(Ok())
-                    with Flatten ex ->
-                        Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
-                        channel.SetResult(Error ex)
-                | _ ->
-                    channel.SetResult(Error ((NotConnectedException "Not connected to broker") :> exn))
-                    Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
-            
-            | ConsumerMessage.ReachedEndOfTheTopic ->
-            
-                Log.Logger.LogWarning("{0} ReachedEndOfTheTopic", prefix)
-                hasReachedEndOfTopic <- true
-                continueLoop <- false
-            
-            | ConsumerMessage.HasMessageAvailable channel ->
-            
-                Log.Logger.LogDebug("{0} HasMessageAvailable", prefix)
-                                
-                // avoid null reference
-                let startMessageId = startMessageId |> Option.defaultValue lastDequeuedMessageId
-                                
-                // we haven't read yet. use startMessageId for comparison
-                if lastDequeuedMessageId = MessageId.Earliest then
-                    // if we are starting from latest, we should seek to the actual last message first.
-                    // allow the last one to be read when read head inclusively.
-                    if startMessageId = MessageId.Latest then
-                        task {
-                            let! lastMessageIdResult = getLastMessageIdAsync()
-                            let lastMessageId = lastMessageIdResult.LastMessageId
-                            // if the consumer is configured to read inclusive then we need to seek to the last message
-                            if consumerConfig.ResetIncludeHead then
-                                let! result = postAndAsyncReply this.Mb (fun channel ->
-                                    SeekAsync (MessageId lastMessageId, channel))
-                                return
-                                    match result with
-                                    | Ok () -> ()
-                                    | Error ex -> reraize ex
-                            match lastMessageIdResult.MarkDeletePosition with
-                            | Some markDeletePosition ->
-                                if lastMessageId.EntryId < %0L then
-                                    return false
-                                else
-                                    // we only care about comparing ledger ids and entry ids as mark delete position doesn't have other ids such as batch index
-                                    let result =
-                                        match markDeletePosition.LedgerId, lastMessageId.LedgerId with
-                                        | x, y when x > y -> 1
-                                        | x, y when x < y -> -1
-                                        | _ ->
-                                            match markDeletePosition.EntryId, lastMessageId.EntryId with
+                            Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
+                            channel.Reply <| Ok()
+                        with Flatten ex ->
+                            Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
+                            channel.Reply <| Error ex
+                    | _ ->
+                        channel.Reply <| Error ((NotConnectedException "Not connected to broker") :> exn)
+                        Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
+                    return! loop ()
+
+                | ConsumerMessage.ReachedEndOfTheTopic ->
+
+                    Log.Logger.LogWarning("{0} ReachedEndOfTheTopic", prefix)
+                    hasReachedEndOfTopic <- true
+
+                | ConsumerMessage.HasMessageAvailable channel ->
+
+                    Log.Logger.LogDebug("{0} HasMessageAvailable", prefix)
+                    
+                    // avoid null reference
+                    let startMessageId = startMessageId |> Option.defaultValue lastDequeuedMessageId
+                    
+                    // we haven't read yet. use startMessageId for comparison
+                    if lastDequeuedMessageId = MessageId.Earliest then
+                        // if we are starting from latest, we should seek to the actual last message first.
+                        // allow the last one to be read when read head inclusively.
+                        if startMessageId = MessageId.Latest then
+                            task {
+                                let! lastMessageIdResult = getLastMessageIdAsync() |> Async.AwaitTask
+                                let lastMessageId = lastMessageIdResult.LastMessageId
+                                // if the consumer is configured to read inclusive then we need to seek to the last message
+                                if consumerConfig.ResetIncludeHead then
+                                    let! result = this.Mb.PostAndAsyncReply(fun channel ->
+                                        SeekAsync (SeekType.MessageId lastMessageId, channel))
+                                    return
+                                        match result with
+                                        | Ok () -> ()
+                                        | Error ex -> reraize ex
+                                match lastMessageIdResult.MarkDeletePosition with
+                                | Some markDeletePosition ->
+                                    if lastMessageId.EntryId < %0L then
+                                        return false
+                                    else
+                                        // we only care about comparing ledger ids and entry ids as mark delete position doesn't have other ids such as batch index
+                                        let result =
+                                            match markDeletePosition.LedgerId, lastMessageId.LedgerId with
                                             | x, y when x > y -> 1
                                             | x, y when x < y -> -1
-                                            | _ -> 0
-                                    return
-                                        if consumerConfig.ResetIncludeHead then
-                                            result <= 0
-                                        else
-                                            result < 0
-                            | None ->
-                                if lastMessageId.EntryId < %0L then
-                                    return false
-                                else
-                                    return consumerConfig.ResetIncludeHead
-                        } |> channel.SetResult
-                    elif hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead then
-                        channel.SetResult(Task.FromResult(true))
+                                            | _ ->
+                                                match markDeletePosition.EntryId, lastMessageId.EntryId with
+                                                | x, y when x > y -> 1
+                                                | x, y when x < y -> -1
+                                                | _ -> 0
+                                        return
+                                            if consumerConfig.ResetIncludeHead then
+                                                result <= 0
+                                            else
+                                                result < 0
+                                | None ->
+                                    if lastMessageId.EntryId < %0L then
+                                        return false
+                                    else
+                                        return consumerConfig.ResetIncludeHead
+                            } |> channel.Reply
+                        elif hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead then
+                            channel.Reply(Task.FromResult(true))
+                        else
+                            task {
+                                let! lastMessageIdResult = getLastMessageIdAsync()
+                                this.LastMessageIdInBroker <- lastMessageIdResult.LastMessageId // Concurrent update - handle wisely
+                                return hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead
+                            } |> channel.Reply
+
                     else
-                        task {
-                            let! lastMessageIdResult = getLastMessageIdAsync()
-                            this.LastMessageIdInBroker <- lastMessageIdResult.LastMessageId // Concurrent update - handle wisely
-                            return hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead
-                        } |> channel.SetResult
-            
-                else
-                    // read before, use lastDequeueMessage for comparison
-                    if hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false then
-                        channel.SetResult(Task.FromResult(true))
-                    else
-                        channel.SetResult(task {
-                            let! lastMessageIdResult = getLastMessageIdAsync()
-                            this.LastMessageIdInBroker <- lastMessageIdResult.LastMessageId // Concurrent update - handle wisely
-                            return hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false
-                        })
-            
-            | ConsumerMessage.ActiveConsumerChanged isActive ->
-                                
-                Log.Logger.LogInformation("{0} ActiveConsumerChanged isActive={1}", prefix, isActive)
+                        // read before, use lastDequeueMessage for comparison
+                        if hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false then
+                            channel.Reply(Task.FromResult(true))
+                        else
+                            task {
+                                let! lastMessageIdResult = getLastMessageIdAsync()
+                                this.LastMessageIdInBroker <- lastMessageIdResult.LastMessageId // Concurrent update - handle wisely
+                                return hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false
+                            } |> channel.Reply
+
+                    return! loop ()
                                     
-            | ConsumerMessage.Tick tick ->
-                                
-                match tick with
-                | StatTick ->
-                    stats.TickTime(incomingMessages.Count)
-                | ChunkTick ->
-                    chunkedMessageTracker.RemoveExpireIncompleteChunkedMessages()
-                                
-            | ConsumerMessage.GetStats channel ->
-                                
-                channel.SetResult(stats.GetStats())
-                                
-            | ConsumerMessage.ReconsumeLater (msg, ackType, deliverAt, channel) ->
-                                
-                let acknowldege = trySendAcknowledge ackType EmptyProperties None
-                task {
-                    try
-                        do! deadLettersProcessor.ReconsumeLater(msg, deliverAt, acknowldege)
-                    with Flatten ex ->
-                        Log.Logger.LogError(ex, "Send to retry topic exception with topic: {0}, messageId: {1}",
-                                        deadLettersProcessor.TopicName, msg.MessageId)
-                        untrackMessage msg.MessageId
-                        let redeliverSet = RedeliverSet()
-                        redeliverSet.Add(msg.MessageId) |> ignore
-                        redeliverMessages redeliverSet
-                } |> channel.SetResult
-                                
-            | ConsumerMessage.ConnectionClosed clientCnx ->
-            
-                Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
-                connectionHandler.ConnectionClosed clientCnx
-                clientCnx.RemoveConsumer(consumerId)
-            
-            | ConsumerMessage.ConnectionFailed ex ->
-            
-                Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
-                let nonRetriableError = ex |> PulsarClientException.isRetriableError |> not
-                let timeout = DateTime.Now > subscribeTimeout
-                if ((nonRetriableError || timeout) && subscribeTsc.TrySetException(ex)) then
-                    Log.Logger.LogInformation("{0} creation failed {1}", prefix,
-                                                if nonRetriableError then "with unretriableError" else "after timeout")
-                    connectionHandler.Failed()
-                    stopConsumer()
-                    continueLoop <- false
-                                
-            | ClearIncomingMessagesAndGetMessageNumber ch ->
-                                
-                Log.Logger.LogDebug("{0} ClearIncomingMessagesAndGetMessageNumber", prefix)
-                let messageNumber = incomingMessages.Count
-                incomingMessages.Clear()
-                incomingMessagesSize <- 0L
-                unAckedMessageTracker.Clear()
-                ch.SetResult messageNumber
-                                
-            | IncreaseAvailablePermits permits ->
-                                
-                Log.Logger.LogDebug("{0} IncreaseAvailablePermits {1}", prefix, permits)
-                increaseAvailablePermits permits
-                                
-            | ConsumerMessage.Close channel ->
-            
-                match connectionHandler.ConnectionState with
-                | Ready clientCnx ->
-                    connectionHandler.Closing()
-                    Log.Logger.LogInformation("{0} starting close", prefix)
-                    let requestId = Generators.getNextRequestId()
-                    let payload = Commands.newCloseConsumer consumerId requestId
-                    try
-                        let! response = clientCnx.SendAndWaitForReply requestId payload
-                        response |> PulsarResponseType.GetEmpty
-                        clientCnx.RemoveConsumer(consumerId)
+                | ConsumerMessage.ActiveConsumerChanged isActive ->
+                    
+                    Log.Logger.LogInformation("{0} ActiveConsumerChanged isActive={1}", prefix, isActive)
+                    return! loop ()
+                        
+                | ConsumerMessage.Tick tick ->
+                    
+                    match tick with
+                    | StatTick ->
+                        stats.TickTime(incomingMessages.Count)
+                    | ChunkTick ->
+                        chunkedMessageTracker.RemoveExpireIncompleteChunkedMessages()
+                    return! loop()
+                    
+                | ConsumerMessage.GetStats channel ->
+                    
+                    channel.Reply <| stats.GetStats()
+                    return! loop ()
+                    
+                | ConsumerMessage.ReconsumeLater (msg, ackType, deliverAt, channel) ->
+                    
+                    let acknowldege = trySendAcknowledge ackType EmptyProperties None
+                    task {
+                        try
+                            do! deadLettersProcessor.ReconsumeLater(msg, deliverAt, acknowldege)
+                        with Flatten ex ->
+                            Log.Logger.LogError(ex, "Send to retry topic exception with topic: {0}, messageId: {1}",
+                                            deadLettersProcessor.TopicName, msg.MessageId)
+                            untrackMessage msg.MessageId
+                            let redeliverSet = RedeliverSet()
+                            redeliverSet.Add(msg.MessageId) |> ignore
+                            redeliverMessages redeliverSet
+                    } |> channel.Reply
+                    return! loop ()
+                    
+                | ConsumerMessage.ConnectionClosed clientCnx ->
+
+                    Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
+                    connectionHandler.ConnectionClosed clientCnx
+                    clientCnx.RemoveConsumer(consumerId)
+                    return! loop ()
+
+                | ConsumerMessage.ConnectionFailed ex ->
+
+                    Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
+                    let nonRetriableError = ex |> PulsarClientException.isRetriableError |> not
+                    let timeout = DateTime.Now > subscribeTimeout
+                    if ((nonRetriableError || timeout) && subscribeTsc.TrySetException(ex)) then
+                        Log.Logger.LogInformation("{0} creation failed {1}", prefix,
+                                                  if nonRetriableError then "with unretriableError" else "after timeout")
+                        connectionHandler.Failed()
+                        stopConsumer()
+                    else
+                        return! loop ()
+                    
+                | ClearIncomingMessagesAndGetMessageNumber ch ->
+                    
+                    Log.Logger.LogDebug("{0} ClearIncomingMessagesAndGetMessageNumber", prefix)
+                    let messageNumber = incomingMessages.Count
+                    incomingMessages.Clear()
+                    incomingMessagesSize <- 0L
+                    unAckedMessageTracker.Clear()
+                    ch.Reply messageNumber
+                    return! loop ()
+                    
+                | IncreaseAvailablePermits permits ->
+                    
+                    Log.Logger.LogDebug("{0} IncreaseAvailablePermits {1}", prefix, permits)
+                    increaseAvailablePermits permits
+                    return! loop ()
+                    
+                | ConsumerMessage.Close channel ->
+
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        connectionHandler.Closing()
+                        Log.Logger.LogInformation("{0} starting close", prefix)
+                        let requestId = Generators.getNextRequestId()
+                        let payload = Commands.newCloseConsumer consumerId requestId
+                        try
+                            let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                            response |> PulsarResponseType.GetEmpty
+                            clientCnx.RemoveConsumer(consumerId)
+                            connectionHandler.Closed()
+                            stopConsumer()
+                            channel.Reply <| Ok()
+                        with Flatten ex ->
+                            Log.Logger.LogError(ex, "{0} failed to send close to server, doing local close", prefix)
+                            connectionHandler.Closed()
+                            stopConsumer()
+                            channel.Reply <| Ok()
+                    | _ ->
+                        Log.Logger.LogWarning("{0} closing but current state {1}, doing local close", prefix, connectionHandler.ConnectionState)
                         connectionHandler.Closed()
                         stopConsumer()
-                        channel.SetResult(Ok())
-                    with Flatten ex ->
-                        Log.Logger.LogError(ex, "{0} failed to send close to server, doing local close", prefix)
-                        connectionHandler.Closed()
-                        stopConsumer()
-                        channel.SetResult(Ok())
-                | _ ->
-                    Log.Logger.LogWarning("{0} closing but current state {1}, doing local close", prefix, connectionHandler.ConnectionState)
-                    connectionHandler.Closed()
-                    stopConsumer()
-                    channel.SetResult(Ok())
+                        channel.Reply <| Ok()
 
-                continueLoop <- false
-            
-            | ConsumerMessage.Unsubscribe channel ->
-            
-                match connectionHandler.ConnectionState with
-                | Ready clientCnx ->
-                    connectionHandler.Closing()
-                    unAckedMessageTracker.Close()
-                    clearDeadLetters()
-                    Log.Logger.LogInformation("{0} starting unsubscribe ", prefix)
-                    let requestId = Generators.getNextRequestId()
-                    let payload = Commands.newUnsubscribeConsumer consumerId requestId                       
-                    try
-                        let! response = clientCnx.SendAndWaitForReply requestId payload
-                        response |> PulsarResponseType.GetEmpty
-                        clientCnx.RemoveConsumer(consumerId)
-                        connectionHandler.Closed()
-                        stopConsumer()
-                        channel.SetResult(Ok())
-                    with Flatten ex ->
-                        Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
-                        channel.SetResult(Error ex)
-                                        
-                    if connectionHandler.ConnectionState = Closed then
-                        continueLoop <- false
-                | _ ->
-                    Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
-                    channel.SetResult (Error((NotConnectedException "Not connected to broker") :> exn))
-        }:> Task).ContinueWith(fun t ->
-                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
-                                    else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
-    |> ignore
+                | ConsumerMessage.Unsubscribe channel ->
 
-
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        connectionHandler.Closing()
+                        unAckedMessageTracker.Close()
+                        clearDeadLetters()
+                        Log.Logger.LogInformation("{0} starting unsubscribe ", prefix)
+                        let requestId = Generators.getNextRequestId()
+                        let payload = Commands.newUnsubscribeConsumer consumerId requestId                       
+                        try
+                            let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                            response |> PulsarResponseType.GetEmpty
+                            clientCnx.RemoveConsumer(consumerId)
+                            connectionHandler.Closed()
+                            stopConsumer()
+                            channel.Reply <| Ok()
+                        with Flatten ex ->
+                            Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
+                            channel.Reply <| Error ex
+                            
+                        if connectionHandler.ConnectionState <> Closed then
+                            return! loop ()
+                    | _ ->
+                        Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
+                        channel.Reply <| Error((NotConnectedException "Not connected to broker") :> exn)
+                        return! loop ()
+            }
+        loop ()
+    )
+    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
     do startStatTimer()
     do startChunkTimer()
 
@@ -1543,15 +1564,21 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.SeekAsync (messageId: MessageId) =
             task {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
-                return! wrapPostAndReply <| postAndAsyncReply mb (fun channel -> SeekAsync (MessageId messageId, channel))
+                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (SeekType.MessageId messageId, channel))
             }
 
         member this.SeekAsync (timestamp: TimeStamp) =
             task {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
-                return! wrapPostAndReply <| postAndAsyncReply mb (fun channel -> SeekAsync (Timestamp timestamp, channel))
+                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (SeekType.Timestamp timestamp, channel))
             }
             
+        member this.SeekAsync (resolver: Func<string, SeekType>) : Task<Unit>  =
+            let startFrom = resolver.Invoke %topicName.CompleteTopicName
+            task {
+                return! wrapPostAndReply <| mb.PostAndAsyncReply(fun channel -> SeekAsync (startFrom, channel))
+            }
+                        
         member this.GetLastMessageIdAsync () =
             task {
                 let! result = getLastMessageIdAsync()

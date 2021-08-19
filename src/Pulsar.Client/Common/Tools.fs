@@ -18,8 +18,8 @@ let RandomGenerator = Random()
 let EmptyProps: IReadOnlyDictionary<string, string> = readOnlyDict []
 let EmptyProperties: IReadOnlyDictionary<string, int64> = readOnlyDict []
 let EmptyAckSet = BitArray(0)
-
 let EmptyMetadata: IReadOnlyDictionary<string, string> = readOnlyDict []
+let DisableReplication = [| "__local__" |]
 
 // Converts
 

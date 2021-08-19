@@ -52,7 +52,8 @@ type internal MultiTopicConsumerMessage<'T> =
     | Close of TaskCompletionSource<ResultOrException<unit>>
     | Unsubscribe of TaskCompletionSource<ResultOrException<unit>>
     | HasReachedEndOfTheTopic of TaskCompletionSource<bool>
-    | Seek of SeekData * TaskCompletionSource<Task>
+    | Seek of SeekType * TaskCompletionSource<Task>
+    | SeekWithResolver of Func<string, SeekType> *  TaskCompletionSource<Task> 
     | PatternTickTime
     | PartitionTickTime
     | GetStats of TaskCompletionSource<Task<ConsumerStats array>>
@@ -776,18 +777,31 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
             | Seek (seekData, channel) ->
 
-                Log.Logger.LogDebug("{0} Seek {1}", prefix, seekData)
-                let seekTask = 
-                    consumers
-                    |> Seq.map (fun (KeyValue(_, (consumer, _))) ->
-                        match seekData with
-                        | Timestamp ts -> consumer.SeekAsync(ts)
-                        | MessageId msgId -> consumer.SeekAsync(msgId))
-                    |> Task.WhenAll
-                unAckedMessageTracker.Clear()
-                incomingMessages.Clear()
-                incomingMessagesSize <- 0L
-                channel.SetResult(seekTask)
+                    Log.Logger.LogDebug("{0} Seek {1}", prefix, seekData)
+                    let seekTask = 
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, (consumer, _))) ->
+                            match seekData with
+                            | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
+                            | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
+                        |> Task.WhenAll
+                    unAckedMessageTracker.Clear()
+                    incomingMessages.Clear()
+                    incomingMessagesSize <- 0L
+                    channel.Reply seekTask
+                    return! loop ()
+                    
+                | SeekWithResolver (resolver, channel) ->
+
+                    let seekTask = 
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))
+                        |> Task.WhenAll
+                    unAckedMessageTracker.Clear()
+                    incomingMessages.Clear()
+                    incomingMessagesSize <- 0L
+                    channel.Reply seekTask
+                    return! loop ()
 
             | PatternTickTime ->
                 
@@ -1061,16 +1075,22 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             if MultiTopicsConsumerImpl<_>.isIllegalMultiTopicsMessageId messageId then
                 failwith "Illegal messageId, messageId can only be earliest/latest"
             task {
-                let! result = postAndAsyncReply mb (fun channel -> Seek(MessageId messageId, channel))
+                let! result = mb.PostAndAsyncReply(fun channel -> Seek(SeekType.MessageId messageId, channel))
                 return! result
             }
 
         member this.SeekAsync (timestamp: TimeStamp) =
             task {
-                let! result = postAndAsyncReply mb (fun channel -> Seek(Timestamp timestamp, channel))
+                let! result = mb.PostAndAsyncReply(fun channel -> Seek(SeekType.Timestamp timestamp, channel))
                 return! result
             }
             
+        member this.SeekAsync (resolver: Func<string, SeekType>) : Task<Unit>  =
+            task {
+                let! result = mb.PostAndAsyncReply(fun channel -> SeekWithResolver(resolver, channel))
+                return! result                
+            }
+           
         member this.GetLastMessageIdAsync () =
             Task.FromException<MessageId>(exn "GetLastMessageId operation not supported on multitopics consumer")
 
