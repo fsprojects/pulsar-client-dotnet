@@ -5,9 +5,12 @@ open Pulsar.Client.Common
 open System.Collections.Generic
 open System.Timers
 open Microsoft.Extensions.Logging
+open System.Threading.Channels
+open System.Threading.Tasks
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 type internal NegativeAcksTrackerMessage =
-    | Add of (MessageId*AsyncReplyChannel<bool>)
+    | Add of (MessageId*TaskCompletionSource<bool>)
     | TickTime
     | Stop
 
@@ -22,68 +25,66 @@ type internal NegativeAcksTracker(prefix: string,
     let prefix = prefix + " NegativeTracker"
     let state = SortedDictionary<MessageId, DateTime>()
 
-    let mb = MailboxProcessor<NegativeAcksTrackerMessage>.Start(fun inbox ->
-        let rec loop ()  =
-            async {
-                let! message = inbox.Receive()
-                match message with
-
-                | Add (msgId, channel) ->
-
-                    Log.Logger.LogDebug("{0} Adding message {1}", prefix, msgId)
-                    if state.ContainsKey(msgId) |> not then
-                        state.Add(msgId, DateTime.Now.Add(nackDelay))
-                        channel.Reply(true)
-                    else
-                        Log.Logger.LogWarning("{0} Duplicate message add {1}", prefix, msgId)
-                        channel.Reply(false)
-                    return! loop ()
-
-                | TickTime ->
-
-                    if state.Count > 0 then
-                        let messagesToRedeliver = HashSet<MessageId>()
-                        for KeyValue(messageId, expirationDate) in state do
-                            if expirationDate < DateTime.Now then
-                                match messageId.ChunkMessageIds with
-                                | Some msgIds ->
-                                    msgIds |> Array.iter (messagesToRedeliver.Add >> ignore)
-                                | None ->
-                                    messagesToRedeliver.Add(messageId) |> ignore
-                        if messagesToRedeliver.Count > 0 then
-                            for msgId in messagesToRedeliver do
-                                state.Remove(msgId) |> ignore
-                            Log.Logger.LogDebug("{0} Redelivering {1} messages", prefix, messagesToRedeliver.Count)
-                            redeliverUnacknowledgedMessages messagesToRedeliver
-                    else
-                        ()
-                    return! loop ()
-
-                | Stop ->
-
-                    Log.Logger.LogDebug("{0} Stop", prefix)
-                    state.Clear()
-            }
-        loop ()
-    )
+    
+    let mb = Channel.CreateUnbounded<NegativeAcksTrackerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    do (task {
+        let mutable continueLoop = true
+        while continueLoop do
+            match! mb.Reader.ReadAsync() with
+            | Add (msgId, channel) ->
+            
+                Log.Logger.LogDebug("{0} Adding message {1}", prefix, msgId)
+                if state.ContainsKey(msgId) |> not then
+                    state.Add(msgId, DateTime.Now.Add(nackDelay))
+                    channel.SetResult(true)
+                else
+                    Log.Logger.LogWarning("{0} Duplicate message add {1}", prefix, msgId)
+                    channel.SetResult(false)
+            
+            | TickTime ->
+            
+                if state.Count > 0 then
+                    let messagesToRedeliver = HashSet<MessageId>()
+                    for KeyValue(messageId, expirationDate) in state do
+                        if expirationDate < DateTime.Now then
+                            match messageId.ChunkMessageIds with
+                            | Some msgIds ->
+                                msgIds |> Array.iter (messagesToRedeliver.Add >> ignore)
+                            | None ->
+                                messagesToRedeliver.Add(messageId) |> ignore
+                    if messagesToRedeliver.Count > 0 then
+                        for msgId in messagesToRedeliver do
+                            state.Remove(msgId) |> ignore
+                        Log.Logger.LogDebug("{0} Redelivering {1} messages", prefix, messagesToRedeliver.Count)
+                        redeliverUnacknowledgedMessages messagesToRedeliver
+                else
+                    ()
+            
+            | Stop ->
+            
+                Log.Logger.LogDebug("{0} Stop", prefix)
+                state.Clear()
+                continueLoop <- false
+            }:> Task).ContinueWith(fun t ->
+                if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
+                else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+    |> ignore
 
     let timer =
         match getTickScheduler with
         | None ->
             let timer = new Timer(timerIntervalms)
             timer.AutoReset <- true
-            timer.Elapsed.Add(fun _ -> mb.Post TickTime)
+            timer.Elapsed.Add(fun _ -> post mb TickTime)
             timer.Start() |> ignore
             timer :> IDisposable
         | Some getScheduler ->
-            getScheduler(fun _ -> mb.Post TickTime)
-    
-    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
+            getScheduler(fun _ -> post mb TickTime)
 
     member this.Add(msgId) =
-        mb.PostAndReply (fun channel -> Add (msgId, channel))
+        postAndAsyncReply mb (fun channel -> Add (msgId, channel))
 
     member this.Close() =
         timer.Dispose()
-        mb.Post Stop
+        post mb Stop
 
