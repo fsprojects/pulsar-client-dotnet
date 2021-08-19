@@ -65,9 +65,9 @@ type internal NegativeAcksTracker(prefix: string,
                 Log.Logger.LogDebug("{0} Stop", prefix)
                 state.Clear()
                 continueLoop <- false
-            }:> Task).ContinueWith(fun t ->
-                if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
-                else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+        }:> Task).ContinueWith(fun t ->
+            if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
+            else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
 
     let timer =
@@ -82,7 +82,7 @@ type internal NegativeAcksTracker(prefix: string,
             getScheduler(fun _ -> post mb TickTime)
 
     member this.Add(msgId) =
-        postAndAsyncReply mb (fun channel -> Add (msgId, channel))
+        postAndAsyncReply mb (fun channel -> Add (msgId, channel)) |> Async.AwaitTask |> Async.RunSynchronously
 
     member this.Close() =
         timer.Dispose()
