@@ -141,7 +141,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let consumerTxnOperations =
         {
             ClearIncomingMessagesAndGetMessageNumber = fun () ->
-                (postAndAsyncReply this.Mb ConsumerMessage.ClearIncomingMessagesAndGetMessageNumber) |> Async.AwaitTask
+                postAndAsyncReply this.Mb ConsumerMessage.ClearIncomingMessagesAndGetMessageNumber |> Async.AwaitTask
             IncreaseAvailablePermits = fun permits ->
                 post this.Mb (ConsumerMessage.IncreaseAvailablePermits permits)
         }
@@ -238,9 +238,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             internalGetLastMessageIdAsync(backoff, int clientConfig.OperationTimeout.TotalMilliseconds) |> Async.StartAsTask
     
     let redeliverMessages messages =
-        postAndAsyncReply this.Mb (fun channel -> RedeliverUnacknowledged (messages, channel))
-        |> Async.AwaitTask
-        |> Async.StartImmediate
+        postAndReply this.Mb (fun channel -> RedeliverUnacknowledged (messages, channel))
 
     let unAckedMessageRedeliver messages =
         interceptors.OnAckTimeoutSend(this, messages)
@@ -1012,7 +1010,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                             Log.Logger.LogWarning("{0} RedeliverAcknowledged was not complete", prefix)
                                     else
                                         Log.Logger.LogDebug("{0} All messages were dead", prefix)
-                                } |> Async.AwaitTask
+                                }
                         if messagesFromQueue > 0 then
                             increaseAvailablePermits messagesFromQueue
                     | _ ->
@@ -1054,7 +1052,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             match seekData with
                             | Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
                             | MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
-                        let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                        let! response = clientCnx.SendAndWaitForReply requestId payload
                         response |> PulsarResponseType.GetEmpty
                                         
                         duringSeek <- Some lastMessage
@@ -1090,7 +1088,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     // allow the last one to be read when read head inclusively.
                     if startMessageId = MessageId.Latest then
                         task {
-                            let! lastMessageIdResult = getLastMessageIdAsync() |> Async.AwaitTask
+                            let! lastMessageIdResult = getLastMessageIdAsync()
                             let lastMessageId = lastMessageIdResult.LastMessageId
                             // if the consumer is configured to read inclusive then we need to seek to the last message
                             if consumerConfig.ResetIncludeHead then
@@ -1218,7 +1216,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let requestId = Generators.getNextRequestId()
                     let payload = Commands.newCloseConsumer consumerId requestId
                     try
-                        let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                        let! response = clientCnx.SendAndWaitForReply requestId payload
                         response |> PulsarResponseType.GetEmpty
                         clientCnx.RemoveConsumer(consumerId)
                         connectionHandler.Closed()
@@ -1248,7 +1246,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let requestId = Generators.getNextRequestId()
                     let payload = Commands.newUnsubscribeConsumer consumerId requestId                       
                     try
-                        let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
+                        let! response = clientCnx.SendAndWaitForReply requestId payload
                         response |> PulsarResponseType.GetEmpty
                         clientCnx.RemoveConsumer(consumerId)
                         connectionHandler.Closed()

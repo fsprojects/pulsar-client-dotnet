@@ -82,7 +82,7 @@ type internal NegativeAcksTracker(prefix: string,
             getScheduler(fun _ -> post mb TickTime)
 
     member this.Add(msgId) =
-        postAndAsyncReply mb (fun channel -> Add (msgId, channel)) |> Async.AwaitTask |> Async.RunSynchronously
+        postAndReply mb (fun channel -> Add (msgId, channel))
 
     member this.Close() =
         timer.Dispose()

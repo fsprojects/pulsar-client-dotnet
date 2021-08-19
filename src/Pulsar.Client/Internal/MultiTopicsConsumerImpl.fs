@@ -320,8 +320,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         let consumer = t.Result.Consumer
                         (consumer :> IConsumer<'T>).DisposeAsync().AsTask())
                     |> Task.WhenAll
-                    |> Async.AwaitTask
-                    |> Async.Ignore
                 return Seq.empty
         }
         
@@ -559,7 +557,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 try
                     let! streams =
                         newStreamsTask
-                        |> Async.AwaitTask
                     this.ConnectionState <- Ready
                     Log.Logger.LogInformation("{0} created", prefix)
                     currentStream <- streams |> TaskSeq
@@ -573,8 +570,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             let consumer = t.Result.Consumer
                             (consumer :> IConsumer<'T>).DisposeAsync().AsTask())
                         |> Task.WhenAll
-                        |> Async.AwaitTask
-                        |> Async.Ignore
                     this.ConnectionState <- Failed
                     consumerCreatedTsc.SetException(ex)
                     stopConsumer()    
@@ -715,7 +710,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             consumers
                             |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.RedeliverUnacknowledgedMessagesAsync())
                             |> Task.WhenAll
-                            |> Async.AwaitTask
                         unAckedMessageTracker.Clear()
                         incomingMessages.Clear()
                         currentStream.RestartCompletedTasks()
@@ -801,18 +795,18 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 try 
                     match multiConsumerType with
                     | Pattern patternInfo ->
-                        let! newAllTopics = patternInfo.GetTopics() |> Async.AwaitTask
+                        let! newAllTopics = patternInfo.GetTopics()
                         let addedTopics = newAllTopics |> HashSet
                         let removedTopics = allTopics |> HashSet
                         addedTopics.ExceptWith allTopics
                         removedTopics.ExceptWith newAllTopics
                         if addedTopics.Count > 0 then
                             Log.Logger.LogInformation("{0} subscribing to {1} new topics", prefix, addedTopics.Count)
-                            let! streams = processAddedTopics addedTopics patternInfo.GetConsumerInfo |> Async.AwaitTask
+                            let! streams = processAddedTopics addedTopics patternInfo.GetConsumerInfo
                             currentStream.AddGenerators(streams)
                         if removedTopics.Count > 0 then
                             Log.Logger.LogInformation("{0} removing subscription to {1} old topics", prefix, removedTopics.Count)
-                            let! streams = processRemovedTopics removedTopics |> Async.AwaitTask
+                            let! streams = processRemovedTopics removedTopics
                             streams   
                             |> Seq.iter (fun stream -> currentStream.RemoveGenerator stream)
                     | _ ->
@@ -826,7 +820,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 match this.ConnectionState with
                 | Ready ->
                     // Check partitions changes of passed in topics, and add new topic partitions.
-                    do! handlePartitions() |> Async.AwaitTask
+                    do! handlePartitions()
                 | _ ->
                     ()
 
@@ -882,7 +876,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     this.ConnectionState <- Closing
                     let consumerTasks = consumers |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.DisposeAsync().AsTask())
                     try
-                        let! _ = Task.WhenAll consumerTasks |> Async.AwaitTask
+                        let! _ = Task.WhenAll consumerTasks
                         this.ConnectionState <- Closed
                         stopConsumer()
                         channel.SetResult(Ok())
@@ -904,7 +898,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     this.ConnectionState <- Closing
                     let consumerTasks = consumers |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.UnsubscribeAsync())
                     try
-                        let! _ = Task.WhenAll consumerTasks |> Async.AwaitTask
+                        let! _ = Task.WhenAll consumerTasks
                         this.ConnectionState <- Closed
                         Log.Logger.LogInformation("{0} unsubscribed", prefix)
                         stopConsumer()
@@ -1089,7 +1083,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             }
 
         member this.HasReachedEndOfTopic =
-            postAndAsyncReply mb HasReachedEndOfTheTopic |> Async.AwaitTask |> Async.RunSynchronously
+            postAndReply mb HasReachedEndOfTheTopic
 
         member this.NegativeAcknowledge msgId =
             task {
@@ -1143,7 +1137,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             }
             
         member this.LastDisconnectedTimestamp =
-            postAndAsyncReply mb LastDisconnectedTimestamp |> Async.AwaitTask |> Async.RunSynchronously
+            postAndReply mb LastDisconnectedTimestamp
         
     interface IAsyncDisposable with
         

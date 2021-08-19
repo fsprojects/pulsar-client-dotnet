@@ -135,11 +135,11 @@ type internal UnAckedMessageTracker(prefix: string,
         member this.Clear() =
             post mb UnackedTrackerMessage.Clear
         member this.Add(msgId) =
-            postAndAsyncReply mb (fun channel -> UnackedTrackerMessage.Add (msgId, channel)) |> Async.AwaitTask |> Async.RunSynchronously
+            postAndReply mb (fun channel -> UnackedTrackerMessage.Add (msgId, channel))
         member this.Remove(msgId) =
-            postAndAsyncReply mb (fun channel -> UnackedTrackerMessage.Remove (msgId, channel)) |> Async.AwaitTask |> Async.RunSynchronously
+            postAndReply mb (fun channel -> UnackedTrackerMessage.Remove (msgId, channel))
         member this.RemoveMessagesTill(msgId) =
-            postAndAsyncReply mb (fun channel -> UnackedTrackerMessage.RemoveMessagesTill (msgId, channel)) |> Async.AwaitTask |> Async.RunSynchronously
+            postAndReply mb (fun channel -> UnackedTrackerMessage.RemoveMessagesTill (msgId, channel))
            
         
         member this.Close() =

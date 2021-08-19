@@ -173,9 +173,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     do! producerTasks
                         |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
                         |> Seq.map (fun t -> task { return! t.Result.DisposeAsync() })
-                        |> Task.WhenAll
-                        |> Async.AwaitTask
-                        |> Async.Ignore
+                        |> Task.WhenAll :> Task
                     this.ConnectionState <- Failed
                     producerCreatedTsc.SetException(ex)
                     stopProducer()
@@ -209,7 +207,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     this.ConnectionState <- Closing
                     let producersTasks = producers |> Seq.map(fun producer -> task { return! producer.DisposeAsync() })
                     try
-                        let! _ = Task.WhenAll producersTasks |> Async.AwaitTask
+                        let! _ = Task.WhenAll producersTasks
                         this.ConnectionState <- Closed
                         Log.Logger.LogInformation("{0} closed", prefix)
                         stopProducer()
@@ -225,7 +223,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                 match this.ConnectionState with
                 | Ready ->
                     // Check partitions changes of passed in topics, and add new topic partitions.
-                    let! partitionedTopicNamesOption = getAllPartitions() |> Async.AwaitTask
+                    let! partitionedTopicNamesOption = getAllPartitions()
                     match partitionedTopicNamesOption with
                     | Some partitionedTopicNames ->
                     
@@ -377,13 +375,13 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
         member this.Topic = %producerConfig.Topic.CompleteTopicName
 
-        member this.LastSequenceId = postAndAsyncReply mb LastSequenceId |> Async.AwaitTask |> Async.RunSynchronously
+        member this.LastSequenceId = postAndReply mb LastSequenceId
 
         member this.Name = producerConfig.ProducerName
 
         member this.GetStatsAsync() = postAndAsyncReply mb GetStats
         
-        member this.LastDisconnectedTimestamp = postAndAsyncReply mb LastDisconnectedTimestamp |> Async.AwaitTask |> Async.RunSynchronously
+        member this.LastDisconnectedTimestamp = postAndReply mb LastDisconnectedTimestamp
 
         
     interface IAsyncDisposable with

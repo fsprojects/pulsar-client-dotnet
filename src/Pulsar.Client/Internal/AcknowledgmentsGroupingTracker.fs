@@ -261,8 +261,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         /// Since the ack are delayed, we need to do some best-effort duplicate check to discard messages that are being
         /// resent after a disconnection and for which the user has already sent an acknowledgement.
         member this.IsDuplicate(msgId) =
-            postAndAsyncReply mb (fun channel -> GroupingTrackerMessage.IsDuplicate (msgId, channel))
-            |> Async.AwaitTask |> Async.RunSynchronously
+            postAndReply mb (fun channel -> GroupingTrackerMessage.IsDuplicate (msgId, channel))
         member this.AddAcknowledgment(msgId, ackType, properties) =
             post mb (GroupingTrackerMessage.AddAcknowledgment (msgId, ackType, properties))
         member this.AddBatchIndexAcknowledgment(msgId, ackType, properties) =

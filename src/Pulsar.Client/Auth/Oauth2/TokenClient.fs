@@ -59,7 +59,7 @@ type internal TokenClient (tokenUrl: Uri, client: HttpClient) =
 
             request.Content <- new FormUrlEncodedContent(body)
 
-            use! response = client.SendAsync request |> Async.AwaitTask
+            use! response = client.SendAsync request
             use! resultContent = response.Content.ReadAsStreamAsync() 
 
             match response.StatusCode with

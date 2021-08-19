@@ -158,6 +158,11 @@ let postAndAsyncReply (channel: Channel<'T>) f =
     let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
     (f tcs) |> channel.Writer.TryWrite |> ignore
     tcs.Task
+
+let postAndReply (channel: Channel<'T>) f =
+    let tcs = TaskCompletionSource(TaskContinuationOptions.ExecuteSynchronously)
+    (f tcs) |> channel.Writer.TryWrite |> ignore
+    tcs.Task.Result
     
 let post (channel: Channel<'T>) =
     channel.Writer.TryWrite >> ignore

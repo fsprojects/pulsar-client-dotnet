@@ -183,7 +183,7 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
     member private this.GetTopicsByPattern (fakeTopicName: TopicName) (regex: Regex) =
         fun () ->
             task {
-                let! allNamespaceTopics = lookupService.GetTopicsUnderNamespace(fakeTopicName.NamespaceName, fakeTopicName.IsPersistent) |> Async.AwaitTask
+                let! allNamespaceTopics = lookupService.GetTopicsUnderNamespace(fakeTopicName.NamespaceName, fakeTopicName.IsPersistent)
                 let topics =
                     allNamespaceTopics
                     |> Seq.filter regex.IsMatch
@@ -204,11 +204,10 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
             let! consumerInfos =
                 if topics.Length > 0 then
                     topics
-                    |> Seq.map (fun topic -> this.GetConsumerInitInfo(schema, topic))            
+                    |> Seq.map (fun topic -> this.GetConsumerInitInfo(schema, topic))
                     |> Task.WhenAll
-                    |> Async.AwaitTask
                 else
-                    async { return [||] }
+                    Task.FromResult([||])
             let patternInfo = { InitialTopics = consumerInfos; GetTopics = getTopicsFun; GetConsumerInfo = getConsumerInfoFun }
             let! consumer = MultiTopicsConsumerImpl.InitPattern(consumerConfig, config, connectionPool,
                                                             patternInfo, lookupService, interceptors, removeConsumer)
