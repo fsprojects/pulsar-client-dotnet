@@ -788,8 +788,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     unAckedMessageTracker.Clear()
                     incomingMessages.Clear()
                     incomingMessagesSize <- 0L
-                    channel.Reply seekTask
-                    return! loop ()
+                    channel.SetResult seekTask
                     
                 | SeekWithResolver (resolver, channel) ->
 
@@ -800,8 +799,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     unAckedMessageTracker.Clear()
                     incomingMessages.Clear()
                     incomingMessagesSize <- 0L
-                    channel.Reply seekTask
-                    return! loop ()
+                    channel.SetResult seekTask
 
             | PatternTickTime ->
                 
@@ -1075,19 +1073,19 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             if MultiTopicsConsumerImpl<_>.isIllegalMultiTopicsMessageId messageId then
                 failwith "Illegal messageId, messageId can only be earliest/latest"
             task {
-                let! result = mb.PostAndAsyncReply(fun channel -> Seek(SeekType.MessageId messageId, channel))
+                let! result = postAndAsyncReply mb (fun channel -> Seek(SeekType.MessageId messageId, channel))
                 return! result
             }
 
         member this.SeekAsync (timestamp: TimeStamp) =
             task {
-                let! result = mb.PostAndAsyncReply(fun channel -> Seek(SeekType.Timestamp timestamp, channel))
+                let! result = postAndAsyncReply mb (fun channel -> Seek(SeekType.Timestamp timestamp, channel))
                 return! result
             }
             
         member this.SeekAsync (resolver: Func<string, SeekType>) : Task<Unit>  =
             task {
-                let! result = mb.PostAndAsyncReply(fun channel -> SeekWithResolver(resolver, channel))
+                let! result = postAndAsyncReply mb (fun channel -> SeekWithResolver(resolver, channel))
                 return! result                
             }
            
