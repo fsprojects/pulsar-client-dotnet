@@ -1401,9 +1401,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             return consumer
         }
 
-    abstract member ReceiveFsharpAsync: CancellationToken -> Async<ResultOrException<Message<'T>>>
+    abstract member ReceiveFsharpAsync: CancellationToken -> Task<ResultOrException<Message<'T>>>
     default this.ReceiveFsharpAsync(cancellationToken: CancellationToken) =
-        async {
+        task {
             connectionHandler.CheckIfActive() |> throwIfNotNull
             let! msgResult = postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel))
             match msgResult with
