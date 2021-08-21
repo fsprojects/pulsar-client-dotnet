@@ -41,7 +41,7 @@ type internal ConsumerMessage<'T> =
     | RedeliverUnacknowledged of RedeliverSet * TaskCompletionSource<unit>
     | RedeliverAllUnacknowledged of TaskCompletionSource<unit>
     | SeekAsync of SeekType * TaskCompletionSource<ResultOrException<unit>>
-    | HasMessageAvailable of TaskCompletionSource<Task<bool>>
+    | HasMessageAvailable of TaskCompletionSource<bool>
     | ActiveConsumerChanged of bool
     | Close of TaskCompletionSource<ResultOrException<unit>>
     | Unsubscribe of TaskCompletionSource<ResultOrException<unit>>
@@ -1091,58 +1091,65 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             let! lastMessageIdResult = getLastMessageIdAsync()
                             let lastMessageId = lastMessageIdResult.LastMessageId
                             // if the consumer is configured to read inclusive then we need to seek to the last message
-                            if consumerConfig.ResetIncludeHead then
-                                let! result = postAndAsyncReply this.Mb (fun channel ->
-                                    SeekAsync (SeekType.MessageId lastMessageId, channel))
-                                return
+                            let! processed = task {
+                                if consumerConfig.ResetIncludeHead then
+                                    let! result = postAndAsyncReply this.Mb (fun channel ->
+                                        SeekAsync (SeekType.MessageId lastMessageId, channel))
+
                                     match result with
-                                    | Ok () -> ()
-                                    | Error ex -> reraize ex
-                            match lastMessageIdResult.MarkDeletePosition with
-                            | Some markDeletePosition ->
-                                if lastMessageId.EntryId < %0L then
-                                    return false
-                                else
-                                    // we only care about comparing ledger ids and entry ids as mark delete position doesn't have other ids such as batch index
-                                    let result =
-                                        match markDeletePosition.LedgerId, lastMessageId.LedgerId with
-                                        | x, y when x > y -> 1
-                                        | x, y when x < y -> -1
-                                        | _ ->
-                                            match markDeletePosition.EntryId, lastMessageId.EntryId with
+                                    | Error ex ->
+                                        channel.SetException(ex)
+                                        return false
+                                    | Ok () -> return true
+                                else return true
+                                }
+                            if processed then
+                                match lastMessageIdResult.MarkDeletePosition with
+                                | Some markDeletePosition ->
+                                    if lastMessageId.EntryId < %0L then
+                                        channel.SetResult(false)
+                                    else
+                                        // we only care about comparing ledger ids and entry ids as mark delete position doesn't have other ids such as batch index
+                                        let result =
+                                            match markDeletePosition.LedgerId, lastMessageId.LedgerId with
                                             | x, y when x > y -> 1
                                             | x, y when x < y -> -1
-                                            | _ -> 0
-                                    return
+                                            | _ ->
+                                                match markDeletePosition.EntryId, lastMessageId.EntryId with
+                                                | x, y when x > y -> 1
+                                                | x, y when x < y -> -1
+                                                | _ -> 0
+                                    
                                         if consumerConfig.ResetIncludeHead then
-                                            result <= 0
+                                            channel.SetResult(result <= 0)
                                         else
-                                            result < 0
-                            | None ->
-                                if lastMessageId.EntryId < %0L then
-                                    return false
-                                else
-                                    return consumerConfig.ResetIncludeHead
-                        } |> channel.SetResult
+                                            channel.SetResult(result < 0)
+                                | None ->
+                                    if lastMessageId.EntryId < %0L then
+                                        channel.SetResult(false)
+                                    else
+                                        channel.SetResult(consumerConfig.ResetIncludeHead)
+                            ()
+                        } |> ignore
                     elif hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead then
-                        channel.SetResult(Task.FromResult(true))
+                        channel.SetResult(true)
                     else
                         task {
                             let! lastMessageIdResult = getLastMessageIdAsync()
                             this.LastMessageIdInBroker <- lastMessageIdResult.LastMessageId // Concurrent update - handle wisely
-                            return hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead
-                        } |> channel.SetResult
+                            channel.SetResult(hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead)
+                        } |> ignore
             
                 else
                     // read before, use lastDequeueMessage for comparison
                     if hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false then
-                        channel.SetResult(Task.FromResult(true))
+                        channel.SetResult(true)
                     else
                         task {
                             let! lastMessageIdResult = getLastMessageIdAsync()
                             this.LastMessageIdInBroker <- lastMessageIdResult.LastMessageId // Concurrent update - handle wisely
-                            return hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false
-                        } |> channel.SetResult
+                            channel.SetResult(hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false)
+                        } |> ignore
             
                                                 
             | ConsumerMessage.ActiveConsumerChanged isActive ->
@@ -1362,8 +1369,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     member this.HasMessageAvailableAsync() =
         task {
             connectionHandler.CheckIfActive() |> throwIfNotNull
-            let! result = postAndAsyncReply mb (fun channel -> HasMessageAvailable channel)
-            return! result
+            return! postAndAsyncReply mb (fun channel -> HasMessageAvailable channel)
         }
 
     member this.LastMessageIdInBroker
