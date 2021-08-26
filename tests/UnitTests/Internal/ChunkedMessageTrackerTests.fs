@@ -34,7 +34,7 @@ let tests =
         {
             MessageId = Unchecked.defaultof<MessageId>
             Metadata = Unchecked.defaultof<Metadata>
-            RedeliveryCount = 0u
+            RedeliveryCount = 0
             Payload = [||]
             MessageKey = ""
             IsKeyBase64Encoded = false

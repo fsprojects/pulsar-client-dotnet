@@ -98,7 +98,7 @@ type internal DeadLetterProcessor<'T>
                     do! acknowledge message.MessageId
             }
         
-        member this.MaxRedeliveryCount = policy.MaxRedeliveryCount |> uint32
+        member this.MaxRedeliveryCount = policy.MaxRedeliveryCount
         member this.TopicName = dlTopicName
 
     static member Disabled = {
@@ -107,7 +107,7 @@ type internal DeadLetterProcessor<'T>
             member this.AddMessage (_,_) = ()
             member this.RemoveMessage _ = ()
             member this.ProcessMessage (_,_) = falseTaskTask
-            member this.MaxRedeliveryCount = UInt32.MaxValue
+            member this.MaxRedeliveryCount = Int32.MaxValue
             member this.TopicName = ""
             member this.ReconsumeLater (_,_,_) = Task.FromResult()
     }

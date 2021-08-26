@@ -520,7 +520,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     TopicName = %""
                     ChunkMessageIds = None
                 }
-            RedeliveryCount = cmd.RedeliveryCount
+            RedeliveryCount = int cmd.RedeliveryCount
             Metadata = metadata
             Payload = payload
             MessageKey = messageMetadata.PartitionKey

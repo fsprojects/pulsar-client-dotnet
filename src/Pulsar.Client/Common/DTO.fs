@@ -224,7 +224,7 @@ type internal RawMessage =
     {
         MessageId: MessageId
         Metadata: Metadata
-        RedeliveryCount: uint32
+        RedeliveryCount: int
         Payload: byte[]
         MessageKey: string
         IsKeyBase64Encoded: bool
