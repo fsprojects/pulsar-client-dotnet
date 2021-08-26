@@ -260,6 +260,7 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
                   properties: IReadOnlyDictionary<string, string>, encryptionCtx: EncryptionContext option,
                   schemaVersion: byte[], sequenceId: SequenceId, orderingKey: byte[], publishTime: TimeStamp,
                   eventTime: Nullable<TimeStamp>,
+                  redeliveryCount: int32, 
                   getValue: unit -> 'T) =
     /// Get the unique message ID associated with this message.
     member this.MessageId = messageId
@@ -284,25 +285,27 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
     member this.PublishTime = publishTime
     /// Get the event time of the message as Unix timestamp (manually set by the application on produce).
     member this.EventTime = eventTime
+    /// Get the redelivery count of the message
+    member this.RedeliveryCount = redeliveryCount
     /// Get the de-serialized value of the message, according the configured Schema.
     member this.GetValue() =
         getValue()
 
     member internal this.WithMessageId messageId =
         Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
-                orderingKey, publishTime, eventTime, getValue)
+                orderingKey, publishTime, eventTime, redeliveryCount, getValue)
     /// Get a new instance of the message with updated data
     member this.WithData data =
         Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
-                orderingKey, publishTime, eventTime, getValue)
+                orderingKey, publishTime, eventTime, redeliveryCount, getValue)
     /// Get a new instance of the message with updated key
     member this.WithKey (key, hasBase64EncodedKey) =
         Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
-                orderingKey, publishTime, eventTime, getValue)
+                orderingKey, publishTime, eventTime, redeliveryCount, getValue)
     /// Get a new instance of the message with updated properties
     member this.WithProperties properties =
         Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
-                orderingKey, publishTime, eventTime, getValue)
+                orderingKey, publishTime, eventTime, redeliveryCount, getValue)
 
 type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 
