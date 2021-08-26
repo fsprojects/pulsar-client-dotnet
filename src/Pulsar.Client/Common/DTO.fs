@@ -260,7 +260,7 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
                   properties: IReadOnlyDictionary<string, string>, encryptionCtx: EncryptionContext option,
                   schemaVersion: byte[], sequenceId: SequenceId, orderingKey: byte[], publishTime: TimeStamp,
                   eventTime: Nullable<TimeStamp>,
-                  redeliveryCount: uint32, 
+                  redeliveryCount: int32, 
                   getValue: unit -> 'T) =
     /// Get the unique message ID associated with this message.
     member this.MessageId = messageId
