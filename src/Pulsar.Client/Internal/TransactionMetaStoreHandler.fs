@@ -21,13 +21,13 @@ type internal TransactionMetaStoreMessage =
     | ConnectionOpened
     | ConnectionFailed of exn
     | ConnectionClosed of ClientCnx
-    | NewTransaction of TimeSpan * TaskCompletionSource<Task<TxnId>>
+    | NewTransaction of TimeSpan * TaskCompletionSource<TxnId>
     | NewTransactionResponse of RequestId * ResultOrException<TxnId>
-    | AddPartitionToTxn of TxnId * CompleteTopicName * TaskCompletionSource<Task<unit>>
+    | AddPartitionToTxn of TxnId * CompleteTopicName * TaskCompletionSource<unit>
     | AddPartitionToTxnResponse of RequestId * ResultOrException<unit>
-    | AddSubscriptionToTxn of TxnId * CompleteTopicName * SubscriptionName * TaskCompletionSource<Task<unit>>
+    | AddSubscriptionToTxn of TxnId * CompleteTopicName * SubscriptionName * TaskCompletionSource<unit>
     | AddSubscriptionToTxnResponse of RequestId * ResultOrException<unit>
-    | EndTxn of TxnId * TxnAction * TaskCompletionSource<Task<unit>>
+    | EndTxn of TxnId * TxnAction * TaskCompletionSource<unit>
     | EndTxnResponse of RequestId * ResultOrException<unit>
     | TimeoutTick
     | Close
@@ -59,7 +59,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                       connectionPool,
                       lookup,
                       completeTopicName,
-                      (fun _ -> post this.Mb (TransactionMetaStoreMessage.ConnectionOpened)),
+                      (fun _ -> post this.Mb TransactionMetaStoreMessage.ConnectionOpened),
                       (fun ex -> post this.Mb (TransactionMetaStoreMessage.ConnectionFailed ex)),
                       Backoff({ BackoffConfig.Default with
                                     Initial = clientConfig.InitialBackoffInterval
@@ -94,7 +94,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
     let startTimeoutTimer () =
         timeoutTimer.Interval <- clientConfig.OperationTimeout.TotalMilliseconds
         timeoutTimer.AutoReset <- true
-        timeoutTimer.Elapsed.Add(fun _ -> post this.Mb (TimeoutTick))
+        timeoutTimer.Elapsed.Add(fun _ -> post this.Mb TimeoutTick)
         timeoutTimer.Start()
     
     let rec checkTimeoutedMessages () =
@@ -137,7 +137,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                 connectionHandler.ConnectionClosed clientCnx
                 clientCnx.RemoveTransactionMetaStoreHandler(transactionCoordinatorId)
                 
-            | TransactionMetaStoreMessage.NewTransaction (ttl, ch) ->
+            | TransactionMetaStoreMessage.NewTransaction (ttl, channel) ->
                 
                 match connectionHandler.ConnectionState with
                 | ConnectionState.Ready clientCnx ->
@@ -146,11 +146,14 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     Log.Logger.LogDebug("{0} New transaction with timeout {1} reqId {2}", prefix, ttl, requestId)
                     let command = Commands.newTxn transactionCoordinatorId requestId ttl
                     task {
-                        let! result = startRequest clientCnx requestId msg command
-                        return TxnRequest.GetNewTransaction result
-                    } |> ch.SetResult
+                        try
+                            let! result = startRequest clientCnx requestId msg command
+                            TxnRequest.GetNewTransaction result |> channel.SetResult
+                        with Flatten ex ->
+                            channel.SetException ex
+                    } |> ignore
                 | _ ->
-                    ch.SetResult(Task.FromException<TxnId>(NotConnectedException "Not connected"))
+                    channel.SetException(NotConnectedException "Not connected")
                     Log.Logger.LogWarning("{0} is not ready for NewTransaction", prefix)
                 
             | TransactionMetaStoreMessage.NewTransactionResponse (reqId, txnIdResult) ->
@@ -171,7 +174,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     Log.Logger.LogWarning("{0} Got new txn response for timeout reqId={1}, result={2}",
                                           prefix, reqId, txnIdResult.ToStr())
                 
-            | TransactionMetaStoreMessage.AddPartitionToTxn (txnId, partition, ch) ->
+            | TransactionMetaStoreMessage.AddPartitionToTxn (txnId, partition, channel) ->
                 
                 match connectionHandler.ConnectionState with
                 | ConnectionState.Ready clientCnx ->
@@ -181,11 +184,14 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                                         prefix, txnId, partition, requestId)
                     let command = Commands.newAddPartitionToTxn txnId requestId partition
                     task {
-                        let! result = startRequest clientCnx requestId msg command
-                        return TxnRequest.GetEmpty result
-                    } |> ch.SetResult
+                        try
+                            let! result = startRequest clientCnx requestId msg command
+                            TxnRequest.GetEmpty result |> channel.SetResult
+                        with Flatten ex ->
+                            channel.SetException ex
+                    }  |> ignore
                 | _ ->
-                    ch.SetResult(Task.FromException<Unit>(NotConnectedException "Not connected"))
+                    channel.SetException(NotConnectedException "Not connected")
                     Log.Logger.LogWarning("{0} is not ready for AddPartitionToTxn", prefix)
                 
             | TransactionMetaStoreMessage.AddPartitionToTxnResponse (reqId, result) ->
@@ -206,7 +212,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     Log.Logger.LogWarning("{0} Got addPartitionToTxn response for timeout reqId={1} result={2}",
                                             prefix, reqId, result.ToStr())
                 
-            | TransactionMetaStoreMessage.AddSubscriptionToTxn (txnId, topic, subscription, ch) ->
+            | TransactionMetaStoreMessage.AddSubscriptionToTxn (txnId, topic, subscription, channel) ->
                 
                 match connectionHandler.ConnectionState with
                 | ConnectionState.Ready clientCnx ->
@@ -215,12 +221,16 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     Log.Logger.LogDebug("{0} AddSubscriptionToTxn txnId {1}, topic {2}, subscription {3}, requestId {4}",
                                         prefix, txnId, topic, subscription, requestId)
                     let command = Commands.newAddSubscriptionToTxn txnId requestId topic subscription
+                    
                     task {
-                        let! result = startRequest clientCnx requestId msg command
-                        return TxnRequest.GetEmpty result
-                    } |> ch.SetResult
+                        try
+                            let! result = startRequest clientCnx requestId msg command
+                            TxnRequest.GetEmpty result |> channel.SetResult
+                        with Flatten ex ->
+                            channel.SetException ex
+                    }  |> ignore
                 | _ ->
-                    ch.SetResult(Task.FromException<Unit>(NotConnectedException "Not connected"))
+                    channel.SetException(NotConnectedException "Not connected")
                     Log.Logger.LogWarning("{0} is not ready for AddSubscriptionToTxn", prefix)
                 
             | TransactionMetaStoreMessage.AddSubscriptionToTxnResponse (reqId, result) ->
@@ -241,7 +251,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     Log.Logger.LogWarning("{0} Got addSubscriptionToTxn response for timeout reqId={1} result={2}",
                                             prefix, reqId, result.ToStr())
             
-            | TransactionMetaStoreMessage.EndTxn (txnId, txnAction, ch) ->
+            | TransactionMetaStoreMessage.EndTxn (txnId, txnAction, channel) ->
                 
                 match connectionHandler.ConnectionState with
                 | ConnectionState.Ready clientCnx ->
@@ -251,11 +261,14 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                                         prefix, txnId, txnAction, requestId)
                     let command = Commands.newEndTxn txnId requestId txnAction
                     task {
-                        let! result = startRequest clientCnx requestId msg command
-                        return TxnRequest.GetEmpty result
-                    } |> ch.SetResult
+                        try
+                            let! result = startRequest clientCnx requestId msg command
+                            TxnRequest.GetEmpty result |> channel.SetResult
+                        with Flatten ex ->
+                            channel.SetException ex
+                    }  |> ignore
                 | _ ->
-                    ch.SetResult(Task.FromException<Unit>(NotConnectedException "Not connected"))
+                    channel.SetException(NotConnectedException "Not connected")
                     Log.Logger.LogWarning("{0} is not ready for EndTxn", prefix)
                 
             | TransactionMetaStoreMessage.EndTxnResponse (reqId, result) ->
@@ -302,33 +315,21 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
     
     member this.NewTransactionAsync(ttl: TimeSpan) =
         connectionHandler.CheckIfActive() |> throwIfNotNull
-        task {
-            let! t = postAndAsyncReply mb (fun ch -> TransactionMetaStoreMessage.NewTransaction(ttl, ch))
-            return! t
-        }
+        postAndAsyncReply mb (fun ch -> TransactionMetaStoreMessage.NewTransaction(ttl, ch))
         
     member this.AddPublishPartitionToTxnAsync(txnId: TxnId, partition) =
         connectionHandler.CheckIfActive() |> throwIfNotNull
-        task {
-            let! t = postAndAsyncReply mb (fun ch -> TransactionMetaStoreMessage.AddPartitionToTxn(txnId, partition, ch))
-            return! t
-        }
+        postAndAsyncReply mb (fun ch -> TransactionMetaStoreMessage.AddPartitionToTxn(txnId, partition, ch))
         
     member this.AddSubscriptionToTxnAsync(txnId: TxnId, topic: CompleteTopicName, subscription: SubscriptionName) =
         connectionHandler.CheckIfActive() |> throwIfNotNull
-        task {
-            let! t = postAndAsyncReply mb (fun ch ->
+        postAndAsyncReply mb (fun ch ->
                 TransactionMetaStoreMessage.AddSubscriptionToTxn(txnId, topic, subscription, ch))
-            return! t
-        }
         
     member this.EdTxnAsync(txnId: TxnId, txnAction: TxnAction) =
         connectionHandler.CheckIfActive() |> throwIfNotNull
-        task {
-            let! t = postAndAsyncReply mb (fun ch ->
+        postAndAsyncReply mb (fun ch ->
                 TransactionMetaStoreMessage.EndTxn(txnId, txnAction, ch))
-            return! t
-        }
         
     member this.Close() =
         post mb Close
