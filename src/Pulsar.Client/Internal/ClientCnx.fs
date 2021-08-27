@@ -105,7 +105,7 @@ and internal CommandParseError =
 and internal SocketMessage =
     | SocketMessageWithReply of Payload * TaskCompletionSource<bool>
     | SocketMessageWithoutReply of Payload
-    | SocketRequestMessageWithReply of RequestId * Payload * TaskCompletionSource<PulsarResponseType>
+    | SocketRequestMessageWithReply of RequestId * Payload * TaskCompletionSource<Task<PulsarResponseType>>
     | Stop
 
 and internal ClientCnx (config: PulsarClientConfiguration,
@@ -306,16 +306,17 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         let mutable continueLoop = true
         while continueLoop do
             match! sendMb.Reader.ReadAsync() with
-            | SocketMessageWithReply (payload, channel) ->
+            | SocketMessageWithReply (payload, replyChannel) ->
                 let! connected = sendSerializedPayload payload
-                channel.SetResult(connected)
+                replyChannel.SetResult(connected)
             | SocketMessageWithoutReply payload ->
                 let! _ = sendSerializedPayload payload
-                ()
-            | SocketRequestMessageWithReply (reqId, payload, channel) ->
-                post requestsMb (AddRequest(reqId, snd payload, channel))
+                return ()
+            | SocketRequestMessageWithReply (reqId, payload, replyChannel) ->
+                let tsc = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
+                post requestsMb (AddRequest(reqId, snd payload, tsc))
                 let! _ = sendSerializedPayload payload
-                ()
+                replyChannel.SetResult(tsc.Task)
             | SocketMessage.Stop ->
                 Log.Logger.LogDebug("{0} sendMb stopped", prefix)
                 continueLoop <- false
@@ -848,7 +849,10 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     member this.SendAndWaitForReply reqId payload =
         if this.IsActive then
-            postAndAsyncReply sendMb (fun replyChannel -> SocketRequestMessageWithReply(reqId, payload, replyChannel))
+            task {
+                let! task = postAndAsyncReply sendMb (fun replyChannel -> SocketRequestMessageWithReply(reqId, payload, replyChannel))
+                return! task
+            }
         else
             Task.FromException<PulsarResponseType> <| ConnectException "Disconnected."
 

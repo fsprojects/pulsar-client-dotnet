@@ -20,12 +20,6 @@
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
-  <PropertyGroup>
-    <WarningLevel>3</WarningLevel>
-    <WarningsAsErrors>3239;0025</WarningsAsErrors>
-    <DebugType>portable</DebugType>
-    <NoWarn>3186;40</NoWarn>
-  </PropertyGroup>
   <ItemGroup>
     <Content Include="paket.references" />
     <Compile Include="OTelProducerInterceptor.fs" />
