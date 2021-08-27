@@ -185,7 +185,7 @@ let tests =
                     .SubscribeAsync()
                 |> Async.AwaitTask
 
-            (producer :?> ProducerImpl<byte[]>).Mb.Post(Tick (UpdateEncryptionKeys encryptor))
+            post (producer :?> ProducerImpl<byte[]>).Mb (Tick (UpdateEncryptionKeys encryptor))
 
             let producerTask2 =
                 Task.Run(fun () ->

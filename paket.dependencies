@@ -24,6 +24,7 @@ nuget AvroSchemaGenerator
 nuget Apache.Avro
 nuget NSec.Cryptography
 nuget PemUtils
+nuget System.Threading.Channels
 
 group Tests
   framework: net5.0
@@ -64,3 +65,4 @@ group OTel
   nuget Microsoft.Extensions.Logging.Console
   nuget System.Diagnostics.DiagnosticSource
   nuget OpenTelemetry.Api
+  nuget System.Threading.Channels

@@ -10,6 +10,7 @@ open Microsoft.Extensions.Logging
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Transaction
 open pulsar.proto
+open System.Threading.Channels
 
 type internal TransRequestTime = {
     CreationTime: DateTime
@@ -20,13 +21,13 @@ type internal TransactionMetaStoreMessage =
     | ConnectionOpened
     | ConnectionFailed of exn
     | ConnectionClosed of ClientCnx
-    | NewTransaction of TimeSpan * AsyncReplyChannel<Task<TxnId>>
+    | NewTransaction of TimeSpan * TaskCompletionSource<Task<TxnId>>
     | NewTransactionResponse of RequestId * ResultOrException<TxnId>
-    | AddPartitionToTxn of TxnId * CompleteTopicName * AsyncReplyChannel<Task<unit>>
+    | AddPartitionToTxn of TxnId * CompleteTopicName * TaskCompletionSource<Task<unit>>
     | AddPartitionToTxnResponse of RequestId * ResultOrException<unit>
-    | AddSubscriptionToTxn of TxnId * CompleteTopicName * SubscriptionName * AsyncReplyChannel<Task<unit>>
+    | AddSubscriptionToTxn of TxnId * CompleteTopicName * SubscriptionName * TaskCompletionSource<Task<unit>>
     | AddSubscriptionToTxnResponse of RequestId * ResultOrException<unit>
-    | EndTxn of TxnId * TxnAction * AsyncReplyChannel<Task<unit>>
+    | EndTxn of TxnId * TxnAction * TaskCompletionSource<Task<unit>>
     | EndTxnResponse of RequestId * ResultOrException<unit>
     | TimeoutTick
     | Close
@@ -58,18 +59,18 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                       connectionPool,
                       lookup,
                       completeTopicName,
-                      (fun _ -> this.Mb.Post(TransactionMetaStoreMessage.ConnectionOpened)),
-                      (fun ex -> this.Mb.Post(TransactionMetaStoreMessage.ConnectionFailed ex)),
+                      (fun _ -> post this.Mb (TransactionMetaStoreMessage.ConnectionOpened)),
+                      (fun ex -> post this.Mb (TransactionMetaStoreMessage.ConnectionFailed ex)),
                       Backoff({ BackoffConfig.Default with
                                     Initial = clientConfig.InitialBackoffInterval
                                     Max = clientConfig.MaxBackoffInterval }))
 
     let transactionMetaStoreOperations = {
-        NewTxnResponse = fun result -> this.Mb.Post(TransactionMetaStoreMessage.NewTransactionResponse result)
-        AddPartitionToTxnResponse = fun result -> this.Mb.Post(TransactionMetaStoreMessage.AddPartitionToTxnResponse result)
-        AddSubscriptionToTxnResponse = fun result -> this.Mb.Post(TransactionMetaStoreMessage.AddSubscriptionToTxnResponse result)
-        EndTxnResponse = fun result -> this.Mb.Post(TransactionMetaStoreMessage.EndTxnResponse result)
-        ConnectionClosed = fun clientCnx -> this.Mb.Post(TransactionMetaStoreMessage.ConnectionClosed clientCnx)
+        NewTxnResponse = fun result -> post this.Mb (TransactionMetaStoreMessage.NewTransactionResponse result)
+        AddPartitionToTxnResponse = fun result -> post this.Mb (TransactionMetaStoreMessage.AddPartitionToTxnResponse result)
+        AddSubscriptionToTxnResponse = fun result -> post this.Mb (TransactionMetaStoreMessage.AddSubscriptionToTxnResponse result)
+        EndTxnResponse = fun result -> post this.Mb (TransactionMetaStoreMessage.EndTxnResponse result)
+        ConnectionClosed = fun clientCnx -> post this.Mb (TransactionMetaStoreMessage.ConnectionClosed clientCnx)
     }
 
     let startRequest (clientCnx: ClientCnx) requestId msg command =
@@ -93,7 +94,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
     let startTimeoutTimer () =
         timeoutTimer.Interval <- clientConfig.OperationTimeout.TotalMilliseconds
         timeoutTimer.AutoReset <- true
-        timeoutTimer.Elapsed.Add(fun _ -> this.Mb.Post(TimeoutTick))
+        timeoutTimer.Elapsed.Add(fun _ -> post this.Mb (TimeoutTick))
         timeoutTimer.Start()
     
     let rec checkTimeoutedMessages () =
@@ -108,224 +109,215 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     ()
                 checkTimeoutedMessages()
     
-    let mb = MailboxProcessor<TransactionMetaStoreMessage>.Start(fun inbox ->
-        let rec loop () =
-            async {
-                let! msg = inbox.Receive()
-                match msg with
-                | TransactionMetaStoreMessage.ConnectionOpened ->
-                    
-                    match connectionHandler.ConnectionState with
-                    | ConnectionState.Ready clientCnx ->
-                        Log.Logger.LogInformation("{0} connection opened.", prefix)
-                        clientCnx.AddTransactionMetaStoreHandler(transactionCoordinatorId, transactionMetaStoreOperations)
-                        transactionCoordinatorCreatedTsc.TrySetResult() |> ignore
-                    | _ ->
-                        Log.Logger.LogWarning("{0} connection opened but connection is not ready, current state is ", prefix)
-                    return! loop ()
-                       
-                | TransactionMetaStoreMessage.ConnectionFailed ex ->
-                    
-                    Log.Logger.LogError(ex, "{0} connection failed.", prefix)
-                    connectionHandler.Failed()
-                    transactionCoordinatorCreatedTsc.TrySetException(ex) |> ignore
-                    return! loop ()
-                    
-                | TransactionMetaStoreMessage.ConnectionClosed clientCnx ->
-                    
-                    Log.Logger.LogDebug("{0} connection closed", prefix)
-                    connectionHandler.ConnectionClosed clientCnx
-                    clientCnx.RemoveTransactionMetaStoreHandler(transactionCoordinatorId)
-                    return! loop ()
-                    
-                | TransactionMetaStoreMessage.NewTransaction (ttl, ch) ->
-                    
-                    match connectionHandler.ConnectionState with
-                    | ConnectionState.Ready clientCnx ->
-                        
-                        let requestId = Generators.getNextRequestId()
-                        Log.Logger.LogDebug("{0} New transaction with timeout {1} reqId {2}", prefix, ttl, requestId)
-                        let command = Commands.newTxn transactionCoordinatorId requestId ttl
-                        task {
-                            let! result = startRequest clientCnx requestId msg command
-                            return TxnRequest.GetNewTransaction result
-                        } |> ch.Reply
-                    | _ ->
-                        ch.Reply(Task.FromException<TxnId>(NotConnectedException "Not connected"))
-                        Log.Logger.LogWarning("{0} is not ready for NewTransaction", prefix)
-                    return! loop ()
-                    
-                | TransactionMetaStoreMessage.NewTransactionResponse (reqId, txnIdResult) ->
-                    
-                    match pendingRequests.TryGetValue reqId with
-                    | true, op ->
-                        pendingRequests.Remove(reqId) |> ignore
-                        match txnIdResult with
-                        | Ok txnId ->
-                            Log.Logger.LogDebug("{0} NewTransactionResponse reqId={1} txnId={2}", prefix, reqId, txnId)
-                            op.SetResult(NewTransaction txnId)
-                        | Error ex ->
-                            if ex :? CoordinatorNotFoundException then
-                                connectionHandler.ReconnectLater ex
-                            Log.Logger.LogError(ex, "{0} NewTransactionResponse reqId={1}", prefix, reqId)
-                            op.SetException(ex)
-                    | _ ->
-                        Log.Logger.LogWarning("{0} Got new txn response for timeout reqId={1}, result={2}",
-                                              prefix, reqId, txnIdResult.ToStr())
-                    return! loop ()
-                    
-                | TransactionMetaStoreMessage.AddPartitionToTxn (txnId, partition, ch) ->
-                    
-                    match connectionHandler.ConnectionState with
-                    | ConnectionState.Ready clientCnx ->
-                        
-                        let requestId = Generators.getNextRequestId()
-                        Log.Logger.LogDebug("{0} AddPartitionToTxn txnId {1}, partition {2}, reqId {3}",
-                                            prefix, txnId, partition, requestId)
-                        let command = Commands.newAddPartitionToTxn txnId requestId partition
-                        task {
-                            let! result = startRequest clientCnx requestId msg command
-                            return TxnRequest.GetEmpty result
-                        } |> ch.Reply
-                    | _ ->
-                        ch.Reply(Task.FromException<Unit>(NotConnectedException "Not connected"))
-                        Log.Logger.LogWarning("{0} is not ready for AddPartitionToTxn", prefix)
-                    return! loop ()
-                    
-                | TransactionMetaStoreMessage.AddPartitionToTxnResponse (reqId, result) ->
-                    
-                    match pendingRequests.TryGetValue reqId with
-                    | true, op ->
-                        pendingRequests.Remove(reqId) |> ignore
-                        match result with
-                        | Ok () ->
-                            Log.Logger.LogDebug("{0} AddPartitionToTxnResponse reqId={1}", prefix, reqId)
-                            op.SetResult(Empty)
-                        | Error ex ->
-                            if ex :? CoordinatorNotFoundException then
-                                connectionHandler.ReconnectLater ex
-                            Log.Logger.LogError(ex, "{0} AddPartitionToTxnResponse reqId={1}", prefix, reqId)
-                            op.SetException(ex)
-                    | _ ->
-                        Log.Logger.LogWarning("{0} Got addPartitionToTxn response for timeout reqId={1} result={2}",
-                                                prefix, reqId, result.ToStr())
-                    return! loop ()
-                    
-                | TransactionMetaStoreMessage.AddSubscriptionToTxn (txnId, topic, subscription, ch) ->
-                    
-                    match connectionHandler.ConnectionState with
-                    | ConnectionState.Ready clientCnx ->
-                        
-                        let requestId = Generators.getNextRequestId()
-                        Log.Logger.LogDebug("{0} AddSubscriptionToTxn txnId {1}, topic {2}, subscription {3}, requestId {4}",
-                                            prefix, txnId, topic, subscription, requestId)
-                        let command = Commands.newAddSubscriptionToTxn txnId requestId topic subscription
-                        task {
-                            let! result = startRequest clientCnx requestId msg command
-                            return TxnRequest.GetEmpty result
-                        } |> ch.Reply
-                    | _ ->
-                        ch.Reply(Task.FromException<Unit>(NotConnectedException "Not connected"))
-                        Log.Logger.LogWarning("{0} is not ready for AddSubscriptionToTxn", prefix)
-                    return! loop ()
-                    
-                | TransactionMetaStoreMessage.AddSubscriptionToTxnResponse (reqId, result) ->
-                    
-                    match pendingRequests.TryGetValue reqId with
-                    | true, op ->
-                        pendingRequests.Remove(reqId) |> ignore
-                        match result with
-                        | Ok () ->
-                            Log.Logger.LogDebug("{0} AddSubscriptionToTxnResponse reqId={1}", prefix, reqId)
-                            op.SetResult(Empty)
-                        | Error ex ->
-                            if ex :? CoordinatorNotFoundException then
-                                connectionHandler.ReconnectLater ex
-                            Log.Logger.LogError(ex, "{0} AddSubscriptionToTxnResponse reqId={1}", prefix, reqId)
-                            op.SetException(ex)
-                    | _ ->
-                        Log.Logger.LogWarning("{0} Got addSubscriptionToTxn response for timeout reqId={1} result={2}",
-                                                prefix, reqId, result.ToStr())
-                    return! loop ()
+    let mb = Channel.CreateUnbounded<TransactionMetaStoreMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    do (task {
+        let mutable continueLoop = true
+        while continueLoop do
+            let! msg = mb.Reader.ReadAsync()
+            match msg with
+            | TransactionMetaStoreMessage.ConnectionOpened ->
                 
-                | TransactionMetaStoreMessage.EndTxn (txnId, txnAction, ch) ->
+                match connectionHandler.ConnectionState with
+                | ConnectionState.Ready clientCnx ->
+                    Log.Logger.LogInformation("{0} connection opened.", prefix)
+                    clientCnx.AddTransactionMetaStoreHandler(transactionCoordinatorId, transactionMetaStoreOperations)
+                    transactionCoordinatorCreatedTsc.TrySetResult() |> ignore
+                | _ ->
+                    Log.Logger.LogWarning("{0} connection opened but connection is not ready, current state is ", prefix)
+                   
+            | TransactionMetaStoreMessage.ConnectionFailed ex ->
+                
+                Log.Logger.LogError(ex, "{0} connection failed.", prefix)
+                connectionHandler.Failed()
+                transactionCoordinatorCreatedTsc.TrySetException(ex) |> ignore
+                
+            | TransactionMetaStoreMessage.ConnectionClosed clientCnx ->
+                
+                Log.Logger.LogDebug("{0} connection closed", prefix)
+                connectionHandler.ConnectionClosed clientCnx
+                clientCnx.RemoveTransactionMetaStoreHandler(transactionCoordinatorId)
+                
+            | TransactionMetaStoreMessage.NewTransaction (ttl, ch) ->
+                
+                match connectionHandler.ConnectionState with
+                | ConnectionState.Ready clientCnx ->
                     
-                    match connectionHandler.ConnectionState with
-                    | ConnectionState.Ready clientCnx ->
-                        
-                        let requestId = Generators.getNextRequestId()
-                        Log.Logger.LogDebug("{0} EndTxn txnId {1}, action {2}, requestId {3}",
-                                            prefix, txnId, txnAction, requestId)
-                        let command = Commands.newEndTxn txnId requestId txnAction
-                        task {
-                            let! result = startRequest clientCnx requestId msg command
-                            return TxnRequest.GetEmpty result
-                        } |> ch.Reply
-                    | _ ->
-                        ch.Reply(Task.FromException<Unit>(NotConnectedException "Not connected"))
-                        Log.Logger.LogWarning("{0} is not ready for EndTxn", prefix)
-                    return! loop ()
+                    let requestId = Generators.getNextRequestId()
+                    Log.Logger.LogDebug("{0} New transaction with timeout {1} reqId {2}", prefix, ttl, requestId)
+                    let command = Commands.newTxn transactionCoordinatorId requestId ttl
+                    task {
+                        let! result = startRequest clientCnx requestId msg command
+                        return TxnRequest.GetNewTransaction result
+                    } |> ch.SetResult
+                | _ ->
+                    ch.SetResult(Task.FromException<TxnId>(NotConnectedException "Not connected"))
+                    Log.Logger.LogWarning("{0} is not ready for NewTransaction", prefix)
+                
+            | TransactionMetaStoreMessage.NewTransactionResponse (reqId, txnIdResult) ->
+                
+                match pendingRequests.TryGetValue reqId with
+                | true, op ->
+                    pendingRequests.Remove(reqId) |> ignore
+                    match txnIdResult with
+                    | Ok txnId ->
+                        Log.Logger.LogDebug("{0} NewTransactionResponse reqId={1} txnId={2}", prefix, reqId, txnId)
+                        op.SetResult(NewTransaction txnId)
+                    | Error ex ->
+                        if ex :? CoordinatorNotFoundException then
+                            connectionHandler.ReconnectLater ex
+                        Log.Logger.LogError(ex, "{0} NewTransactionResponse reqId={1}", prefix, reqId)
+                        op.SetException(ex)
+                | _ ->
+                    Log.Logger.LogWarning("{0} Got new txn response for timeout reqId={1}, result={2}",
+                                          prefix, reqId, txnIdResult.ToStr())
+                
+            | TransactionMetaStoreMessage.AddPartitionToTxn (txnId, partition, ch) ->
+                
+                match connectionHandler.ConnectionState with
+                | ConnectionState.Ready clientCnx ->
                     
-                | TransactionMetaStoreMessage.EndTxnResponse (reqId, result) ->
+                    let requestId = Generators.getNextRequestId()
+                    Log.Logger.LogDebug("{0} AddPartitionToTxn txnId {1}, partition {2}, reqId {3}",
+                                        prefix, txnId, partition, requestId)
+                    let command = Commands.newAddPartitionToTxn txnId requestId partition
+                    task {
+                        let! result = startRequest clientCnx requestId msg command
+                        return TxnRequest.GetEmpty result
+                    } |> ch.SetResult
+                | _ ->
+                    ch.SetResult(Task.FromException<Unit>(NotConnectedException "Not connected"))
+                    Log.Logger.LogWarning("{0} is not ready for AddPartitionToTxn", prefix)
+                
+            | TransactionMetaStoreMessage.AddPartitionToTxnResponse (reqId, result) ->
+                
+                match pendingRequests.TryGetValue reqId with
+                | true, op ->
+                    pendingRequests.Remove(reqId) |> ignore
+                    match result with
+                    | Ok () ->
+                        Log.Logger.LogDebug("{0} AddPartitionToTxnResponse reqId={1}", prefix, reqId)
+                        op.SetResult(Empty)
+                    | Error ex ->
+                        if ex :? CoordinatorNotFoundException then
+                            connectionHandler.ReconnectLater ex
+                        Log.Logger.LogError(ex, "{0} AddPartitionToTxnResponse reqId={1}", prefix, reqId)
+                        op.SetException(ex)
+                | _ ->
+                    Log.Logger.LogWarning("{0} Got addPartitionToTxn response for timeout reqId={1} result={2}",
+                                            prefix, reqId, result.ToStr())
+                
+            | TransactionMetaStoreMessage.AddSubscriptionToTxn (txnId, topic, subscription, ch) ->
+                
+                match connectionHandler.ConnectionState with
+                | ConnectionState.Ready clientCnx ->
                     
-                    match pendingRequests.TryGetValue reqId with
-                    | true, op ->
-                        pendingRequests.Remove(reqId) |> ignore
-                        match result with
-                        | Ok () ->
-                            Log.Logger.LogDebug("{0} EndTxnResponse reqId={1}", prefix, reqId)
-                            op.SetResult(Empty)
-                        | Error ex ->
-                            if ex :? CoordinatorNotFoundException then
-                                connectionHandler.ReconnectLater ex
-                            Log.Logger.LogError(ex, "{0} EndTxnResponse reqId={1}", prefix, reqId)
-                            op.SetException(ex)
-                    | _ ->
-                        Log.Logger.LogWarning("{0} Got end transaction response for timeout reqId={1} result={2}",
-                                                prefix, reqId, result.ToStr())
-                    return! loop ()
+                    let requestId = Generators.getNextRequestId()
+                    Log.Logger.LogDebug("{0} AddSubscriptionToTxn txnId {1}, topic {2}, subscription {3}, requestId {4}",
+                                        prefix, txnId, topic, subscription, requestId)
+                    let command = Commands.newAddSubscriptionToTxn txnId requestId topic subscription
+                    task {
+                        let! result = startRequest clientCnx requestId msg command
+                        return TxnRequest.GetEmpty result
+                    } |> ch.SetResult
+                | _ ->
+                    ch.SetResult(Task.FromException<Unit>(NotConnectedException "Not connected"))
+                    Log.Logger.LogWarning("{0} is not ready for AddSubscriptionToTxn", prefix)
+                
+            | TransactionMetaStoreMessage.AddSubscriptionToTxnResponse (reqId, result) ->
+                
+                match pendingRequests.TryGetValue reqId with
+                | true, op ->
+                    pendingRequests.Remove(reqId) |> ignore
+                    match result with
+                    | Ok () ->
+                        Log.Logger.LogDebug("{0} AddSubscriptionToTxnResponse reqId={1}", prefix, reqId)
+                        op.SetResult(Empty)
+                    | Error ex ->
+                        if ex :? CoordinatorNotFoundException then
+                            connectionHandler.ReconnectLater ex
+                        Log.Logger.LogError(ex, "{0} AddSubscriptionToTxnResponse reqId={1}", prefix, reqId)
+                        op.SetException(ex)
+                | _ ->
+                    Log.Logger.LogWarning("{0} Got addSubscriptionToTxn response for timeout reqId={1} result={2}",
+                                            prefix, reqId, result.ToStr())
+            
+            | TransactionMetaStoreMessage.EndTxn (txnId, txnAction, ch) ->
+                
+                match connectionHandler.ConnectionState with
+                | ConnectionState.Ready clientCnx ->
                     
-                | TimeoutTick ->
-                        
-                    checkTimeoutedMessages()
-                    return! loop()
+                    let requestId = Generators.getNextRequestId()
+                    Log.Logger.LogDebug("{0} EndTxn txnId {1}, action {2}, requestId {3}",
+                                        prefix, txnId, txnAction, requestId)
+                    let command = Commands.newEndTxn txnId requestId txnAction
+                    task {
+                        let! result = startRequest clientCnx requestId msg command
+                        return TxnRequest.GetEmpty result
+                    } |> ch.SetResult
+                | _ ->
+                    ch.SetResult(Task.FromException<Unit>(NotConnectedException "Not connected"))
+                    Log.Logger.LogWarning("{0} is not ready for EndTxn", prefix)
+                
+            | TransactionMetaStoreMessage.EndTxnResponse (reqId, result) ->
+                
+                match pendingRequests.TryGetValue reqId with
+                | true, op ->
+                    pendingRequests.Remove(reqId) |> ignore
+                    match result with
+                    | Ok () ->
+                        Log.Logger.LogDebug("{0} EndTxnResponse reqId={1}", prefix, reqId)
+                        op.SetResult(Empty)
+                    | Error ex ->
+                        if ex :? CoordinatorNotFoundException then
+                            connectionHandler.ReconnectLater ex
+                        Log.Logger.LogError(ex, "{0} EndTxnResponse reqId={1}", prefix, reqId)
+                        op.SetException(ex)
+                | _ ->
+                    Log.Logger.LogWarning("{0} Got end transaction response for timeout reqId={1} result={2}",
+                                            prefix, reqId, result.ToStr())
+                
+            | TimeoutTick ->
                     
-                | Close ->
-                    
-                    timeoutTimer.Stop()
-                    for KeyValue(_, v) in pendingRequests do
-                        v.SetException(AlreadyClosedException "{0} is closed")
-                    pendingRequests.Clear()
-                    timeoutQueue.Clear()
-                    connectionHandler.Close()
-           }
-        loop ()
-    )
-    
-    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
+                checkTimeoutedMessages()
+                
+            | Close ->
+                
+                timeoutTimer.Stop()
+                for KeyValue(_, v) in pendingRequests do
+                    v.SetException(AlreadyClosedException "{0} is closed")
+                pendingRequests.Clear()
+                timeoutQueue.Clear()
+                connectionHandler.Close()
+                continueLoop <- false
+
+        }:> Task).ContinueWith(fun t ->
+            if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
+            else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+    |> ignore
+
     do connectionHandler.GrabCnx()
     do startTimeoutTimer()
     
-    member private this.Mb: MailboxProcessor<TransactionMetaStoreMessage> = mb
+    member private this.Mb: Channel<TransactionMetaStoreMessage> = mb
     
     member this.NewTransactionAsync(ttl: TimeSpan) =
         connectionHandler.CheckIfActive() |> throwIfNotNull
         task {
-            let! t = mb.PostAndAsyncReply(fun ch -> TransactionMetaStoreMessage.NewTransaction(ttl, ch))
+            let! t = postAndAsyncReply mb (fun ch -> TransactionMetaStoreMessage.NewTransaction(ttl, ch))
             return! t
         }
         
     member this.AddPublishPartitionToTxnAsync(txnId: TxnId, partition) =
         connectionHandler.CheckIfActive() |> throwIfNotNull
         task {
-            let! t = mb.PostAndAsyncReply(fun ch -> TransactionMetaStoreMessage.AddPartitionToTxn(txnId, partition, ch))
+            let! t = postAndAsyncReply mb (fun ch -> TransactionMetaStoreMessage.AddPartitionToTxn(txnId, partition, ch))
             return! t
         }
         
     member this.AddSubscriptionToTxnAsync(txnId: TxnId, topic: CompleteTopicName, subscription: SubscriptionName) =
         connectionHandler.CheckIfActive() |> throwIfNotNull
         task {
-            let! t = mb.PostAndAsyncReply(fun ch ->
+            let! t = postAndAsyncReply mb (fun ch ->
                 TransactionMetaStoreMessage.AddSubscriptionToTxn(txnId, topic, subscription, ch))
             return! t
         }
@@ -333,10 +325,10 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
     member this.EdTxnAsync(txnId: TxnId, txnAction: TxnAction) =
         connectionHandler.CheckIfActive() |> throwIfNotNull
         task {
-            let! t = mb.PostAndAsyncReply(fun ch ->
+            let! t = postAndAsyncReply mb (fun ch ->
                 TransactionMetaStoreMessage.EndTxn(txnId, txnAction, ch))
             return! t
         }
         
     member this.Close() =
-        mb.Post(Close)
+        post mb Close

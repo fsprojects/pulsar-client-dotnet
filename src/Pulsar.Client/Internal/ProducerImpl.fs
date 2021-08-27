@@ -15,8 +15,9 @@ open System.Timers
 open System.IO
 open System.Runtime.InteropServices
 open Pulsar.Client.Transaction
+open System.Threading.Channels
 
-type SendMessageRequest<'T> = MessageBuilder<'T> * AsyncReplyChannel<Task<MessageId>>
+type SendMessageRequest<'T> = MessageBuilder<'T> * TaskCompletionSource<Task<MessageId>>
 
 type internal ProducerTickType =
     | SendBatchTick
@@ -33,9 +34,9 @@ type internal ProducerMessage<'T> =
     | RecoverChecksumError of SequenceId
     | RecoverNotAllowedError of SequenceId
     | TopicTerminatedError
-    | Close of AsyncReplyChannel<ResultOrException<unit>>
+    | Close of TaskCompletionSource<ResultOrException<unit>>
     | Tick of ProducerTickType
-    | GetStats of AsyncReplyChannel<ProducerStats>
+    | GetStats of TaskCompletionSource<ProducerStats>
     
 type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, lookup: BinaryLookupService, schema: ISchema<'T>,
@@ -79,8 +80,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                           connectionPool,
                           lookup,
                           producerConfig.Topic.CompleteTopicName,
-                          (fun epoch -> this.Mb.Post(ProducerMessage.ConnectionOpened epoch)),
-                          (fun ex -> this.Mb.Post(ProducerMessage.ConnectionFailed ex)),
+                          (fun epoch -> post this.Mb (ProducerMessage.ConnectionOpened epoch)),
+                          (fun ex -> post this.Mb (ProducerMessage.ConnectionFailed ex)),
                           Backoff { BackoffConfig.Default with
                                         Initial = clientConfig.InitialBackoffInterval
                                         Max = clientConfig.MaxBackoffInterval
@@ -119,7 +120,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             failPendingMessage msg ex
         while blockedRequests.Count > 0 do
             let _, ch = blockedRequests.Dequeue()
-            ch.Reply(Task.FromException<MessageId>(ex))
+            ch.SetResult(Task.FromException<MessageId>(ex))
         if producerConfig.BatchingEnabled then
             failPendingBatchMessages ex
 
@@ -128,14 +129,14 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         if sendTimeoutMs > 0.0 then
             sendTimeoutTimer.Interval <- sendTimeoutMs
             sendTimeoutTimer.AutoReset <- true
-            sendTimeoutTimer.Elapsed.Add(fun _ -> this.Mb.Post(Tick SendTimeoutTick))
+            sendTimeoutTimer.Elapsed.Add(fun _ -> post this.Mb (Tick SendTimeoutTick))
             sendTimeoutTimer.Start()
 
     let batchTimer = new Timer()
     let startSendBatchTimer () =
         batchTimer.Interval <- producerConfig.BatchingMaxPublishDelay.TotalMilliseconds
         batchTimer.AutoReset <- true
-        batchTimer.Elapsed.Add(fun _ -> this.Mb.Post(Tick SendBatchTick))
+        batchTimer.Elapsed.Add(fun _ -> post this.Mb (Tick SendBatchTick))
         batchTimer.Start()
 
     let statTimer = new Timer()
@@ -143,7 +144,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         if clientConfig.StatsInterval <> TimeSpan.Zero then
             statTimer.Interval <- clientConfig.StatsInterval.TotalMilliseconds
             statTimer.AutoReset <- true
-            statTimer.Elapsed.Add(fun _ -> this.Mb.Post(Tick StatTick))
+            statTimer.Elapsed.Add(fun _ -> post this.Mb (Tick StatTick))
             statTimer.Start()
     
     let cryptoTimer = new Timer()
@@ -152,7 +153,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         | Some enc ->
             cryptoTimer.Interval <- TimeSpan(hours = 4, minutes = 0, seconds = 0).TotalMilliseconds
             cryptoTimer.AutoReset <- true
-            cryptoTimer.Elapsed.Add(fun _ -> this.Mb.Post(Tick (UpdateEncryptionKeys enc)))
+            cryptoTimer.Elapsed.Add(fun _ -> post this.Mb (Tick (UpdateEncryptionKeys enc)))
             cryptoTimer.Start()
         | None -> ()
         
@@ -194,7 +195,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         if (blockedRequests.Count > 0) then
             blockedRequests.Dequeue()
             |> BeginSendMessage
-            |> this.Mb.Post
+            |> post this.Mb
         pendingMessages.Dequeue()
     
     let resendMessages (clientCnx: ClientCnx) =
@@ -341,12 +342,12 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         maxMessageSize <- messageSize
         batchMessageContainer.MaxMessageSize <- messageSize
         
-    let canEnqueueRequest (channel: AsyncReplyChannel<Task<MessageId>>) sendRequest msgCount =
+    let canEnqueueRequest (channel: TaskCompletionSource<Task<MessageId>>) sendRequest msgCount =
         if pendingMessages.Count + msgCount > producerConfig.MaxPendingMessages then
             if producerConfig.BlockIfQueueFull then
                 blockedRequests.Enqueue(sendRequest)
             else
-                channel.Reply(Task.FromException<MessageId>(ProducerQueueIsFullError "Producer send queue is full"))
+                channel.SetResult(Task.FromException<MessageId>(ProducerQueueIsFullError "Producer send queue is full"))
             false
         else
             true
@@ -444,7 +445,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         | Error ex ->
                             chunkError <- true
                             failMessage message tcs ex
-            channel.Reply(tcs.Task)
+            channel.SetResult(tcs.Task)
     
     let stopProducer() =
         sendTimeoutTimer.Stop()
@@ -456,302 +457,293 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         Log.Logger.LogInformation("{0} stopped", prefix)
         
     let producerOperations = {
-        AckReceived = fun sendReceipt -> this.Mb.Post(AckReceived sendReceipt)
-        TopicTerminatedError = fun () -> this.Mb.Post(TopicTerminatedError)
-        RecoverChecksumError = fun seqId -> this.Mb.Post(RecoverChecksumError seqId)
-        RecoverNotAllowedError = fun seqId -> this.Mb.Post(RecoverNotAllowedError seqId)
-        ConnectionClosed = fun clientCnx -> this.Mb.Post(ConnectionClosed clientCnx)
+        AckReceived = fun sendReceipt -> post this.Mb (AckReceived sendReceipt)
+        TopicTerminatedError = fun () -> post this.Mb (TopicTerminatedError)
+        RecoverChecksumError = fun seqId -> post this.Mb (RecoverChecksumError seqId)
+        RecoverNotAllowedError = fun seqId -> post this.Mb (RecoverNotAllowedError seqId)
+        ConnectionClosed = fun clientCnx -> post this.Mb (ConnectionClosed clientCnx)
     }
 
-    let mb = MailboxProcessor<ProducerMessage<'T>>.Start(fun inbox ->
-
-        let rec loop () =
-            async {
-                match! inbox.Receive() with
-
-                | ProducerMessage.ConnectionOpened epoch ->
-
-                    match connectionHandler.ConnectionState with
-                    | Ready clientCnx ->
-                        Log.Logger.LogInformation("{0} starting register to topic {1}", prefix, producerConfig.Topic)
-                        updateMaxMessageSize clientCnx.MaxMessageSize
-                        clientCnx.AddProducer(producerId, producerOperations)
-                        let requestId = Generators.getNextRequestId()
-                        try
-                            let payload = Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName
-                                              producerId requestId schema.SchemaInfo epoch
-                            let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
-                            let success = response |> PulsarResponseType.GetProducerSuccess
-                            if String.IsNullOrEmpty producerName then
-                                producerName <- success.GeneratedProducerName
-                                prefix <- $"producer({producerId}, {producerName}, {partitionIndex})"
-                            Log.Logger.LogInformation("{0} registered", prefix)
-                            schemaVersion <- success.SchemaVersion
-                            connectionHandler.ResetBackoff()    
-
-                            if msgIdGenerator = %0L && producerConfig.InitialSequenceId.IsNone then
-                                // Only update sequence id generator if it wasn't already modified. That means we only want
-                                // to update the id generator the first time the producer gets established, and ignore the
-                                // sequence id sent by broker in subsequent producer reconnects
-                                lastSequenceIdPublished <- %success.LastSequenceId
-                                msgIdGenerator <- success.LastSequenceId + %1L
-
-                            if producerConfig.BatchingEnabled then
-                                startSendBatchTimer()
-
-                            resendMessages clientCnx
-                        with Flatten ex ->
-                            clientCnx.RemoveProducer producerId
-                            Log.Logger.LogError(ex, "{0} Failed to create", prefix)
-                            match ex with                            
-                            | :? TopicDoesNotExistException ->
-                                match connectionHandler.ConnectionState with
-                                | Failed ->
-                                    Log.Logger.LogWarning("{0} Topic doesn't exist exception {1}", prefix, ex.Message)
-                                    this.Mb.PostAndAsyncReply(ProducerMessage.Close) |> ignore
-                                    producerCreatedTsc.TrySetException(ex) |> ignore
-                                | _ -> ()
-                            | :? ProducerBlockedQuotaExceededException ->
-                                Log.Logger.LogWarning("{0} Topic backlog quota exceeded. {1}", prefix, ex.Message)
-                                failPendingMessages(ex)
-                            | :? ProducerBlockedQuotaExceededError ->
-                                Log.Logger.LogWarning("{0} is blocked on creation because backlog exceeded. {1}", prefix, ex.Message)
-                            | _ ->
-                                ()
-
-                            match ex with
-                            | :? TopicTerminatedException ->
-                                Log.Logger.LogWarning("{0} is terminated. {1}", prefix, ex.Message)
-                                connectionHandler.Terminate()
-                                failPendingMessages(ex)
+    let mb = Channel.CreateUnbounded<ProducerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    do (task {
+        let mutable continueLoop = true
+        while continueLoop do
+            match! mb.Reader.ReadAsync() with
+            | ProducerMessage.ConnectionOpened epoch ->
+                match connectionHandler.ConnectionState with
+                | Ready clientCnx ->
+                    Log.Logger.LogInformation("{0} starting register to topic {1}", prefix, producerConfig.Topic)
+                    updateMaxMessageSize clientCnx.MaxMessageSize
+                    clientCnx.AddProducer(producerId, producerOperations)
+                    let requestId = Generators.getNextRequestId()
+                    try
+                        let payload = Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName
+                                            producerId requestId schema.SchemaInfo epoch
+                        let! response = clientCnx.SendAndWaitForReply requestId payload
+                        let success = response |> PulsarResponseType.GetProducerSuccess
+                        if String.IsNullOrEmpty producerName then
+                            producerName <- success.GeneratedProducerName
+                            prefix <- $"producer({producerId}, {producerName}, {partitionIndex})"
+                        Log.Logger.LogInformation("{0} registered", prefix)
+                        schemaVersion <- success.SchemaVersion
+                        connectionHandler.ResetBackoff()    
+            
+                        if msgIdGenerator = %0L && producerConfig.InitialSequenceId.IsNone then
+                            // Only update sequence id generator if it wasn't already modified. That means we only want
+                            // to update the id generator the first time the producer gets established, and ignore the
+                            // sequence id sent by broker in subsequent producer reconnects
+                            lastSequenceIdPublished <- %success.LastSequenceId
+                            msgIdGenerator <- success.LastSequenceId + %1L
+            
+                        if producerConfig.BatchingEnabled then
+                            startSendBatchTimer()
+            
+                        resendMessages clientCnx
+                    with Flatten ex ->
+                        clientCnx.RemoveProducer producerId
+                        Log.Logger.LogError(ex, "{0} Failed to create", prefix)
+                        match ex with                            
+                        | :? TopicDoesNotExistException ->
+                            match connectionHandler.ConnectionState with
+                            | Failed ->
+                                Log.Logger.LogWarning("{0} Topic doesn't exist exception {1}", prefix, ex.Message)
+                                let! _ = postAndAsyncReply this.Mb ProducerMessage.Close
                                 producerCreatedTsc.TrySetException(ex) |> ignore
-                                stopProducer()
-                            | _ when producerCreatedTsc.Task.IsCompleted
-                                     || (PulsarClientException.isRetriableError ex && DateTime.Now < createProducerTimeout) ->
-                                // Either we had already created the producer once (producerCreatedFuture.isDone()) or we are
-                                // still within the initial timeout budget and we are dealing with a retryable error
-                                connectionHandler.ReconnectLater ex
-                            | _ ->
-                                connectionHandler.Failed()
-                                producerCreatedTsc.SetException(ex)
-                                stopProducer()
-                    | _ ->
-                        Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
-                    
-                    if connectionHandler.ConnectionState <> Failed then
-                        return! loop ()
-
-                | ProducerMessage.ConnectionClosed clientCnx ->
-
-                    Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
-                    connectionHandler.ConnectionClosed clientCnx
-                    clientCnx.RemoveProducer(producerId)
-                    return! loop ()
-
-                | ProducerMessage.ConnectionFailed ex ->
-
-                    Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
-                    if (DateTime.Now > createProducerTimeout && producerCreatedTsc.TrySetException(ex)) then
-                        Log.Logger.LogInformation("{0} creation failed", prefix)
-                        connectionHandler.Failed()
-                        stopProducer()
+                            | _ -> ()
+                        | :? ProducerBlockedQuotaExceededException ->
+                            Log.Logger.LogWarning("{0} Topic backlog quota exceeded. {1}", prefix, ex.Message)
+                            failPendingMessages(ex)
+                        | :? ProducerBlockedQuotaExceededError ->
+                            Log.Logger.LogWarning("{0} is blocked on creation because backlog exceeded. {1}", prefix, ex.Message)
+                        | _ ->
+                            ()
+            
+                        match ex with
+                        | :? TopicTerminatedException ->
+                            Log.Logger.LogWarning("{0} is terminated. {1}", prefix, ex.Message)
+                            connectionHandler.Terminate()
+                            failPendingMessages(ex)
+                            producerCreatedTsc.TrySetException(ex) |> ignore
+                            stopProducer()
+                        | _ when producerCreatedTsc.Task.IsCompleted
+                                    || (PulsarClientException.isRetriableError ex && DateTime.Now < createProducerTimeout) ->
+                            // Either we had already created the producer once (producerCreatedFuture.isDone()) or we are
+                            // still within the initial timeout budget and we are dealing with a retryable error
+                            connectionHandler.ReconnectLater ex
+                        | _ ->
+                            connectionHandler.Failed()
+                            producerCreatedTsc.SetException(ex)
+                            stopProducer()
+                | _ ->
+                    Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
+                                
+                if connectionHandler.ConnectionState = Failed then
+                    continueLoop <- false
+            
+            | ProducerMessage.ConnectionClosed clientCnx ->
+            
+                Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
+                connectionHandler.ConnectionClosed clientCnx
+                clientCnx.RemoveProducer(producerId)
+            
+            | ProducerMessage.ConnectionFailed ex ->
+            
+                Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
+                if (DateTime.Now > createProducerTimeout && producerCreatedTsc.TrySetException(ex)) then
+                    Log.Logger.LogInformation("{0} creation failed", prefix)
+                    connectionHandler.Failed()
+                    stopProducer()
+                    continueLoop <- false
+            
+            | ProducerMessage.BeginSendMessage sendRequest ->
+            
+                Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
+                beginSendMessage sendRequest
+            
+            | ProducerMessage.AckReceived receipt ->
+            
+                let sequenceId = receipt.SequenceId
+                let highestSequenceId = receipt.HighestSequenceId
+                if pendingMessages.Count > 0 then
+                    let pendingMessage = pendingMessages.Peek()
+                    let exptectedHighestSequenceId = int64 pendingMessage.HighestSequenceId
+                    let expectedSequenceId = int64 pendingMessage.SequenceId
+                    if sequenceId > expectedSequenceId then
+                        Log.Logger.LogWarning("{0} Got ack for msg. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
+                            prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
+                            receipt.SequenceId, receipt.HighestSequenceId, pendingMessages.Count)
+                        // Force connection closing so that messages can be re-transmitted in a new connection
+                        match connectionHandler.ConnectionState with
+                        | Ready clientCnx -> clientCnx.Dispose()
+                        | _ -> ()
+                    elif sequenceId < expectedSequenceId then
+                        Log.Logger.LogInformation("{0} Got ack for timed out msg. expecting: {1} - {2} - got: {3} - {4}",
+                            prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
+                            receipt.SequenceId, receipt.HighestSequenceId)
                     else
-                        return! loop ()
-
-                | ProducerMessage.BeginSendMessage sendRequest ->
-
-                    Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
-                    beginSendMessage sendRequest
-                    return! loop ()
-
-                | ProducerMessage.AckReceived receipt ->
-
-                    let sequenceId = receipt.SequenceId
-                    let highestSequenceId = receipt.HighestSequenceId
-                    if pendingMessages.Count > 0 then
-                        let pendingMessage = pendingMessages.Peek()
-                        let exptectedHighestSequenceId = int64 pendingMessage.HighestSequenceId
-                        let expectedSequenceId = int64 pendingMessage.SequenceId
-                        if sequenceId > expectedSequenceId then
-                            Log.Logger.LogWarning("{0} Got ack for msg. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
-                                prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
-                                receipt.SequenceId, receipt.HighestSequenceId, pendingMessages.Count)
+                        // Add check `sequenceId >= highestSequenceId` for backward compatibility.
+                        if sequenceId >= highestSequenceId || highestSequenceId = exptectedHighestSequenceId then
+                            Log.Logger.LogDebug("{0} Received ack for message {1}", prefix, receipt)
+                            dequeuePendingMessage() |> ignore
+                            lastSequenceIdPublished <- Math.Max(lastSequenceIdPublished, %(getHighestSequenceId pendingMessage))
+                            match pendingMessage.Callback with
+                            | SingleCallback (chunkDetailsOption, msg, tcs) ->
+                                if chunkDetailsOption.IsNone || chunkDetailsOption.Value.IsLast then
+                                    let currentMessageId =
+                                        { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
+                                            Type = MessageIdType.Single; TopicName = %""; ChunkMessageIds = None }
+                                    let msgId = 
+                                        match chunkDetailsOption with
+                                        | Some chunkDetail ->
+                                            chunkDetail.MessageIds.[chunkDetail.ChunkId] <- currentMessageId
+                                            { currentMessageId with ChunkMessageIds = Some chunkDetail.MessageIds }
+                                        | None ->
+                                            currentMessageId
+                                    interceptors.OnSendAcknowledgement(this, msg, msgId, null)
+                                    stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
+                                    tcs.SetResult(msgId)
+                                else
+                                    // updating messageIds array
+                                    let chunkDetails = chunkDetailsOption.Value
+                                    let currentMsgId =
+                                                { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
+                                                    Type = MessageIdType.Single; TopicName = %""; ChunkMessageIds = None }
+                                    chunkDetails.MessageIds.[chunkDetails.ChunkId] <- currentMsgId
+                                                    
+                            | BatchCallbacks tcss ->
+                                tcss
+                                |> Array.iter (fun (msgId, msg, tcs) ->
+                                    let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
+                                                    Type = Batch msgId; TopicName = %""; ChunkMessageIds = None }
+                                    interceptors.OnSendAcknowledgement(this, msg, msgId, null)
+                                    stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
+                                    tcs.SetResult(msgId))
+                        else
+                            Log.Logger.LogWarning("{0} Got ack for batch msg error. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
+                                                    prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
+                                                    receipt.SequenceId, receipt.HighestSequenceId, pendingMessages.Count)
                             // Force connection closing so that messages can be re-transmitted in a new connection
                             match connectionHandler.ConnectionState with
                             | Ready clientCnx -> clientCnx.Dispose()
                             | _ -> ()
-                        elif sequenceId < expectedSequenceId then
-                            Log.Logger.LogInformation("{0} Got ack for timed out msg. expecting: {1} - {2} - got: {3} - {4}",
-                                prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
-                                receipt.SequenceId, receipt.HighestSequenceId)
+                else
+                    Log.Logger.LogInformation("{0} Got ack for timed out msg {1} - {2}", prefix, sequenceId, highestSequenceId)
+            
+            | ProducerMessage.RecoverChecksumError sequenceId ->
+            
+                //* Checks message checksum to retry if message was corrupted while sending to broker. Recomputes checksum of the
+                //* message header-payload again.
+                //* <ul>
+                //* <li><b>if matches with existing checksum</b>: it means message was corrupt while sending to broker. So, resend
+                //* message</li>
+                //* <li><b>if doesn't match with existing checksum</b>: it means message is already corrupt and can't retry again.
+                //* So, fail send-message by failing callback</li>
+                //* </ul>
+                Log.Logger.LogWarning("{0} RecoverChecksumError seqId={1}", prefix, sequenceId)
+                if pendingMessages.Count > 0 then
+                    let pendingMessage = pendingMessages.Peek()
+                    let expectedSequenceId = getHighestSequenceId pendingMessage
+                    if sequenceId = expectedSequenceId then
+                        let! corrupted = verifyIfLocalBufferIsCorrupted pendingMessage
+                        if corrupted then
+                            // remove message from pendingMessages queue and fail callback
+                            dequeuePendingMessage |> ignore
+                            failPendingMessage pendingMessage (ChecksumException "Checksum failed on corrupt message")
                         else
-                            // Add check `sequenceId >= highestSequenceId` for backward compatibility.
-                            if sequenceId >= highestSequenceId || highestSequenceId = exptectedHighestSequenceId then
-                                Log.Logger.LogDebug("{0} Received ack for message {1}", prefix, receipt)
-                                dequeuePendingMessage() |> ignore
-                                lastSequenceIdPublished <- Math.Max(lastSequenceIdPublished, %(getHighestSequenceId pendingMessage))
-                                match pendingMessage.Callback with
-                                | SingleCallback (chunkDetailsOption, msg, tcs) ->
-                                    if chunkDetailsOption.IsNone || chunkDetailsOption.Value.IsLast then
-                                        let currentMessageId =
-                                            { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
-                                                Type = MessageIdType.Single; TopicName = %""; ChunkMessageIds = None }
-                                        let msgId = 
-                                            match chunkDetailsOption with
-                                            | Some chunkDetail ->
-                                                chunkDetail.MessageIds.[chunkDetail.ChunkId] <- currentMessageId
-                                                { currentMessageId with ChunkMessageIds = Some chunkDetail.MessageIds }
-                                            | None ->
-                                                currentMessageId
-                                        interceptors.OnSendAcknowledgement(this, msg, msgId, null)
-                                        stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
-                                        tcs.SetResult(msgId)
-                                    else
-                                        // updating messageIds array
-                                        let chunkDetails = chunkDetailsOption.Value
-                                        let currentMsgId =
-                                                    { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
-                                                      Type = MessageIdType.Single; TopicName = %""; ChunkMessageIds = None }
-                                        chunkDetails.MessageIds.[chunkDetails.ChunkId] <- currentMsgId
-                                        
-                                | BatchCallbacks tcss ->
-                                    tcss
-                                    |> Array.iter (fun (msgId, msg, tcs) ->
-                                        let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex
-                                                      Type = Batch msgId; TopicName = %""; ChunkMessageIds = None }
-                                        interceptors.OnSendAcknowledgement(this, msg, msgId, null)
-                                        stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
-                                        tcs.SetResult(msgId))
-                            else
-                                Log.Logger.LogWarning("{0} Got ack for batch msg error. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
-                                                      prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
-                                                      receipt.SequenceId, receipt.HighestSequenceId, pendingMessages.Count)
-                                // Force connection closing so that messages can be re-transmitted in a new connection
-                                match connectionHandler.ConnectionState with
-                                | Ready clientCnx -> clientCnx.Dispose()
-                                | _ -> ()
+                            Log.Logger.LogDebug("{0} Message is not corrupted, retry send-message with sequenceId {1}", prefix, sequenceId)
+                            match connectionHandler.ConnectionState with
+                            | Ready clientCnx -> resendMessages clientCnx
+                            | _ -> Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
+                                            
                     else
-                        Log.Logger.LogInformation("{0} Got ack for timed out msg {1} - {2}", prefix, sequenceId, highestSequenceId)
-                    return! loop ()
-
-                | ProducerMessage.RecoverChecksumError sequenceId ->
-
-                    //* Checks message checksum to retry if message was corrupted while sending to broker. Recomputes checksum of the
-                    //* message header-payload again.
-                    //* <ul>
-                    //* <li><b>if matches with existing checksum</b>: it means message was corrupt while sending to broker. So, resend
-                    //* message</li>
-                    //* <li><b>if doesn't match with existing checksum</b>: it means message is already corrupt and can't retry again.
-                    //* So, fail send-message by failing callback</li>
-                    //* </ul>
-                    Log.Logger.LogWarning("{0} RecoverChecksumError seqId={1}", prefix, sequenceId)
-                    if pendingMessages.Count > 0 then
-                        let pendingMessage = pendingMessages.Peek()
-                        let expectedSequenceId = getHighestSequenceId pendingMessage
-                        if sequenceId = expectedSequenceId then
-                            let! corrupted = verifyIfLocalBufferIsCorrupted pendingMessage |> Async.AwaitTask
-                            if corrupted then
-                                // remove message from pendingMessages queue and fail callback
-                                dequeuePendingMessage |> ignore
-                                failPendingMessage pendingMessage (ChecksumException "Checksum failed on corrupt message")
-                            else
-                                Log.Logger.LogDebug("{0} Message is not corrupted, retry send-message with sequenceId {1}", prefix, sequenceId)
-                                match connectionHandler.ConnectionState with
-                                | Ready clientCnx -> resendMessages clientCnx
-                                | _ -> Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
+                        Log.Logger.LogDebug("{0} Corrupt message is already timed out {1}", prefix, sequenceId)
+                else
+                    Log.Logger.LogDebug("{0} Got send failure for timed out seqId {1}", prefix, sequenceId)
                                 
-                        else
-                            Log.Logger.LogDebug("{0} Corrupt message is already timed out {1}", prefix, sequenceId)
+            | ProducerMessage.RecoverNotAllowedError sequenceId ->
+                               
+                Log.Logger.LogWarning("{0} RecoverNotAllowedError seqId={1}", prefix, sequenceId)
+                if pendingMessages.Count > 0 then
+                    let pendingMessage = pendingMessages.Peek()
+                    let expectedSequenceId = getHighestSequenceId pendingMessage
+                    if sequenceId = expectedSequenceId then
+                        failPendingMessage pendingMessage (
+                            prefix + ": the size of the message is not allowed" |> NotAllowedException
+                        )
                     else
-                        Log.Logger.LogDebug("{0} Got send failure for timed out seqId {1}", prefix, sequenceId)
-                    return! loop ()
-                    
-                | ProducerMessage.RecoverNotAllowedError sequenceId ->
-                   
-                    Log.Logger.LogWarning("{0} RecoverNotAllowedError seqId={1}", prefix, sequenceId)
-                    if pendingMessages.Count > 0 then
-                        let pendingMessage = pendingMessages.Peek()
-                        let expectedSequenceId = getHighestSequenceId pendingMessage
-                        if sequenceId = expectedSequenceId then
-                            failPendingMessage pendingMessage (
-                                prefix + ": the size of the message is not allowed" |> NotAllowedException
-                            )
-                        else
-                            Log.Logger.LogDebug("{0} Not allowed message is already timed out {1}", prefix, sequenceId)
-                    else
-                        Log.Logger.LogDebug("{0} Got send failure for timed out seqId {1}", prefix, sequenceId)
-                    return! loop ()
-
-                | ProducerMessage.TopicTerminatedError ->
-
+                        Log.Logger.LogDebug("{0} Not allowed message is already timed out {1}", prefix, sequenceId)
+                else
+                    Log.Logger.LogDebug("{0} Got send failure for timed out seqId {1}", prefix, sequenceId)
+            
+            | ProducerMessage.TopicTerminatedError ->
+            
+                match connectionHandler.ConnectionState with
+                | Closed | Terminated -> ()
+                | _ ->
+                    connectionHandler.Terminate()
+                    failPendingMessages(TopicTerminatedException("The topic has been terminated"))
+            
+            | ProducerMessage.Tick tickType ->
+                                
+                match tickType with
+                | SendBatchTick -> 
+                    batchMessageAndSend()
+                | SendTimeoutTick ->
                     match connectionHandler.ConnectionState with
                     | Closed | Terminated -> ()
                     | _ ->
-                        connectionHandler.Terminate()
-                        failPendingMessages(TopicTerminatedException("The topic has been terminated"))
-                    return! loop ()
-
-                | ProducerMessage.Tick tickType ->
-                    
-                    match tickType with
-                    | SendBatchTick -> 
-                        batchMessageAndSend()
-                    | SendTimeoutTick ->
-                        match connectionHandler.ConnectionState with
-                        | Closed | Terminated -> ()
-                        | _ ->
-                            if pendingMessages.Count > 0 then
-                                let firstMessage = pendingMessages.Peek()
-                                if firstMessage.CreatedAt.AddMilliseconds(sendTimeoutMs) <= DateTime.Now then
-                                    // The diff is less than or equal to zero, meaning that the message has been timed out.
-                                    // Set the callback to timeout on every message, then clear the pending queue.
-                                    Log.Logger.LogInformation("{0} Message send timed out. Failing {1} messages", prefix, pendingMessages.Count)
-                                    let ex = TimeoutException "Could not send message to broker within given timeout"
-                                    failPendingMessages ex
-                    | StatTick ->
-                        stats.TickTime(pendingMessages.Count)
-                    | UpdateEncryptionKeys encryptor ->
-                        try
-                            encryptor.UpdateEncryptionKeys()
-                        with ex ->
-                            Log.Logger.LogError(ex, "{0} Couldn't update encryption keys", prefix)
-
-                    return! loop ()
-
-                | ProducerMessage.GetStats channel ->
-                    channel.Reply <| stats.GetStats()
-                    return! loop ()
-                
-                | ProducerMessage.Close channel ->
-
-                    match connectionHandler.ConnectionState with
-                    | Ready clientCnx ->
-                        connectionHandler.Closing()
-                        Log.Logger.LogInformation("{0} starting close", prefix)
-                        let requestId = Generators.getNextRequestId()
-                        let payload = Commands.newCloseProducer producerId requestId
-                        try
-                            let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
-                            response |> PulsarResponseType.GetEmpty
-                            clientCnx.RemoveProducer(producerId)
-                            connectionHandler.Closed()
-                            stopProducer()
-                            failPendingMessages(AlreadyClosedException("Producer was already closed"))
-                            channel.Reply <| Ok()
-                        with Flatten ex ->
-                            Log.Logger.LogError(ex, "{0} failed to close", prefix)
-                            channel.Reply <| Error ex
-                    | _ ->
-                        Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
+                        if pendingMessages.Count > 0 then
+                            let firstMessage = pendingMessages.Peek()
+                            if firstMessage.CreatedAt.AddMilliseconds(sendTimeoutMs) <= DateTime.Now then
+                                // The diff is less than or equal to zero, meaning that the message has been timed out.
+                                // Set the callback to timeout on every message, then clear the pending queue.
+                                Log.Logger.LogInformation("{0} Message send timed out. Failing {1} messages", prefix, pendingMessages.Count)
+                                let ex = TimeoutException "Could not send message to broker within given timeout"
+                                failPendingMessages ex
+                | StatTick ->
+                    stats.TickTime(pendingMessages.Count)
+                | UpdateEncryptionKeys encryptor ->
+                    try
+                        encryptor.UpdateEncryptionKeys()
+                    with ex ->
+                        Log.Logger.LogError(ex, "{0} Couldn't update encryption keys", prefix)
+            
+            
+            | ProducerMessage.GetStats channel ->
+                channel.SetResult <| stats.GetStats()
+                            
+            | ProducerMessage.Close channel ->
+            
+                match connectionHandler.ConnectionState with
+                | Ready clientCnx ->
+                    connectionHandler.Closing()
+                    Log.Logger.LogInformation("{0} starting close", prefix)
+                    let requestId = Generators.getNextRequestId()
+                    let payload = Commands.newCloseProducer producerId requestId
+                    try
+                        let! response = clientCnx.SendAndWaitForReply requestId payload
+                        response |> PulsarResponseType.GetEmpty
+                        clientCnx.RemoveProducer(producerId)
                         connectionHandler.Closed()
                         stopProducer()
                         failPendingMessages(AlreadyClosedException("Producer was already closed"))
-                        channel.Reply <| Ok()
-            }
-        loop ()
-    )
+                        channel.SetResult <| Ok()
+                    with Flatten ex ->
+                        Log.Logger.LogError(ex, "{0} failed to close", prefix)
+                        channel.SetResult <| Error ex
+                | _ ->
+                    Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
+                    connectionHandler.Closed()
+                    stopProducer()
+                    failPendingMessages(AlreadyClosedException("Producer was already closed"))
+                    channel.SetResult <| Ok()
 
-    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix))
+                continueLoop <- false
+            }:> Task).ContinueWith(fun t ->
+                if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
+                else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+    |> ignore
+
     do startSendTimeoutTimer()
     do startStatTimer()
     do startCryptoTimer()
@@ -764,10 +756,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             | None ->
                 ()
             let interceptMsg = interceptors.BeforeSend(this, message)
-            return! mb.PostAndAsyncReply(fun channel -> BeginSendMessage (interceptMsg, channel))
+            return! postAndAsyncReply mb (fun channel -> BeginSendMessage (interceptMsg, channel))
         }
 
-    member internal this.Mb with get(): MailboxProcessor<ProducerMessage<'T>> = mb
+    member internal this.Mb with get(): Channel<ProducerMessage<'T>> = mb
 
     override this.Equals producer =
         producerId = (producer :?> IProducer<'T>).ProducerId
@@ -894,7 +886,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.Name = producerName
         
         member this.GetStatsAsync() =
-            mb.PostAndAsyncReply(ProducerMessage.GetStats) |> Async.StartAsTask
+            postAndAsyncReply mb (ProducerMessage.GetStats)
             
         member this.LastDisconnectedTimestamp =
             connectionHandler.LastDisconnectedTimestamp
@@ -907,7 +899,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 ValueTask()
             | _ ->
                 task {
-                    let! result = mb.PostAndAsyncReply(ProducerMessage.Close)
+                    let! result = postAndAsyncReply mb ProducerMessage.Close
                     match result with
                     | Ok () -> ()
                     | Error ex -> reraize ex 

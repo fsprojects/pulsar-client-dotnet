@@ -6,6 +6,9 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System
 open FSharp.UMX
+open System.Threading.Channels
+open System.Threading.Tasks
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 type internal ConnectionHandlerMessage =
     | GrabCnx
@@ -41,83 +44,79 @@ type internal ConnectionHandler( parentPrefix: string,
         | Uninitialized | Connecting | Ready _ -> true
         | _ -> false
 
-    let mb = MailboxProcessor<ConnectionHandlerMessage>.Start(fun inbox ->
-        let rec loop () =
-            async {
-                match! inbox.Receive() with
+    let mb = Channel.CreateUnbounded<ConnectionHandlerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    do (task {
+        let mutable continueLoop = true
+        while continueLoop do
+            match! mb.Reader.ReadAsync() with
+            | GrabCnx ->
                 
-                | GrabCnx ->
+                match this.ConnectionState with
+                | Ready _ ->
+                    Log.Logger.LogWarning("{0} Client cnx already set for topic {1}, ignoring reconnection request", prefix, topic);
+                | _ ->
+                    if isValidStateForReconnection() then
+                        try
+                            Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic)
+                            let! broker = lookup.GetBroker(topic)
+                            let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize, false)
+                            this.ConnectionState <- Ready clientCnx
+                            Log.Logger.LogDebug("{0} Successfuly reconnected to {1}, {2}", prefix, topic, clientCnx)
+                            connectionOpened epoch
+                        with Flatten ex ->
+                            match ex with
+                            | MaxMessageSizeChanged newSize ->
+                                Log.Logger.LogInformation("{0} MaxMessageSizeChanged to {1}", prefix, newSize)
+                                maxMessageSize <- newSize
+                                post this.Mb GrabCnx
+                            | _ ->
+                                Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                                connectionFailed ex
+                                if isValidStateForReconnection() then
+                                    post this.Mb (ReconnectLater ex)
+                    else
+                        Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                        
+            | ReconnectLater ex ->
+                
+                if isValidStateForReconnection() then
+                    let delay = backoff.Next()
+                    Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
+                        prefix, topic, this.ConnectionState, delay)
+                    this.ConnectionState <- Connecting
+                    epoch <- epoch + 1UL
+                    asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
+                else
+                    Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
                     
-                    match this.ConnectionState with
-                    | Ready _ ->
-                        Log.Logger.LogWarning("{0} Client cnx already set for topic {1}, ignoring reconnection request", prefix, topic);
-                    | _ ->
-                        if isValidStateForReconnection() then
-                            try
-                                Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic)
-                                let! broker = lookup.GetBroker(topic) |> Async.AwaitTask
-                                let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize, false) |> Async.AwaitTask
-                                this.ConnectionState <- Ready clientCnx
-                                Log.Logger.LogDebug("{0} Successfuly reconnected to {1}, {2}", prefix, topic, clientCnx)
-                                connectionOpened epoch
-                            with Flatten ex ->
-                                match ex with
-                                | MaxMessageSizeChanged newSize ->
-                                    Log.Logger.LogInformation("{0} MaxMessageSizeChanged to {1}", prefix, newSize)
-                                    maxMessageSize <- newSize
-                                    this.Mb.Post(GrabCnx)
-                                | _ ->
-                                    Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
-                                    connectionFailed ex
-                                    if isValidStateForReconnection() then
-                                        this.Mb.Post(ReconnectLater ex)
-                        else
-                            Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", prefix, topic, this.ConnectionState)
-                    return! loop ()
-                            
-                | ReconnectLater ex ->
-                    
+            | ConnectionClosed clientCnx ->
+                
+                this.LastDisconnectedTimestamp <- %DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                match this.ConnectionState with
+                | Ready cnx when cnx <> clientCnx ->
+                    Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
+                | _ ->
                     if isValidStateForReconnection() then
                         let delay = backoff.Next()
-                        Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
+                        Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {3}ms ",
                             prefix, topic, this.ConnectionState, delay)
                         this.ConnectionState <- Connecting
                         epoch <- epoch + 1UL
-                        asyncDelayMs delay (fun() -> this.Mb.Post GrabCnx)
+                        asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
                     else
-                        Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
-                    return! loop ()
-                        
-                | ConnectionClosed clientCnx ->
-                    
-                    this.LastDisconnectedTimestamp <- %DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                    match this.ConnectionState with
-                    | Ready cnx when cnx <> clientCnx ->
-                        Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
-                    | _ ->
-                        if isValidStateForReconnection() then
-                            let delay = backoff.Next()
-                            Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {3}ms ",
-                                prefix, topic, this.ConnectionState, delay)
-                            this.ConnectionState <- Connecting
-                            epoch <- epoch + 1UL
-                            asyncDelayMs delay (fun() -> this.Mb.Post GrabCnx)
-                        else
-                            Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
-                    return! loop ()
-                    
-                | Close ->
-                    ()
-            }
-        loop ()
-    )
+                        Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                
+            | Close ->
+                continueLoop <- false
+        }:> Task).ContinueWith(fun t ->
+            if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} ConnectionHandler mailbox failure", prefix)
+            else Log.Logger.LogInformation("{0} ConnectionHandler mailbox has stopped normally", prefix))
+    |> ignore
 
-    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "{0} ConnectionHandler mailbox failure", prefix))
-
-    member private __.Mb with get() : MailboxProcessor<ConnectionHandlerMessage> = mb
+    member private __.Mb with get() : Channel<ConnectionHandlerMessage> = mb
 
     member this.GrabCnx() =
-        mb.Post(GrabCnx)
+        post mb GrabCnx
 
     member this.Terminate() =
         this.ConnectionState <- Terminated
@@ -135,10 +134,10 @@ type internal ConnectionHandler( parentPrefix: string,
         this.ConnectionState <- Ready connection
 
     member this.ConnectionClosed (clientCnx: ClientCnx) =
-        mb.Post(ConnectionClosed clientCnx)
+        post mb (ConnectionClosed clientCnx)
 
     member this.ReconnectLater ex =
-        mb.Post(ReconnectLater ex)
+        post mb (ReconnectLater ex)
 
     member this.ResetBackoff() =
         backoff.Reset()
@@ -159,4 +158,4 @@ type internal ConnectionHandler( parentPrefix: string,
         | Failed | Uninitialized -> NotConnectedException(prefix + " not connected") :> exn
         
     member this.Close() =
-        mb.Post(Close)
+        post mb Close

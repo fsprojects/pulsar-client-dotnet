@@ -10,6 +10,7 @@ open Microsoft.IO
 open System.Runtime.ExceptionServices
 open System.Collections.Generic
 open Microsoft.Extensions.Logging
+open System.Threading.Channels
 
 let MemoryStreamManager = RecyclableMemoryStreamManager()
 let MagicNumber = int16 0x0e01
@@ -152,3 +153,16 @@ type Result<'T, 'TError> with
         match this with
         | Ok smth -> $"Ok {smth}"
         | Error err -> $"Error {err}"
+
+let postAndAsyncReply (channel: Channel<'T>) f =
+    let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
+    (f tcs) |> channel.Writer.TryWrite |> ignore
+    tcs.Task
+
+let postAndReply (channel: Channel<'T>) f =
+    let tcs = TaskCompletionSource(TaskContinuationOptions.ExecuteSynchronously)
+    (f tcs) |> channel.Writer.TryWrite |> ignore
+    tcs.Task.Result
+    
+let post (channel: Channel<'T>) =
+    channel.Writer.TryWrite >> ignore

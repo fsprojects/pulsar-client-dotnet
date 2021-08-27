@@ -9,6 +9,8 @@ open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
 open pulsar.proto
+open System.Threading.Channels
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 type internal TransactionCoordinatorState =
     | NONE
@@ -18,7 +20,7 @@ type internal TransactionCoordinatorState =
     | CLOSED
 
 type internal TransactionCoordinatorMessage =
-    | Start of AsyncReplyChannel<ResultOrException<Unit>>
+    | Start of TaskCompletionSource<ResultOrException<Unit>>
     | Close
 
 type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfiguration,
@@ -42,11 +44,12 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
             TopicName.TRANSACTION_COORDINATOR_ASSIGN.ToString()
         |> UMX.tag
     
-    let mb = MailboxProcessor<TransactionCoordinatorMessage>.Start(fun inbox ->
 
-        let rec loop () =
-            async {
-                match! inbox.Receive() with
+    let mb = Channel.CreateUnbounded<TransactionCoordinatorMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    do (task {
+        let mutable continueLoop = true
+        while continueLoop do
+                match! mb.Reader.ReadAsync() with
                 | TransactionCoordinatorMessage.Start ch ->
                     
                     Log.Logger.LogDebug("{0} starting", prefix)
@@ -56,7 +59,6 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                         try
                             let! partitionMeta =
                                 lookup.GetPartitionedTopicMetadata(TopicName.TRANSACTION_COORDINATOR_ASSIGN.CompleteTopicName)
-                                |> Async.AwaitTask
                             let tasks = 
                                 if partitionMeta.Partitions > 0 then
                                     seq {
@@ -72,20 +74,19 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                                     let handler = TransactionMetaStoreHandler(clientConfig, %0UL,
                                                                               getTCAssignTopicName(-1), connectionPool, lookup, tcs)
                                     handlers.Add(handler)
-                                    seq { tcs.Task }                                
-                            do! tasks |> Task.WhenAll |> Async.AwaitTask |> Async.Ignore
+                                    seq { tcs.Task }
+                            let! _ = Task.WhenAll(tasks)
                             Log.Logger.LogInformation("{0} connected with partitions count {1}", prefix, partitionMeta.Partitions)
                             state <- TransactionCoordinatorState.READY
-                            ch.Reply(Ok ())
+                            ch.SetResult(Ok ())
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} connection error on start", prefix)
                             state <- TransactionCoordinatorState.NONE
-                            ch.Reply(Error ex)
+                            ch.SetResult(Error ex)
                     | _ ->
                         Log.Logger.LogError("{0} Can not start while current state is {1}", prefix, state)
                         state <- TransactionCoordinatorState.NONE
-                        ch.Reply(CoordinatorClientStateException $"Can not start while current state is {state}" :> exn |> Error)
-                    return! loop ()
+                        ch.SetResult(CoordinatorClientStateException $"Can not start while current state is {state}" :> exn |> Error)
                 
                 | Close ->
                     
@@ -97,16 +98,16 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                             handler.Close()
                         handlers.Clear()
                         state <- TransactionCoordinatorState.CLOSED
-           }
-        loop ()
-    )
-    
-    do mb.Error.Add(fun ex -> Log.Logger.LogCritical(ex, "transaction coordinator mailbox failure"))
-    
-    member this.Mb: MailboxProcessor<TransactionCoordinatorMessage> = mb
+                    continueLoop <- false
+        } :> Task).ContinueWith(fun t ->
+                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "transaction coordinator mailbox failure")
+                                    else Log.Logger.LogInformation("transaction coordinator mailbox has stopped normally"))
+        |> ignore
+
+    member this.Mb: Channel<TransactionCoordinatorMessage> = mb
     
     member this.Start() =
-        mb.PostAndAsyncReply(Start)
+        postAndAsyncReply mb Start
         
     member this.NewTransactionAsync() =
         this.NewTransactionAsync(DEFAULT_TXN_TTL)
@@ -144,4 +145,4 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
         handler.EdTxnAsync(txnId, TxnAction.Abort)
         
     member this.Close() =
-        mb.Post(Close)
+        post mb Close
