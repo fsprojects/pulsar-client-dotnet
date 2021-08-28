@@ -121,8 +121,11 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                 Log.Logger.LogInformation("Pulsar client stopped")
                 continueLoop <- false
         } :> Task).ContinueWith(fun t ->
-                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "PulsarClient mailbox failure")
-                                    else Log.Logger.LogInformation("PulsarClient mailbox has stopped normally"))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "PulsarClient mailbox failure")
+            else
+                Log.Logger.LogInformation("PulsarClient mailbox has stopped normally"))
         |> ignore
         
     let removeConsumer = fun consumer -> post mb (RemoveConsumer consumer)

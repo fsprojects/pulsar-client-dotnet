@@ -738,8 +738,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                 continueLoop <- false
             }:> Task).ContinueWith(fun t ->
-                if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
-                else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+                if t.IsFaulted then
+                    let (Flatten ex) = t.Exception
+                    Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                else
+                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
 
     do startSendTimeoutTimer()
@@ -823,21 +826,22 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.SendAndForgetAsync (message: 'T) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             let msg = _this.NewMessage message
-            task {
-                let! _ = this.SendMessage msg
-                return ()
-                    
-            }
+            let sendTask = this.SendMessage msg
+            if sendTask.IsFaulted then
+                let (Flatten ex) = sendTask.Exception
+                Task.FromException<Unit> ex
+            else
+                Task.FromResult()
 
         member this.SendAndForgetAsync (message: MessageBuilder<'T>) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
-            task {
-                let sendTask = this.SendMessage message
-                if sendTask.IsFaulted then
-                    let (Flatten ex) = sendTask.Exception in reraize ex
-                else
-                    message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
-            }
+            let sendTask = this.SendMessage message
+            if sendTask.IsFaulted then
+                let (Flatten ex) = sendTask.Exception
+                Task.FromException<Unit> ex
+            else
+                message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
+                Task.FromResult()
 
         member this.SendAsync (message: 'T) =
             connectionHandler.CheckIfActive() |> throwIfNotNull

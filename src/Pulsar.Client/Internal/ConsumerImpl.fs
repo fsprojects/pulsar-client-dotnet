@@ -1290,8 +1290,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
                     channel.SetResult <| Error((NotConnectedException "Not connected to broker") :> exn)
         } :> Task).ContinueWith(fun t ->
-            if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
-            else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+            else
+                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
 
     do startStatTimer()
@@ -1530,25 +1533,22 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
-            task {
-                let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then
-                    stats.IncrementNumAcksFailed()
-                    interceptors.OnAcknowledgeCumulative(this, msgId, exn)
-                    raise exn
+            let exn = connectionHandler.CheckIfActive()
+            if not (isNull exn) then
+                stats.IncrementNumAcksFailed()
+                interceptors.OnAcknowledgeCumulative(this, msgId, exn)
+                raise exn
 
-                // no need to IncrementNumAcksFailed, since ack can't fail
-                return! postAndAsyncReply mb (fun ch -> Acknowledge(msgId, AckType.Cumulative, None, Some ch))
-            }
+            // no need to IncrementNumAcksFailed, since ack can't fail
+            postAndAsyncReply mb (fun ch -> Acknowledge(msgId, AckType.Cumulative, None, Some ch))
             
-        member this.AcknowledgeCumulativeAsync (msgId: MessageId, txn: Transaction) =
-            task {
-                let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then
-                    stats.IncrementNumAcksFailed()
-                    interceptors.OnAcknowledgeCumulative(this, msgId, exn)
-                    raise exn
-                
+        member this.AcknowledgeCumulativeAsync (msgId: MessageId, txn: Transaction) =            
+            let exn = connectionHandler.CheckIfActive()
+            if not (isNull exn) then
+                stats.IncrementNumAcksFailed()
+                interceptors.OnAcknowledgeCumulative(this, msgId, exn)
+                raise exn
+            task {                
                 if txn |> isNull |> not then
                     txn.RegisterCumulativeAckConsumer(consumerId, consumerTxnOperations)
                     do! txn.RegisterAckedTopic(topicName.CompleteTopicName, consumerConfig.SubscriptionName)
@@ -1560,28 +1560,24 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
         member this.RedeliverUnacknowledgedMessagesAsync () =
-            task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
-                do! postAndAsyncReply mb RedeliverAllUnacknowledged
-            }
+            connectionHandler.CheckIfActive() |> throwIfNotNull
+            postAndAsyncReply mb RedeliverAllUnacknowledged
 
         member this.SeekAsync (messageId: MessageId) =
-            task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
-                return! wrapPostAndReply <| postAndAsyncReply mb (fun channel -> SeekAsync (SeekType.MessageId messageId, channel))
-            }
+            connectionHandler.CheckIfActive() |> throwIfNotNull
+            postAndAsyncReply mb (fun channel -> SeekAsync (SeekType.MessageId messageId, channel))
+            |> wrapPostAndReply
 
         member this.SeekAsync (timestamp: TimeStamp) =
-            task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
-                return! wrapPostAndReply <| postAndAsyncReply mb (fun channel -> SeekAsync (SeekType.Timestamp timestamp, channel))
-            }
+            connectionHandler.CheckIfActive() |> throwIfNotNull
+            postAndAsyncReply mb (fun channel -> SeekAsync (SeekType.Timestamp timestamp, channel))
+            |> wrapPostAndReply
+            
             
         member this.SeekAsync (resolver: Func<string, SeekType>) : Task<Unit>  =
             let startFrom = resolver.Invoke %topicName.CompleteTopicName
-            task {
-                return! wrapPostAndReply <| postAndAsyncReply mb (fun channel -> SeekAsync (startFrom, channel))
-            }
+            postAndAsyncReply mb (fun channel -> SeekAsync (startFrom, channel))
+            |> wrapPostAndReply
 
         member this.GetLastMessageIdAsync () =
             task {
@@ -1590,25 +1586,22 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
         member this.UnsubscribeAsync() =
-            task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
-                return! wrapPostAndReply <| postAndAsyncReply mb ConsumerMessage.Unsubscribe
-            }
+            connectionHandler.CheckIfActive() |> throwIfNotNull
+            postAndAsyncReply mb ConsumerMessage.Unsubscribe
+            |> wrapPostAndReply
 
         member this.HasReachedEndOfTopic = hasReachedEndOfTopic
 
         member this.NegativeAcknowledge msgId =
-            task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
-                post mb (NegativeAcknowledge(msgId))
-            }
+            connectionHandler.CheckIfActive() |> throwIfNotNull
+            post mb (NegativeAcknowledge(msgId))
+            Task.FromResult()
 
         member this.NegativeAcknowledge (msgs: Messages<'T>)  =
-            task {
-                connectionHandler.CheckIfActive() |> throwIfNotNull 
-                for msg in msgs do
-                    post mb (NegativeAcknowledge(msg.MessageId))
-            }
+            connectionHandler.CheckIfActive() |> throwIfNotNull 
+            for msg in msgs do
+                post mb (NegativeAcknowledge(msg.MessageId))
+            Task.FromResult()
         
         member this.ConsumerId = consumerId
 

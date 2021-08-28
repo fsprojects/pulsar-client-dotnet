@@ -100,8 +100,11 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                         state <- TransactionCoordinatorState.CLOSED
                     continueLoop <- false
         } :> Task).ContinueWith(fun t ->
-                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "transaction coordinator mailbox failure")
-                                    else Log.Logger.LogInformation("transaction coordinator mailbox has stopped normally"))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "transaction coordinator mailbox failure")
+            else
+                Log.Logger.LogInformation("transaction coordinator mailbox has stopped normally"))
         |> ignore
 
     member this.Mb: Channel<TransactionCoordinatorMessage> = mb

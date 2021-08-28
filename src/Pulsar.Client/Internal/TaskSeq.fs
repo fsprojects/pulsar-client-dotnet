@@ -127,8 +127,11 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 else
                     Log.Logger.LogWarning("TaskSeq: trying to remove non-existing generator")
         }:> Task).ContinueWith(fun t ->
-            if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "Taskseq mailbox failure")
-            else Log.Logger.LogInformation("Taskseq mailbox has stopped normally"))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "Taskseq mailbox failure")
+            else
+                Log.Logger.LogInformation("Taskseq mailbox has stopped normally"))
     |> ignore
     
     do tasks.Add(resetWhenAnyTcs.Task)

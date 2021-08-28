@@ -226,8 +226,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogTrace("{0} timeout tick", prefix)
                 handleTimeoutedMessages()
         } :> Task).ContinueWith(fun t ->
-                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} requestsMb mailbox failure", prefix)
-                                    else Log.Logger.LogInformation("{0} requestsMb mailbox has stopped normally", prefix))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "{0} requestsMb mailbox failure", prefix)
+            else
+                Log.Logger.LogInformation("{0} requestsMb mailbox has stopped normally", prefix))
         |> ignore
 
     let tryStopMailboxes() =
@@ -285,8 +288,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogDebug("{0} keepalive tick", prefix)
                 handleKeepAliveTimeout()
         } :> Task).ContinueWith(fun t ->
-                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} operationsMb mailbox failure", prefix)
-                                    else Log.Logger.LogInformation("{0} operationsMb mailbox has stopped normally", prefix))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "{0} operationsMb mailbox failure", prefix)
+            else
+                Log.Logger.LogInformation("{0} operationsMb mailbox has stopped normally", prefix))
     |> ignore
 
     let sendSerializedPayload (writePayload, commandType) =
@@ -320,8 +326,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogDebug("{0} sendMb stopped", prefix)
                 continueLoop <- false
         }:> Task).ContinueWith(fun t ->
-                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} sendMb mailbox failure", prefix)
-                                    else Log.Logger.LogInformation("{0} sendMb mailbox has stopped normally", prefix))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "{0} sendMb mailbox failure", prefix)
+            else
+                Log.Logger.LogInformation("{0} sendMb mailbox has stopped normally", prefix))
     |> ignore
 
     let readMessage (reader: BinaryReader) (stream: MemoryStream) frameLength =

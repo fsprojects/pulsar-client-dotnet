@@ -115,8 +115,11 @@ type internal UnAckedMessageTracker(prefix: string,
                 continueLoop <- false
 
         }:> Task).ContinueWith(fun t ->
-            if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
-            else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+            else
+                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
 
     let timer =
