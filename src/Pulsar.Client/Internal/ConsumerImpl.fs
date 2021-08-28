@@ -1392,10 +1392,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     member this.ConsumerId with get() = consumerId
 
     member this.HasMessageAvailableAsync() =
-        task {
-            connectionHandler.CheckIfActive() |> throwIfNotNull
-            return! postAndAsyncReply mb (fun channel -> HasMessageAvailable channel)
-        }
+        connectionHandler.CheckIfActive() |> throwIfNotNull
+        postAndAsyncReply mb (fun channel -> HasMessageAvailable channel)
 
     member this.LastMessageIdInBroker
         with get() = Volatile.Read(&lastMessageIdInBroker)
@@ -1407,10 +1405,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     override this.GetHashCode () = int consumerId
     
     member this.InitInternal() =
-        task {
-            do connectionHandler.GrabCnx()
-            return! subscribeTsc.Task
-        }
+        connectionHandler.GrabCnx()
+        subscribeTsc.Task
 
     static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                        topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
@@ -1432,8 +1428,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             return consumer
         }
 
-    abstract member ReceiveFsharpAsync: CancellationToken -> Task<ResultOrException<Message<'T>>>
-    default this.ReceiveFsharpAsync(cancellationToken: CancellationToken) =
+    abstract member ReceiveWrappedAsync: CancellationToken -> Task<ResultOrException<Message<'T>>>
+    default this.ReceiveWrappedAsync(cancellationToken: CancellationToken) =
         task {
             connectionHandler.CheckIfActive() |> throwIfNotNull
             let! msgResult = postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel))
@@ -1703,14 +1699,14 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
             |> InvalidMessageException
         raise exn
         
-    override this.ReceiveFsharpAsync(ct) =
+    override this.ReceiveWrappedAsync(ct) =
         this.SendFlowPermits 1
-        base.ReceiveFsharpAsync(ct) 
+        base.ReceiveWrappedAsync(ct) 
     
     interface IConsumer<'T> with
         override this.ReceiveAsync(cancellationToken: CancellationToken) =
             task {
-                match! this.ReceiveFsharpAsync(cancellationToken) with
+                match! this.ReceiveWrappedAsync(cancellationToken) with
                 | Ok msg ->
                     return msg
                 | Error exn ->

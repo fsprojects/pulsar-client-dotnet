@@ -181,7 +181,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 if consumerImp.HasReachedEndOfTopic then
                     Log.Logger.LogWarning("{0} topic was terminated", topic)
                     do! Task.Delay(Timeout.Infinite) // infinite delay for terminated topic
-                let! message = consumer.ReceiveFsharpAsync(CancellationToken.None)
+                let! message = consumer.ReceiveWrappedAsync(CancellationToken.None)
                 return
                     message |> Result.map (fun msg ->
                         let newMessageId = { msg.MessageId with TopicName = topic }
