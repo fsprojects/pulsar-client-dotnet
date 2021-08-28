@@ -91,8 +91,10 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                 log.LogInformation("{0} Closed", prefix)
                 continueLoop <- false
         } :> Task).ContinueWith(fun t ->
-                                    if t.IsFaulted then log.LogCritical(t.Exception, "{0} mailbox failure", prefix)
-                                    else log.LogInformation("{0} mailbox has stopped normally", prefix))
+            if t.IsFaulted then
+                log.LogCritical(t.Exception, "{0} mailbox failure", prefix)
+            else
+                log.LogInformation("{0} mailbox has stopped normally", prefix))
         |> ignore
 
     let postMb msg = mb.Writer.TryWrite(msg) |> ignore

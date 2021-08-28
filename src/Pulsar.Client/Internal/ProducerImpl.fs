@@ -17,7 +17,7 @@ open System.Runtime.InteropServices
 open Pulsar.Client.Transaction
 open System.Threading.Channels
 
-type SendMessageRequest<'T> = MessageBuilder<'T> * TaskCompletionSource<Task<MessageId>>
+type SendMessageRequest<'T> = MessageBuilder<'T> * TaskCompletionSource<MessageId>
 
 type internal ProducerTickType =
     | SendBatchTick
@@ -119,8 +119,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             let msg = pendingMessages.Dequeue()
             failPendingMessage msg ex
         while blockedRequests.Count > 0 do
-            let _, ch = blockedRequests.Dequeue()
-            ch.SetResult(Task.FromException<MessageId>(ex))
+            let _, channel = blockedRequests.Dequeue()
+            channel.SetException(ex)
         if producerConfig.BatchingEnabled then
             failPendingBatchMessages ex
 
@@ -342,12 +342,12 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         maxMessageSize <- messageSize
         batchMessageContainer.MaxMessageSize <- messageSize
         
-    let canEnqueueRequest (channel: TaskCompletionSource<Task<MessageId>>) sendRequest msgCount =
+    let canEnqueueRequest (channel: TaskCompletionSource<MessageId>) sendRequest msgCount =
         if pendingMessages.Count + msgCount > producerConfig.MaxPendingMessages then
             if producerConfig.BlockIfQueueFull then
                 blockedRequests.Enqueue(sendRequest)
             else
-                channel.SetResult(Task.FromException<MessageId>(ProducerQueueIsFullError "Producer send queue is full"))
+                channel.SetException(ProducerQueueIsFullError "Producer send queue is full")
             false
         else
             true
@@ -355,7 +355,6 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let beginSendMessage (sendRequest: SendMessageRequest<'T>) =
         let message, channel = sendRequest
         if canEnqueueRequest channel sendRequest 1 then
-            let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
             let sequenceId =
                 match message.SequenceId with
                 | Some seqId ->
@@ -365,7 +364,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     msgIdGenerator <- msgIdGenerator + %1L
                     %oldValue
             if canAddToBatch message then
-                let batchItem = { Message = message; Tcs = tcs; SequenceId = sequenceId }
+                let batchItem = { Message = message; Tcs = channel; SequenceId = sequenceId }
                 if canAddToCurrentBatch message then
                     // should trigger complete the batch message, new message will add to a new batch and new batch
                     // sequence id use the new message, so that broker can handle the message duplication
@@ -396,7 +395,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 let compressedPayload = compressionCodec.Encode message.Payload
                 if compressedPayload.Length > maxMessageSize && not producerConfig.ChunkingEnabled then
                     let ex = InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes"
-                    failMessage message tcs ex
+                    failMessage message channel ex
                 else
                     let totalChunks =
                         Math.Max(1, compressedPayload.Length) / maxMessageSize
@@ -435,7 +434,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 SequenceId = sequenceId
                                 HighestSequenceId = %(-1L)
                                 Payload = payload
-                                Callback = SingleCallback (chunkDetails, message, tcs)
+                                Callback = SingleCallback (chunkDetails, message, channel)
                                 CreatedAt = DateTime.Now
                             }
                             lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
@@ -444,8 +443,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             readStartIndex <- chunkId * maxMessageSize
                         | Error ex ->
                             chunkError <- true
-                            failMessage message tcs ex
-            channel.SetResult(tcs.Task)
+                            failMessage message channel ex
     
     let stopProducer() =
         sendTimeoutTimer.Stop()
@@ -458,7 +456,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         
     let producerOperations = {
         AckReceived = fun sendReceipt -> post this.Mb (AckReceived sendReceipt)
-        TopicTerminatedError = fun () -> post this.Mb (TopicTerminatedError)
+        TopicTerminatedError = fun () -> post this.Mb TopicTerminatedError
         RecoverChecksumError = fun seqId -> post this.Mb (RecoverChecksumError seqId)
         RecoverNotAllowedError = fun seqId -> post this.Mb (RecoverNotAllowedError seqId)
         ConnectionClosed = fun clientCnx -> post this.Mb (ConnectionClosed clientCnx)
@@ -740,8 +738,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                 continueLoop <- false
             }:> Task).ContinueWith(fun t ->
-                if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
-                else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+                if t.IsFaulted then
+                    let (Flatten ex) = t.Exception
+                    Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                else
+                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
 
     do startSendTimeoutTimer()
@@ -825,36 +826,32 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.SendAndForgetAsync (message: 'T) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             let msg = _this.NewMessage message
-            task {
-                let! task = this.SendMessage msg
-                if task.IsFaulted then
-                    reraize task.Exception.InnerException
-                else
-                    return ()
-            }
+            let sendTask = this.SendMessage msg
+            if sendTask.IsFaulted then
+                let (Flatten ex) = sendTask.Exception
+                Task.FromException<Unit> ex
+            else
+                Task.FromResult()
 
         member this.SendAndForgetAsync (message: MessageBuilder<'T>) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
-            task {
-                let! sendTask = this.SendMessage message
-                if sendTask.IsFaulted then
-                    let (Flatten ex) = sendTask.Exception in reraize ex
-                else
-                    message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
-            }
+            let sendTask = this.SendMessage message
+            if sendTask.IsFaulted then
+                let (Flatten ex) = sendTask.Exception
+                Task.FromException<Unit> ex
+            else
+                message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
+                Task.FromResult()
 
         member this.SendAsync (message: 'T) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             let msg = _this.NewMessage message
-            task {
-                let! task = this.SendMessage msg
-                return! task
-            }
+            this.SendMessage msg
 
         member this.SendAsync (message: MessageBuilder<'T>) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             task {
-                let! sendTask = this.SendMessage message
+                let sendTask = this.SendMessage message
                 if not sendTask.IsFaulted then
                     message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
                 return! sendTask
@@ -886,7 +883,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.Name = producerName
         
         member this.GetStatsAsync() =
-            postAndAsyncReply mb (ProducerMessage.GetStats)
+            postAndAsyncReply mb ProducerMessage.GetStats
             
         member this.LastDisconnectedTimestamp =
             connectionHandler.LastDisconnectedTimestamp

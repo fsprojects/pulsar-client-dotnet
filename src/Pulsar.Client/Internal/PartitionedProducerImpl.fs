@@ -228,12 +228,10 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     | Some partitionedTopicNames ->
                     
                         Log.Logger.LogDebug("{0} partitions number. old: {1}, new: {2}", prefix, numPartitions, partitionedTopicNames.Length )
-                        if numPartitions = partitionedTopicNames.Length
-                        then
+                        if numPartitions = partitionedTopicNames.Length then
                             // topic partition number not changed
                             ()
-                        elif numPartitions < partitionedTopicNames.Length
-                        then
+                        elif numPartitions < partitionedTopicNames.Length then
                             let producerTasks =
                                 seq { numPartitions..partitionedTopicNames.Length - 1 }
                                 |> Seq.map (fun partitionIndex ->
@@ -278,8 +276,11 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     |> Task.WhenAll
                 channel.SetResult(statsReduce stats)
         }:> Task).ContinueWith(fun t ->
-            if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} mailbox failure", prefix)
-            else Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+            else
+                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
 
     do
@@ -314,10 +315,8 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         and set value = Volatile.Write(&connectionState, value)
 
     member private this.InitInternal() =
-       task {
-           post mb Init
-           return! producerCreatedTsc.Task
-       }
+       post mb Init
+       producerCreatedTsc.Task
 
     static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                         partitions: int, lookup: BinaryLookupService, schema: ISchema<'T>,
@@ -332,28 +331,20 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
     interface IProducer<'T> with
 
         member this.SendAndForgetAsync (message: 'T) =
-            task {
-                let partition = _this.NewMessage message |> this.ChoosePartitionIfActive
-                return! producers.[partition].SendAndForgetAsync(message)
-            }
+            let partition = _this.NewMessage message |> this.ChoosePartitionIfActive
+            producers.[partition].SendAndForgetAsync(message)
 
         member this.SendAndForgetAsync (message: MessageBuilder<'T>) =
-            task {
-                let partition = this.ChoosePartitionIfActive(message)
-                return! producers.[partition].SendAndForgetAsync(message)
-            }
+            let partition = this.ChoosePartitionIfActive(message)
+            producers.[partition].SendAndForgetAsync(message)
 
         member this.SendAsync (message: 'T) =
-            task {
-                let partition = _this.NewMessage message |> this.ChoosePartitionIfActive
-                return! producers.[partition].SendAsync(message)
-            }
+            let partition = _this.NewMessage message |> this.ChoosePartitionIfActive
+            producers.[partition].SendAsync(message)
 
         member this.SendAsync (message: MessageBuilder<'T>) =
-            task {
-                let partition = this.ChoosePartitionIfActive(message)
-                return! producers.[partition].SendAsync(message)
-            }
+            let partition = this.ChoosePartitionIfActive(message)
+            producers.[partition].SendAsync(message)
             
         member this.NewMessage (value:'T,
             [<Optional; DefaultParameterValue(null:string)>]key:string,

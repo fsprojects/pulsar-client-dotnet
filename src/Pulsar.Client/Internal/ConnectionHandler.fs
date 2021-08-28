@@ -109,8 +109,11 @@ type internal ConnectionHandler( parentPrefix: string,
             | Close ->
                 continueLoop <- false
         }:> Task).ContinueWith(fun t ->
-            if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} ConnectionHandler mailbox failure", prefix)
-            else Log.Logger.LogInformation("{0} ConnectionHandler mailbox has stopped normally", prefix))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "{0} ConnectionHandler mailbox failure", prefix)
+            else
+                Log.Logger.LogInformation("{0} ConnectionHandler mailbox has stopped normally", prefix))
     |> ignore
 
     member private __.Mb with get() : Channel<ConnectionHandlerMessage> = mb

@@ -24,7 +24,7 @@ type internal PulsarClientMessage =
     | AddProducer of IAsyncDisposable // IProducer
     | AddConsumer of IAsyncDisposable // IConsumer
     | GetSchemaProvider of TaskCompletionSource<MultiVersionSchemaInfoProvider> * CompleteTopicName
-    | Close of TaskCompletionSource<Task>
+    | Close of TaskCompletionSource<Unit>
     | Stop
 
 type PulsarClient internal (config: PulsarClientConfiguration) as this =
@@ -100,17 +100,18 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                     this.ClientState <- Closing
                     let producersTasks = producers |> Seq.map (fun producer -> task { return! producer.DisposeAsync() } )
                     let consumerTasks = consumers |> Seq.map (fun consumer -> task { return! consumer.DisposeAsync() })
-                    let t = task {
+                    task {
                         try
                             let! _ = Task.WhenAll (seq { yield! producersTasks; yield! consumerTasks })
                             schemaProviders |> Seq.iter (fun (KeyValue (_, provider)) -> provider.Close())
                             config.Authentication.Dispose()
                             tryStopMailbox()
+                            channel.SetResult()
                         with ex ->
                             Log.Logger.LogError(ex, "Couldn't stop client")
                             this.ClientState <- Active
-                    }
-                    channel.SetResult(t)
+                            channel.SetResult()
+                    } |> ignore
                 | _ ->
                     channel.SetException(AlreadyClosedException("Client already closed. URL: " + config.ServiceAddresses.ToString()))
             | Stop ->
@@ -120,8 +121,11 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                 Log.Logger.LogInformation("Pulsar client stopped")
                 continueLoop <- false
         } :> Task).ContinueWith(fun t ->
-                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "PulsarClient mailbox failure")
-                                    else Log.Logger.LogInformation("PulsarClient mailbox has stopped normally"))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "PulsarClient mailbox failure")
+            else
+                Log.Logger.LogInformation("PulsarClient mailbox has stopped normally"))
         |> ignore
         
     let removeConsumer = fun consumer -> post mb (RemoveConsumer consumer)
@@ -129,7 +133,7 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
    
     static member Logger
         with get () = Log.Logger
-        and set (value) = Log.Logger <- value
+        and set value = Log.Logger <- value
     
     member internal this.Init() =
         task {
@@ -152,11 +156,8 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
             this.SingleTopicSubscribeAsync(consumerConfig, schema, interceptors)
 
     member this.CloseAsync() =
-        task {
-            checkIfActive()
-            let! t = postAndAsyncReply mb Close
-            return! t
-        }
+        checkIfActive()
+        postAndAsyncReply mb Close
     
     member private this.PreProcessSchemaBeforeSubscribe(schema: ISchema<'T>, topicName) =
         task {
@@ -271,7 +272,7 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                 | None ->
                     ()                    
             let removeProducer = fun producer -> post mb (RemoveProducer producer)
-            if (metadata.IsMultiPartitioned) then
+            if metadata.IsMultiPartitioned then
                 let! producer = PartitionedProducerImpl.Init(producerConfig, config, connectionPool, metadata.Partitions,
                                                              lookupService, activeSchema, interceptors, removeProducer)
                 post mb (AddProducer producer)
@@ -312,7 +313,7 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
 
     member private this.ClientState
         with get() = Volatile.Read(&clientState)
-        and set(value) = Volatile.Write(&clientState, value)
+        and set value = Volatile.Write(&clientState, value)
 
     member this.IsClosed =
         match this.ClientState with

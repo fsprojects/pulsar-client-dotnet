@@ -11,8 +11,8 @@ open System.Threading.Channels
 type internal TaskGenerator<'T> = unit -> Task<'T>
 
 type internal TaskSeqMessage<'T> =
-    | WhenAnyTask of TaskCompletionSource<Task<Task<'T>>>
-    | Next of TaskCompletionSource<Task<Task<'T>>>
+    | WhenAnyTask of TaskCompletionSource<Task<'T>>
+    | Next of TaskCompletionSource<Task<'T>>
     | NextComplete of Task<'T>
     | AddGenerators of TaskGenerator<'T> seq
     | RemoveGenerator of TaskGenerator<'T>
@@ -46,6 +46,15 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
         else
             tasks |> Task.WhenAny
     
+    let whenAnyTaskToChannel (channel: TaskCompletionSource<Task<'T>>) =
+        task {
+            try
+                let! result = whenAnyTask()
+                channel.SetResult result
+            with Flatten ex ->
+                channel.SetException ex
+        } |> ignore
+    
     let mb = Channel.CreateUnbounded<TaskSeqMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (task {
         while true do
@@ -53,7 +62,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
             | WhenAnyTask channel ->
                 
                 Log.Logger.LogTrace("TaskSeq.WhenAnyTask nextWaiting:{0}", nextWaiting)
-                whenAnyTask() |> channel.SetResult
+                whenAnyTaskToChannel channel
             
             | Next channel ->
                 
@@ -66,7 +75,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                     waitingQueue.Enqueue channel
                 else
                     nextWaiting <- true
-                    whenAnyTask() |> channel.SetResult
+                    whenAnyTaskToChannel channel
                     
             | NextComplete completedTask ->
                 
@@ -78,7 +87,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                     Log.Logger.LogWarning("TaskSeq: generator was removed, but task has completed")
                 if tasks.Count > 1 && waitingQueue.Count > 0 then
                     let channel = waitingQueue.Dequeue()
-                    whenAnyTask() |> channel.SetResult
+                    whenAnyTaskToChannel channel
                 else
                     nextWaiting <- false
                 
@@ -101,7 +110,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 if noGenerators && waitingQueue.Count > 0 && not nextWaiting then
                     nextWaiting <- true
                     let channel = waitingQueue.Dequeue()
-                    whenAnyTask() |> channel.SetResult
+                    whenAnyTaskToChannel channel
                 else
                     resetWhenAnyTcs.SetCanceled()
                     resetWhenAnyTcs <- TaskCompletionSource()
@@ -118,8 +127,11 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 else
                     Log.Logger.LogWarning("TaskSeq: trying to remove non-existing generator")
         }:> Task).ContinueWith(fun t ->
-            if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "Taskseq mailbox failure")
-            else Log.Logger.LogInformation("Taskseq mailbox has stopped normally"))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "Taskseq mailbox failure")
+            else
+                Log.Logger.LogInformation("Taskseq mailbox has stopped normally"))
     |> ignore
     
     do tasks.Add(resetWhenAnyTcs.Task)
@@ -128,8 +140,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
 
     member private this.RestartNext() =
         async {
-            let! whenAnyTask = postAndAsyncReply mb WhenAnyTask |> Async.AwaitTask
-            let! completedTask = whenAnyTask |> Async.AwaitTask
+            let! completedTask = postAndAsyncReply mb WhenAnyTask |> Async.AwaitTask
             Log.Logger.LogTrace("TaskSeq.RestartNext {0}", completedTask.Status) 
             if completedTask.IsCanceled then
                 return! this.RestartNext()
@@ -139,8 +150,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
         
     member this.Next() =
         task {
-            let! whenAnyTask = postAndAsyncReply mb Next
-            let! completedTask = whenAnyTask
+            let! completedTask =  postAndAsyncReply mb Next |> Async.AwaitTask
             Log.Logger.LogTrace("TaskSeq.Next {0}", completedTask.Status) 
             if completedTask.IsCanceled then
                 let! restartedTask = this.RestartNext()

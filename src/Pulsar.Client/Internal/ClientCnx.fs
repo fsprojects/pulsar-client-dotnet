@@ -105,7 +105,7 @@ and internal CommandParseError =
 and internal SocketMessage =
     | SocketMessageWithReply of Payload * TaskCompletionSource<bool>
     | SocketMessageWithoutReply of Payload
-    | SocketRequestMessageWithReply of RequestId * Payload * TaskCompletionSource<Task<PulsarResponseType>>
+    | SocketRequestMessageWithReply of RequestId * Payload * TaskCompletionSource<PulsarResponseType>
     | Stop
 
 and internal ClientCnx (config: PulsarClientConfiguration,
@@ -226,8 +226,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogTrace("{0} timeout tick", prefix)
                 handleTimeoutedMessages()
         } :> Task).ContinueWith(fun t ->
-                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} requestsMb mailbox failure", prefix)
-                                    else Log.Logger.LogInformation("{0} requestsMb mailbox has stopped normally", prefix))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "{0} requestsMb mailbox failure", prefix)
+            else
+                Log.Logger.LogInformation("{0} requestsMb mailbox has stopped normally", prefix))
         |> ignore
 
     let tryStopMailboxes() =
@@ -285,8 +288,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogDebug("{0} keepalive tick", prefix)
                 handleKeepAliveTimeout()
         } :> Task).ContinueWith(fun t ->
-                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} operationsMb mailbox failure", prefix)
-                                    else Log.Logger.LogInformation("{0} operationsMb mailbox has stopped normally", prefix))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "{0} operationsMb mailbox failure", prefix)
+            else
+                Log.Logger.LogInformation("{0} operationsMb mailbox has stopped normally", prefix))
     |> ignore
 
     let sendSerializedPayload (writePayload, commandType) =
@@ -306,23 +312,25 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         let mutable continueLoop = true
         while continueLoop do
             match! sendMb.Reader.ReadAsync() with
-            | SocketMessageWithReply (payload, replyChannel) ->
+            | SocketMessageWithReply (payload, channel) ->
                 let! connected = sendSerializedPayload payload
-                replyChannel.SetResult(connected)
+                channel.SetResult(connected)
             | SocketMessageWithoutReply payload ->
                 let! _ = sendSerializedPayload payload
-                return ()
-            | SocketRequestMessageWithReply (reqId, payload, replyChannel) ->
-                let tsc = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
-                post requestsMb (AddRequest(reqId, snd payload, tsc))
+                ()
+            | SocketRequestMessageWithReply (reqId, payload, channel) ->
+                post requestsMb (AddRequest(reqId, snd payload, channel))
                 let! _ = sendSerializedPayload payload
-                replyChannel.SetResult(tsc.Task)
+                ()
             | SocketMessage.Stop ->
                 Log.Logger.LogDebug("{0} sendMb stopped", prefix)
                 continueLoop <- false
         }:> Task).ContinueWith(fun t ->
-                                    if t.IsFaulted then Log.Logger.LogCritical(t.Exception, "{0} sendMb mailbox failure", prefix)
-                                    else Log.Logger.LogInformation("{0} sendMb mailbox has stopped normally", prefix))
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "{0} sendMb mailbox failure", prefix)
+            else
+                Log.Logger.LogInformation("{0} sendMb mailbox has stopped normally", prefix))
     |> ignore
 
     let readMessage (reader: BinaryReader) (stream: MemoryStream) frameLength =
@@ -849,10 +857,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     member this.SendAndWaitForReply reqId payload =
         if this.IsActive then
-            task {
-                let! task = postAndAsyncReply sendMb (fun replyChannel -> SocketRequestMessageWithReply(reqId, payload, replyChannel))
-                return! task
-            }
+            postAndAsyncReply sendMb (fun replyChannel -> SocketRequestMessageWithReply(reqId, payload, replyChannel))
         else
             Task.FromException<PulsarResponseType> <| ConnectException "Disconnected."
 
