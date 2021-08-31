@@ -49,8 +49,8 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
     override this.Decode bytes =
         use stream = new MemoryStream(bytes)
         avroReader.Read(defaultValue, BinaryDecoder(stream))
-    override this.GetSpecificSchema stringSchema =
-        let writtenSchema = Schema.Parse(stringSchema)
+    override this.GetSpecificSchema schemaInfo _ =
+        let writtenSchema = Schema.Parse(schemaInfo.Schema |> Encoding.UTF8.GetString)
         if avroReader :? SpecificDatumReader<'T> then
             AvroSchema(schema, SpecificDatumReader(writtenSchema, schema), avroWriter) :> ISchema<'T>
         else
@@ -63,17 +63,20 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
             else
                 AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema), avroWriter) :> ISchema<'T>
         
-type internal GenericAvroSchema(topicSchema: TopicSchema) =
+type internal GenericAvroSchema(schemaInfo: SchemaInfo, schemaVersion: SchemaVersion option) =
     inherit ISchema<GenericRecord>()
-    let stringSchema = topicSchema.SchemaInfo.Schema |> Encoding.UTF8.GetString
+    let stringSchema = schemaInfo.Schema |> Encoding.UTF8.GetString
     let avroSchema = Schema.Parse(stringSchema) :?> RecordSchema
     let avroReader = GenericDatumReader<Avro.Generic.GenericRecord>(avroSchema, avroSchema)
     let schemaFields = avroSchema.Fields
+    
+    new(topicSchema) = 
+        GenericAvroSchema(topicSchema.SchemaInfo, topicSchema.SchemaVersion)
 
     override this.SchemaInfo = {
         Name = ""
         Type = SchemaType.AVRO
-        Schema = topicSchema.SchemaInfo.Schema
+        Schema = schemaInfo.Schema
         Properties = Map.empty
     }
     override this.Encode _ = raise <| SchemaSerializationException "GenericAvroSchema is for consuming only!"
@@ -84,8 +87,11 @@ type internal GenericAvroSchema(topicSchema: TopicSchema) =
             schemaFields
             |> Seq.map (fun sf -> { Name = sf.Name; Value = record.[sf.Name]; Index = sf.Pos })
             |> Seq.toArray
-        let scemaVersionBytes =
-            topicSchema.SchemaVersion
+        let schemaVersionBytes =
+            schemaVersion
             |> Option.map (fun sv -> sv.Bytes)
             |> Option.toObj
-        GenericRecord(scemaVersionBytes, fields)
+        GenericRecord(schemaVersionBytes, fields)
+        
+    override this.GetSpecificSchema schemaInfo schemaVersion =
+        GenericAvroSchema(schemaInfo,schemaVersion) :> ISchema<_>

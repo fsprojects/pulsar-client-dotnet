@@ -18,7 +18,7 @@ type internal MultiVersionSchemaInfoProvider(getSchema : (SchemaVersion -> Task<
                 cacheIntry.AbsoluteExpirationRelativeToNow <- Nullable <| TimeSpan.FromMinutes(30.0)
                 cacheIntry.Size <- Nullable(1L)
                 let! schemaReponse = getSchema schemaVersion
-                return schemaReponse |> Option.map (fun sch -> latestSchema.GetSpecificSchema(sch.SchemaInfo.Schema |> Encoding.UTF8.GetString))
+                return schemaReponse |> Option.map (fun sch -> latestSchema.GetSpecificSchema sch.SchemaInfo sch.SchemaVersion )
             })
         
     member this.Close() =
