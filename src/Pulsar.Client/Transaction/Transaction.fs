@@ -152,11 +152,11 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             let! cumulativeConsumersData =
                 cumulativeAckConsumers
                 |> Seq.map(fun (KeyValue(_, consumer)) ->
-                    async {
+                    task {
                         let! permits = consumer.ClearIncomingMessagesAndGetMessageNumber()
                         return (consumer, permits)
                     })
-                |> Async.Parallel
+                |> Task.WhenAll
             try
                 try
                     do! txnOperations.Abort(txnId)

@@ -6,6 +6,7 @@ open Expecto.Flip
 open Pulsar.Client.Internal
 open Pulsar.Client.Common
 open FSharp.UMX
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 [<Tests>]
 let tests =
@@ -16,7 +17,7 @@ let tests =
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalled = false
             let sendPayload cnx payload =
-                async {
+                task {
                     sendPayloadCalled <- true
                     return true
                 }
@@ -30,7 +31,7 @@ let tests =
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalled = false
             let sendPayload cnx payload =
-                async {
+                task {
                     sendPayloadCalled <- true
                     return true
                 }
@@ -44,7 +45,7 @@ let tests =
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalled = false
             let sendPayload cnx payload =
-                async {
+                task {
                     sendPayloadCalled <- true
                     return true
                 }
@@ -58,7 +59,7 @@ let tests =
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
-                async {
+                task {
                     sendPayloadCalledCount <- sendPayloadCalledCount + 1
                     return true
                 }
@@ -77,7 +78,7 @@ let tests =
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
-                async {
+                task {
                     sendPayloadCalledCount <- sendPayloadCalledCount + 1
                     return true
                 }
@@ -99,7 +100,7 @@ let tests =
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
-                async {
+                task {
                     sendPayloadCalledCount <- sendPayloadCalledCount + 1
                     return true
                 }
@@ -121,7 +122,7 @@ let tests =
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
-                async {
+                task {
                     sendPayloadCalledCount <- sendPayloadCalledCount + 1
                     return true
                 }

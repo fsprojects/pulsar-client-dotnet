@@ -461,7 +461,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             with Flatten ex ->
                 Log.Logger.LogError(ex, "Failed to send DLQ message to {0} for message id {1}",
                                     deadLettersProcessor.TopicName, messageId)
-                return Task.FromResult(false)
+                return Task.FromResult false
         }
         
     let getRedeliveryMessageIdData ids =
@@ -604,7 +604,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 Error ex
         
     let discardCorruptedMessage (msgId: MessageId) (clientCnx: ClientCnx) err =
-        async {
+        task {
             let command = Commands.newAck consumerId msgId.LedgerId msgId.EntryId Individual
                             EmptyProperties null (Some err) None None None
             let! discardResult = clientCnx.Send command
@@ -616,15 +616,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         }
         
     let getSchemaDecodeFunction (metadata: Metadata) =
-        async {
+        task {
             // mutable workaround for unsupported let! inside let
-            let mutable schemaDecodeFunction = Unchecked.defaultof<(byte[]->'T)>
+            let mutable schemaDecodeFunction = Unchecked.defaultof<byte[]->'T>
             if schemaProvider.IsNone || metadata.SchemaVersion.IsNone then
                 schemaDecodeFunction <- schema.Decode
             else
                 let schemaVersion = metadata.SchemaVersion.Value
                 try
-                    let! specificSchemaOption = schemaProvider.Value.GetSchemaByVersion(schema, schemaVersion) |> Async.AwaitTask
+                    let! specificSchemaOption = schemaProvider.Value.GetSchemaByVersion(schema, schemaVersion)
                     schemaDecodeFunction <-
                         match specificSchemaOption with
                         | Some specificSchema -> specificSchema.Decode
@@ -735,19 +735,19 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         try
             handleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel
                 isMessageUndecryptable isChunkedMessage schemaDecodeFunction
-            async.Return ()
+            Task.FromResult()
         with
         | :? BatchDeserializationException ->
             discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
         
         
     let consumerOperations = {
-        MessageReceived = fun (rawMessage) -> post this.Mb (MessageReceived rawMessage)
+        MessageReceived = fun rawMessage -> post this.Mb (MessageReceived rawMessage)
         ReachedEndOfTheTopic = fun () -> post this.Mb ReachedEndOfTheTopic
-        ActiveConsumerChanged = fun (isActive) -> post this.Mb (ActiveConsumerChanged isActive)
-        ConnectionClosed = fun (clientCnx) -> post this.Mb (ConnectionClosed clientCnx)
+        ActiveConsumerChanged = fun isActive -> post this.Mb (ActiveConsumerChanged isActive)
+        ConnectionClosed = fun clientCnx -> post this.Mb (ConnectionClosed clientCnx)
         AckError = fun (reqId, ex) -> post this.Mb (AckError(reqId, ex))
-        AckReceipt = fun (reqId) -> post this.Mb (AckReceipt(reqId))
+        AckReceipt = fun reqId -> post this.Mb (AckReceipt(reqId))
     }
     
     let mb = Channel.CreateUnbounded<ConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
@@ -942,7 +942,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             consumerConfig.BatchReceivePolicy.Timeout
                             (fun () ->
                                 if not batchCts.IsCancellationRequested then
-                                    post this.Mb (SendBatchByTimeout)
+                                    post this.Mb SendBatchByTimeout
                                 else
                                     batchCts.Dispose())
                         Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
@@ -964,13 +964,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             | ConsumerMessage.RemoveWaiter waiter ->
                                 
                 waiters.Remove(waiter) |> ignore
-                let (ctrOpt, _) = waiter
+                let ctrOpt, _ = waiter
                 ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
                                 
             | ConsumerMessage.RemoveBatchWaiter batchWaiter ->
                                 
                 batchWaiters.Remove(batchWaiter) |> ignore
-                let (cts, ctrOpt, _) = batchWaiter
+                let cts, ctrOpt, _ = batchWaiter
                 ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
                 cts.Dispose()
                                 
@@ -1055,7 +1055,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let requestId = Generators.getNextRequestId()
                     Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData)
                     try
-                        let (payload, lastMessage) =
+                        let payload, lastMessage =
                             match seekData with
                             | SeekType.Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
                             | SeekType.MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
@@ -1373,7 +1373,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         avalablePermits <- 0
     
     member internal this.SendFlowPermits numMessages =
-        async {
+        task {
             Log.Logger.LogDebug("{0} SendFlowPermits {1}", prefix, numMessages)
             match connectionHandler.ConnectionState with
             | Ready clientCnx ->
@@ -1383,7 +1383,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogWarning("{0} failed SendFlowPermits {1}", prefix, numMessages)
             | _ ->
                 Log.Logger.LogWarning("{0} not connected, skipping SendFlowPermits {1}", prefix, numMessages)
-        } |> Async.StartImmediate
+        } |> ignore
         
     member internal this.Waiters with get() = waiters
     
@@ -1397,7 +1397,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     member this.LastMessageIdInBroker
         with get() = Volatile.Read(&lastMessageIdInBroker)
-        and private set(value) = Volatile.Write(&lastMessageIdInBroker, value)
+        and private set value = Volatile.Write(&lastMessageIdInBroker, value)
     
     override this.Equals consumer =
         consumerId = (consumer :?> IConsumer<'T>).ConsumerId
