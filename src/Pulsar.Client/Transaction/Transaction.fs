@@ -76,7 +76,7 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
         | OPEN ->
             this.Abort()
         | _ ->
-            Task.FromResult()
+            unitTask
     )
 
     member this.State

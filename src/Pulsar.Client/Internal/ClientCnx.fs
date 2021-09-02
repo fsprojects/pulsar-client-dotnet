@@ -849,7 +849,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         if this.IsActive then
             postAndAsyncReply sendMb (fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
         else
-            Task.FromResult false
+            falseTask
         
     member this.SendAndForget (payload: Payload) =
         if this.IsActive then

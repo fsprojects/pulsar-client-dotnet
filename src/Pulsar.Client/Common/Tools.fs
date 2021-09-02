@@ -147,6 +147,7 @@ let tryPeek (queue: Queue<'T>) =
         None
     
 let falseTaskTask = false |> Task.FromResult |> Task.FromResult
+let falseTask = false |> Task.FromResult
 let trueTask = true |> Task.FromResult
 let unitTask = () |> Task.FromResult
         

@@ -831,7 +831,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 let (Flatten ex) = sendTask.Exception
                 Task.FromException<Unit> ex
             else
-                Task.FromResult()
+                unitTask
 
         member this.SendAndForgetAsync (message: MessageBuilder<'T>) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
@@ -841,7 +841,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 Task.FromException<Unit> ex
             else
                 message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
-                Task.FromResult()
+                unitTask
 
         member this.SendAsync (message: 'T) =
             connectionHandler.CheckIfActive() |> throwIfNotNull

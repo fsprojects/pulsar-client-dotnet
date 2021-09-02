@@ -406,7 +406,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             | _ ->
                 sendAcknowledge messageId ackType properties
                 Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
-            Task.FromResult()
+            unitTask
 
     let isPriorEntryIndex idx =
         match startMessageId with
@@ -461,7 +461,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             with Flatten ex ->
                 Log.Logger.LogError(ex, "Failed to send DLQ message to {0} for message id {1}",
                                     deadLettersProcessor.TopicName, messageId)
-                return Task.FromResult false
+                return falseTask
         }
         
     let getRedeliveryMessageIdData ids =
@@ -735,7 +735,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         try
             handleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel
                 isMessageUndecryptable isChunkedMessage schemaDecodeFunction
-            Task.FromResult()
+            unitTask
         with
         | :? BatchDeserializationException ->
             discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
@@ -1591,13 +1591,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.NegativeAcknowledge msgId =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             post mb (NegativeAcknowledge(msgId))
-            Task.FromResult()
+            unitTask
 
         member this.NegativeAcknowledge (msgs: Messages<'T>)  =
             connectionHandler.CheckIfActive() |> throwIfNotNull 
             for msg in msgs do
                 post mb (NegativeAcknowledge(msg.MessageId))
-            Task.FromResult()
+            unitTask
         
         member this.ConsumerId = consumerId
 

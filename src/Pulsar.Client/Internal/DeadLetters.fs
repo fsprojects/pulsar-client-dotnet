@@ -2,11 +2,11 @@
 
 open System
 open System.Collections.Generic
+open FSharp.Control.Tasks.V2.ContextInsensitive
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
-open FSharp.Control.Tasks.V2.ContextInsensitive
 open FSharp.UMX
 
 type internal DeadLetterProcessor<'T>
@@ -109,5 +109,5 @@ type internal DeadLetterProcessor<'T>
             member this.ProcessMessage (_,_) = falseTaskTask
             member this.MaxRedeliveryCount = Int32.MaxValue
             member this.TopicName = ""
-            member this.ReconsumeLater (_,_,_) = Task.FromResult()
+            member this.ReconsumeLater (_,_,_) = unitTask
     }
