@@ -49,7 +49,7 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
     override this.Decode bytes =
         use stream = new MemoryStream(bytes)
         avroReader.Read(defaultValue, BinaryDecoder(stream))
-    override this.GetSpecificSchema schemaInfo _ =
+    override this.GetSpecificSchema (schemaInfo, _) =
         let writtenSchema = Schema.Parse(schemaInfo.Schema |> Encoding.UTF8.GetString)
         if avroReader :? SpecificDatumReader<'T> then
             AvroSchema(schema, SpecificDatumReader(writtenSchema, schema), avroWriter) :> ISchema<'T>
@@ -93,5 +93,5 @@ type internal GenericAvroSchema(schemaInfo: SchemaInfo, schemaVersion: SchemaVer
             |> Option.toObj
         GenericRecord(schemaVersionBytes, fields)
         
-    override this.GetSpecificSchema schemaInfo schemaVersion =
+    override this.GetSpecificSchema (schemaInfo, schemaVersion) =
         GenericAvroSchema(schemaInfo,schemaVersion) :> ISchema<_>

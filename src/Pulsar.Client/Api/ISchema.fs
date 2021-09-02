@@ -8,8 +8,8 @@ type ISchema<'T>() =
     abstract member SchemaInfo: SchemaInfo
     abstract member Encode: 'T -> byte[]
     abstract member Decode: byte[] -> 'T
-    abstract member GetSpecificSchema: SchemaInfo -> SchemaVersion option -> ISchema<'T>
-    default this.GetSpecificSchema _ _ =
+    abstract member GetSpecificSchema: SchemaInfo * SchemaVersion option -> ISchema<'T>
+    default this.GetSpecificSchema (_, _) =
         this
     abstract member SupportSchemaVersioning: bool
     default this.SupportSchemaVersioning = false

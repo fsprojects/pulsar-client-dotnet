@@ -503,5 +503,56 @@ let tests =
           
             Log.Debug("Finished Auto consume KeyValue with nested object works")
         }
+        
+        testAsync "Auto consume with multi-version schema" {
+
+            Log.Debug("Start Auto consume with multi-version schema")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! producer =
+                client.NewProducer(Schema.AVRO<SimpleRecord2>())
+                    .Topic(topicName)
+                    .EnableBatching(false)
+                    .CreateAsync() |> Async.AwaitTask
+                    
+            let! producer2 =
+                client.NewProducer(Schema.AVRO<SimpleRecord>())
+                    .Topic(topicName)
+                    .EnableBatching(false)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer =
+                client.NewConsumer(Schema.AUTO_CONSUME())
+                    .Topic(topicName)
+                    .ConsumerName("auto-consume")
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let simpleMessage = { SimpleRecord2.Name = "abc"; Age = 21; Surname = "test" }
+            let simpleMessage2 = { SimpleRecord.Name = "def"; Age = 20 }
+            let! _ = producer.SendAsync(simpleMessage) |> Async.AwaitTask // send the first version message
+            let! _ = producer2.SendAsync(simpleMessage2) |> Async.AwaitTask // send the second version message
+
+            let! msg = consumer.ReceiveAsync() |> Async.AwaitTask
+            do! consumer.AcknowledgeAsync msg.MessageId |> Async.AwaitTask
+            let record = msg.GetValue()
+            // we could get the correct schema version for each message.
+            Expect.equal "" 0L (BitConverter.ToInt64(ReadOnlySpan<byte>(record.SchemaVersion |> Array.rev)))
+            Expect.equal "" simpleMessage.Name (record.GetField("Name") |> unbox)
+            Expect.equal "" simpleMessage.Age (record.GetField("Age") |> unbox)
+            Expect.equal "" simpleMessage.Surname (record.GetField("Surname") |> unbox)
+            
+            let! msg2 = consumer.ReceiveAsync() |> Async.AwaitTask
+            do! consumer.AcknowledgeAsync msg2.MessageId |> Async.AwaitTask
+            let record2 = msg2.GetValue()
+            Expect.equal "" 1L (BitConverter.ToInt64( ReadOnlySpan<byte>(record2.SchemaVersion |> Array.rev)))
+            Expect.equal "" simpleMessage2.Name (record2.GetField("Name") |> unbox)
+            Expect.equal "" simpleMessage2.Age (record2.GetField("Age") |> unbox)
+            
+            do! consumer.UnsubscribeAsync() |> Async.AwaitTask
+          
+            Log.Debug("Finished Auto consume with multi-version schema")
+        }
     ]
     
