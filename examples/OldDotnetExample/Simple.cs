@@ -9,7 +9,7 @@ namespace OldDotnetExample
     {
         internal static async Task RunSimple()
         {
-            const string serviceUrl = "pulsar://my-pulsar-cluster:31004";
+            const string serviceUrl = "pulsar://127.0.0.1:6650";
             const string subscriptionName = "my-subscription";
             var topicName = $"my-topic-{DateTime.Now.Ticks}";
 
