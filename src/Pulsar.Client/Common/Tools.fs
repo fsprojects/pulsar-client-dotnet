@@ -4,13 +4,13 @@ module internal Pulsar.Client.Common.Tools
 open System
 open System.Collections
 open System.Net
-open System
 open System.Threading.Tasks
 open Microsoft.IO
 open System.Runtime.ExceptionServices
 open System.Collections.Generic
 open Microsoft.Extensions.Logging
 open System.Threading.Channels
+open FSharp.Control.Tasks.V2.ContextInsensitive
 
 let MemoryStreamManager = RecyclableMemoryStreamManager()
 let MagicNumber = int16 0x0e01
@@ -88,31 +88,31 @@ let convertToDateTime (msTimestamp: int64) =
 // Mix
 
 let asyncDelay (delay: TimeSpan) work =
-    async {
-        do! Async.Sleep delay
+    task {
+        do! Task.Delay delay
         try
             work()
         with ex ->
             Log.Logger.LogError(ex, "Error in delayed action")
-    } |> Async.StartImmediate
-    
+    } |> ignore
+
 let asyncDelayTask (delay: TimeSpan) work =
-    async {
-        do! Async.Sleep delay
+    task {
+        do! Task.Delay delay
         try
-            return! work() |> Async.AwaitTask
+            return! work()
         with ex ->
             Log.Logger.LogError(ex, "Error in delayed action")
-    } |> Async.StartImmediate
+    } |> ignore
 
 let asyncDelayMs (delay: int) work =
-    async {
-        do! Async.Sleep delay 
+    task {
+        do! Task.Delay delay
         try
             work()
         with ex ->
             Log.Logger.LogError(ex, "Error in delayed action")
-    } |> Async.StartImmediate
+    } |> ignore
 
 let signSafeMod dividend divisor =
     let modulo = dividend % divisor
@@ -147,6 +147,9 @@ let tryPeek (queue: Queue<'T>) =
         None
     
 let falseTaskTask = false |> Task.FromResult |> Task.FromResult
+let falseTask = false |> Task.FromResult
+let trueTask = true |> Task.FromResult
+let unitTask = () |> Task.FromResult
         
 type Result<'T, 'TError> with
     member this.ToStr() =

@@ -764,14 +764,14 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 let authData = authenticationDataProvider.Authenticate({ Bytes = cmd.Challenge.auth_data })
                 let request = Commands.newAuthResponse methodName authData (int protocolVersion) clientVersion
                 Log.Logger.LogInformation("{0} Mutual auth {1}, requested {2}", prefix, methodName, cmd.Challenge.AuthMethodName)
-                async {
+                task {
                     let! result = this.Send(request)
                     if not result then
                         Log.Logger.LogWarning("{0} Failed to send request for mutual auth to broker", prefix)
                         NotConnectedException "Failed to send request for mutual auth to broker"
                         |> initialConnectionTsc.TrySetException
                         |> ignore
-                } |> Async.StartImmediate
+                } |> ignore
             else
                 Log.Logger.LogWarning("{0} CommandAuthChallenge with empty challenge", prefix)
         | XCommandError cmd ->
@@ -819,7 +819,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     do startRequestTimeoutTimer()
     do startKeepAliveTimer()
-    do Task.Run(fun () -> readSocket()) |> ignore
+    do readSocket() |> ignore
 
     member private this.SendMb with get(): Channel<SocketMessage> = sendMb
 
@@ -847,9 +847,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     
     member this.Send payload =
         if this.IsActive then
-            postAndAsyncReply sendMb (fun replyChannel -> SocketMessageWithReply(payload, replyChannel)) |> Async.AwaitTask
+            postAndAsyncReply sendMb (fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
         else
-            async.Return false
+            falseTask
         
     member this.SendAndForget (payload: Payload) =
         if this.IsActive then

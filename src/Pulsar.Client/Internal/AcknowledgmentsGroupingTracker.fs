@@ -31,7 +31,7 @@ type internal IAcknowledgmentsGroupingTracker =
 
 type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackGroupTime: TimeSpan,
                                     getState: unit -> ConnectionState,
-                                    sendAckPayload: ClientCnx -> Payload -> Async<bool>) =
+                                    sendAckPayload: ClientCnx -> Payload -> Task<bool>) =
 
     [<Literal>]
     let MAX_ACK_GROUP_SIZE = 1000
@@ -56,24 +56,24 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
     let prefix = prefix + " GroupingTracker"
 
     let getAckData (msgId: MessageId) =
-        let (_, acker) = getBatchDetails msgId.Type
+        let _, acker = getBatchDetails msgId.Type
         let ackSet = acker.BitSet |> toLongArray
         (msgId.LedgerId, msgId.EntryId, ackSet)
     
     let flush () =
-        async {
+        task {
             if not cumulativeAckFlushRequired && pendingIndividualAcks.Count = 0 && pendingIndividualBatchIndexAcks.Count = 0 then
                 return ()
             else
                 let! result =
-                    async {
+                    task {
                         match getState() with
                         | Ready cnx ->
                             let mutable success = true
                             if cumulativeAckFlushRequired then
                                 let ackSet =
                                     if lastCumulativeAckIsBatch then
-                                        let (_, acker) = lastCumulativeAck.Type |> getBatchDetails
+                                        let _, acker = lastCumulativeAck.Type |> getBatchDetails
                                         acker.BitSet |> toLongArray
                                     else
                                         null
@@ -135,9 +135,9 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         }
 
     let doImmediateAck (msgId: MessageId) ackType properties =
-        async {
+        task {
             let! result =
-                async {
+                task {
                     match getState() with
                     | Ready cnx ->
                         let payload = Commands.newAck consumerId msgId.LedgerId msgId.EntryId ackType properties null
@@ -154,12 +154,12 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         }
     
     let doImmediateBatchIndexAck (msgId: MessageId) ackType properties =
-        async {
+        task {
             let! result =
-                async {
+                task {
                     match getState() with
                     | Ready cnx ->
-                        let (index, acker) = getBatchDetails msgId.Type
+                        let index, acker = getBatchDetails msgId.Type
                         let i = %index
                         let bitSet = BitArray(acker.GetBatchSize(), true)
                         let payload =
