@@ -554,6 +554,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         let interceptMsg = interceptors.BeforeConsume(this, message)
         channel.SetResult (Ok interceptMsg)
 
+    let failWaiters ex =
+        while waiters.Count > 0 do
+            let waitingChannel = waiters |> dequeueWaiter
+            waitingChannel.SetResult(Error ex)
+        while batchWaiters.Count > 0 do
+            let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
+            batchWaitingChannel.SetResult(Error ex)
+    
     let stopConsumer () =
         unAckedMessageTracker.Close()
         acksGroupingTracker.Close()
@@ -565,12 +573,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         statTimer.Stop()
         chunkTimer.Stop()
         cleanup(this)
-        while waiters.Count > 0 do
-            let waitingChannel = waiters |> dequeueWaiter
-            waitingChannel.SetResult(Error (AlreadyClosedException("Consumer is already closed") :> exn))
-        while batchWaiters.Count > 0 do
-            let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
-            batchWaitingChannel.SetResult(Error (AlreadyClosedException("Consumer is already closed") :> exn))
+        failWaiters <| AlreadyClosedException("Consumer is already closed")
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let decryptMessage (rawMessage:RawMessage) =
@@ -1080,7 +1083,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             
                 Log.Logger.LogWarning("{0} ReachedEndOfTheTopic", prefix)
                 hasReachedEndOfTopic <- true
-                continueLoop <- false
+                failWaiters <| TopicTerminatedException("Topic has been terminated")
             
             | ConsumerMessage.HasMessageAvailable channel ->
             
