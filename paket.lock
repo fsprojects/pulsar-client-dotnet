@@ -8,7 +8,7 @@ NUGET
       System.Reflection (>= 4.3)
       System.Reflection.Emit.ILGeneration (>= 4.7)
       System.Reflection.Emit.Lightweight (>= 4.7)
-    AvroSchemaGenerator (1.9)
+    AvroSchemaGenerator (2.3)
       System.ComponentModel.Annotations (>= 5.0)
       System.Text.Json (>= 5.0.2)
     DerConverter (3.0.0.82)
