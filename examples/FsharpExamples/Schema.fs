@@ -4,7 +4,7 @@
 open System
 open System.ComponentModel.DataAnnotations
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open Pulsar.Client.Common
 
 [<CLIMutable>]

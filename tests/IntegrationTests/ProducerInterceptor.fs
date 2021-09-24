@@ -4,7 +4,7 @@ open System
 open System.Collections.Generic
 open Expecto
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Text
 open System.Threading.Tasks
 open Pulsar.Client.Common

@@ -1,4 +1,3 @@
-TaskBuilder.fs
 FSharp.Core
 FSharp.UMX
 Pipelines.Sockets.Unofficial

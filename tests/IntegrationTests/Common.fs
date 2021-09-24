@@ -2,7 +2,7 @@ module Pulsar.Client.IntegrationTests.Common
 
 open System
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Text
 open System.Threading.Tasks
 open Pulsar.Client.Common

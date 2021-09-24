@@ -2,7 +2,7 @@
 
 open System
 open System.Collections.Generic
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System.Threading.Tasks

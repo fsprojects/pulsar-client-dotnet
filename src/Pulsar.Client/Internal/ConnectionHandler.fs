@@ -8,7 +8,7 @@ open System
 open FSharp.UMX
 open System.Threading.Channels
 open System.Threading.Tasks
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 
 type internal ConnectionHandlerMessage =
     | GrabCnx

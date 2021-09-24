@@ -10,7 +10,7 @@ open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
 open pulsar.proto
 open System.Threading.Channels
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 
 type internal TransactionCoordinatorState =
     | NONE

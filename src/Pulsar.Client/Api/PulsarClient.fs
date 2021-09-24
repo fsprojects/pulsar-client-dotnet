@@ -2,7 +2,7 @@
 
 open System
 open System.Text.RegularExpressions
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
 open System.Collections.Generic

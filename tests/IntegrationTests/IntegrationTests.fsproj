@@ -9,6 +9,7 @@
     <NoWarn>3186</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="paket.references" />
     <Compile Include="Expect.fs" />
     <Compile Include="Common.fs" />
     <Compile Include="Flow.fs" />
@@ -35,7 +36,6 @@
     <Compile Include="Failover.fs" />
     <Compile Include="Transaction.fs" />
     <Compile Include="MessageCrypto.fs" />
-    <None Include="paket.references" />
     <Compile Include="Main.fs" />
   </ItemGroup>
   <ItemGroup>

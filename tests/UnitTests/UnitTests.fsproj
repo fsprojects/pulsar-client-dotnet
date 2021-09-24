@@ -9,6 +9,7 @@
     <NoWarn>3186</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="paket.references" />
     <Compile Include="Expect.fs" />
     <Compile Include="Common\Properties.fs" />
     <Compile Include="Common\HashTests.fs" />
@@ -34,7 +35,6 @@
     <Compile Include="Internal\StatsTests.fs" />
     <Compile Include="Internal\ChunkedMessageTrackerTests.fs" />
     <Compile Include="Internal\Transaction.fs" />
-    <None Include="paket.references" />
     <Compile Include="Tests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>

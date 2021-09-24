@@ -4,7 +4,7 @@
 
 open System
 open Expecto
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open Pulsar.Client.IntegrationTests.Common

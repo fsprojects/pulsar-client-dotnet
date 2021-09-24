@@ -7,7 +7,7 @@ open Pulsar.Client.Common
 open System
 open Expecto
 open Expecto.Flip
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Threading.Tasks
 open Pulsar.Client.IntegrationTests.Common
 open Serilog

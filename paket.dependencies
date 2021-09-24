@@ -3,7 +3,7 @@ storage: none
 framework: netstandard2.0
 
 nuget FSharp.UMX
-nuget FSharp.Core 5.0.1
+nuget FSharp.Core
 nuget Microsoft.Extensions.Caching.Memory
 nuget Microsoft.Extensions.Logging
 nuget Microsoft.Extensions.Logging.Abstractions
@@ -12,7 +12,6 @@ nuget Microsoft.Bcl.AsyncInterfaces
 nuget System.Text.Json
 nuget System.IO.Pipelines
 nuget Pipelines.Sockets.Unofficial
-nuget TaskBuilder.fs
 nuget protobuf-net
 nuget protobuf-net.Reflection
 nuget NETStandard.Library
@@ -31,7 +30,7 @@ group Tests
   source https://api.nuget.org/v3/index.json
   storage: none
 
-  nuget FSharp.Core 5.0.1
+  nuget FSharp.Core
   nuget Expecto.FsCheck
   nuget Expecto
   nuget Microsoft.NET.Test.Sdk

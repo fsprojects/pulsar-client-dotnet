@@ -6,7 +6,7 @@ open Expecto.Flip
 open System.Threading.Tasks
 open Pulsar.Client.Api
 open Pulsar.Client.Common
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 
 [<Tests>]
 let tests =

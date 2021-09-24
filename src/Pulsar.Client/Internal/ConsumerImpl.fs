@@ -1,7 +1,7 @@
 ﻿namespace Pulsar.Client.Api
 
 open System.Collections
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Threading.Tasks
 open FSharp.UMX
 open System.Collections.Generic

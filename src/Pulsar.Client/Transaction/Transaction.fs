@@ -3,7 +3,7 @@ namespace Pulsar.Client.Transaction
 open System
 open System.Collections.Generic
 open System.Threading
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open Pulsar.Client.Api

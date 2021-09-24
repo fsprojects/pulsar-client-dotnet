@@ -4,7 +4,7 @@ open System.Threading.Tasks
 open FSharp.UMX
 open Pulsar.Client.Common
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System
 open Pulsar.Client.Internal
 open Pulsar.Client.Schema

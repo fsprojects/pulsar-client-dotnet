@@ -10,7 +10,7 @@ open System.Runtime.ExceptionServices
 open System.Collections.Generic
 open Microsoft.Extensions.Logging
 open System.Threading.Channels
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 
 let MemoryStreamManager = RecyclableMemoryStreamManager()
 let MagicNumber = int16 0x0e01
@@ -52,7 +52,7 @@ let invalidArgIf predicate message =
     throwIf predicate (fun() -> ArgumentException(message))
 
 let invalidArgIfBlankString =
-    invalidArgIf (String.IsNullOrWhiteSpace)
+    invalidArgIf String.IsNullOrWhiteSpace
 
 let invalidArgIfNotGreaterThanZero =
     invalidArgIf ((>=) 0)
@@ -61,7 +61,7 @@ let invalidArgIfLessThanZero =
     invalidArgIf ((>) 0)
 
 let invalidArgIfDefault msg =
-    invalidArgIf (fun (arg) -> arg = Unchecked.defaultof<'a>) msg
+    invalidArgIf (fun arg -> arg = Unchecked.defaultof<'a>) msg
 
 let reraize<'a> ex =
     (ExceptionDispatchInfo.Capture ex).Throw()

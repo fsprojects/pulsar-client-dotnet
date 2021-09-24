@@ -3,7 +3,7 @@
 open System.Reflection
 open Pulsar.Client.Common
 open System.Collections.Generic
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open Microsoft.Extensions.Logging
 open System.Threading.Tasks
 open Pulsar.Client.Transaction

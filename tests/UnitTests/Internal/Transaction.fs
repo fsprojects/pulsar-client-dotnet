@@ -7,7 +7,7 @@ open Expecto.Flip
 open Pulsar.Client.Common
 open Pulsar.Client.Transaction
 open FSharp.UMX
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 
 
 [<Tests>]

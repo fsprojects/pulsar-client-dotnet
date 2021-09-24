@@ -3,7 +3,7 @@
 // Learn more about F# at http://fsharp.org
 open System
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Text
 open Pulsar.Client.Common
 open FSharp.UMX

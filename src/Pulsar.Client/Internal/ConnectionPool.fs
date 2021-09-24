@@ -1,7 +1,7 @@
 ﻿namespace Pulsar.Client.Internal
 
 open Pulsar.Client.Common
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Collections.Concurrent
 open System.Net
 open System.Threading.Tasks

@@ -2,7 +2,7 @@
 
 open System
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open Pulsar.Client.Common
 open System.Text
 
