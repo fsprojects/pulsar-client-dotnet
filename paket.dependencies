@@ -26,7 +26,7 @@ nuget PemUtils
 nuget System.Threading.Channels
 
 group Tests
-  framework: net5.0
+  framework: net6.0
   source https://api.nuget.org/v3/index.json
   storage: none
 
@@ -45,7 +45,7 @@ group Tests
   nuget protobuf-net.Reflection
   
 group Examples
-  framework: net5.0
+  framework: net6.0
   source https://api.nuget.org/v3/index.json
   storage: none
 

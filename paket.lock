@@ -146,7 +146,7 @@ NUGET
 
 GROUP Examples
 STORAGE: NONE
-RESTRICTION: == net5.0
+RESTRICTION: == net6.0
 NUGET
   remote: https://api.nuget.org/v3/index.json
     Apache.Avro (1.10.2)
@@ -535,7 +535,7 @@ NUGET
 
 GROUP Tests
 STORAGE: NONE
-RESTRICTION: == net5.0
+RESTRICTION: == net6.0
 NUGET
   remote: https://api.nuget.org/v3/index.json
     Apache.Avro (1.10.2)
