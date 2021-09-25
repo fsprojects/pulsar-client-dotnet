@@ -295,7 +295,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogInformation("{0} operationsMb mailbox has stopped normally", prefix))
     |> ignore
 
-    let sendSerializedPayload (writePayload, commandType) =
+    let sendSerializedPayload (writePayload, commandType: BaseCommand.Type) =
         Log.Logger.LogDebug("{0} Sending message of type {1}", prefix, commandType)
         task {
             try

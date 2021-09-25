@@ -274,7 +274,7 @@ let tests =
 
     testList "Reader" [
 
-        testAsync "Reader non-batching configuration works fine" {
+        ftestAsync "Reader non-batching configuration works fine" {
             do! basicReaderCheck false |> Async.AwaitTask
         }
 
