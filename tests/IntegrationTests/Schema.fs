@@ -306,7 +306,7 @@ let tests =
             Log.Debug("Finished Incompatible record errors")
         }
         
-        testAsync "Avro schema upgrade works fine" {
+        ptestAsync "Avro schema upgrade works fine" {
 
             Log.Debug("Start Avro schema upgrade works fine")
             let client = getClient()
@@ -504,7 +504,7 @@ let tests =
             Log.Debug("Finished Auto consume KeyValue with nested object works")
         }
         
-        testAsync "Auto consume with multi-version schema" {
+        ptestAsync "Auto consume with multi-version schema" {
 
             Log.Debug("Start Auto consume with multi-version schema")
             let client = getClient()

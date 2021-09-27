@@ -626,7 +626,7 @@ NUGET
       Microsoft.NETCore.Platforms (>= 1.1)
       Microsoft.NETCore.Targets (>= 1.1)
       System.Runtime (>= 4.3)
-    YoloDev.Expecto.TestSdk (0.12.8)
+    YoloDev.Expecto.TestSdk (0.12.9)
       Expecto (>= 9.0 < 10.0)
       FSharp.Core (>= 4.6)
       System.Collections.Immutable (>= 1.5 < 5.1)
