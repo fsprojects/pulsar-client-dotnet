@@ -49,8 +49,8 @@ type internal MultiTopicConsumerMessage<'T> =
     | AcknowledgeCumulative of TaskCompletionSource<unit> * MessageId * Transaction option
     | RedeliverUnacknowledged of RedeliverSet * TaskCompletionSource<unit>
     | RedeliverAllUnacknowledged of TaskCompletionSource<unit>
-    | Close of TaskCompletionSource<ResultOrException<unit>>
-    | Unsubscribe of TaskCompletionSource<ResultOrException<unit>>
+    | Close of TaskCompletionSource<unit>
+    | Unsubscribe of TaskCompletionSource<unit>
     | HasReachedEndOfTheTopic of TaskCompletionSource<bool>
     | Seek of SeekType * TaskCompletionSource<unit>
     | SeekWithResolver of Func<string, SeekType> *  TaskCompletionSource<unit> 
@@ -915,7 +915,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 Log.Logger.LogDebug("{0} Close", prefix)
                 match this.ConnectionState with
                 | Closing | Closed ->
-                    channel.SetResult(Ok())
+                    channel.SetResult()
                 | _ ->
                     this.ConnectionState <- Closing
                     let consumerTasks = consumers |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.DisposeAsync().AsTask())
@@ -923,12 +923,12 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         let! _ = Task.WhenAll consumerTasks
                         this.ConnectionState <- Closed
                         stopConsumer()
-                        channel.SetResult(Ok())
+                        channel.SetResult()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not close all child consumers properly", prefix)
                         this.ConnectionState <- Closed
                         stopConsumer()
-                        channel.SetResult(Ok())
+                        channel.SetResult()
                 continueLoop <- false
 
             | Unsubscribe channel ->
@@ -937,7 +937,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 Log.Logger.LogDebug("{0} Unsubscribe", prefix)
                 match this.ConnectionState with
                 | Closing | Closed ->
-                    channel.SetResult(Ok())
+                    channel.SetResult()
                 | _ ->
                     this.ConnectionState <- Closing
                     let consumerTasks = consumers |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.UnsubscribeAsync())
@@ -946,11 +946,11 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         this.ConnectionState <- Closed
                         Log.Logger.LogInformation("{0} unsubscribed", prefix)
                         stopConsumer()
-                        channel.SetResult(Ok())
+                        channel.SetResult()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not unsubscribe", prefix)
                         this.ConnectionState <- Failed
-                        channel.SetResult(Error ex)
+                        channel.SetException ex
                         continueLoop <- true
         }:> Task).ContinueWith(fun t ->
             if t.IsFaulted then
@@ -1099,12 +1099,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             Task.FromException<MessageId>(exn "GetLastMessageId operation not supported on multitopics consumer")
 
         member this.UnsubscribeAsync() =
-            task {
-                let! result = postAndAsyncReply mb Unsubscribe
-                match result with
-                | Ok () -> ()
-                | Error ex -> reraize ex
-            }
+            postAndAsyncReply mb Unsubscribe
 
         member this.HasReachedEndOfTopic =
             postAndReply mb HasReachedEndOfTheTopic
@@ -1153,14 +1148,9 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         
     interface IAsyncDisposable with
         
-        member this.DisposeAsync() =
-            task {
-                match this.ConnectionState with
-                | Closing | Closed ->
-                    return ()
-                | _ ->
-                    let! result = postAndAsyncReply mb Close
-                    match result with
-                    | Ok () -> ()
-                    | Error ex -> reraize ex
-            } |> ValueTask
+        member this.DisposeAsync() =    
+            match this.ConnectionState with
+            | Closing | Closed ->
+                ValueTask()
+            | _ ->
+                postAndAsyncReply mb Close |> ValueTask
