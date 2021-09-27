@@ -118,7 +118,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     
     let keyValueProcessor = KeyValueProcessor.GetInstance schema
 
-    let wrapPostAndReply (mbAsyncReply: Task<ResultOrException<'A>>) =
+    let wrapPostAndReply (mbAsyncReply: Task<ResultOrException<unit>>) =
         task {
             match! mbAsyncReply with
             | Ok msg ->
