@@ -11,10 +11,10 @@ type UserCancellation = CancellationTokenRegistration option
 type BatchCancellation = CancellationTokenSource
 
 type Waiter<'T> =
-    UserCancellation * TaskCompletionSource<ResultOrException<Message<'T>>>
+    UserCancellation * TaskCompletionSource<Message<'T>>
     
 type BatchWaiter<'T> =
-    BatchCancellation * UserCancellation * TaskCompletionSource<ResultOrException<Messages<'T>>>
+    BatchCancellation * UserCancellation * TaskCompletionSource<Messages<'T>>
 
 let hasEnoughMessagesForBatchReceive (batchReceivePolicy: BatchReceivePolicy) incomingMessagesCount incomingMessagesSize =
     if (batchReceivePolicy.MaxNumMessages <= 0 && batchReceivePolicy.MaxNumBytes <= 0L) then

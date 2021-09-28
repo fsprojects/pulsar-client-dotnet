@@ -40,8 +40,8 @@ type internal BatchAddResponse<'T> =
 
 type internal MultiTopicConsumerMessage<'T> =
     | Init
-    | Receive of CancellationToken * TaskCompletionSource<ResultOrException<Message<'T>>>
-    | BatchReceive of CancellationToken * TaskCompletionSource<ResultOrException<Messages<'T>>>
+    | Receive of CancellationToken * TaskCompletionSource<Message<'T>>
+    | BatchReceive of CancellationToken * TaskCompletionSource<Messages<'T>>
     | MessageReceived of ResultOrException<Message<'T>> * TaskCompletionSource<unit>
     | SendBatchByTimeout
     | Acknowledge of TaskCompletionSource<unit> * MessageId * Transaction option
@@ -198,10 +198,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         pollerCts.Dispose()
         while waiters.Count > 0 do
             let waitingChannel = waiters |> dequeueWaiter
-            waitingChannel.SetResult(Error (AlreadyClosedException("Consumer is already closed") :> exn))
+            AlreadyClosedException "Consumer is already closed" |> waitingChannel.SetException
         while batchWaiters.Count > 0 do
             let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
-            batchWaitingChannel.SetResult(Error (AlreadyClosedException("Consumer is already closed") :> exn))
+            AlreadyClosedException "Consumer is already closed" |> batchWaitingChannel.SetException
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let singleInit (consumerInitInfo: ConsumerInitInfo<'T>) =
@@ -407,7 +407,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         }
         
 
-    let replyWithBatch (channel: TaskCompletionSource<ResultOrException<Messages<'T>>>) =
+    let replyWithBatch (channel: TaskCompletionSource<Messages<'T>>) =
         let messages = Messages(consumerConfig.BatchReceivePolicy.MaxNumMessages, consumerConfig.BatchReceivePolicy.MaxNumBytes)
         
         let mutable shouldContinue = true
@@ -430,10 +430,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         match error with
         | Some ex when messages.Count = 0 ->
             // only fail when no batched messages before error happened
-            channel.SetResult (Error ex)
+            channel.SetException ex
         | _ ->
             Log.Logger.LogDebug("{0} BatchFormed with size {1}", prefix, messages.Size)
-            channel.SetResult (Ok messages)
+            channel.SetResult messages
 
     let handlePartitions() =
         task {
@@ -520,11 +520,14 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 ()
         }
     
-    let replyWithMessage (channel: TaskCompletionSource<ResultOrException<Message<'T>>>) (message: ResultOrException<Message<'T>>) =
+    let replyWithMessage (channel: TaskCompletionSource<Message<'T>>) (message: ResultOrException<Message<'T>>) =
         match message with
-        | Ok msg -> unAckedMessageTracker.Add msg.MessageId |> ignore
-        | _ -> ()
-        channel.SetResult message
+        | Ok msg ->
+            unAckedMessageTracker.Add msg.MessageId |> ignore
+            channel.SetResult msg
+        | Error ex ->
+            channel.SetException ex
+        
     
     let runPoller (ct: CancellationToken) =
         Task.Run<unit>(fun () ->
@@ -605,7 +608,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 
                 Log.Logger.LogDebug("{0} Receive", prefix)
                 if cancellationToken.IsCancellationRequested then
-                    channel.SetResult(Error (TaskCanceledException() :> exn))
+                    channel.SetCanceled()
                 else
                     if incomingMessages.Count > 0 then
                         replyWithMessage channel <| dequeueMessage()
@@ -615,7 +618,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                 let rec cancellationTokenRegistration =
                                     cancellationToken.Register((fun () ->
                                         Log.Logger.LogDebug("{0} receive cancelled", prefix)
-                                        channel.SetResult(Error (TaskCanceledException() :> exn))
+                                        channel.SetCanceled()
                                         post this.Mb (RemoveWaiter(cancellationTokenRegistration, channel))
                                     ), false) |> Some
                                 cancellationTokenRegistration
@@ -628,7 +631,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 
                 Log.Logger.LogDebug("{0} BatchReceive", prefix)
                 if cancellationToken.IsCancellationRequested then
-                    channel.SetResult(Error (TaskCanceledException() :> exn))
+                    channel.SetCanceled()
                 else
                     if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
                         replyWithBatch channel
@@ -640,7 +643,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                     cancellationToken.Register((fun () ->
                                         Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
                                         batchCts.Cancel()
-                                        channel.SetResult(Error (TaskCanceledException() :> exn))
+                                        channel.SetCanceled()
                                         post this.Mb (RemoveBatchWaiter(batchCts, cancellationTokenRegistration, channel))
                                     ), false)
                                     |> Some
@@ -1034,25 +1037,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     interface IConsumer<'T> with
 
         member this.ReceiveAsync(cancellationToken: CancellationToken) =
-            task {
-                match! postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel)) with
-                | Ok msg ->
-                    return msg
-                | Error exn ->
-                    return reraize exn
-            }
+            postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel))
             
         member this.ReceiveAsync() =
             _this.ReceiveAsync(CancellationToken.None)
             
         member this.BatchReceiveAsync(cancellationToken: CancellationToken) =
-            task {
-                match! postAndAsyncReply mb (fun channel -> BatchReceive(cancellationToken, channel)) with
-                | Ok msg ->
-                    return msg
-                | Error exn ->
-                    return reraize exn
-            }
+            postAndAsyncReply mb (fun channel -> BatchReceive(cancellationToken, channel))
 
         member this.BatchReceiveAsync() =
             _this.BatchReceiveAsync(CancellationToken.None)

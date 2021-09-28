@@ -7,7 +7,6 @@
   </PropertyGroup>
   <PropertyGroup>
     <NoWarn>3186</NoWarn>
-    <DefineConstants>TRACE;NOTLS</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <None Include="paket.references" />

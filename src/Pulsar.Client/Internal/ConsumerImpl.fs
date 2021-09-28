@@ -33,8 +33,8 @@ type internal ConsumerMessage<'T> =
     | ConnectionClosed of ClientCnx
     | ReachedEndOfTheTopic
     | MessageReceived of RawMessage * ClientCnx
-    | Receive of CancellationToken * TaskCompletionSource<ResultOrException<Message<'T>>>
-    | BatchReceive of CancellationToken * TaskCompletionSource<ResultOrException<Messages<'T>>>
+    | Receive of CancellationToken * TaskCompletionSource<Message<'T>>
+    | BatchReceive of CancellationToken * TaskCompletionSource<Messages<'T>>
     | SendBatchByTimeout
     | Acknowledge of MessageId * AckType * Transaction option * TaskCompletionSource<Unit> option
     | NegativeAcknowledge of MessageId
@@ -506,7 +506,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         stats.UpdateNumMsgsReceived(msg.Data.Length)
         trackMessage msg.MessageId
 
-    let replyWithBatch (channel: TaskCompletionSource<ResultOrException<Messages<'T>>>) =
+    let replyWithBatch (channel: TaskCompletionSource<Messages<'T>>) =
         let messages = Messages(consumerConfig.BatchReceivePolicy.MaxNumMessages, consumerConfig.BatchReceivePolicy.MaxNumBytes)
         let mutable shouldContinue = true
         while shouldContinue && incomingMessages.Count > 0 do
@@ -518,7 +518,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             else
                 shouldContinue <- false
         Log.Logger.LogDebug("{0} BatchFormed with size {1}", prefix, messages.Size)
-        channel.SetResult(Ok messages)
+        channel.SetResult messages
     
     let removeExpiredMessagesFromQueue (msgIds: RedeliverSet) =
         if incomingMessages.Count > 0 then
@@ -540,18 +540,18 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         else
             0
 
-    let replyWithMessage (channel: TaskCompletionSource<ResultOrException<Message<'T>>>) message =
+    let replyWithMessage (channel: TaskCompletionSource<Message<'T>>) message =
         messageProcessed message
         let interceptMsg = interceptors.BeforeConsume(this, message)
-        channel.SetResult (Ok interceptMsg)
+        channel.SetResult interceptMsg
 
-    let failWaiters ex =
+    let failWaiters (ex: exn) =
         while waiters.Count > 0 do
             let waitingChannel = waiters |> dequeueWaiter
-            waitingChannel.SetResult(Error ex)
+            waitingChannel.SetException ex
         while batchWaiters.Count > 0 do
             let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
-            batchWaitingChannel.SetResult(Error ex)
+            batchWaitingChannel.SetException ex
     
     let stopConsumer () =
         unAckedMessageTracker.Close()
@@ -878,7 +878,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             
                 Log.Logger.LogDebug("{0} Receive", prefix)
                 if cancellationToken.IsCancellationRequested then
-                    TaskCanceledException() :> exn |> Error |> channel.SetResult
+                    channel.SetCanceled()
                 else
                     if incomingMessages.Count > 0 then
                         replyWithMessage channel <| dequeueMessage()
@@ -888,7 +888,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 let rec cancellationTokenRegistration =
                                     cancellationToken.Register((fun () ->
                                         Log.Logger.LogDebug("{0} receive cancelled", prefix)
-                                        TaskCanceledException() :> exn |> Error |> channel.SetResult
+                                        channel.SetCanceled()
                                         post this.Mb (RemoveWaiter(cancellationTokenRegistration, channel))
                                     ), false) |> Some
                                 cancellationTokenRegistration
@@ -913,7 +913,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             
                 Log.Logger.LogDebug("{0} BatchReceive", prefix)
                 if cancellationToken.IsCancellationRequested then
-                    TaskCanceledException() :> exn |> Error |> channel.SetResult
+                    channel.SetCanceled()
                 else
                     if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
                         replyWithBatch channel
@@ -925,7 +925,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                     cancellationToken.Register((fun () ->
                                         Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
                                         batchCts.Cancel()
-                                        TaskCanceledException() :> exn |> Error |> channel.SetResult
+                                        channel.SetCanceled()
                                         post this.Mb (RemoveBatchWaiter(batchCts, cancellationTokenRegistration, channel))
                                     ), false) |> Some
                                 cancellationTokenRegistration
@@ -1411,13 +1411,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     default this.ReceiveWrappedAsync(cancellationToken: CancellationToken) =
         task {
             connectionHandler.CheckIfActive() |> throwIfNotNull
-            let! msgResult = postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel))
-            match msgResult with
-            | Ok _ ->
-                return msgResult
-            | Error _ ->
+            try
+                let! msgResult = postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel))
+                return Ok msgResult
+            with Flatten ex ->
                 stats.IncrementNumReceiveFailed()
-                return msgResult
+                return Error ex
         }
     member internal this.RedeliverUnacknowledged msgIds =
         postAndAsyncReply mb (fun channel -> RedeliverUnacknowledged(msgIds, channel))
@@ -1427,12 +1426,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.ReceiveAsync(cancellationToken: CancellationToken) =
             task {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
-                match! postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel)) with
-                | Ok msg ->
-                    return msg
-                | Error exn ->
+                try
+                    let! msgResult = postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel))
+                    return msgResult
+                with Flatten ex ->
                     stats.IncrementNumReceiveFailed()
-                    return reraize exn
+                    return reraize ex
             }
             
         member this.ReceiveAsync() =
@@ -1441,12 +1440,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.BatchReceiveAsync(cancellationToken: CancellationToken) =
             task {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
-                match! postAndAsyncReply mb (fun channel -> BatchReceive(cancellationToken, channel)) with
-                | Ok msg ->
-                    return msg
-                | Error exn ->
+                try 
+                    let! msgResult = postAndAsyncReply mb (fun channel -> BatchReceive(cancellationToken, channel))
+                    return msgResult
+                with Flatten ex ->
                     stats.IncrementNumBatchReceiveFailed()
-                    return reraize exn
+                    return reraize ex
             }
             
         member this.BatchReceiveAsync() =
