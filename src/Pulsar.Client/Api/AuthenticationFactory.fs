@@ -2,6 +2,7 @@
 
 open Pulsar.Client.Auth
 
+[<AbstractClass; Sealed>]
 type AuthenticationFactory =
 
     static member Token (token: string) : Authentication =

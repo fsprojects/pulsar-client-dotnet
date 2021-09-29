@@ -8,7 +8,6 @@ open Microsoft.Extensions.Logging
 open OpenTelemetry.Context.Propagation
 open Pulsar.Client.Api
 open Pulsar.Client.Common
-open FSharp.Control.Tasks.V2
 open System.Threading.Tasks
 
 type AckResult = Result<string, exn>

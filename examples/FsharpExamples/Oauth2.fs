@@ -34,7 +34,7 @@ let runOauth() =
         let! client =
             PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
-                .Authentication(AuthenticationFactoryOAuth2.clientCredentials(issuerUrl, fileUri, audience))
+                .Authentication(AuthenticationFactoryOAuth2.ClientCredentials(issuerUrl, audience, fileUri))
                 .BuildAsync()
 
         let! producer =

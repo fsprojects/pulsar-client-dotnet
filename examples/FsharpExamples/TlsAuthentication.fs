@@ -14,7 +14,7 @@ let runTlsAuthentication () =
     let subscriptionName = "my-subscription"
     let topicName = sprintf "my-topic-%i" DateTime.Now.Ticks;
     use ca = new X509Certificate2(@"path-to-ca.crt")
-    let userTls = AuthenticationFactory.tls(@"path-to-user.pfx")
+    let userTls = AuthenticationFactory.Tls(@"path-to-user.pfx")
 
     task {
         
