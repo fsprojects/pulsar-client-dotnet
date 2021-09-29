@@ -112,7 +112,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
     let failPendingBatchMessages (ex: exn) =
         if batchMessageContainer.NumMessagesInBatch > 0 then
-            batchMessageContainer.Discard(ex)
+            batchMessageContainer.Discard ex
 
     let failPendingMessages (ex: exn) =
         while pendingMessages.Count > 0 do
@@ -120,7 +120,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             failPendingMessage msg ex
         while blockedRequests.Count > 0 do
             let _, channel = blockedRequests.Dequeue()
-            channel.SetException(ex)
+            channel.SetException ex
         if producerConfig.BatchingEnabled then
             failPendingBatchMessages ex
 
@@ -150,10 +150,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let cryptoTimer = new Timer()
     let startCryptoTimer () =
         match producerConfig.MessageEncryptor with
-        | Some enc ->
+        | Some encryptor ->
             cryptoTimer.Interval <- TimeSpan(hours = 4, minutes = 0, seconds = 0).TotalMilliseconds
             cryptoTimer.AutoReset <- true
-            cryptoTimer.Elapsed.Add(fun _ -> post this.Mb (Tick (UpdateEncryptionKeys enc)))
+            cryptoTimer.Elapsed.Add(fun _ -> post this.Mb (Tick (UpdateEncryptionKeys encryptor)))
             cryptoTimer.Start()
         | None -> ()
         
@@ -724,7 +724,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         clientCnx.RemoveProducer(producerId)
                         connectionHandler.Closed()
                         stopProducer()
-                        failPendingMessages(AlreadyClosedException("Producer was already closed"))
+                        failPendingMessages <| AlreadyClosedException "Producer was already closed"
                         channel.SetResult <| Ok()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed to close", prefix)
@@ -733,7 +733,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
                     connectionHandler.Closed()
                     stopProducer()
-                    failPendingMessages(AlreadyClosedException("Producer was already closed"))
+                    failPendingMessages <| AlreadyClosedException "Producer was already closed"
                     channel.SetResult <| Ok()
 
                 continueLoop <- false

@@ -564,7 +564,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         statTimer.Stop()
         chunkTimer.Stop()
         cleanup(this)
-        failWaiters <| AlreadyClosedException("Consumer is already closed")
+        failWaiters <| AlreadyClosedException "Consumer is already closed"
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let decryptMessage (rawMessage:RawMessage) =
@@ -800,13 +800,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         clientCnx.RemoveConsumer consumerId
                         Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
                         match ex with
-                        | _ when (PulsarClientException.isRetriableError ex && DateTime.Now < subscribeTimeout) ->
+                        | _ when PulsarClientException.isRetriableError ex && DateTime.Now < subscribeTimeout ->
                             connectionHandler.ReconnectLater ex
                         | _ when not subscribeTsc.Task.IsCompleted ->
                             // unable to create new consumer, fail operation
                             connectionHandler.Failed()
                             subscribeTsc.SetException(ex)
                             stopConsumer()
+                            continueLoop <- false
                         | :? TopicDoesNotExistException ->
                             // The topic was deleted after the consumer was created, and we're
                             // not allowed to recreate the topic. This can happen in few cases:
@@ -817,14 +818,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             connectionHandler.Failed()
                             stopConsumer()
                             Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
+                            continueLoop <- false
                         | _ ->
                             // consumer was subscribed and connected but we got some error, keep trying
                             connectionHandler.ReconnectLater ex
                 | _ ->
-                    Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
-                                
-                if connectionHandler.ConnectionState = Failed then
-                    continueLoop <- false
+                    Log.Logger.LogWarning("{0} connection opened but connection state is {1}", prefix, connectionHandler.ConnectionState)
+                    
                                 
             | ConsumerMessage.MessageReceived (rawMessage, clientCnx) ->
                                 
@@ -1048,24 +1048,25 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | Ready clientCnx ->
                     let requestId = Generators.getNextRequestId()
                     Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData)
+                    let payload, seekMessageId =
+                        match seekData with
+                        | SeekType.Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
+                        | SeekType.MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
+                    let originSeekMessageId = duringSeek
+                    duringSeek <- Some seekMessageId
                     try
-                        let payload, lastMessage =
-                            match seekData with
-                            | SeekType.Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
-                            | SeekType.MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
                         let! response = clientCnx.SendAndWaitForReply requestId payload
                         response |> PulsarResponseType.GetEmpty
-                                        
-                        duringSeek <- Some lastMessage
                         lastDequeuedMessageId <- MessageId.Earliest
-                                        
                         acksGroupingTracker.FlushAndClean()
                         incomingMessages.Clear()
                         Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
                         channel.SetResult()
                     with Flatten ex ->
+                        // re-set duringSeek and seekMessageId if seek failed
+                        duringSeek <- originSeekMessageId
                         Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
-                        channel.SetException(ex)
+                        channel.SetException ex
                 | _ ->
                     NotConnectedException "Not connected to broker" |> channel.SetException
                     Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)

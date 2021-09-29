@@ -1420,6 +1420,17 @@ namespace pulsar.proto
         internal void ResetIsChunk() => __pbn__IsChunk = null;
         private bool? __pbn__IsChunk;
 
+        [global::ProtoBuf.ProtoMember(8, Name = @"marker")]
+        [global::System.ComponentModel.DefaultValue(false)]
+        public bool Marker
+        {
+            get => __pbn__Marker ?? false;
+            set => __pbn__Marker = value;
+        }
+        public bool ShouldSerializeMarker() => __pbn__Marker != null;
+        public void ResetMarker() => __pbn__Marker = null;
+        private bool? __pbn__Marker;
+
     }
 
     [global::ProtoBuf.ProtoContract()]

@@ -122,14 +122,14 @@ type internal UnAckedMessageTracker(prefix: string,
                 Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
 
+    do fillTimePartions()
     let timer =
-        fillTimePartions()
         match getTickScheduler with
         | None ->
             let timer = new Timer(tickDuration.TotalMilliseconds)
             timer.AutoReset <- true
             timer.Elapsed.Add(fun _ -> post mb TickTime)
-            timer.Start() |> ignore
+            timer.Start()
             timer :> IDisposable
         | Some getScheduler ->
             getScheduler(fun _ -> post mb TickTime)
