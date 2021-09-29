@@ -2,7 +2,7 @@
 
 open System
 open Pulsar.Client.Common
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 
 type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 

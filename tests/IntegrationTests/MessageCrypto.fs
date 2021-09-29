@@ -3,7 +3,7 @@
 open System
 open System.Text
 open Expecto
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Threading.Tasks
 open Pulsar.Client.Api
 open Pulsar.Client.Common

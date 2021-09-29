@@ -11,7 +11,7 @@ open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open Pulsar.Client.Schema
 open Pulsar.Client.UnitTests
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 
 [<Tests>]
 let tests =

@@ -1,7 +1,7 @@
 ﻿namespace Pulsar.Client.Internal
 
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open Pulsar.Client.Common
 open System
 open System.Net
@@ -22,7 +22,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 return [| topicName |]
         }
 
-    member private this.GetPartitionedTopicMetadata (endpoint, topicName, backoff: Backoff, remainingTimeMs) =
+    member private this.GetPartitionedTopicMetadataInner (endpoint, topicName, backoff: Backoff, remainingTimeMs) =
          async {
             try
                 let! clientCnx = endpoint |> connectionPool.GetBrokerlessConnection |> Async.AwaitTask
@@ -32,7 +32,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 return PulsarResponseType.GetPartitionedTopicMetadata response
             with Flatten ex ->
                 let nextDelay = Math.Min(backoff.Next(), remainingTimeMs)
-                // skip retry scheduler when set lookup throttle in client or server side which will lead to `TooManyRequestsException`                
+                // skip retry scheduler when set lookup throttle in client or server side which will lead to `TooManyRequestsException`
                 let isLookupThrottling =
                     (PulsarClientException.isRetriableError ex |> not)
                     || (ex :? TooManyRequestsException) 
@@ -40,7 +40,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                     reraize ex
                 Log.Logger.LogWarning(ex, "GetPartitionedTopicMetadata failed will retry in {0} ms", nextDelay)
                 do! Async.Sleep nextDelay
-                return! this.GetPartitionedTopicMetadata(endpoint, topicName, backoff, remainingTimeMs - nextDelay)
+                return! this.GetPartitionedTopicMetadataInner(endpoint, topicName, backoff, remainingTimeMs - nextDelay)
         }
         
      member this.GetPartitionedTopicMetadata topicName =
@@ -49,7 +49,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                                         Initial = TimeSpan.FromMilliseconds(100.0)
                                         MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
                                         Max = TimeSpan.FromMinutes(1.0) }
-            let! result = this.GetPartitionedTopicMetadata(resolveEndPoint(), topicName, backoff, int config.OperationTimeout.TotalMilliseconds)
+            let! result = this.GetPartitionedTopicMetadataInner(resolveEndPoint(), topicName, backoff, int config.OperationTimeout.TotalMilliseconds)
             return result
         }
 
@@ -85,17 +85,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                        else { LogicalAddress = LogicalAddress resultEndpoint; PhysicalAddress = PhysicalAddress resultEndpoint }
         }
 
-    member this.GetTopicsUnderNamespace (ns : NamespaceName, isPersistent : bool) =
-        task {
-            let backoff = Backoff { BackoffConfig.Default with
-                                        Initial = TimeSpan.FromMilliseconds(100.0)
-                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
-                                        Max = TimeSpan.FromMinutes(1.0) }
-            let! result = this.GetTopicsUnderNamespace(resolveEndPoint(), ns, backoff, int config.OperationTimeout.TotalMilliseconds, isPersistent)
-            return result
-        }
-
-    member private this.GetTopicsUnderNamespace (endpoint: DnsEndPoint, ns: NamespaceName, backoff: Backoff,
+    member private this.GetTopicsUnderNamespaceInner (endpoint: DnsEndPoint, ns: NamespaceName, backoff: Backoff,
                                                  remainingTimeMs: int, isPersistent: bool) =
         async {
             try
@@ -111,21 +101,21 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                     raise (TimeoutException "Could not getTopicsUnderNamespace within configured timeout.")
                 Log.Logger.LogWarning(ex, "GetTopicsUnderNamespace failed will retry in {0} ms", delay)
                 do! Async.Sleep delay
-                return! this.GetTopicsUnderNamespace(endpoint, ns, backoff, remainingTimeMs - delay, isPersistent)
+                return! this.GetTopicsUnderNamespaceInner(endpoint, ns, backoff, remainingTimeMs - delay, isPersistent)
         }
-        
-    member this.GetSchema(topicName: CompleteTopicName, ?schemaVersion: SchemaVersion) =
+    
+    member this.GetTopicsUnderNamespace (ns : NamespaceName, isPersistent : bool) =
         task {
             let backoff = Backoff { BackoffConfig.Default with
                                         Initial = TimeSpan.FromMilliseconds(100.0)
                                         MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
                                         Max = TimeSpan.FromMinutes(1.0) }
-            let! result = this.GetSchema(resolveEndPoint(), topicName, schemaVersion, backoff, int config.OperationTimeout.TotalMilliseconds)
+            let! result = this.GetTopicsUnderNamespaceInner(resolveEndPoint(), ns, backoff, int config.OperationTimeout.TotalMilliseconds, isPersistent)
             return result
         }
         
-    member private this.GetSchema(endpoint: DnsEndPoint, topicName: CompleteTopicName, schemaVersion: SchemaVersion option,
-                                  backoff: Backoff, remainingTimeMs: int) =
+    member private this.GetSchemaInner(endpoint: DnsEndPoint, topicName: CompleteTopicName, schemaVersion: SchemaVersion option,
+                              backoff: Backoff, remainingTimeMs: int) =
         async {
             try
                 let! clientCnx = connectionPool.GetBrokerlessConnection endpoint |> Async.AwaitTask
@@ -142,5 +132,16 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                     raise (TimeoutException "Could not GetSchema within configured timeout.")
                 Log.Logger.LogWarning(ex, "GetSchema failed will retry in {0} ms", delay)
                 do! Async.Sleep delay
-                return! this.GetSchema(endpoint, topicName, schemaVersion, backoff, remainingTimeMs - delay)
+                return! this.GetSchemaInner(endpoint, topicName, schemaVersion, backoff, remainingTimeMs - delay)
         }
+        
+    member this.GetSchema(topicName: CompleteTopicName, ?schemaVersion: SchemaVersion) =
+        task {
+            let backoff = Backoff { BackoffConfig.Default with
+                                        Initial = TimeSpan.FromMilliseconds(100.0)
+                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
+                                        Max = TimeSpan.FromMinutes(1.0) }
+            let! result = this.GetSchemaInner(resolveEndPoint(), topicName, schemaVersion, backoff, int config.OperationTimeout.TotalMilliseconds)
+            return result
+        }
+        

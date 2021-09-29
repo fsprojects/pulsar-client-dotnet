@@ -7,7 +7,7 @@ open System.Timers
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Microsoft.Extensions.Logging
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open Pulsar.Client.Transaction
 open pulsar.proto
 open System.Threading.Channels

@@ -7,7 +7,7 @@ open Expecto.Flip
 open Pulsar.Client.Common
 open Pulsar.Client.Transaction
 open FSharp.UMX
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 
 
 [<Tests>]
@@ -44,8 +44,14 @@ let tests =
             let timeout = TimeSpan.FromMinutes(1.0)
             let operations =
                 {
-                    AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
-                    AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
+                    AddPublishPartitionToTxn = fun (_, _) -> task {
+                        do! Task.Yield()
+                        return ()
+                    }
+                    AddSubscriptionToTxn = fun (_, _, _) -> task {
+                        do! Task.Yield()
+                        return ()
+                    }
                     Commit = fun _ -> Task.FromResult()
                     Abort = fun _ -> Task.FromResult()
                 }
@@ -95,8 +101,14 @@ let tests =
             let timeout = TimeSpan.FromMinutes(1.0)
             let operations =
                 {
-                    AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
-                    AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
+                    AddPublishPartitionToTxn = fun (_, _) -> task {
+                        do! Task.Yield()
+                        return ()
+                    }
+                    AddSubscriptionToTxn = fun (_, _, _) -> task {
+                        do! Task.Yield()
+                        return ()
+                    }
                     Commit = fun _ -> Task.FromResult()
                     Abort = fun _ -> Task.FromResult()
                 }
@@ -213,7 +225,6 @@ let tests =
         testAsync "Can't use transaction after commit" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
-            let mutable aborted = false
             let operations =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
@@ -234,7 +245,6 @@ let tests =
         testAsync "Can't use transaction after abort" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
-            let mutable aborted = false
             let operations =
                 {
                     AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()

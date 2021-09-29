@@ -6,7 +6,7 @@ open System.Text.Json
 open System.Net.Http
 open System.Text.Json.Serialization
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open Pulsar.Client.Auth
 type Metadata =
     {

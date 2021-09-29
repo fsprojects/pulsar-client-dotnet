@@ -6,7 +6,7 @@ open System.Collections.Generic
 open System.Threading
 open Expecto
 open Expecto.Flip
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Threading.Tasks
 open Pulsar.Client.Api
 open Pulsar.Client.Common

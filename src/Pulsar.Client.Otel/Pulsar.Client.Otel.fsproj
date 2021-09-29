@@ -27,7 +27,7 @@
     <NoWarn>3186;40</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <Content Include="paket.references" />
+    <None Include="paket.references" />
     <Compile Include="OTelProducerInterceptor.fs" />
     <Compile Include="OtelConsumerInterceptor.fs" />
   </ItemGroup>

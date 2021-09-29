@@ -4,7 +4,7 @@ open System
 open System.Threading.Tasks
 open OpenTelemetry
 open Pulsar.Client.Api
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open Pulsar.Client.Common
 open System.Text
 open Pulsar.Client.Otel.OTelProducerInterceptor

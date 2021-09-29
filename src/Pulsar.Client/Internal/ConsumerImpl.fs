@@ -1,7 +1,7 @@
 ﻿namespace Pulsar.Client.Api
 
 open System.Collections
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Threading.Tasks
 open FSharp.UMX
 open System.Collections.Generic
@@ -33,18 +33,18 @@ type internal ConsumerMessage<'T> =
     | ConnectionClosed of ClientCnx
     | ReachedEndOfTheTopic
     | MessageReceived of RawMessage * ClientCnx
-    | Receive of CancellationToken * TaskCompletionSource<ResultOrException<Message<'T>>>
-    | BatchReceive of CancellationToken * TaskCompletionSource<ResultOrException<Messages<'T>>>
+    | Receive of CancellationToken * TaskCompletionSource<Message<'T>>
+    | BatchReceive of CancellationToken * TaskCompletionSource<Messages<'T>>
     | SendBatchByTimeout
     | Acknowledge of MessageId * AckType * Transaction option * TaskCompletionSource<Unit> option
     | NegativeAcknowledge of MessageId
     | RedeliverUnacknowledged of RedeliverSet * TaskCompletionSource<unit>
     | RedeliverAllUnacknowledged of TaskCompletionSource<unit>
-    | SeekAsync of SeekType * TaskCompletionSource<ResultOrException<unit>>
+    | SeekAsync of SeekType * TaskCompletionSource<unit>
     | HasMessageAvailable of TaskCompletionSource<bool>
     | ActiveConsumerChanged of bool
-    | Close of TaskCompletionSource<ResultOrException<unit>>
-    | Unsubscribe of TaskCompletionSource<ResultOrException<unit>>
+    | Close of TaskCompletionSource<unit>
+    | Unsubscribe of TaskCompletionSource<unit>
     | Tick of ConsumerTickType
     | GetStats of TaskCompletionSource<ConsumerStats>
     | ReconsumeLater of Message<'T> * AckType * TimeStamp * TaskCompletionSource<unit>
@@ -117,15 +117,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             chunkTimer.Start()
     
     let keyValueProcessor = KeyValueProcessor.GetInstance schema
-
-    let wrapPostAndReply (mbAsyncReply: Task<ResultOrException<'A>>) =
-        task {
-            match! mbAsyncReply with
-            | Ok msg ->
-                return msg
-            | Error ex ->
-                return reraize ex
-        }
     
     let connectionHandler =
         ConnectionHandler(prefix,
@@ -515,7 +506,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         stats.UpdateNumMsgsReceived(msg.Data.Length)
         trackMessage msg.MessageId
 
-    let replyWithBatch (channel: TaskCompletionSource<ResultOrException<Messages<'T>>>) =
+    let replyWithBatch (channel: TaskCompletionSource<Messages<'T>>) =
         let messages = Messages(consumerConfig.BatchReceivePolicy.MaxNumMessages, consumerConfig.BatchReceivePolicy.MaxNumBytes)
         let mutable shouldContinue = true
         while shouldContinue && incomingMessages.Count > 0 do
@@ -527,7 +518,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             else
                 shouldContinue <- false
         Log.Logger.LogDebug("{0} BatchFormed with size {1}", prefix, messages.Size)
-        channel.SetResult(Ok messages)
+        channel.SetResult messages
     
     let removeExpiredMessagesFromQueue (msgIds: RedeliverSet) =
         if incomingMessages.Count > 0 then
@@ -549,18 +540,18 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         else
             0
 
-    let replyWithMessage (channel: TaskCompletionSource<ResultOrException<Message<'T>>>) message =
+    let replyWithMessage (channel: TaskCompletionSource<Message<'T>>) message =
         messageProcessed message
         let interceptMsg = interceptors.BeforeConsume(this, message)
-        channel.SetResult (Ok interceptMsg)
+        channel.SetResult interceptMsg
 
-    let failWaiters ex =
+    let failWaiters (ex: exn) =
         while waiters.Count > 0 do
             let waitingChannel = waiters |> dequeueWaiter
-            waitingChannel.SetResult(Error ex)
+            waitingChannel.SetException ex
         while batchWaiters.Count > 0 do
             let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
-            batchWaitingChannel.SetResult(Error ex)
+            batchWaitingChannel.SetException ex
     
     let stopConsumer () =
         unAckedMessageTracker.Close()
@@ -887,7 +878,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             
                 Log.Logger.LogDebug("{0} Receive", prefix)
                 if cancellationToken.IsCancellationRequested then
-                    TaskCanceledException() :> exn |> Error |> channel.SetResult
+                    channel.SetCanceled()
                 else
                     if incomingMessages.Count > 0 then
                         replyWithMessage channel <| dequeueMessage()
@@ -897,7 +888,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 let rec cancellationTokenRegistration =
                                     cancellationToken.Register((fun () ->
                                         Log.Logger.LogDebug("{0} receive cancelled", prefix)
-                                        TaskCanceledException() :> exn |> Error |> channel.SetResult
+                                        channel.SetCanceled()
                                         post this.Mb (RemoveWaiter(cancellationTokenRegistration, channel))
                                     ), false) |> Some
                                 cancellationTokenRegistration
@@ -922,7 +913,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             
                 Log.Logger.LogDebug("{0} BatchReceive", prefix)
                 if cancellationToken.IsCancellationRequested then
-                    TaskCanceledException() :> exn |> Error |> channel.SetResult
+                    channel.SetCanceled()
                 else
                     if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
                         replyWithBatch channel
@@ -934,7 +925,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                     cancellationToken.Register((fun () ->
                                         Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
                                         batchCts.Cancel()
-                                        TaskCanceledException() :> exn |> Error |> channel.SetResult
+                                        channel.SetCanceled()
                                         post this.Mb (RemoveBatchWaiter(batchCts, cancellationTokenRegistration, channel))
                                     ), false) |> Some
                                 cancellationTokenRegistration
@@ -1071,12 +1062,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         acksGroupingTracker.FlushAndClean()
                         incomingMessages.Clear()
                         Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
-                        channel.SetResult(Ok())
+                        channel.SetResult()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
-                        channel.SetResult(Error ex)
+                        channel.SetException(ex)
                 | _ ->
-                    channel.SetResult(Error ((NotConnectedException "Not connected to broker") :> exn))
+                    NotConnectedException "Not connected to broker" |> channel.SetException
                     Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
             
             | ConsumerMessage.ReachedEndOfTheTopic ->
@@ -1102,48 +1093,33 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 let! lastMessageIdResult = getLastMessageIdAsync()
                                 let lastMessageId = lastMessageIdResult.LastMessageId
                                 // if the consumer is configured to read inclusive then we need to seek to the last message
-                                let! processed =
-                                    task {
-                                        if consumerConfig.ResetIncludeHead then
-                                            let! result = postAndAsyncReply this.Mb (fun channel ->
+                                do! postAndAsyncReply this.Mb (fun channel ->
                                                 SeekAsync (SeekType.MessageId lastMessageId, channel))
-
-                                            match result with
-                                            | Error ex ->
-                                                channel.SetException ex
-                                                return false
-                                            | Ok () ->
-                                                return true
-                                        else
-                                            return true
-                                    }
-                                if processed then
-                                    match lastMessageIdResult.MarkDeletePosition with
-                                    | Some markDeletePosition ->
-                                        if lastMessageId.EntryId < %0L then
-                                            channel.SetResult(false)
-                                        else
-                                            // we only care about comparing ledger ids and entry ids as mark delete position doesn't have other ids such as batch index
-                                            let result =
-                                                match markDeletePosition.LedgerId, lastMessageId.LedgerId with
+                                match lastMessageIdResult.MarkDeletePosition with
+                                | Some markDeletePosition ->
+                                    if lastMessageId.EntryId < %0L then
+                                        channel.SetResult(false)
+                                    else
+                                        // we only care about comparing ledger ids and entry ids as mark delete position doesn't have other ids such as batch index
+                                        let result =
+                                            match markDeletePosition.LedgerId, lastMessageId.LedgerId with
+                                            | x, y when x > y -> 1
+                                            | x, y when x < y -> -1
+                                            | _ ->
+                                                match markDeletePosition.EntryId, lastMessageId.EntryId with
                                                 | x, y when x > y -> 1
                                                 | x, y when x < y -> -1
-                                                | _ ->
-                                                    match markDeletePosition.EntryId, lastMessageId.EntryId with
-                                                    | x, y when x > y -> 1
-                                                    | x, y when x < y -> -1
-                                                    | _ -> 0
-                                        
-                                            if consumerConfig.ResetIncludeHead then
-                                                channel.SetResult(result <= 0)
-                                            else
-                                                channel.SetResult(result < 0)
-                                    | None ->
-                                        if lastMessageId.EntryId < %0L then
-                                            channel.SetResult(false)
+                                                | _ -> 0
+                                    
+                                        if consumerConfig.ResetIncludeHead then
+                                            channel.SetResult(result <= 0)
                                         else
-                                            channel.SetResult(consumerConfig.ResetIncludeHead)
-                                ()
+                                            channel.SetResult(result < 0)
+                                | None ->
+                                    if lastMessageId.EntryId < %0L then
+                                        channel.SetResult(false)
+                                    else
+                                        channel.SetResult(consumerConfig.ResetIncludeHead)
                             with Flatten ex ->
                                 channel.SetException ex
                         } |> ignore
@@ -1253,17 +1229,17 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         clientCnx.RemoveConsumer(consumerId)
                         connectionHandler.Closed()
                         stopConsumer()
-                        channel.SetResult <| Ok()
+                        channel.SetResult()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed to send close to server, doing local close", prefix)
                         connectionHandler.Closed()
                         stopConsumer()
-                        channel.SetResult <| Ok()
+                        channel.SetResult()
                 | _ ->
                     Log.Logger.LogWarning("{0} closing but current state {1}, doing local close", prefix, connectionHandler.ConnectionState)
                     connectionHandler.Closed()
                     stopConsumer()
-                    channel.SetResult <| Ok()
+                    channel.SetResult()
                 continueLoop <- false
             
             | ConsumerMessage.Unsubscribe channel ->
@@ -1282,16 +1258,16 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         clientCnx.RemoveConsumer(consumerId)
                         connectionHandler.Closed()
                         stopConsumer()
-                        channel.SetResult <| Ok()
+                        channel.SetResult()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
-                        channel.SetResult <| Error ex
+                        channel.SetException ex
                                         
                     if connectionHandler.ConnectionState = Closed then
                         continueLoop <- false
                 | _ ->
                     Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
-                    channel.SetResult <| Error((NotConnectedException "Not connected to broker") :> exn)
+                    NotConnectedException "Not connected to broker" |> channel.SetException
         } :> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
@@ -1435,13 +1411,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     default this.ReceiveWrappedAsync(cancellationToken: CancellationToken) =
         task {
             connectionHandler.CheckIfActive() |> throwIfNotNull
-            let! msgResult = postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel))
-            match msgResult with
-            | Ok _ ->
-                return msgResult
-            | Error _ ->
+            try
+                let! msgResult = postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel))
+                return Ok msgResult
+            with Flatten ex ->
                 stats.IncrementNumReceiveFailed()
-                return msgResult
+                return Error ex
         }
     member internal this.RedeliverUnacknowledged msgIds =
         postAndAsyncReply mb (fun channel -> RedeliverUnacknowledged(msgIds, channel))
@@ -1451,12 +1426,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.ReceiveAsync(cancellationToken: CancellationToken) =
             task {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
-                match! postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel)) with
-                | Ok msg ->
-                    return msg
-                | Error exn ->
+                try
+                    let! msgResult = postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel))
+                    return msgResult
+                with Flatten ex ->
                     stats.IncrementNumReceiveFailed()
-                    return reraize exn
+                    return reraize ex
             }
             
         member this.ReceiveAsync() =
@@ -1465,12 +1440,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.BatchReceiveAsync(cancellationToken: CancellationToken) =
             task {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
-                match! postAndAsyncReply mb (fun channel -> BatchReceive(cancellationToken, channel)) with
-                | Ok msg ->
-                    return msg
-                | Error exn ->
+                try 
+                    let! msgResult = postAndAsyncReply mb (fun channel -> BatchReceive(cancellationToken, channel))
+                    return msgResult
+                with Flatten ex ->
                     stats.IncrementNumBatchReceiveFailed()
-                    return reraize exn
+                    return reraize ex
             }
             
         member this.BatchReceiveAsync() =
@@ -1565,18 +1540,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.SeekAsync (messageId: MessageId) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             postAndAsyncReply mb (fun channel -> SeekAsync (SeekType.MessageId messageId, channel))
-            |> wrapPostAndReply
 
         member this.SeekAsync (timestamp: TimeStamp) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             postAndAsyncReply mb (fun channel -> SeekAsync (SeekType.Timestamp timestamp, channel))
-            |> wrapPostAndReply
             
             
         member this.SeekAsync (resolver: Func<string, SeekType>) : Task<Unit>  =
             let startFrom = resolver.Invoke %topicName.CompleteTopicName
             postAndAsyncReply mb (fun channel -> SeekAsync (startFrom, channel))
-            |> wrapPostAndReply
 
         member this.GetLastMessageIdAsync () =
             task {
@@ -1587,7 +1559,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.UnsubscribeAsync() =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             postAndAsyncReply mb ConsumerMessage.Unsubscribe
-            |> wrapPostAndReply
 
         member this.HasReachedEndOfTopic = hasReachedEndOfTopic
 
@@ -1660,17 +1631,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         
     interface IAsyncDisposable with
         
-        member this.DisposeAsync() =     
+        member this.DisposeAsync() =
             match connectionHandler.ConnectionState with
             | Closing | Closed ->
                 ValueTask()
             | _ ->
-                task {
-                    let! result = postAndAsyncReply mb ConsumerMessage.Close
-                    match result with
-                    | Ok () -> ()
-                    | Error ex -> reraize ex 
-                } |> ValueTask
+                postAndAsyncReply mb ConsumerMessage.Close |> ValueTask
 
 
 and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,

@@ -2,7 +2,7 @@
 <Project Sdk="Microsoft.NET.Sdk" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net5.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
     <None Include="paket.references" />
@@ -16,7 +16,6 @@
     <Compile Include="Telemetry.fs" />
     <Compile Include="Oauth2.fs" />
     <Compile Include="Program.fs" />
-    <Content Include="paket.references" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>

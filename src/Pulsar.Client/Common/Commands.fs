@@ -13,7 +13,7 @@ open Microsoft.Extensions.Logging
 open Pulsar.Client.Internal
 open Pulsar.Client.Api
 open Pulsar.Client.Common
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 
 type CommandType = BaseCommand.Type
 

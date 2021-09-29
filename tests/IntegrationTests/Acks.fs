@@ -3,7 +3,7 @@ module Pulsar.Client.IntegrationTests.Acks
 open System
 open Expecto
 open Expecto.Flip
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open System.Text
 open System.Threading.Tasks
 open System.Threading

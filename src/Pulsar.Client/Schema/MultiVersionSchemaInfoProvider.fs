@@ -4,7 +4,7 @@ open System
 open System.Text
 open System.Threading.Tasks
 open Microsoft.Extensions.Caching.Memory
-open FSharp.Control.Tasks.V2.ContextInsensitive
+
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
