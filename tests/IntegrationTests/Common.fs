@@ -25,8 +25,8 @@ let pulsarSslAddress = "pulsar+ssl://127.0.0.1:6651"
 // generate pfx file from pem, leave the password blank
 // openssl pkcs12 -in admin.cert.pem -inkey admin.key-pk8.pem -export -out admin.pfx
 let ca = new Security.Cryptography.X509Certificates.X509Certificate2(@"../ssl/ca.cert.pem")
-let sslAdmin = AuthenticationFactory.tls(@"../ssl/admin.pfx")
-let sslUser1 = AuthenticationFactory.tls(@"../ssl/user1.pfx")
+let sslAdmin = AuthenticationFactory.Tls(@"../ssl/admin.pfx")
+let sslUser1 = AuthenticationFactory.Tls(@"../ssl/user1.pfx")
 #endif
 
 let configureLogging() =

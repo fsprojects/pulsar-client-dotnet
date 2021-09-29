@@ -43,10 +43,10 @@ type Credentials =
         ClientEmail : string 
 
         [<JsonPropertyName("issuer_url")>]
-        IssuerUrl : string 
+        IssuerUrl : string
     }
     
-type internal AuthenticationOauth2(issuerUrl: Uri, privateKey: Uri, audience: string) =  
+type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey: Uri, scope: string) =  
     inherit Authentication()
     
     let mutable token : Option<TokenResult * DateTime> = None  
@@ -104,7 +104,8 @@ type internal AuthenticationOauth2(issuerUrl: Uri, privateKey: Uri, audience: st
                         tokenTaskResult.ExchangeClientCredentials(
                             credentials.ClientId,
                             credentials.ClientSecret,
-                            audience
+                            audience,
+                            scope
                         )
                 }).GetAwaiter().GetResult()
             match newToken with

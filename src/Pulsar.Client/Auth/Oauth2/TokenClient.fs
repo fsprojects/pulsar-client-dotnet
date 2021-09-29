@@ -43,7 +43,7 @@ type internal TokenExchangeResult =
     
 type internal TokenClient (tokenUrl: Uri, client: HttpClient) =
         
-    member this.ExchangeClientCredentials(clientId:string, clientSecret:string, audience:string)=
+    member this.ExchangeClientCredentials(clientId:string, clientSecret:string, audience:string, scope: string)=
         task {
             use request = new HttpRequestMessage(HttpMethod.Post, tokenUrl)
 
@@ -55,6 +55,8 @@ type internal TokenClient (tokenUrl: Uri, client: HttpClient) =
                 KeyValuePair("client_id", clientId)
                 KeyValuePair("client_secret", clientSecret)
                 KeyValuePair("audience", audience)
+                if scope |> String.IsNullOrEmpty |> not then
+                    KeyValuePair("scope", scope)
             }
 
             request.Content <- new FormUrlEncodedContent(body)

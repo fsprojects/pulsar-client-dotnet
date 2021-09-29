@@ -10,5 +10,5 @@ let newAuthenticationToken (token: string) =
 let newAuthenticationTls (certFilePath: string) =
     new AuthenticationTls (certFilePath)
     
-let newAuthenticationOauth2 (issuerUrl : Uri, credentialsJson: Uri, audience: string) =
-    new AuthenticationOauth2 (issuerUrl, credentialsJson, audience)
+let newAuthenticationOauth2 (issuerUrl : Uri, audience: string, privateKey: Uri, scope: string) =
+    new AuthenticationOauth2 (issuerUrl, audience, privateKey, scope)

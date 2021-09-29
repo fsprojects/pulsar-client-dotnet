@@ -1,8 +1,11 @@
-﻿module Pulsar.Client.Api.AuthenticationFactoryOAuth2
-
+﻿namespace Pulsar.Client.Api
 open System
+open System.Runtime.InteropServices
 open Pulsar.Client.Auth
 
-let clientCredentials (issuerUrl : Uri, credentialsJson: Uri, audience: string) =
-    DefaultImplementation.newAuthenticationOauth2 (issuerUrl, credentialsJson, audience)
-    :> Authentication
+type AuthenticationFactoryOAuth2 =
+
+    static member ClientCredentials (issuerUrl : Uri, audience: string, privateKey: Uri,
+                                   [<Optional; DefaultParameterValue(null:string)>] scope) =
+        DefaultImplementation.newAuthenticationOauth2 (issuerUrl, audience, privateKey, scope)
+        :> Authentication

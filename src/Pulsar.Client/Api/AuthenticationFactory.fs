@@ -1,10 +1,12 @@
-﻿module Pulsar.Client.Api.AuthenticationFactory
+﻿namespace Pulsar.Client.Api
 
 open Pulsar.Client.Auth
 
-let token (token: string) : Authentication =
-    DefaultImplementation.newAuthenticationToken token :> Authentication
+type AuthenticationFactory =
 
-let tls (certFilePath: string) : Authentication =
-    DefaultImplementation.newAuthenticationTls certFilePath :> Authentication
+    static member Token (token: string) : Authentication =
+        DefaultImplementation.newAuthenticationToken token :> Authentication
+
+    static member Tls (certFilePath: string) : Authentication =
+        DefaultImplementation.newAuthenticationTls certFilePath :> Authentication
     
