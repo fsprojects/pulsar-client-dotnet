@@ -418,8 +418,8 @@ type ChunkDetails =
         member this.IsLast =
             this.ChunkId = this.TotalChunks - 1
 
-type internal SingleCallback<'T> = ChunkDetails option * MessageBuilder<'T> * TaskCompletionSource<MessageId>
-type internal BatchCallback<'T> = BatchDetails * MessageBuilder<'T> * TaskCompletionSource<MessageId>
+type internal SingleCallback<'T> = ChunkDetails option * MessageBuilder<'T> * TaskCompletionSource<MessageId> option
+type internal BatchCallback<'T> = BatchDetails * MessageBuilder<'T> * TaskCompletionSource<MessageId> option
 type internal PendingCallback<'T> = 
     | SingleCallback of SingleCallback<'T>
     | BatchCallbacks of BatchCallback<'T>[]
@@ -436,7 +436,7 @@ type internal PendingMessage<'T> =
 type internal BatchItem<'T> =
     {
         Message: MessageBuilder<'T>
-        Tcs : TaskCompletionSource<MessageId>
+        Tcs : TaskCompletionSource<MessageId> option
         SequenceId: SequenceId
     }
 

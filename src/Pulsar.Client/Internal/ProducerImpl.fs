@@ -17,7 +17,7 @@ open System.Runtime.InteropServices
 open Pulsar.Client.Transaction
 open System.Threading.Channels
 
-type SendMessageRequest<'T> = MessageBuilder<'T> * TaskCompletionSource<MessageId>
+type SendMessageRequest<'T> = MessageBuilder<'T> * TaskCompletionSource<MessageId> * bool
 
 type internal ProducerTickType =
     | SendBatchTick
@@ -95,10 +95,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             KeyBasedBatchMessageContainer(prefix, producerConfig) :> MessageContainer<'T>
         | _ -> failwith "Unknown BatchBuilder type"
 
-    let failMessage (message: MessageBuilder<'T>) (tcs: TaskCompletionSource<MessageId>) (ex: exn) =
+    let failMessage (message: MessageBuilder<'T>) (tcs: TaskCompletionSource<MessageId> option) (ex: exn) =
         interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
         stats.IncrementSendFailed()
-        tcs.SetException(ex)
+        tcs |> Option.iter (fun tcs -> tcs.SetException(ex))
     
     let failPendingMessage msg (ex: exn) =
         match msg.Callback with
@@ -119,7 +119,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             let msg = pendingMessages.Dequeue()
             failPendingMessage msg ex
         while blockedRequests.Count > 0 do
-            let _, channel = blockedRequests.Dequeue()
+            let _, channel, _ = blockedRequests.Dequeue()
             channel.SetException ex
         if producerConfig.BatchingEnabled then
             failPendingBatchMessages ex
@@ -353,8 +353,15 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             true
         
     let beginSendMessage (sendRequest: SendMessageRequest<'T>) =
-        let message, channel = sendRequest
+        let message, channel, isFireAndForget = sendRequest
         if canEnqueueRequest channel sendRequest 1 then
+            if isFireAndForget then
+                channel.SetResult <| Unchecked.defaultof<MessageId>
+            let channel =
+                if isFireAndForget then
+                    None
+                else
+                    Some channel
             let sequenceId =
                 match message.SequenceId with
                 | Some seqId ->
@@ -599,7 +606,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                             currentMessageId
                                     interceptors.OnSendAcknowledgement(this, msg, msgId, null)
                                     stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
-                                    tcs.SetResult(msgId)
+                                    tcs |> Option.iter (fun tcs -> tcs.SetResult(msgId))
                                 else
                                     // updating messageIds array
                                     let chunkDetails = chunkDetailsOption.Value
@@ -615,7 +622,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                                     Type = Batch msgId; TopicName = %""; ChunkMessageIds = None }
                                     interceptors.OnSendAcknowledgement(this, msg, msgId, null)
                                     stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
-                                    tcs.SetResult(msgId))
+                                    tcs |> Option.iter (fun tcs -> tcs.SetResult(msgId)))
                         else
                             Log.Logger.LogWarning("{0} Got ack for batch msg error. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
                                                     prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
@@ -749,7 +756,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     do startStatTimer()
     do startCryptoTimer()
 
-    member private this.SendMessage (message : MessageBuilder<'T>) =
+    member private this.SendMessage (message : MessageBuilder<'T>, isFireAndForget: bool): Task<MessageId> =
         task {
             match message.Txn with
             | Some txn ->
@@ -757,7 +764,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             | None ->
                 ()
             let interceptMsg = interceptors.BeforeSend(this, message)
-            return! postAndAsyncReply mb (fun channel -> BeginSendMessage (interceptMsg, channel))
+            return! postAndAsyncReply mb (fun channel -> BeginSendMessage (interceptMsg, channel, isFireAndForget))
         }
 
     member internal this.Mb with get(): Channel<ProducerMessage<'T>> = mb
@@ -826,36 +833,40 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.SendAndForgetAsync (message: 'T) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             let msg = _this.NewMessage message
-            let sendTask = this.SendMessage msg
+            let sendTask = this.SendMessage(msg, true)
             if sendTask.IsFaulted then
                 let (Flatten ex) = sendTask.Exception
                 Task.FromException<Unit> ex
             else
-                unitTask
+                task {
+                    let! _ =  sendTask
+                    return ()
+                }
 
         member this.SendAndForgetAsync (message: MessageBuilder<'T>) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
-            let sendTask = this.SendMessage message
+            let sendTask = this.SendMessage(message, true)
             if sendTask.IsFaulted then
                 let (Flatten ex) = sendTask.Exception
                 Task.FromException<Unit> ex
             else
                 message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
-                unitTask
+                task {
+                    let! _ =  sendTask
+                    return ()
+                }
 
         member this.SendAsync (message: 'T) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
             let msg = _this.NewMessage message
-            this.SendMessage msg
+            this.SendMessage(msg, false)
 
         member this.SendAsync (message: MessageBuilder<'T>) =
             connectionHandler.CheckIfActive() |> throwIfNotNull
-            task {
-                let sendTask = this.SendMessage message
-                if not sendTask.IsFaulted then
-                    message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
-                return! sendTask
-            }
+            let sendTask = this.SendMessage(message, false)
+            if not sendTask.IsFaulted then
+                message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
+            sendTask
 
         member this.NewMessage (value:'T,
             [<Optional; DefaultParameterValue(null:string)>]key:string,
