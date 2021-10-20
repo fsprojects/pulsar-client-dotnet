@@ -32,7 +32,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                     ()
                 | _ ->
                     activity
-                        .SetTag("acknowledge.type", "Duplicate")
+                        .SetTag("messaging.acknowledge_type", "Duplicate")
                         .Dispose()
                     log.LogWarning("{0} Duplicate activity detected", prefix)
                         
@@ -43,9 +43,11 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                 message    //If there are no listeners interested in this activity, the activity above will be null <..> Ensure that all subsequent calls using this activity are protected with a null check.                
             else
                 activity
+                    .SetTag("messaging.system", "pulsar") 
                     .SetTag("messaging.destination_kind", "topic") 
-                    .SetTag("messaging.destination", producer.Topic) 
-                    .SetTag("messaging.operation", "Produce")
+                    .SetTag("messaging.destination", producer.Topic)
+                    .SetTag("messaging.operation", "send")
+                    .SetTag("messaging.producer_id",$"{producer.Name} - {producer.ProducerId}")
                     |> ignore                
                 if activity.IsAllDataRequested then
                    // It is highly recommended to check activity.IsAllDataRequested,
@@ -66,7 +68,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
         member this.Dispose() =
             for KeyValue(_, activity) in cache do 
                 activity
-                    .SetTag("acknowledge.type", "InterceptorStopped")
+                    .SetTag("messaging.acknowledge_type", "InterceptorStopped")
                     .Dispose()
             activitySource.Dispose()
             cache.Clear()
@@ -82,14 +84,14 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                         match exn with
                         | null ->
                              activity
-                                .SetTag("acknowledge.type", "Success")
+                                .SetTag("messaging.acknowledge_type", "Success")
                                 .SetTag("messaging.message_id", messageId)
                                 .Dispose()
                         |  _ ->
                             //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md                                             
                             activity
-                                .SetTag("acknowledge.type", "Error")
-                                .SetTag("exception.type", exn.Source) 
+                                .SetTag("messaging.acknowledge_type", "Error")
+                                .SetTag("exception.type", exn.GetType().FullName) 
                                 .SetTag("exception.message", exn.Message) 
                                 .SetTag("exception.stacktrace", exn.StackTrace)
                                 .Dispose()
