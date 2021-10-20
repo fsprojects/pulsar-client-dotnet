@@ -114,7 +114,7 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     .SetTag("messaging.system", "pulsar") 
                     .SetTag("messaging.destination_kind", "topic")                    
                     .SetTag("messaging.destination", consumer.Topic)
-                    .SetTag("messaging.consumer_id", consumer.ConsumerId)
+                    .SetTag("messaging.id", $"{consumer.Name} - {consumer.ConsumerId}")
                     .SetTag("messaging.message_id", message.MessageId)
                     .SetTag("messaging.operation", "receive")
                     |> ignore
