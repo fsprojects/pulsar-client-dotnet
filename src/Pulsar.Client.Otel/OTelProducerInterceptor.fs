@@ -47,7 +47,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                     .SetTag("messaging.destination_kind", "topic") 
                     .SetTag("messaging.destination", producer.Topic)
                     .SetTag("messaging.operation", "send")
-                    .SetTag("messaging.id",$"{producer.Name} - {producer.ProducerId}")
+                    .SetTag("messaging.producer_id",$"{producer.Name} - {producer.ProducerId}")
                     |> ignore                
                 if activity.IsAllDataRequested then
                    // It is highly recommended to check activity.IsAllDataRequested,
