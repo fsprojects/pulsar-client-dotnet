@@ -43,9 +43,9 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                 message    //If there are no listeners interested in this activity, the activity above will be null <..> Ensure that all subsequent calls using this activity are protected with a null check.                
             else
                 activity
+                    .SetTag("messaging.system", "pulsar") 
                     .SetTag("messaging.destination_kind", "topic") 
-                    .SetTag("messaging.destination", producer.Topic) 
-                    .SetTag("messaging.operation", "Produce")
+                    .SetTag("messaging.destination", producer.Topic)                    
                     |> ignore                
                 if activity.IsAllDataRequested then
                    // It is highly recommended to check activity.IsAllDataRequested,

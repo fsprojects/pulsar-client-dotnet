@@ -111,10 +111,12 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                                              parentContext.ActivityContext)            
             if activity |> isNull |> not then
                 activity
-                    .SetTag("messaging.destination_kind", "topic")
+                    .SetTag("messaging.system", "pulsar") 
+                    .SetTag("messaging.destination_kind", "topic")                    
                     .SetTag("messaging.destination", consumer.Topic)
+                    .SetTag("messaging.consumer_id", consumer.ConsumerId)
                     .SetTag("messaging.message_id", message.MessageId)
-                    .SetTag("messaging.operation", "Consume")
+                    .SetTag("messaging.operation", "receive")
                     |> ignore
                 if activity.IsAllDataRequested then
                     parentContext.Baggage.GetBaggage()
