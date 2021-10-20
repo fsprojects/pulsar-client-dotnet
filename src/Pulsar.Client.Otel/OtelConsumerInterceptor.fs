@@ -28,7 +28,7 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
     
     let stopActivitySuccessfully (activity: Activity) ackType =
         activity
-            .SetTag("acknowledge.type", ackType)
+            .SetTag("messaging.acknowledge_type", ackType)
             .Dispose()
     
     let endActivity messageId (ackResult: AckResult) =
@@ -39,8 +39,8 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                  stopActivitySuccessfully activity ackType
             | Error exn ->
                 activity
-                    .SetTag("acknowledge.type", "Error")
-                    .SetTag("exception.type", exn.Source)
+                    .SetTag("messaging.acknowledge_type", "Error")
+                    .SetTag("exception.type", exn.GetType().FullName)
                     .SetTag("exception.message", exn.Message)
                     .SetTag("exception.stacktrace", exn.StackTrace)
                     .Dispose()
@@ -76,14 +76,14 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                 match cache.TryGetValue msgId with
                 | true, _ ->
                     activity
-                        .SetTag("acknowledge.type", "Duplicate")
+                        .SetTag("messaging.acknowledge_type", "Duplicate")
                         .Dispose()
                 | _ ->
                     cache.Add(msgId, activity)
             | InterceptorCommand.Stop ->
                 for KeyValue(_, activity) in cache do 
                     activity
-                        .SetTag("acknowledge.type", "InterceptorStopped")
+                        .SetTag("messaging.acknowledge_type", "InterceptorStopped")
                         .Dispose()
                 activitySource.Dispose()
                 cache.Clear()
