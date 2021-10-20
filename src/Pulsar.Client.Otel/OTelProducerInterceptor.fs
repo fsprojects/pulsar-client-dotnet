@@ -91,7 +91,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                             //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md                                             
                             activity
                                 .SetTag("acknowledge.type", "Error")
-                                .SetTag("exception.type", exn.Source) 
+                                .SetTag("exception.type", exn.GetType().FullName) 
                                 .SetTag("exception.message", exn.Message) 
                                 .SetTag("exception.stacktrace", exn.StackTrace)
                                 .Dispose()
