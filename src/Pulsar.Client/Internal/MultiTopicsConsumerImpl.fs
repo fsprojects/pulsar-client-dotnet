@@ -530,7 +530,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         
     
     let runPoller (ct: CancellationToken) =
-        Task.Run<unit>(fun () ->
+        (Task.Run<unit>(fun () ->
                 task {
                     while not ct.IsCancellationRequested do
                         let! msg = currentStream.Next()
@@ -538,7 +538,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             do! postAndAsyncReply this.Mb (fun channel -> MessageReceived (msg, channel))
                         ()
                 }
-            , ct)
+        , ct) :> Task).ContinueWith(fun t ->
+                if t.IsFaulted then
+                    let (Flatten ex) = t.Exception
+                    Log.Logger.LogCritical(ex, "{0} poller failure", prefix)
+                else
+                    Log.Logger.LogInformation("{0} poller has stopped normally", prefix)
+            )
     
     let mb = Channel.CreateUnbounded<MultiTopicConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (task {

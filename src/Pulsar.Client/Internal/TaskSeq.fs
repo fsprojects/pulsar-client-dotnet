@@ -150,7 +150,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
         
     member this.Next() =
         task {
-            let! completedTask =  postAndAsyncReply mb Next |> Async.AwaitTask
+            let! completedTask = postAndAsyncReply mb Next |> Async.AwaitTask
             Log.Logger.LogTrace("TaskSeq.Next {0}", completedTask.Status) 
             if completedTask.IsCanceled then
                 let! restartedTask = this.RestartNext()

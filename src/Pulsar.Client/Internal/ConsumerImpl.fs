@@ -48,8 +48,8 @@ type internal ConsumerMessage<'T> =
     | Tick of ConsumerTickType
     | GetStats of TaskCompletionSource<ConsumerStats>
     | ReconsumeLater of Message<'T> * AckType * TimeStamp * TaskCompletionSource<unit>
-    | RemoveWaiter of Waiter<'T>
-    | RemoveBatchWaiter of BatchWaiter<'T>
+    | CancelWaiter of Waiter<'T>
+    | CancelBatchWaiter of BatchWaiter<'T>
     | AckReceipt of RequestId
     | AckError of RequestId * exn
     | ClearIncomingMessagesAndGetMessageNumber of TaskCompletionSource<int>
@@ -888,8 +888,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 let rec cancellationTokenRegistration =
                                     cancellationToken.Register((fun () ->
                                         Log.Logger.LogDebug("{0} receive cancelled", prefix)
-                                        channel.SetCanceled()
-                                        post this.Mb (RemoveWaiter(cancellationTokenRegistration, channel))
+                                        post this.Mb (CancelWaiter(cancellationTokenRegistration, channel))
                                     ), false) |> Some
                                 cancellationTokenRegistration
                             else
@@ -924,9 +923,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 let rec cancellationTokenRegistration =
                                     cancellationToken.Register((fun () ->
                                         Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
-                                        batchCts.Cancel()
-                                        channel.SetCanceled()
-                                        post this.Mb (RemoveBatchWaiter(batchCts, cancellationTokenRegistration, channel))
+                                        post this.Mb (CancelBatchWaiter(batchCts, cancellationTokenRegistration, channel))
                                     ), false) |> Some
                                 cancellationTokenRegistration
                             else
@@ -936,9 +933,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             consumerConfig.BatchReceivePolicy.Timeout
                             (fun () ->
                                 if not batchCts.IsCancellationRequested then
-                                    post this.Mb SendBatchByTimeout
-                                else
-                                    batchCts.Dispose())
+                                    post this.Mb SendBatchByTimeout)
                         Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
                                 
             | ConsumerMessage.SendBatchByTimeout ->
@@ -955,18 +950,21 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 // Ensure the message is not redelivered for ack-timeout, since we did receive an "ack"
                 untrackMessage messageId
                                                 
-            | ConsumerMessage.RemoveWaiter waiter ->
+            | ConsumerMessage.CancelWaiter waiter ->
+ 
+                if waiters.Remove waiter then
+                    let ctrOpt, channel = waiter
+                    channel.SetCanceled()
+                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
                                 
-                waiters.Remove(waiter) |> ignore
-                let ctrOpt, _ = waiter
-                ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
-                                
-            | ConsumerMessage.RemoveBatchWaiter batchWaiter ->
-                                
-                batchWaiters.Remove(batchWaiter) |> ignore
-                let cts, ctrOpt, _ = batchWaiter
-                ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
-                cts.Dispose()
+            | ConsumerMessage.CancelBatchWaiter batchWaiter ->
+
+                if batchWaiters.Remove batchWaiter then
+                    let batchCts, ctrOpt, channel = batchWaiter
+                    batchCts.Cancel()
+                    batchCts.Dispose()
+                    channel.SetCanceled()
+                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
                                 
             | ConsumerMessage.AckReceipt reqId ->
                                 
