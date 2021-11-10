@@ -31,7 +31,7 @@ type AvroSchemaTest = { X: string; Y: ResizeArray<int> }
 type ProtobufNativeSchemaTest = {
         [<ProtoMember(1)>]foo: string
         [<ProtoMember(2)>]bar: double
-        [<ProtoMember(3)>]time: DateTime
+        [<ProtoMember(3)>][<CompatibilityLevel(CompatibilityLevel.Level300)>]time: DateTime
     }
 
 [<Tests>]
