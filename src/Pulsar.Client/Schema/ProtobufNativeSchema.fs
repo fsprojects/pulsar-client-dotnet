@@ -20,11 +20,34 @@ type   ProtobufNativeSchemaData(fileDescriptorSet:byte[],
     member  this.rootMessageTypeName =rootMessageTypeName     
     member  this.rootFileDescriptorName =rootFileDescriptorName
 type VirtualFile(content:string)=
+    let timestampProtoName = "/google/protobuf/timestamp.proto"
+    let timestampProtoContent = "
+syntax = \"proto3\";
+
+package google.protobuf;
+
+option csharp_namespace = \"Google.Protobuf.WellKnownTypes\";
+option cc_enable_arenas = true;
+option go_package = \"google.golang.org/protobuf/types/known/timestamppb\";
+option java_package = \"com.google.protobuf\";
+option java_outer_classname = \"TimestampProto\";
+option java_multiple_files = true;
+option objc_class_prefix = \"GPB\";
+
+message Timestamp {
+  int64 seconds = 1;
+  int32 nanos = 2;
+}
+"
     member private this.Content = content
     interface IFileSystem with
         member this.Exists _ = true
-        member this.OpenText _ =
-            new StringReader(this.Content) :> TextReader
+        member this.OpenText path =
+            if timestampProtoName.Equals(path)
+            then
+                new StringReader(timestampProtoContent) :> TextReader
+            else
+                new StringReader(this.Content) :> TextReader
 type internal ProtoBufNativeSchema<'T > () =
     inherit ISchema<'T>()    
   

@@ -31,6 +31,7 @@ type AvroSchemaTest = { X: string; Y: ResizeArray<int> }
 type ProtobufNativeSchemaTest = {
         [<ProtoMember(1)>]foo: string
         [<ProtoMember(2)>]bar: double
+        [<ProtoMember(3)>]time: DateTime
     }
 
 [<Tests>]
@@ -194,7 +195,7 @@ let tests =
         }
         
         test "Protobuf native" {
-            let inputs = [{ ProtobufNativeSchemaTest.foo = "X1"; bar = 1.0}]
+            let inputs = [{ ProtobufNativeSchemaTest.foo = "X1"; bar = 1.0; time = DateTime.Now}]
             for input in inputs do
                 let schema = Schema.PROTOBUF_NATIVE<ProtobufNativeSchemaTest>()
                 let output =
@@ -203,6 +204,7 @@ let tests =
                     |> schema.Decode
                 Expect.equal "" input.foo output.foo
                 Expect.equal "" input.bar output.bar
+                Expect.equal "" input.time output.time
         }
         
         test "Avro schema works fine with Avro generated classes" {
