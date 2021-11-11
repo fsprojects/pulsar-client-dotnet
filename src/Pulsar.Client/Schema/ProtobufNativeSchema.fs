@@ -16,34 +16,33 @@ type ExtensibleClass()=
     inherit Extensible()
 type   ProtobufNativeSchemaData(fileDescriptorSet:byte[],
                                        rootMessageTypeName: string,
-                                       rootFileDescriptorName:string) =      
-    member this.fileDescriptorSet = fileDescriptorSet       
-    member  this.rootMessageTypeName =rootMessageTypeName     
+                                       rootFileDescriptorName:string) =
+    member this.fileDescriptorSet = fileDescriptorSet
+    member  this.rootMessageTypeName =rootMessageTypeName
     member  this.rootFileDescriptorName =rootFileDescriptorName
 type VirtualFile(fileName:string, content:string)=
-    let assembly = Assembly.GetAssembly typeof<IFileSystem>
-    let resourceNamesList = (assembly.GetManifestResourceNames() |> Array.toList)
-    member private this.Content = content
-    member private this.isUserFile(path : String) =
+    let protobufReflectionAssembly = Assembly.GetAssembly typeof<IFileSystem>
+    let embeddedProtoFilesNames = protobufReflectionAssembly.GetManifestResourceNames()
+    let isUserFile (path: string) =
         // we need to subtract the prefix `/` here.
-        path.Substring(1) |> fileName.Equals
-    member private this.getBuiltinProtoPath(path : String) =
-        $"ProtoBuf{path.Replace('/', '.')}"
+        path.Substring 1 = fileName
+    let getEmbeddedProtoName (path: string) =
+        "ProtoBuf" + path.Replace('/', '.')
     interface IFileSystem with
         member this.Exists path =
-            this.isUserFile path ||
-            List.contains (path |> this.getBuiltinProtoPath) resourceNamesList
+            isUserFile path
+            || Array.contains (getEmbeddedProtoName path) embeddedProtoFilesNames
         member this.OpenText path =
-            if this.isUserFile path
-            then
-                new StringReader(this.Content) :> TextReader
+            if isUserFile path then
+                new StringReader(content) :> TextReader
             else
-                new StreamReader(path |> this.getBuiltinProtoPath |> assembly.GetManifestResourceStream) :> TextReader
+                let embededResourceStream = path |> getEmbeddedProtoName |> protobufReflectionAssembly.GetManifestResourceStream
+                new StreamReader(embededResourceStream) :> TextReader
                 
 type internal ProtoBufNativeSchema<'T > () =
-    inherit ISchema<'T>()    
+    inherit ISchema<'T>()
   
-    let getDescriptor( )=        
+    let getDescriptor( )=
        
        
         let gotClassAttribute = Attribute.GetCustomAttributes(typeof<'T>) |>
@@ -55,7 +54,7 @@ type internal ProtoBufNativeSchema<'T > () =
         match gotClassAttribute with
             Some _ ->
                 let userClassNamespace = typeof<'T>.Namespace
-                let userClassName = typeof<'T>.Name               
+                let userClassName = typeof<'T>.Name
                
                 let protoForType = Serializer.GetProto<'T> ()
                 let protoFileName = userClassName + ".proto"
@@ -83,8 +82,8 @@ type internal ProtoBufNativeSchema<'T > () =
     override this.Encode value =            
         if parameterIsClass && (isNull <| box value) then
             raise <| SchemaSerializationException "Need Non-Null content value"
-        use stream = MemoryStreamManager.GetStream()      
-        Serializer.Serialize(stream, value)       
+        use stream = MemoryStreamManager.GetStream()
+        Serializer.Serialize(stream, value)
         stream.ToArray()  
 
     override this.SchemaInfo =
@@ -113,19 +112,19 @@ type internal GenericProtobufNativeSchema(topicSchema: TopicSchema) =
             |> Option.map (fun sv -> sv.Bytes)
             |> Option.toObj
             
-        let schemaSpan = ReadOnlySpan(topicSchema.SchemaInfo.Schema)         
-        let data = JsonSerializer.Deserialize schemaSpan :> ProtobufNativeSchemaData        
+        let schemaSpan = ReadOnlySpan(topicSchema.SchemaInfo.Schema)
+        let data = JsonSerializer.Deserialize schemaSpan :> ProtobufNativeSchemaData
         let descriptorSpan = ReadOnlySpan(data.fileDescriptorSet)
         let desc = Serializer.Deserialize<FileDescriptorSet>  descriptorSpan
         let extensibleSpan = ReadOnlySpan(bytes)
         let ext = Serializer.Deserialize<ExtensibleClass>  extensibleSpan
         
         let file = desc.Files.[0] //we don't allow multi-file for now anyway
-        let messageFields = file.MessageTypes.[0].Fields               
+        let messageFields = file.MessageTypes.[0].Fields
        
         let getFieldsFromMessage (field:FieldDescriptorProto) : Field =
             let fieldCreator value =
-                { Name = field.Name; Value = value; Index = field.Number }            
+                { Name = field.Name; Value = value; Index = field.Number }
             match field.``type`` with
               
                | FieldDescriptorProto.Type.TypeDouble -> 
@@ -143,7 +142,7 @@ type internal GenericProtobufNativeSchema(topicSchema: TopicSchema) =
                | FieldDescriptorProto.Type.TypeFixed32
                | FieldDescriptorProto.Type.TypeSint32
                | FieldDescriptorProto.Type.TypeSfixed32  -> 
-                   Extensible.GetValue<int32>(ext, field.Number) |> fieldCreator     
+                   Extensible.GetValue<int32>(ext, field.Number) |> fieldCreator
                | FieldDescriptorProto.Type.TypeBool -> 
                    Extensible.GetValue<bool >(ext, field.Number)  |> fieldCreator
                | FieldDescriptorProto.Type.TypeString ->                
@@ -153,7 +152,7 @@ type internal GenericProtobufNativeSchema(topicSchema: TopicSchema) =
                | FieldDescriptorProto.Type.TypeUint32 -> 
                    Extensible.GetValue<uint32 >(ext, field.Number)  |> fieldCreator
                | FieldDescriptorProto.Type.TypeEnum -> 
-                   Extensible.GetValue<Enum>(ext, field.Number)  |> fieldCreator                       
+                   Extensible.GetValue<Enum>(ext, field.Number)  |> fieldCreator
                | _ -> failwith "not supported yet" //TYPE_MESSAGE
                
         let fields =
