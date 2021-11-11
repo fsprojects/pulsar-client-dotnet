@@ -8,7 +8,7 @@ namespace AvroGenerated
     {
         private static void Main(string[] args)
         {
-            string[] allLines = File.ReadAllLines(@"..\..\..\sample.avsc", Encoding.UTF8);
+            string[] allLines = File.ReadAllLines(@"../../../sample.avsc", Encoding.UTF8);
 
             var schemaJson = string.Join("", allLines);
 
@@ -16,7 +16,7 @@ namespace AvroGenerated
             var codeGen = new CodeGen();
             codeGen.AddSchema(avroSchema);
             codeGen.GenerateCode();
-            codeGen.WriteTypes(@"..\..\..\..\");    
+            codeGen.WriteTypes(@"../../../../");    
         }
         
     }

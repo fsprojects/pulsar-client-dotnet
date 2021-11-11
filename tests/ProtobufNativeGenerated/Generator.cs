@@ -34,14 +34,14 @@ namespace ProtobufNativeGenerated
         static void Main(string[] args)
         {
             CodeGenerator codegen = CSharpCodeGenerator.Default;
-            var set = new FileDescriptorSet{FileSystem = new VirtualFile(@"..\..\..\sample.proto")};
+            var set = new FileDescriptorSet{FileSystem = new VirtualFile(@"../../../sample.proto")};
             var protoFileName = "sample.proto"; //https://developers.google.com/protocol-buffers/docs/proto3
             var baseUri = new Uri("file://" + protoFileName, UriKind.Absolute);
             set.AddImportPath(baseUri.AbsolutePath);
             set.Add(protoFileName);
             set.Process();
             var files = codegen.Generate(set);
-            WriteFiles(files, @"..\..\..\");
+            WriteFiles(files, @"../../../");
           
         }
         static void WriteFiles(IEnumerable<CodeFile> files, string outPath)
