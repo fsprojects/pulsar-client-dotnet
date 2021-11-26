@@ -674,6 +674,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             rawMessage.Metadata.PublishTime,
                             rawMessage.Metadata.EventTime,
                             rawMessage.RedeliveryCount,
+                            rawMessage.Metadata.ReplicatedFrom,
                             getValue
                         )
             if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
@@ -1336,6 +1337,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 rawMessage.Metadata.PublishTime,
                                 eventTime,
                                 rawMessage.RedeliveryCount,
+                                rawMessage.Metadata.ReplicatedFrom,
                                 getValue
                             )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then

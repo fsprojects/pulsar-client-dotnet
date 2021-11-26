@@ -511,6 +511,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             EncryptionParam = messageMetadata.EncryptionParam
             EncryptionAlgo = messageMetadata.EncryptionAlgo
             OrderingKey = messageMetadata.OrderingKey
+            ReplicatedFrom = messageMetadata.ReplicatedFrom
         }
 
         {
