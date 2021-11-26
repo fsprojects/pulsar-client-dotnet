@@ -28,6 +28,7 @@ let tests =
             EncryptionAlgo = ""
             EventTime = Nullable()
             OrderingKey = [||]
+            ReplicatedFrom = ""
         }
         
     let testRawMessage =
