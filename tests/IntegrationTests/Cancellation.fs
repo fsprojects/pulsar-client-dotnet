@@ -39,7 +39,7 @@ let tests =
             with _ ->
                 Expect.equal "" consumerTask.Status TaskStatus.Canceled
                 
-            Log.Debug("Finished Send and receive 100 messages concurrently works fine with small receiver queue size")
+            Log.Debug("Finished Cancellation without receiving a single message works fine")
         }
         
         testAsync "Cancellation without receiving a single message works fine (multitopic)" {

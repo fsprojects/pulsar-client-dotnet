@@ -50,7 +50,7 @@ jobs:
         docker-compose logs init
 
     - name: Run Integration Tests
-      timeout-minutes: 2
+      timeout-minutes: 3
       run: |
         cd tests/IntegrationTests
-        dotnet run --no-spinner --debug
+        dotnet run -c Release --no-build --no-spinner
