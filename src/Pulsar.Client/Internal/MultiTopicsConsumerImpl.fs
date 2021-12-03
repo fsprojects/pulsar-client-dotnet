@@ -40,8 +40,8 @@ type internal BatchAddResponse<'T> =
 
 type internal MultiTopicConsumerMessage<'T> =
     | Init
-    | Receive of CancellationToken * TaskCompletionSource<Message<'T>>
-    | BatchReceive of CancellationToken * TaskCompletionSource<Messages<'T>>
+    | Receive of ReceiveCallback<'T>
+    | BatchReceive of ReceiveCallbacks<'T>
     | MessageReceived of ResultOrException<Message<'T>> * TaskCompletionSource<unit>
     | SendBatchByTimeout
     | Acknowledge of TaskCompletionSource<unit> * MessageId * Transaction option
@@ -528,6 +528,63 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         | Error ex ->
             channel.SetException ex
         
+    let receive (receiveCallback: ReceiveCallback<'T>) =
+        Log.Logger.LogDebug("{0} Receive", prefix)
+        let cancellationToken = receiveCallback.CancellationToken
+        let channel = receiveCallback.MessageChannel
+        if cancellationToken.IsCancellationRequested then
+            channel.SetCanceled()
+        else
+            if incomingMessages.Count > 0 then
+                replyWithMessage channel <| dequeueMessage()
+            else
+                let tokenRegistration =
+                    if cancellationToken.CanBeCanceled then
+                        let rec cancellationTokenRegistration =
+                            cancellationToken.Register((fun () ->
+                                Log.Logger.LogDebug("{0} receive cancelled", prefix)
+                                channel.SetCanceled()
+                                post this.Mb (RemoveWaiter(cancellationTokenRegistration, channel))
+                            ), false) |> Some
+                        cancellationTokenRegistration
+                    else
+                        None
+                waiters.AddLast((tokenRegistration, channel)) |> ignore
+                Log.Logger.LogDebug("{0} Receive waiting", prefix)
+                
+    let batchReceive (receiveCallbacks: ReceiveCallbacks<'T>) =
+        Log.Logger.LogDebug("{0} BatchReceive", prefix)
+        let cancellationToken = receiveCallbacks.CancellationToken
+        let channel = receiveCallbacks.MessagesChannel
+        if cancellationToken.IsCancellationRequested then
+            channel.SetCanceled()
+        else
+            if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
+                replyWithBatch channel
+            else
+                let batchCts = new CancellationTokenSource()
+                let registration =
+                    if cancellationToken.CanBeCanceled then
+                        let rec cancellationTokenRegistration =
+                            cancellationToken.Register((fun () ->
+                                Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
+                                batchCts.Cancel()
+                                channel.SetCanceled()
+                                post this.Mb (RemoveBatchWaiter(batchCts, cancellationTokenRegistration, channel))
+                            ), false)
+                            |> Some
+                        cancellationTokenRegistration
+                    else
+                        None
+                batchWaiters.AddLast((batchCts, registration, channel)) |> ignore
+                asyncDelay
+                    consumerConfig.BatchReceivePolicy.Timeout
+                    (fun () ->
+                        if not batchCts.IsCancellationRequested then
+                            post this.Mb SendBatchByTimeout
+                        else
+                            batchCts.Dispose())
+                Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
     
     let runPoller (ct: CancellationToken) =
         (Task.Run<unit>(fun () ->
@@ -610,61 +667,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 else
                     pollerChannel.SetResult()
                 
-            | Receive (cancellationToken, channel) ->
+            | Receive receiveCallback ->
                 
-                Log.Logger.LogDebug("{0} Receive", prefix)
-                if cancellationToken.IsCancellationRequested then
-                    channel.SetCanceled()
-                else
-                    if incomingMessages.Count > 0 then
-                        replyWithMessage channel <| dequeueMessage()
-                    else
-                        let tokenRegistration =
-                            if cancellationToken.CanBeCanceled then
-                                let rec cancellationTokenRegistration =
-                                    cancellationToken.Register((fun () ->
-                                        Log.Logger.LogDebug("{0} receive cancelled", prefix)
-                                        channel.SetCanceled()
-                                        post this.Mb (RemoveWaiter(cancellationTokenRegistration, channel))
-                                    ), false) |> Some
-                                cancellationTokenRegistration
-                            else
-                                None
-                        waiters.AddLast((tokenRegistration, channel)) |> ignore
-                        Log.Logger.LogDebug("{0} Receive waiting", prefix)
+                receive receiveCallback
                 
-            | BatchReceive (cancellationToken, channel) ->
+            | BatchReceive receiveCallbacks ->
                 
-                Log.Logger.LogDebug("{0} BatchReceive", prefix)
-                if cancellationToken.IsCancellationRequested then
-                    channel.SetCanceled()
-                else
-                    if batchWaiters.Count = 0 && hasEnoughMessagesForBatchReceive() then
-                        replyWithBatch channel
-                    else
-                        let batchCts = new CancellationTokenSource()
-                        let registration =
-                            if cancellationToken.CanBeCanceled then
-                                let rec cancellationTokenRegistration =
-                                    cancellationToken.Register((fun () ->
-                                        Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
-                                        batchCts.Cancel()
-                                        channel.SetCanceled()
-                                        post this.Mb (RemoveBatchWaiter(batchCts, cancellationTokenRegistration, channel))
-                                    ), false)
-                                    |> Some
-                                cancellationTokenRegistration
-                            else
-                                None
-                        batchWaiters.AddLast((batchCts, registration, channel)) |> ignore
-                        asyncDelay
-                            consumerConfig.BatchReceivePolicy.Timeout
-                            (fun () ->
-                                if not batchCts.IsCancellationRequested then
-                                    post this.Mb SendBatchByTimeout
-                                else
-                                    batchCts.Dispose())
-                        Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
+                batchReceive receiveCallbacks
                 
             | SendBatchByTimeout ->
                 
@@ -1043,13 +1052,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     interface IConsumer<'T> with
 
         member this.ReceiveAsync(cancellationToken: CancellationToken) =
-            postAndAsyncReply mb (fun channel -> Receive(cancellationToken, channel))
+            postAndAsyncReply mb (fun channel -> Receive { CancellationToken = cancellationToken; MessageChannel = channel })
             
         member this.ReceiveAsync() =
             _this.ReceiveAsync(CancellationToken.None)
             
         member this.BatchReceiveAsync(cancellationToken: CancellationToken) =
-            postAndAsyncReply mb (fun channel -> BatchReceive(cancellationToken, channel))
+            postAndAsyncReply mb (fun channel -> BatchReceive { CancellationToken = cancellationToken; MessagesChannel = channel })
 
         member this.BatchReceiveAsync() =
             _this.BatchReceiveAsync(CancellationToken.None)

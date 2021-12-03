@@ -53,4 +53,4 @@ jobs:
       timeout-minutes: 3
       run: |
         cd tests/IntegrationTests
-        dotnet run -c Release --no-build --no-spinner
+        dotnet run -c Release --no-build --no-spinner --debug

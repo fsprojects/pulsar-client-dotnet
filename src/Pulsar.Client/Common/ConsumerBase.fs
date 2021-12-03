@@ -16,6 +16,16 @@ type Waiter<'T> =
 type BatchWaiter<'T> =
     BatchCancellation * UserCancellation * TaskCompletionSource<Messages<'T>>
 
+type ReceiveCallback<'T> = {
+    CancellationToken: CancellationToken
+    MessageChannel: TaskCompletionSource<Message<'T>>
+}
+
+type ReceiveCallbacks<'T> = {
+    CancellationToken: CancellationToken
+    MessagesChannel: TaskCompletionSource<Messages<'T>>
+}
+
 let hasEnoughMessagesForBatchReceive (batchReceivePolicy: BatchReceivePolicy) incomingMessagesCount incomingMessagesSize =
     if (batchReceivePolicy.MaxNumMessages <= 0 && batchReceivePolicy.MaxNumBytes <= 0L) then
         false
