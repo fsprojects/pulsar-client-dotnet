@@ -18,7 +18,7 @@ let tests =
 
     testList "Cancellation" [
 
-        testAsync "Cancellation without receiving a single message works fine" {
+        ftestAsync "Cancellation without receiving a single message works fine" {
 
             Log.Debug("Started Cancellation without receiving a single message works fine")
             let client = getClient()
