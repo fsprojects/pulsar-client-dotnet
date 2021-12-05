@@ -480,4 +480,51 @@ let tests =
             Log.Debug("Finished Negative acks work correctly with batches")
 
         }
+        
+        testAsync "Messages get acked on consumer close" {
+
+            Log.Debug("Started messages get redelivered if ackTimeout is set")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let consumerName = "AckOnCloseConsumer"
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .CreateAsync() |> Async.AwaitTask
+
+            let! consumer1 =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .ConsumerName(consumerName)
+                    .SubscribeAsync() |> Async.AwaitTask
+
+            let data = [| 1uy |]
+            let! _ = producer.SendAsync(data) |> Async.AwaitTask
+
+            let! message = consumer1.ReceiveAsync() |> Async.AwaitTask
+            do! consumer1.AcknowledgeAsync(message.MessageId) |> Async.AwaitTask
+            
+            Expect.sequenceEqual "" message.Data data
+            do! consumer1.DisposeAsync().AsTask() |> Async.AwaitTask
+            
+            let! consumer2 =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .ConsumerName(consumerName)
+                    .SubscribeAsync() |> Async.AwaitTask
+            let cts = new CancellationTokenSource(200)
+            try
+                let! msg = consumer2.ReceiveAsync(cts.Token) |> Async.AwaitTask
+                failwith <| "Unexpected success" + msg.ToString()
+            with
+            | :? TaskCanceledException -> ()
+            | ex ->
+                reraize ex
+
+            Log.Debug("Finished Messages get acked on consumer close")
+
+        }
     ]

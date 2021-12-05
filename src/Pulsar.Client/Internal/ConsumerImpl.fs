@@ -1238,6 +1238,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let requestId = Generators.getNextRequestId()
                     let payload = Commands.newCloseConsumer consumerId requestId
                     try
+                        do! acksGroupingTracker.FlushAsync <| Ready clientCnx
                         let! response = clientCnx.SendAndWaitForReply requestId payload
                         response |> PulsarResponseType.GetEmpty
                         clientCnx.RemoveConsumer(consumerId)
@@ -1261,12 +1262,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
                     connectionHandler.Closing()
-                    unAckedMessageTracker.Close()
-                    clearDeadLetters()
                     Log.Logger.LogInformation("{0} starting unsubscribe ", prefix)
                     let requestId = Generators.getNextRequestId()
                     let payload = Commands.newUnsubscribeConsumer consumerId requestId                       
                     try
+                        do! acksGroupingTracker.FlushAsync <| Ready clientCnx
                         let! response = clientCnx.SendAndWaitForReply requestId payload
                         response |> PulsarResponseType.GetEmpty
                         clientCnx.RemoveConsumer(consumerId)

@@ -17,6 +17,7 @@ type internal GroupingTrackerMessage =
     | AddBatchIndexAcknowledgment of (MessageId*AckType*IReadOnlyDictionary<string, int64>)
     | FlushAndClean
     | Flush
+    | FlushAsync of (ConnectionState*TaskCompletionSource<Unit>)
     | Stop
 
 type internal LastCumulativeAck = MessageId
@@ -27,6 +28,7 @@ type internal IAcknowledgmentsGroupingTracker =
     abstract member AddBatchIndexAcknowledgment: MessageId * AckType * IReadOnlyDictionary<string, int64> -> unit
     abstract member FlushAndClean: unit -> unit
     abstract member Flush: unit -> unit
+    abstract member FlushAsync: ConnectionState -> Task<unit>
     abstract member Close: unit -> unit
 
 type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackGroupTime: TimeSpan,
@@ -60,14 +62,15 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         let ackSet = acker.BitSet |> toLongArray
         (msgId.LedgerId, msgId.EntryId, ackSet)
     
-    let flush () =
+    let flush (clientCnxOption: ConnectionState option) =
         task {
             if not cumulativeAckFlushRequired && pendingIndividualAcks.Count = 0 && pendingIndividualBatchIndexAcks.Count = 0 then
                 return ()
             else
                 let! result =
                     task {
-                        match getState() with
+                        let state = clientCnxOption |> Option.defaultWith getState
+                        match state with
                         | Ready cnx ->
                             let mutable success = true
                             if cumulativeAckFlushRequired then
@@ -208,7 +211,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                         // Individual ack
                         if pendingIndividualAcks.Add msgId then
                             if pendingIndividualAcks.Count >= MAX_ACK_GROUP_SIZE then
-                                do! flush ()
+                                do! flush None
                                 Log.Logger.LogWarning("{0} messageId {1} MAX_ACK_GROUP_SIZE reached and flushed", prefix, msgId)
                         else
                             Log.Logger.LogWarning("{0} messageId {1} has already been added to the ack tracker", prefix, msgId)
@@ -223,26 +226,31 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                     else
                         if pendingIndividualBatchIndexAcks.Add(msgId) then
                             if pendingIndividualBatchIndexAcks.Count >= MAX_ACK_GROUP_SIZE then
-                                do! flush ()
+                                do! flush None
                                 Log.Logger.LogWarning("{0} messageId {1} MAX_ACK_GROUP_SIZE reached and flushed", prefix, msgId)
                         else
                             Log.Logger.LogWarning("{0} messageId {1} has already been added", prefix, msgId)
                     
                 | GroupingTrackerMessage.FlushAndClean ->
                 
-                    do! flush()
+                    do! flush None
                     pendingIndividualAcks.Clear()
                     cumulativeAckFlushRequired <- false
                     lastCumulativeAck <- MessageId.Earliest
                 
                 | Flush ->
                 
-                    do! flush()
+                    do! flush None
+                    
+                | FlushAsync (connectionState, channel) ->
+                
+                    do! flush <| Some connectionState
+                    channel.SetResult()
                 
                 | Stop ->
                 
-                    do! flush()
                     continueLoop <- false
+                    
         } :> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
@@ -269,10 +277,12 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
             post mb (GroupingTrackerMessage.AddAcknowledgment (msgId, ackType, properties))
         member this.AddBatchIndexAcknowledgment(msgId, ackType, properties) =
             post mb (GroupingTrackerMessage.AddBatchIndexAcknowledgment (msgId, ackType, properties))
-        member this.Flush() =
+        member this.Flush () =
             post mb GroupingTrackerMessage.Flush
         member this.FlushAndClean() =
             post mb GroupingTrackerMessage.FlushAndClean
+        member this.FlushAsync connectionState =
+            postAndAsyncReply mb (fun channel -> FlushAsync (connectionState, channel))
         member this.Close() =
             timer.Stop()
             post mb GroupingTrackerMessage.Stop
@@ -286,6 +296,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                 member this.AddBatchIndexAcknowledgment(msgId, ackType, properties) = ()
                 member this.Flush() = ()
                 member this.FlushAndClean() = ()
+                member this.FlushAsync _ = unitTask
                 member this.Close() = ()
         }
 
