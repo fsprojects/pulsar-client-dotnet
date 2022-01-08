@@ -15,7 +15,7 @@ namespace OldDotnetExample
             const string subscriptionName = "my-subscription";
             var topicName = $"my-topic-{DateTime.Now.Ticks}";
             var ca = new X509Certificate2(@"path-to-ca.crt");
-            var userTls = AuthenticationFactory.tls(@"path-to-user.pfx");
+            var userTls = AuthenticationFactory.Tls(@"path-to-user.pfx");
                 
             var client = await new PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)

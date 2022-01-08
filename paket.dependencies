@@ -19,7 +19,7 @@ nuget zlib.net-mutliplatform
 nuget K4os.Compression.LZ4
 nuget Snappy.Standard
 nuget ZstdNet
-nuget AvroSchemaGenerator
+nuget AvroSchemaGenerator 2.4.1
 nuget Apache.Avro
 nuget NSec.Cryptography
 nuget PemUtils
@@ -52,8 +52,8 @@ group Examples
   nuget Pulsar.Client
   nuget Pulsar.Client.Otel
   nuget Microsoft.Extensions.Logging.Console
-  nuget OpenTelemetry
-  nuget OpenTelemetry.Exporter.Console
+  nuget OpenTelemetry rc
+  nuget OpenTelemetry.Exporter.Console rc
 
 group OTel
   framework: netstandard2.0
@@ -65,3 +65,4 @@ group OTel
   nuget System.Diagnostics.DiagnosticSource
   nuget OpenTelemetry.Api
   nuget System.Threading.Channels
+  nuget AvroSchemaGenerator 2.4.1
