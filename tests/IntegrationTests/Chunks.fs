@@ -1,5 +1,6 @@
 module Pulsar.Client.IntegrationTests.Chunks
 
+open Pulsar.Client.Api
 open Pulsar.Client.Common
 
 #nowarn "25"
@@ -16,27 +17,27 @@ open Serilog
 let tests =
     testList "Chunks" [
         
-        testAsync "Two chunks-message delivered successfully" {
+        testTask "Two chunks-message delivered successfully" {
             Log.Debug("Started Two chunks-message delivered successfully")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let name = "twoChunks"
 
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(name)
                     .EnableBatching(false)
                     .EnableChunking(true)
                     .CompressionType(CompressionType.Snappy)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            let! consumer =
+            let! (consumer :  IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(name)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let payload = Array.zeroCreate 10_000_000
             Random().NextBytes(payload)
@@ -47,11 +48,11 @@ let tests =
             let! msgId =
                 producer.NewMessage(payload)
                 |> producer.SendAsync
-                |> Async.AwaitTask
                 
-            let! msg =
+                
+            let! (msg : Message<byte[]>) =
                 consumer.ReceiveAsync()
-                |> Async.AwaitTask
+                
             
             Expect.equal "" msgId msg.MessageId
             Expect.equal "" 1uy msg.Data.[1] 
@@ -59,41 +60,41 @@ let tests =
             Expect.equal "" 0uy msg.Data.[0] 
             Expect.equal "" 0uy msg.Data.[9_000_000] 
         
-            do! consumer.UnsubscribeAsync() |> Async.AwaitTask
-            do! Async.Sleep 100
+            do! consumer.UnsubscribeAsync() 
+            do! Task.Delay 100
             Log.Debug("Ended Two chunks-message delivered successfully")
         }
         
-        testAsync "Two parallel chunks-message delivered successfully with short queue" {
+        testTask "Two parallel chunks-message delivered successfully with short queue" {
             Log.Debug("Started Two parallel chunks-message delivered successfully with short queue")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let name = "parallelChunks"
 
-            let! producer1 =
+            let! (producer1 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(name + "1")
                     .EnableBatching(false)
                     .EnableChunking(true)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            let! producer2 =
+            let! (producer2 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(name + "2")
                     .EnableBatching(false)
                     .EnableChunking(true)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
             
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(name)
                     .SubscriptionName("test-subscription")
                     .MaxPendingChunkedMessage(1)
                     .AckTimeout(TimeSpan.FromMilliseconds(1000.0))
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let payload1 = Array.zeroCreate 10_000_000
             let payload2 = Array.zeroCreate 10_000_000
@@ -105,9 +106,9 @@ let tests =
                 [| producer1.NewMessage(payload1)|> producer1.SendAsync
                    producer2.NewMessage(payload2)|> producer2.SendAsync |]
                 |> Task.WhenAll
-                |> Async.AwaitTask
+                
                  
-            let! [| msg1; msg2 |] =
+            let! ([| msg1; msg2 |] : Message<byte[]>[]) =
                 [| task {
                        let! msg = consumer.ReceiveAsync()
                        do! consumer.AcknowledgeAsync(msg.MessageId)
@@ -119,7 +120,7 @@ let tests =
                         return msg
                    } |]
                 |> Task.WhenAll
-                |> Async.AwaitTask
+                
             
             let [ one; two ] = 
                 if msg1.Data.[0] = 0uy then
@@ -137,8 +138,8 @@ let tests =
             Expect.equal "" 1uy two.Data.[0]
             Expect.equal "" 1uy two.Data.[9_000_000]
          
-            do! consumer.UnsubscribeAsync() |> Async.AwaitTask
-            do! Async.Sleep 100
+            do! consumer.UnsubscribeAsync() 
+            do! Task.Delay 100
              
             Log.Debug("Ended Two parallel chunks-message delivered successfully with short queue")
         }

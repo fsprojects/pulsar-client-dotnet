@@ -108,10 +108,10 @@ let tests =
                         do! consumeMessagesWithTxn consumer1 txn numberOfMessages name
                     }:> Task)            
             
-            do! Task.WhenAll [| producerTask; consumer1Task |] |> Async.AwaitTask
+            do! Task.WhenAll [| producerTask; consumer1Task |] 
             
-            do! txn.Abort() |> Async.AwaitTask
-            do! consumer1.DisposeAsync().AsTask() |> Async.AwaitTask
+            do! txn.Abort() 
+            do! consumer1.DisposeAsync().AsTask() 
             
             let! txn =
                 client.NewTransaction().BuildAsync()
@@ -196,10 +196,10 @@ let tests =
                         do! Task.Delay(100)
                     }:> Task)
             
-            do! Task.WhenAll [| producerTask; consumer1Task |] |> Async.AwaitTask
+            do! Task.WhenAll [| producerTask; consumer1Task |] 
             
-            do! txn1.Abort() |> Async.AwaitTask
-            do! consumer1.DisposeAsync().AsTask() |> Async.AwaitTask
+            do! txn1.Abort() 
+            do! consumer1.DisposeAsync().AsTask() 
             
             let! txn2 =
                 client.NewTransaction().BuildAsync()
@@ -248,30 +248,30 @@ let tests =
 
     testList "Transaction" [
         
-        testAsync "Produce 10 messages within txn with batch works fine" {
-            do! produceTest true |> Async.AwaitTask
+        testTask "Produce 10 messages within txn with batch works fine" {
+            do! produceTest true 
         }
-        testAsync "Produce 10 messages within txn without batch works fine" {
-            do! produceTest false |> Async.AwaitTask
-        }
-        
-        testAsync "Consume 10 messages within txn with batch works fine" {
-            do! consumeTest true |> Async.AwaitTask
+        testTask "Produce 10 messages within txn without batch works fine" {
+            do! produceTest false 
         }
         
-        testAsync "Consume 10 messages within txn without batch works fine" {
-            do! consumeTest false |> Async.AwaitTask
+        testTask "Consume 10 messages within txn with batch works fine" {
+            do! consumeTest true 
         }
         
-        testAsync "Consume cumulative 10 messages within txn with batch works fine" {
-            do! consumeCumulativeTest true |> Async.AwaitTask
+        testTask "Consume 10 messages within txn without batch works fine" {
+            do! consumeTest false 
         }
         
-        testAsync "Consume cumulative 10 messages within txn without batch works fine" {
-            do! consumeCumulativeTest false |> Async.AwaitTask
+        testTask "Consume cumulative 10 messages within txn with batch works fine" {
+            do! consumeCumulativeTest true 
         }
         
-        testAsync "Consume and Produce within txn works fine" {
+        testTask "Consume cumulative 10 messages within txn without batch works fine" {
+            do! consumeCumulativeTest false 
+        }
+        
+        testTask "Consume and Produce within txn works fine" {
 
             Log.Debug("Started Consume and Produce within txn works fine")
             let client = getTxnClient()
@@ -285,14 +285,14 @@ let tests =
                     .ProducerName("regular")
                     .EnableBatching(false)
                     .SendTimeout(TimeSpan.Zero)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
                     
             let! regularConsumer =
                  client.NewConsumer()
                     .Topic(topicName + "1")
                     .ConsumerName("regular")
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
             
             let! producer =
                 client.NewProducer()
@@ -300,14 +300,14 @@ let tests =
                     .ProducerName(name)
                     .EnableBatching(false)
                     .SendTimeout(TimeSpan.Zero)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
                     
             let! consumer =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(name)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
             
             let regularProducerTask =
                 Task.Run(fun () ->
@@ -317,7 +317,7 @@ let tests =
             
             let! txn =
                 client.NewTransaction().BuildAsync()
-                |> Async.AwaitTask
+                
             
             let consumerTask =
                 Task.Run(fun () ->
@@ -337,68 +337,68 @@ let tests =
                         do! consumeMessages regularConsumer numberOfMessages "regular"
                     }:> Task)
             
-            do! Task.WhenAll [| regularProducerTask; producerTask; consumerTask |] |> Async.AwaitTask
-            do! Async.Sleep 150
+            do! Task.WhenAll [| regularProducerTask; producerTask; consumerTask |] 
+            do! Task.Delay 150
             Expect.isFalse "" regularConsumerTask.IsCompleted
-            do! txn.Commit() |> Async.AwaitTask
+            do! txn.Commit() 
            
-            do! Async.Sleep 150
+            do! Task.Delay 150
             Expect.isTrue "" consumerTask.IsCompletedSuccessfully
             
             Log.Debug("Finished Consume and Produce within txn works fine")
         }
         
-        testAsync "Concurrent transactions works fine" {
+        testTask "Concurrent transactions works fine" {
 
             Log.Debug("Started Concurrent transactions works fine")
             let client = getTxnClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let name = "txnConcurrent"
             
-            let! producer1 =
+            let! (producer1 : IProducer<string>) =
                 client.NewProducer(Schema.STRING())
                     .Topic(topicName)
                     .ProducerName(name+ "1")
                     .EnableBatching(false)
                     .SendTimeout(TimeSpan.Zero)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
             
-            let! producer2 =
+            let! (producer2 : IProducer<string>) =
                 client.NewProducer(Schema.STRING())
                     .Topic(topicName)
                     .ProducerName(name + "2")
                     .EnableBatching(true)
                     .SendTimeout(TimeSpan.Zero)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
                     
-            let! consumer1 =
+            let! (consumer1 : IConsumer<string>) =
                 client.NewConsumer(Schema.STRING())
                     .Topic(topicName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .ConsumerName(name + "1")
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
                     
-            let! consumer2 =
+            let! (consumer2 : IConsumer<string>) =
                 client.NewConsumer(Schema.STRING())
                     .Topic(topicName)
                     .ConsumerName(name + "2")
                     .SubscriptionType(SubscriptionType.Shared)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
             
-            let! txn1 = client.NewTransaction().BuildAsync() |> Async.AwaitTask
-            let! txn2 = client.NewTransaction().BuildAsync() |> Async.AwaitTask
-            let! txn3 = client.NewTransaction().BuildAsync() |> Async.AwaitTask
+            let! txn1 = client.NewTransaction().BuildAsync() 
+            let! txn2 = client.NewTransaction().BuildAsync() 
+            let! txn3 = client.NewTransaction().BuildAsync() 
             
             for i in 1..20 do
-                do! producer1.SendAndForgetAsync(producer1.NewMessage($"TXN1.1-{i}", txn = txn1)) |> Async.AwaitTask
+                do! producer1.SendAndForgetAsync(producer1.NewMessage($"TXN1.1-{i}", txn = txn1)) 
             for i in 1..20 do
-                do! producer1.SendAndForgetAsync(producer1.NewMessage($"TXN2.1-{i}", txn = txn2)) |> Async.AwaitTask
+                do! producer1.SendAndForgetAsync(producer1.NewMessage($"TXN2.1-{i}", txn = txn2)) 
             for i in 1..20 do
-                do! producer2.SendAndForgetAsync(producer2.NewMessage($"TXN1.2-{i}", txn = txn1)) |> Async.AwaitTask
+                do! producer2.SendAndForgetAsync(producer2.NewMessage($"TXN1.2-{i}", txn = txn1)) 
             for i in 1..20 do
-                do! producer2.SendAndForgetAsync(producer2.NewMessage($"TXN2.2-{i}", txn = txn2)) |> Async.AwaitTask
+                do! producer2.SendAndForgetAsync(producer2.NewMessage($"TXN2.2-{i}", txn = txn2)) 
             
             let cts = new CancellationTokenSource(1000)
             let getNextMessage() =
@@ -415,40 +415,40 @@ let tests =
                 }
                 
             let receiveTask = getNextMessage()
-            do! Async.Sleep 150
+            do! Task.Delay 150
             Expect.isFalse "" receiveTask.IsCompleted
             
-            do! txn1.Commit() |> Async.AwaitTask
-            let! message1 = receiveTask |> Async.AwaitTask
+            do! txn1.Commit() 
+            let! (message1 : Message<string>) = receiveTask 
             Expect.stringStarts "" "TXN1" (message1.GetValue())            
             
-            do! Task.WhenAll [| txn2.Abort() ; txn3.Commit() |] |> Async.AwaitTask |> Async.Ignore
+            do! Task.WhenAll [| txn2.Abort() ; txn3.Commit() |] 
             
-            do! consumer1.DisposeAsync().AsTask() |> Async.AwaitTask
-            do! consumer2.DisposeAsync().AsTask() |> Async.AwaitTask
+            do! consumer1.DisposeAsync().AsTask() 
+            do! consumer2.DisposeAsync().AsTask() 
             
-            let! consumer3 =
+            let! (consumer3 : IConsumer<string>) =
                 client.NewConsumer(Schema.STRING())
                     .Topic(topicName)
                     .ConsumerName(name + "3")
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
                     
             for i in 1..39 do
-                let! message = consumer3.ReceiveAsync() |> Async.AwaitTask
+                let! (message : Message<string>) = consumer3.ReceiveAsync() 
                 Expect.stringStarts "" "TXN1" (message.GetValue())
-                do! consumer3.AcknowledgeAsync(message.MessageId) |> Async.AwaitTask
+                do! consumer3.AcknowledgeAsync(message.MessageId) 
                 
             let cts = new CancellationTokenSource(200)
             try
-                let! msg = consumer3.ReceiveAsync(cts.Token) |> Async.AwaitTask
+                let! (msg : Message<string>) = consumer3.ReceiveAsync(cts.Token) 
                 failwith $"Unexpected success {msg.GetValue()}"
             with Flatten ex ->
                 match ex with
                 | :? TaskCanceledException -> ()
                 | _ -> reraize ex
                 
-            do! Async.Sleep 110
+            do! Task.Delay 110
             
             Log.Debug("Finished Concurrent transactions works fine")
         }

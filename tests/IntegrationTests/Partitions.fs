@@ -29,7 +29,7 @@ let tests =
 
     testList "Partitions" [
 
-        testAsync "Single producer and single consumer with 3 partitions" {
+        testTask "Single producer and single consumer with 3 partitions" {
 
             Log.Debug("Started Single producer and single consumer with 3 partitions")
             let client = getClient()
@@ -41,7 +41,7 @@ let tests =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! consumer =
                 client.NewConsumer()
@@ -49,7 +49,7 @@ let tests =
                     .SubscriptionName("test-subscription")
                     .ConsumerName(consumerName)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let messages = generateMessages 10 producerName
 
@@ -65,15 +65,15 @@ let tests =
                         do! consumeAndVerifyMessages consumer consumerName messages
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
-            do! Async.Sleep(110) // wait for acks
+            do! Task.WhenAll(producerTask, consumerTask) 
+            do! Task.Delay(110) // wait for acks
 
             Log.Debug("Finished Single producer and single consumer with 3 partitions")
 
         }
 
         // make active after https://github.com/apache/pulsar/issues/5877 is resolved
-        testAsync "Two producers and two consumers with 2 partitions" {
+        testTask "Two producers and two consumers with 2 partitions" {
 
             Log.Debug("Started Two producers and two consumers with 2 partitions")
             let client = getClient()
@@ -88,14 +88,14 @@ let tests =
                     .Topic(topicName)
                     .ProducerName(producerName1)
                     .MessageRoutingMode(MessageRoutingMode.SinglePartition)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! producer2 =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName2)
                     .MessageRoutingMode(MessageRoutingMode.SinglePartition)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! consumer1 =
                 client.NewConsumer()
@@ -104,7 +104,7 @@ let tests =
                     .SubscriptionType(SubscriptionType.Shared)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .ConsumerName(consumerName1)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let! consumer2 =
                 client.NewConsumer()
@@ -113,7 +113,7 @@ let tests =
                     .SubscriptionType(SubscriptionType.Shared)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .ConsumerName(consumerName2)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let messages1 = generateMessages 5 producerName1
             let messages2 = generateMessages 5 producerName2
@@ -154,13 +154,13 @@ let tests =
                                 failwith <| sprintf "Received unexpected message '%s'" received
                     }:> Task)
 
-            do! Task.WhenAll(producerTask1, producerTask2, consumerTask) |> Async.AwaitTask
-            do! Async.Sleep(110) // wait for acks
+            do! Task.WhenAll(producerTask1, producerTask2, consumerTask) 
+            do! Task.Delay(110) // wait for acks
 
             Log.Debug("Finished Two producers and two consumers with 2 partitions")
         }
         
-        testAsync "Batch read works with partitions" {
+        testTask "Batch read works with partitions" {
 
             Log.Debug("Started Batch read works with partitions")
             let client = getClient()
@@ -171,20 +171,20 @@ let tests =
             let numberOfMessages = 10
             let batchSize = 8
 
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .ConsumerName(consumerName)
                     .BatchReceivePolicy(BatchReceivePolicy(batchSize, -1L, batchTimeout))
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let messages = generateMessages numberOfMessages producerName
 
@@ -228,48 +228,48 @@ let tests =
                         
                     } :> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
-            do! Async.Sleep(110) // wait for acks
+            do! Task.WhenAll(producerTask, consumerTask) 
+            do! Task.Delay(110) // wait for acks
 
             Log.Debug("Finished Batch read works with partitions")
 
         }
         
-        testAsync "Auto schema works fine with partitioned topic" {
+        testTask "Auto schema works fine with partitioned topic" {
 
             Log.Debug("Start Auto schema works fine with partitioned topic")
             let client = getClient()
             let topicName1 = "public/default/partitioned4"
             let topicName2 = "public/default/partitioned5"
 
-            let! producer =
+            let! (producer : IProducer<SimpleRecord>) =
                 client.NewProducer(Schema.JSON<SimpleRecord>())
                     .Topic(topicName1)
                     .ProducerName("autoPartitionedNormal")
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            let! consumer =
+            let! (consumer : IConsumer<GenericRecord>) =
                 client.NewConsumer(Schema.AUTO_CONSUME())
                     .Topic(topicName1)
                     .ConsumerName("autoPartitionedConsume")
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
-            let! consumer2 =
+            let! (consumer2 : IConsumer<SimpleRecord>) =
                 client.NewConsumer(Schema.JSON<SimpleRecord>())
                     .Topic(topicName2)
                     .ConsumerName("autoNormal")
                     .SubscriptionName("test-subscription")
                     .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
             
-            let! producer2 =
+            let! (producer2 : IProducer<byte[]>) =
                 client.NewProducer(Schema.AUTO_PRODUCE())
                     .Topic(topicName2)
                     .ProducerName("autoProduce")
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
             
             let messages = [|
                     for i in [1..10] do
@@ -277,7 +277,7 @@ let tests =
                 |]
             
             for message in messages do
-                let! _ = producer.SendAsync(message) |> Async.AwaitTask
+                let! _ = producer.SendAsync(message) 
                 ()
 
             let firstDict =
@@ -286,12 +286,12 @@ let tests =
                 |> dict
                 |> Dictionary
             for i in [1..10] do
-                let! msg1 = consumer.ReceiveAsync() |> Async.AwaitTask
-                do! consumer.AcknowledgeAsync msg1.MessageId |> Async.AwaitTask
+                let! (msg1 : Message<GenericRecord>) = consumer.ReceiveAsync() 
+                do! consumer.AcknowledgeAsync msg1.MessageId 
                 let genericRecord = msg1.GetValue()
                 Expect.equal "" "Name" (genericRecord.GetField("Name") |> unbox)
                 firstDict.Remove(genericRecord.GetField("Age") |> unbox<float> |> int) |> ignore
-                let! _ = producer2.SendAsync(msg1.Data) |> Async.AwaitTask
+                let! _ = producer2.SendAsync(msg1.Data) 
                 ()
             Expect.isEmpty "firstDict" firstDict
             
@@ -301,8 +301,8 @@ let tests =
                 |> dict
                 |> Dictionary
             for i in [1..10] do
-                let! msg1 = consumer2.ReceiveAsync() |> Async.AwaitTask
-                do! consumer2.AcknowledgeAsync msg1.MessageId |> Async.AwaitTask
+                let! (msg1 : Message<SimpleRecord>) = consumer2.ReceiveAsync() 
+                do! consumer2.AcknowledgeAsync msg1.MessageId 
                 let jsonRecord = msg1.GetValue()
                 Expect.equal "" "Name" jsonRecord.Name
                 secondDict.Remove(jsonRecord.Age) |> ignore
@@ -311,7 +311,7 @@ let tests =
             Log.Debug("Finished Auto schema works fine with partitioned topic")
         }        
         
-        testAsync "Deduplication works with partitions" {
+        testTask "Deduplication works with partitions" {
 
             Log.Debug("Started Deduplication works with partitions")
 
@@ -320,52 +320,52 @@ let tests =
             let topicName = "public/deduplication/partitioned"
             let name = "deduplicationPartitions" + Guid.NewGuid().ToString("N")
 
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(name)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
                     
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(name)
                     .BatchReceivePolicy(BatchReceivePolicy(-1, 10485760L, TimeSpan.FromSeconds(1.0)))
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             for i in 1..messagesCount do
                 let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producer.Name (DateTime.Now.ToLongTimeString()) )
                 let message = producer.NewMessage(payload, i.ToString(), sequenceId = Nullable(%(int64 i))  )
-                let! m1 = producer.SendAsync(message) |> Async.AwaitTask
+                let! m1 = producer.SendAsync(message) 
                 Log.Logger.Debug("Sent {0} to {1}", i, m1.Partition)
-                let! m2 = producer.SendAsync(message) |> Async.AwaitTask
+                let! m2 = producer.SendAsync(message) 
                 Log.Logger.Debug("Sent {0} to {1}", i, m2.Partition)
                 ()            
             
-            do! producer.DisposeAsync().AsTask() |> Async.AwaitTask            
+            do! producer.DisposeAsync().AsTask()             
             
-            let! newProducer =
+            let! (newProducer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(name)
                     .EnableBatching(false)
                     .InitialSequenceId(%0L)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
                     
             for i in 1..messagesCount do
                 let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s on %s" i producer.Name (DateTime.Now.ToLongTimeString()) )
                 let message = newProducer.NewMessage(payload, i.ToString(), sequenceId = Nullable(%(int64 i))  )
-                let! _ = newProducer.SendAndForgetAsync(message) |> Async.AwaitTask
+                let! _ = newProducer.SendAndForgetAsync(message) 
                 ()
 
-            let! messages = consumer.BatchReceiveAsync() |> Async.AwaitTask
+            let! (messages : Messages<byte[]>) = consumer.BatchReceiveAsync() 
             
             Expect.equal "" messagesCount messages.Count
             
-            do! consumer.AcknowledgeAsync(messages) |> Async.AwaitTask
-            do! Async.Sleep(110)
-            do! consumer.DisposeAsync().AsTask() |> Async.AwaitTask
+            do! consumer.AcknowledgeAsync(messages) 
+            do! Task.Delay(110)
+            do! consumer.DisposeAsync().AsTask() 
             
             Log.Debug("Finished Deduplication works with partitions")
         }

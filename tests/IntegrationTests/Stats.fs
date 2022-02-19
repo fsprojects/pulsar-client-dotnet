@@ -10,7 +10,7 @@ open Pulsar.Client.IntegrationTests.Common
 [<Tests>]
 let tests =
     testList "Stats" [
-        testAsync "Consumer and Producer stats" {
+        testTask "Consumer and Producer stats" {
             let client = getStatsClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
@@ -19,14 +19,14 @@ let tests =
             let! producer =
                 client.NewProducer()
                     .Topic(topicName)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
             
             let! consumer =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -40,11 +40,11 @@ let tests =
                         do! consumeMessages consumer numberOfMessages consumerName
                     }:> Task)
               
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
-            do! Async.Sleep 1000
-            let! producerStats = producer.GetStatsAsync() |> Async.AwaitTask
-            do! Async.Sleep 1000
-            let! consumerStats = consumer.GetStatsAsync() |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
+            do! Task.Delay 1000
+            let! producerStats = producer.GetStatsAsync() 
+            do! Task.Delay 1000
+            let! consumerStats = consumer.GetStatsAsync() 
             
             let numberOfMessages = int64 numberOfMessages
             Expect.equal producerStats.TotalMsgsSent numberOfMessages "The producStats.TotalMsgsSent is not equal to numberOfMessages" 

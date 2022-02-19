@@ -274,53 +274,53 @@ let tests =
 
     testList "Reader" [
 
-        testAsync "Reader non-batching configuration works fine" {
-            do! basicReaderCheck false |> Async.AwaitTask
+        testTask "Reader non-batching configuration works fine" {
+            do! basicReaderCheck false 
         }
 
-        testAsync "Reader batching configuration works fine" {
-            do! basicReaderCheck true |> Async.AwaitTask
+        testTask "Reader batching configuration works fine" {
+            do! basicReaderCheck true 
         }
 
-        testAsync "Muliple readers non-batching configuration works fine" {
-            do! checkMultipleReaders false |> Async.AwaitTask
+        testTask "Muliple readers non-batching configuration works fine" {
+            do! checkMultipleReaders false 
         }
 
-        testAsync "Muliple readers batching configuration works fine" {
-            do! checkMultipleReaders true |> Async.AwaitTask
+        testTask "Muliple readers batching configuration works fine" {
+            do! checkMultipleReaders true 
         }
 
-        testAsync "Check reading from producer messageId without batching" {
-            do! checkReadingFromProducerMessageId false |> Async.AwaitTask
+        testTask "Check reading from producer messageId without batching" {
+            do! checkReadingFromProducerMessageId false 
         }
 
-        testAsync "Check reading from producer messageId with batching" {
-            do! checkReadingFromProducerMessageId true |> Async.AwaitTask
+        testTask "Check reading from producer messageId with batching" {
+            do! checkReadingFromProducerMessageId true 
         }
         
-        testAsync "Check reading from last messageId without batching" {
-            do! checkReadingFromLastMessageId false |> Async.AwaitTask
+        testTask "Check reading from last messageId without batching" {
+            do! checkReadingFromLastMessageId false 
         }
         
-        testAsync "Check reading from last messageId with batching" {
-            do! checkReadingFromLastMessageId true |> Async.AwaitTask
+        testTask "Check reading from last messageId with batching" {
+            do! checkReadingFromLastMessageId true 
         }
         
-        testAsync "Check StartMessageFromRollbackDuration without batching" {
-            do! checkReadingFromRollback false |> Async.AwaitTask
+        testTask "Check StartMessageFromRollbackDuration without batching" {
+            do! checkReadingFromRollback false 
         }
         
-        testAsync "Check StartMessageFromRollbackDuration with batching" {
-            do! checkReadingFromRollback true |> Async.AwaitTask
+        testTask "Check StartMessageFromRollbackDuration with batching" {
+            do! checkReadingFromRollback true 
         }
         
         // uncomment when https://github.com/apache/pulsar/issues/10515 is ready
-        ptestAsync "Check StartMessageFromFuturePoint without batching" {
-            do! checkReadingFromFuture false |> Async.AwaitTask
+        ptestTask "Check StartMessageFromFuturePoint without batching" {
+            do! checkReadingFromFuture false 
         }
         
         // uncomment when https://github.com/apache/pulsar/issues/10515 is ready
-        ptestAsync "Check StartMessageFromFuturePoint with batching" {
-            do! checkReadingFromFuture true |> Async.AwaitTask
+        ptestTask "Check StartMessageFromFuturePoint with batching" {
+            do! checkReadingFromFuture true 
         }
     ]

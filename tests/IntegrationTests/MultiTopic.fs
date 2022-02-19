@@ -6,6 +6,7 @@ open System.Text
 open Expecto
 
 open System.Threading.Tasks
+open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.IntegrationTests.Common
 open Serilog
@@ -15,7 +16,7 @@ open FSharp.UMX
 let tests =
     testList "Multitopic" [
         
-        testAsync "Two producers and one multiconsumer work fine" {
+        testTask "Two producers and one multiconsumer work fine" {
 
             Log.Debug("Started Two producers and one multiconsumer work fine")
             let client = getClient()
@@ -28,14 +29,14 @@ let tests =
                     .Topic(topicName1)
                     .ProducerName(name + "1")
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
                     
             let! producer2 =
                 client.NewProducer()
                     .Topic(topicName1)
                     .ProducerName(name + "2")
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! consumer =
                 client.NewConsumer()
@@ -43,7 +44,7 @@ let tests =
                     .SubscriptionName("test-subscription")
                     .ConsumerName(name)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let messages1 = generateMessages 10 (name + "1")
             let messages2 = generateMessages 10 (name + "2")
@@ -67,15 +68,15 @@ let tests =
                         do! consumeAndVerifyMessages consumer name messages
                     }:> Task)
 
-            do! Task.WhenAll(producer1Task, producer2Task, consumerTask) |> Async.AwaitTask
-            do! Async.Sleep(110) // wait for acks
+            do! Task.WhenAll(producer1Task, producer2Task, consumerTask) 
+            do! Task.Delay(110) // wait for acks
 
             Log.Debug("Finished Two producers and one multiconsumer work fine")
 
         }
         
         // will fail if run more often than brokerDeleteInactiveTopicsFrequencySeconds (60 sec)
-        testAsync "Two producers and one pattern consumer work fine" {
+        testTask "Two producers and one pattern consumer work fine" {
 
             Log.Debug("Started Two producers and one pattern consumer work fine")
             let client = getClient()
@@ -88,14 +89,14 @@ let tests =
                     .Topic(topicName1)
                     .ProducerName(name + "1")
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
                     
             let! producer2 =
                 client.NewProducer()
                     .Topic(topicName1)
                     .ProducerName(name + "2")
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! consumer =
                 client.NewConsumer()
@@ -103,7 +104,7 @@ let tests =
                     .SubscriptionName("test-subscription")
                     .ConsumerName(name)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let messages1 = generateMessages 10 (name + "1")
             let messages2 = generateMessages 10 (name + "2")
@@ -127,37 +128,37 @@ let tests =
                         do! consumeAndVerifyMessages consumer name messages
                     }:> Task)
 
-            do! Task.WhenAll(producer1Task, producer2Task, consumerTask) |> Async.AwaitTask            
-            do! Async.Sleep(110) // wait for acks
+            do! Task.WhenAll(producer1Task, producer2Task, consumerTask)             
+            do! Task.Delay(110) // wait for acks
             
-            do! producer1.DisposeAsync().AsTask() |> Async.AwaitTask
-            do! producer2.DisposeAsync().AsTask() |> Async.AwaitTask
-            do! consumer.UnsubscribeAsync() |> Async.AwaitTask
+            do! producer1.DisposeAsync().AsTask() 
+            do! producer2.DisposeAsync().AsTask() 
+            do! consumer.UnsubscribeAsync() 
 
             Log.Debug("Finished Two producers and one multiconsumer work fine")
 
         }
         
-        ptestAsync "Eternal loop to test cluster modifications removal/addition" {
+        testTask "Eternal loop to test cluster modifications removal/addition" {
 
             Log.Debug("Started Eternal loop to test cluster modifications removal/addition")
             let client = getClient()
 
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic("public/default/topic-loop-1")
                     .ProducerName("looping")
                     .EnableBatching(false)
                     .SendTimeout(TimeSpan.FromSeconds(6.0))
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .TopicsPattern("public/default/topic-loop-*")
                     .ConsumerName("looping")
                     .SubscriptionName("test-subscription")
                     .PatternAutoDiscoveryPeriod(TimeSpan.FromSeconds(10.0))
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -185,12 +186,12 @@ let tests =
                             Log.Logger.Error(ex, "Receive failed")
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
 
             Log.Debug("Finished Eternal loop to test cluster modifications removal/addition")
         }
         
-        testAsync "Subscribe to new topic" {
+        testTask "Subscribe to new topic" {
     
             let subscriptionName = "testPulsar"
             let topicPattern = sprintf "persistent://public/default/%s-*" (Guid.NewGuid().ToString("N"))
@@ -199,17 +200,17 @@ let tests =
 
             let client = getClient()
 
-            let! producer1 =
+            let! (producer1 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topic1)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
                     
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .TopicsPattern(topicPattern)
                     .PatternAutoDiscoveryPeriod(TimeSpan.FromSeconds(4.0))
                     .SubscriptionName(subscriptionName)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let send1 =
                 Task.Run(fun () ->
@@ -230,14 +231,14 @@ let tests =
                         } :> Task
                     )
 
-            do! Task.WhenAll(send1) |> Async.AwaitTask
+            do! Task.WhenAll(send1) 
             
-            let! producer2 =
+            let! (producer2 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topic2)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            do! Async.Sleep(5000)
+            do! Task.Delay(5000)
 
             let send2 =
                 Task.Run(fun () ->
@@ -248,12 +249,12 @@ let tests =
                             ()
                     } :> Task
                 )
-            do! Task.WhenAll(send2, receiveAll) |> Async.AwaitTask
+            do! Task.WhenAll(send2, receiveAll) 
             
             Log.Debug("Finished Subscribe to new topic")
         }
         
-        ptestAsync "2К of topics" {
+        testTask "2К of topics" {
     
             Log.Debug("Started 2К of topics")
             let subscriptionName = "testPulsar"
@@ -278,16 +279,16 @@ let tests =
                         } 
                 |]
                 
-            let! _ = Task.WhenAll(producers) |> Async.AwaitTask
+            let! _ = Task.WhenAll(producers) 
 
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .TopicsPattern(topicPattern)
                     .PatternAutoDiscoveryPeriod(TimeSpan.FromSeconds(2.0))
                     .SubscriptionName(subscriptionName)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
                     
-            do! Async.Sleep(30000)
+            do! Task.Delay(30000)
             Log.Warning("Finished sleeping")
             
             let mutable i = 0
@@ -305,14 +306,14 @@ let tests =
             |] |> Task.WaitAll
             Log.Warning("Messages sent")
             for i in 1..messageNumber do
-                let! message = consumer.ReceiveAsync() |> Async.AwaitTask
+                let! (message : Message<byte[]>) = consumer.ReceiveAsync() 
                 Log.Warning($"{i} I've got message")
-                do! consumer.AcknowledgeAsync(message.MessageId) |> Async.AwaitTask
+                do! consumer.AcknowledgeAsync(message.MessageId) 
             
             Log.Debug("Finished 2К of topics")
         }
         
-        testAsync "Multiple topic seek by function" {
+        testTask "Multiple topic seek by function" {
             let prefix = $"persistent://public/default/topic-seektest-{Guid.NewGuid():N}-"
             let topicName1 = prefix + "1"
             let topicName2 = prefix + "2"
@@ -320,19 +321,19 @@ let tests =
 
             let name = "MultiConsumer"
 
-            let! producer1 =
+            let! (producer1 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName1)
                     .ProducerName(name + "1")
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
                     
-            let! producer2 =
+            let! (producer2 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName2)
                     .ProducerName(name + "2")
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let messages1 = generateMessages 10 (name + "1")
             let messages2 = generateMessages 10 (name + "2")
@@ -340,23 +341,23 @@ let tests =
             let ids2 = List<MessageId>()
             let times = List<TimeStamp>()
             
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topics([ topicName1; topicName2])
                     .SubscriptionName("test-seektest-subscription")
                     .SubscriptionType(SubscriptionType.Shared)
                     .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
                     
             for msg in messages1 do
-                let! messageIdSent = producer1.SendAsync(Encoding.UTF8.GetBytes(msg)) |> Async.AwaitTask
+                let! messageIdSent = producer1.SendAsync(Encoding.UTF8.GetBytes(msg)) 
                 ids1.Add(messageIdSent)
                 
             for msg in messages2 do
-                let! messageIdSent = producer2.SendAsync(Encoding.UTF8.GetBytes(msg))  |> Async.AwaitTask
+                let! messageIdSent = producer2.SendAsync(Encoding.UTF8.GetBytes(msg))  
                 DateTime.UtcNow |> extractTimeStamp |> times.Add
                 ids2.Add(messageIdSent)
-                do! Async.Sleep(100)
+                do! Task.Delay(100)
             
             do! consumer.SeekAsync(fun topicName ->
                     match topicName with
@@ -364,14 +365,14 @@ let tests =
                     | t when t = topicName2 -> SeekType.Timestamp times.[5]
                     | _ -> SeekType.MessageId MessageId.Latest
                 )    
-                |> Async.AwaitTask
                 
-            let rec consumerLoop (msg1, msg2) = async {
+                
+            let rec consumerLoop (msg1, msg2) = task {
 
                 match msg1, msg2 with
                 | Some _, Some _ -> return msg1, msg2
                 | _ -> 
-                    let! msg = consumer.ReceiveAsync() |> Async.AwaitTask
+                    let! msg = consumer.ReceiveAsync() 
                     
                     let next =
                         match msg1, msg2 with
@@ -383,11 +384,11 @@ let tests =
                 
             }
             
-            let! msg1, msg2 = consumerLoop (None, None)
+            let! ((msg1, msg2) : Message<byte[]> option * Message<byte[]> option) = consumerLoop (None, None)
                                                     
-            do! producer1.DisposeAsync().AsTask() |> Async.AwaitTask
-            do! producer2.DisposeAsync().AsTask() |> Async.AwaitTask
-            do! consumer.UnsubscribeAsync() |> Async.AwaitTask
+            do! producer1.DisposeAsync().AsTask() 
+            do! producer2.DisposeAsync().AsTask() 
+            do! consumer.UnsubscribeAsync() 
             
             Expect.equal msg1.IsSome true "The message from topic1 is found" 
             Expect.equal msg2.IsSome true "The message from topic2 is found"

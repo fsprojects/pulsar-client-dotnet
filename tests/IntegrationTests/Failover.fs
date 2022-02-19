@@ -14,7 +14,7 @@ open Serilog
 let tests =
     testList "Failover" [ 
 
-        testAsync "Failover consumer works fine" {
+        testTask "Failover consumer works fine" {
 
             Log.Debug("Started Failover consumer works fine")
             let client = getClient()
@@ -28,7 +28,7 @@ let tests =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! consumer1 =
                 client.NewConsumer()
@@ -36,7 +36,7 @@ let tests =
                     .ConsumerName(consumerName1)
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.Failover)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
                     
             let! consumer2 =
                 client.NewConsumer()
@@ -44,7 +44,7 @@ let tests =
                     .ConsumerName(consumerName2)
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.Failover)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -66,13 +66,13 @@ let tests =
                         do! consumeMessages consumer2 numberOfMessages consumerName2
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumer1Task, consumer2Task) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumer1Task, consumer2Task) 
 
             Log.Debug("Finished Failover consumer works fine")
         }
 
         // TODO: uncomment and check in 2.8
-        ptestAsync "Failover consumer with PriorityLevel works fine" {
+        testTask "Failover consumer with PriorityLevel works fine" {
 
             Log.Debug("Started Failover consumer with PriorityLevel works fine")
             let client = getClient()
@@ -91,7 +91,7 @@ let tests =
                     .Topic(topicName)
                     .EnableBatching(false)
                     .ProducerName(producerName)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! consumer1 =
                 client.NewConsumer()
@@ -100,7 +100,7 @@ let tests =
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.Failover)
                     .PriorityLevel(consumerPriority1)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
                     
             let! consumer2 =
                 client.NewConsumer()
@@ -109,7 +109,7 @@ let tests =
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.Failover)
                     .PriorityLevel(consumerPriority2)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
                     
             let! consumer3 =
                 client.NewConsumer()
@@ -118,9 +118,9 @@ let tests =
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.Failover)
                     .PriorityLevel(consumerPriority3)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
-            do! Task.Delay(1000) |> Async.AwaitTask
+            do! Task.Delay(1000) 
             
             let messages1 = generateMessages numberOfMessages (producerName + "1")
             let messages2 = generateMessages numberOfMessages (producerName + "2")
@@ -153,10 +153,10 @@ let tests =
                         do! consumeAndVerifyMessages consumer3 consumerName3 messages2
                     }:> Task)
 
-            let! failoverTask = Task.WhenAny(consumer2Task, consumer3Task) |> Async.AwaitTask
+            let! failoverTask = Task.WhenAny(consumer2Task, consumer3Task) 
             
-            do! Task.WhenAll(producerTask, consumer1Task, failoverTask) |> Async.AwaitTask
-            do! Async.Sleep(110) // wait for acks
+            do! Task.WhenAll(producerTask, consumer1Task, failoverTask) 
+            do! Task.Delay(110) // wait for acks
 
             Log.Debug("Finished Failover consumer with PriorityLevel works fine")
         }

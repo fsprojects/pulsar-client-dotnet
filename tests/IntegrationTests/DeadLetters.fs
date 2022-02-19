@@ -46,7 +46,7 @@ let tests =
         }
 
     testList "deadLetters" [
-        testAsync "Failed messages stored in a configured dead letter topic" {
+        testTask "Failed messages stored in a configured dead letter topic" {
 
             let description = "Failed messages stored in a configured dead letter topic"
 
@@ -63,7 +63,6 @@ let tests =
                     .Topic(config.TopicName)
                     .EnableBatching(false)
                     .CreateAsync()
-                    |> Async.AwaitTask
 
             let! consumer =
                 createConsumer()
@@ -74,7 +73,6 @@ let tests =
                     .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
                     .DeadLetterPolicy(config.DeadLettersPolicy)
                     .SubscribeAsync()
-                    |> Async.AwaitTask
 
             let! dlqConsumer =
                 createConsumer()
@@ -83,8 +81,7 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .SubscribeAsync()
-                    |> Async.AwaitTask
-
+                    
             let producerTask =
                 Task.Run(fun () ->
                     task {
@@ -110,12 +107,12 @@ let tests =
                     dlqConsumerTask
                 |]
 
-            do! Task.WhenAll(tasks) |> Async.AwaitTask
+            do! Task.WhenAll(tasks) 
 
             description |> logTestEnd
         }
         
-        testAsync "Partitioned topic failed messages stored in a configured dead letter topic" {
+        testTask "Partitioned topic failed messages stored in a configured dead letter topic" {
 
             let description = "Failed messages in a partitioned topic are stored in a configured dead letter topic"
 
@@ -132,7 +129,6 @@ let tests =
                     .Topic(config.TopicName)
                     .EnableBatching(false)
                     .CreateAsync()
-                    |> Async.AwaitTask
 
             let! consumer =
                 createConsumer()
@@ -144,7 +140,6 @@ let tests =
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .DeadLetterPolicy(config.DeadLettersPolicy)
                     .SubscribeAsync()
-                    |> Async.AwaitTask
 
             let! dlqConsumer =
                 createConsumer()
@@ -154,7 +149,6 @@ let tests =
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .SubscriptionType(SubscriptionType.Shared)
                     .SubscribeAsync()
-                    |> Async.AwaitTask
 
             let messages = generateMessages config.NumberOfMessages producerName
             
@@ -183,13 +177,13 @@ let tests =
                     dlqConsumerTask
                 |]
 
-            do! Task.WhenAll(tasks) |> Async.AwaitTask
-            do! Async.Sleep(110) // wait for acks
+            do! Task.WhenAll(tasks) 
+            do! Task.Delay(110) // wait for acks
 
             description |> logTestEnd
         }
 
-        testAsync "Failed messages stored in a default dead letter topic" {
+        testTask "Failed messages stored in a default dead letter topic" {
 
             let description = "Failed messages stored in a default dead letter topic"
 
@@ -206,7 +200,6 @@ let tests =
                     .Topic(config.TopicName)
                     .EnableBatching(false)
                     .CreateAsync()
-                    |> Async.AwaitTask
 
             let! consumer =
                 createConsumer()
@@ -217,7 +210,6 @@ let tests =
                     .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
                     .DeadLetterPolicy(DeadLetterPolicy(0))
                     .SubscribeAsync()
-                    |> Async.AwaitTask
 
             let! dlqConsumer =
                 createConsumer()
@@ -226,7 +218,6 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .SubscribeAsync()
-                    |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
@@ -253,12 +244,12 @@ let tests =
                     dlqConsumerTask
                 |]
 
-            do! Task.WhenAll(tasks) |> Async.AwaitTask
+            do! Task.WhenAll(tasks) 
 
             description |> logTestEnd
         }
 
-        testAsync "Failed batch stored in a configured default letter topic" {
+        testTask "Failed batch stored in a configured default letter topic" {
 
             let description = "Failed batch stored in a configured dead letter topic"
 
@@ -275,7 +266,6 @@ let tests =
                     .Topic(config.TopicName)
                     .BatchingMaxMessages(config.NumberOfMessages)
                     .CreateAsync()
-                    |> Async.AwaitTask
 
             let! consumer =
                 createConsumer()
@@ -286,7 +276,6 @@ let tests =
                     .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
                     .DeadLetterPolicy(config.DeadLettersPolicy)
                     .SubscribeAsync()
-                    |> Async.AwaitTask
 
             let! dlqConsumer =
                 createConsumer()
@@ -295,7 +284,6 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .SubscribeAsync()
-                    |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
@@ -322,12 +310,12 @@ let tests =
                     dlqConsumerTask
                 |]
 
-            do! Task.WhenAll(tasks) |> Async.AwaitTask
+            do! Task.WhenAll(tasks) 
 
             description |> logTestEnd
         }
 
-        testAsync "Some failed batch messages get stored in a configured default letter topic" {
+        testTask "Some failed batch messages get stored in a configured default letter topic" {
 
             let description = "Failed batch stored in a configured dead letter topic"
 
@@ -349,9 +337,8 @@ let tests =
                     .BatchingMaxMessages(config.NumberOfMessages)
                     .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(100.0))
                     .CreateAsync()
-                    |> Async.AwaitTask
 
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 createConsumer()
                     .ConsumerName(consumerName)
                     .Topic(config.TopicName)
@@ -360,16 +347,14 @@ let tests =
                     .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
                     .DeadLetterPolicy(DeadLetterPolicy(redeliveryCount, config.DeadLettersPolicy.DeadLetterTopic))
                     .SubscribeAsync()
-                    |> Async.AwaitTask
 
-            let! dlqConsumer =
+            let! (dlqConsumer : IConsumer<byte[]>) =
                 createConsumer()
                     .ConsumerName(dlqConsumerName)
                     .Topic(config.DeadLettersPolicy.DeadLetterTopic)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .SubscribeAsync()
-                    |> Async.AwaitTask
 
             let producerTask =
                 Task.Run(fun () ->
@@ -413,12 +398,12 @@ let tests =
                     dlqConsumerTask
                 |]
 
-            do! Task.WhenAll(tasks) |> Async.AwaitTask
+            do! Task.WhenAll(tasks) 
 
             description |> logTestEnd
         }
         
-        testAsync "Reconsume later works properly" {
+        testTask "Reconsume later works properly" {
 
             let description = "Reconsume later works properly"
 
@@ -428,27 +413,25 @@ let tests =
             let producerName = "reconsumeProducer"
             let consumerName = "reconsumeConsumer"
 
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 createProducer()
                     .ProducerName(producerName)
                     .Topic(config.TopicName)
                     .EnableBatching(false)
                     .CreateAsync()
-                    |> Async.AwaitTask
 
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 createConsumer()
                     .ConsumerName(consumerName)
                     .Topic(config.TopicName)
                     .SubscriptionName(config.SubscriptionName)
                     .EnableRetry(true)
                     .SubscribeAsync()
-                    |> Async.AwaitTask
          
-            let! msgId = producer.SendAsync([| 0uy; 1uy; 0uy |]) |> Async.AwaitTask
-            let! msg1 = consumer.ReceiveAsync() |> Async.AwaitTask
-            do! consumer.ReconsumeLaterAsync(msg1, %(DateTime.UtcNow.AddSeconds(1.0) |> convertToMsTimestamp)) |> Async.AwaitTask
-            let! msg2 = consumer.ReceiveAsync() |> Async.AwaitTask
+            let! msgId = producer.SendAsync([| 0uy; 1uy; 0uy |]) 
+            let! (msg1 : Message<byte[]>) = consumer.ReceiveAsync() 
+            do! consumer.ReconsumeLaterAsync(msg1, %(DateTime.UtcNow.AddSeconds(1.0) |> convertToMsTimestamp)) 
+            let! (msg2 : Message<byte[]>) = consumer.ReceiveAsync() 
 
             Expect.equal "" msgId msg1.MessageId
             Expect.equal "" (msg1.GetValue() |> Array.toList) (msg2.GetValue() |> Array.toList)

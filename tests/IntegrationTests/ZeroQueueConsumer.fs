@@ -15,7 +15,7 @@ open Serilog
 [<Tests>]
 let tests =
     testList "ZeroQueueConsumer" [ 
-        testAsync "ZeroQueueConsumer work fine" {
+        testTask "ZeroQueueConsumer work fine" {
             
             Log.Debug("Started ZeroQueueConsumer work fine")
             let client = getClient()
@@ -29,7 +29,7 @@ let tests =
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
             
             let! consumer =
                 client.NewConsumer()
@@ -37,7 +37,7 @@ let tests =
                     .ConsumerName(consumerName)
                     .ReceiverQueueSize(0)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -51,13 +51,13 @@ let tests =
                         do! consumeMessages consumer numberOfMessages consumerName
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
-            do! Async.Sleep(110) // wait for acks
+            do! Task.WhenAll(producerTask, consumerTask) 
+            do! Task.Delay(110) // wait for acks
             
             Log.Debug("Finished ZeroQueueConsumer work fine")
         }
         
-        testAsync "ZeroQueueConsumer with multiconsumer work fine" {
+        testTask "ZeroQueueConsumer with multiconsumer work fine" {
 
             Log.Debug("Started ZeroQueueConsumer with multiconsumer work fine")
             let client = getClient()
@@ -70,14 +70,14 @@ let tests =
                     .Topic(topicName1)
                     .ProducerName(name + "1")
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
                     
             let! producer2 =
                 client.NewProducer()
                     .Topic(topicName1)
                     .ProducerName(name + "2")
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! consumer =
                 client.NewConsumer()
@@ -86,7 +86,7 @@ let tests =
                     .ConsumerName(name)
                     .ReceiverQueueSize(0)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let messages1 = generateMessages 10 (name + "1")
             let messages2 = generateMessages 10 (name + "2")
@@ -110,57 +110,60 @@ let tests =
                         do! consumeAndVerifyMessages consumer name messages
                     }:> Task)
 
-            do! Task.WhenAll(producer1Task, producer2Task, consumerTask) |> Async.AwaitTask
-            do! Async.Sleep(110) // wait for acks
+            do! Task.WhenAll(producer1Task, producer2Task, consumerTask) 
+            do! Task.Delay(110) // wait for acks
 
             Log.Debug("Finished ZeroQueueConsumer with multiconsumer work fine")
 
         }
         
-        testAsync "ZeroConsumer redelivery works well" {
+        testTask "ZeroConsumer redelivery works well" {
             Log.Debug("Started ZeroConsumer redelivery works well")
             
             let client = getClient()
             
             let topicName = Guid.NewGuid().ToString()
-            let! producer = client.NewProducer(Schema.STRING())
-                                .Topic(topicName)
-                                .EnableBatching(false)
-                                .CreateAsync()
-                                |> Async.AwaitTask
+            
+            let! (producer : IProducer<string>) =
+                client.NewProducer(Schema.STRING())
+                    .Topic(topicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
                                 
-            let! consumer = client.NewConsumer(Schema.STRING())
-                               .Topic(topicName)
-                               .SubscriptionName("test-subscription")
-                               .SubscriptionType(SubscriptionType.Exclusive)
-                               .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
-                               .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(100.))
-                               .ReceiverQueueSize(0)
-                               .SubscribeAsync()
-                               |> Async.AwaitTask
+                                
+            let! (consumer : IConsumer<string>) =
+                client.NewConsumer(Schema.STRING())
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(100.))
+                    .ReceiverQueueSize(0)
+                    .SubscribeAsync()
+                               
             
             let firstTick = Environment.TickCount64.ToString()
             let secondTick = Environment.TickCount64.ToString()
-            let! _ = producer.SendAsync(firstTick) |> Async.AwaitTask
-            let! _ = producer.SendAsync(secondTick) |> Async.AwaitTask
+            let! _ = producer.SendAsync(firstTick) 
+            let! _ = producer.SendAsync(secondTick) 
              
             let cts = new CancellationTokenSource(TimeSpan.FromSeconds(5.))
              
             for i in 1..5 do
-                 let! msg = consumer.ReceiveAsync(cts.Token) |> Async.AwaitTask
+                 let! (msg : Message<string>) = consumer.ReceiveAsync(cts.Token) 
                  Expect.equal "" (msg.GetValue()) firstTick
-                 do! consumer.RedeliverUnacknowledgedMessagesAsync() |> Async.AwaitTask
+                 do! consumer.RedeliverUnacknowledgedMessagesAsync() 
                  
-            let! msg = consumer.ReceiveAsync(cts.Token) |> Async.AwaitTask
-            do! consumer.NegativeAcknowledge(msg.MessageId) |> Async.AwaitTask
-            let! msg1 = consumer.ReceiveAsync(cts.Token) |> Async.AwaitTask
+            let! (msg : Message<string>) = consumer.ReceiveAsync(cts.Token) 
+            do! consumer.NegativeAcknowledge(msg.MessageId) 
+            let! (msg1 : Message<string>) = consumer.ReceiveAsync(cts.Token) 
             Expect.equal "" (msg1.GetValue()) secondTick
-            do! consumer.AcknowledgeAsync(msg1.MessageId) |> Async.AwaitTask
-            let! msg2 = consumer.ReceiveAsync(cts.Token) |> Async.AwaitTask
+            do! consumer.AcknowledgeAsync(msg1.MessageId) 
+            let! (msg2 : Message<string>) = consumer.ReceiveAsync(cts.Token) 
             Expect.equal "" (msg2.GetValue()) firstTick
-            do! consumer.AcknowledgeAsync(msg2.MessageId) |> Async.AwaitTask
+            do! consumer.AcknowledgeAsync(msg2.MessageId) 
             
-            do! Async.Sleep(110) // wait for acks
+            do! Task.Delay(110) // wait for acks
 
             Log.Debug("Finished ZeroConsumer redelivery works well")
             
