@@ -15,7 +15,7 @@ let tests =
     
     testList "Transaction tests" [
         
-        testAsync "Registering topic multiple times with same subscription returns same task" {
+        testTask "Registering topic multiple times with same subscription returns same task" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
             let operations =
@@ -39,7 +39,7 @@ let tests =
             Expect.allEqual "" results.[0] results
         }
         
-        testAsync "Registering topic multiple times with different subscriptions returns different tasks" {
+        testTask "Registering topic multiple times with different subscriptions returns different tasks" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
             let operations =
@@ -73,7 +73,7 @@ let tests =
             Expect.notEqual "" results.[0] results.[2]
         }
         
-        testAsync "Registering producer to the same topic returns same task" {
+        testTask "Registering producer to the same topic returns same task" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
             let operations =
@@ -96,7 +96,7 @@ let tests =
             Expect.allEqual "" results.[0] results
         }
         
-        testAsync "Registering producers to multiple topics returns different tasks" {
+        testTask "Registering producers to multiple topics returns different tasks" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
             let operations =
@@ -126,7 +126,7 @@ let tests =
             Expect.notEqual "" results.[0] results.[1]
         }
         
-        testAsync "Ack and commit works as expected" {
+        testTask "Ack and commit works as expected" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
             let mutable commited = false
@@ -142,15 +142,15 @@ let tests =
             let ts = Transaction(timeout, operations, txnId)
             ts.RegisterAckOp(tcs.Task)
             let commitTask = ts.Commit()
-            do! Async.Sleep 40
+            do! Task.Delay 40
             Expect.isFalse "" commitTask.IsCompleted
             tcs.SetResult()
-            do! Async.Sleep 40
+            do! Task.Delay 40
             Expect.isTrue "" commitTask.IsCompletedSuccessfully
             Expect.isTrue "" commited
         }
         
-        testAsync "Send and commit works as expected" {
+        testTask "Send and commit works as expected" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
             let mutable commited = false
@@ -166,15 +166,15 @@ let tests =
             let ts = Transaction(timeout, operations, txnId)
             ts.RegisterSendOp(tcs.Task)
             let commitTask = ts.Commit()
-            do! Async.Sleep 40
+            do! Task.Delay 40
             Expect.isFalse "" commitTask.IsCompleted
             tcs.SetResult(MessageId.Latest)
-            do! Async.Sleep 40
+            do! Task.Delay 40
             Expect.isTrue "" commitTask.IsCompletedSuccessfully
             Expect.isTrue "" commited
         }
         
-        testAsync "Ack and abort works as expected" {
+        testTask "Ack and abort works as expected" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
             let mutable aborted = false
@@ -190,15 +190,15 @@ let tests =
             let ts = Transaction(timeout, operations, txnId)
             ts.RegisterAckOp(tcs.Task)
             let commitTask = ts.Abort()
-            do! Async.Sleep 40
+            do! Task.Delay 40
             Expect.isFalse "" commitTask.IsCompleted
             tcs.SetResult()
-            do! Async.Sleep 40
+            do! Task.Delay 40
             Expect.isTrue "" commitTask.IsCompletedSuccessfully
             Expect.isTrue "" aborted
         }
         
-        testAsync "Send and abort works as expected" {
+        testTask "Send and abort works as expected" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
             let mutable aborted = false
@@ -214,15 +214,15 @@ let tests =
             let ts = Transaction(timeout, operations, txnId)
             ts.RegisterSendOp(tcs.Task)
             let commitTask = ts.Abort()
-            do! Async.Sleep 40
+            do! Task.Delay 40
             Expect.isFalse "" commitTask.IsCompleted
             tcs.SetResult(MessageId.Latest)
-            do! Async.Sleep 40
+            do! Task.Delay 40
             Expect.isTrue "" commitTask.IsCompletedSuccessfully
             Expect.isTrue "" aborted
         }
         
-        testAsync "Can't use transaction after commit" {
+        testTask "Can't use transaction after commit" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
             let operations =
@@ -242,7 +242,7 @@ let tests =
             
         }
         
-        testAsync "Can't use transaction after abort" {
+        testTask "Can't use transaction after abort" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
             let operations =
@@ -262,7 +262,7 @@ let tests =
             
         }
         
-        testAsync "CumulativeAckConsumer is cleared after abort" {
+        testTask "CumulativeAckConsumer is cleared after abort" {
             
             let timeout = TimeSpan.FromMinutes(1.0)
             let operations =
@@ -283,7 +283,7 @@ let tests =
                     IncreaseAvailablePermits = fun num -> increased <- num
                 }
             ts.RegisterCumulativeAckConsumer(%1UL, consumerOperations)
-            do! ts.Abort() |> Async.AwaitTask
+            do! ts.Abort() 
             
             Expect.equal "" msgToClearNum increased
         }

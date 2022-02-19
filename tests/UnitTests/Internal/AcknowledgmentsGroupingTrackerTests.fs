@@ -1,6 +1,7 @@
 ﻿module Pulsar.Client.UnitTests.Internal.AcknowledgmentsGroupingTrackerTests
 
 open System
+open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Internal
@@ -13,7 +14,7 @@ let tests =
 
     testList "AcknowledgmentsGroupingTracker" [
 
-        testAsync "Immediate ack is sent if ackGroupTime is zero" {
+        testTask "Immediate ack is sent if ackGroupTime is zero" {
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalled = false
             let sendPayload cnx payload =
@@ -23,11 +24,11 @@ let tests =
                 }
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.Zero, getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }, Individual, EmptyProperties)
-            do! Async.Sleep(45)
+            do! Task.Delay(45)
             Expect.isTrue "" sendPayloadCalled
         }
 
-        testAsync "Immediate ack is not sent if ackGroupTime is not zero" {
+        testTask "Immediate ack is not sent if ackGroupTime is not zero" {
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalled = false
             let sendPayload cnx payload =
@@ -37,11 +38,11 @@ let tests =
                 }
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(100.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }, Individual, EmptyProperties)
-            do! Async.Sleep(45)
+            do! Task.Delay(45)
             Expect.isFalse "" sendPayloadCalled
         }
 
-        testAsync "Ack is eventually sent if ackGroupTime is not zero" {
+        testTask "Ack is eventually sent if ackGroupTime is not zero" {
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalled = false
             let sendPayload cnx payload =
@@ -51,11 +52,11 @@ let tests =
                 }
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             ackTracker.AddAcknowledgment( { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }, Individual, EmptyProperties)
-            do! Async.Sleep(100)
+            do! Task.Delay(100)
             Expect.isTrue "" sendPayloadCalled
         }
 
-        testAsync "Cumulative ack works correctly" {
+        testTask "Cumulative ack works correctly" {
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
@@ -68,13 +69,13 @@ let tests =
 
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             ackTracker.AddAcknowledgment(message2, AckType.Cumulative, EmptyProperties)
-            do! Async.Sleep(100)
+            do! Task.Delay(100)
             Expect.equal "" 1 sendPayloadCalledCount
             let isDuplicate = ackTracker.IsDuplicate message1
             Expect.isTrue "" isDuplicate
         }
 
-        testAsync "Multiple messages get multiacked" {
+        testTask "Multiple messages get multiacked" {
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
@@ -90,13 +91,13 @@ let tests =
             ackTracker.AddAcknowledgment(message1, AckType.Cumulative, EmptyProperties)
             ackTracker.AddAcknowledgment(message2, AckType.Cumulative, EmptyProperties)
             ackTracker.AddAcknowledgment(message3, AckType.Cumulative, EmptyProperties)
-            do! Async.Sleep(100)
+            do! Task.Delay(100)
             Expect.equal "" 1 sendPayloadCalledCount
             let isDuplicate = ackTracker.IsDuplicate message1
             Expect.isTrue "" isDuplicate
         }
         
-        testAsync "AddBatchIndexAcknowledgment works" {
+        testTask "AddBatchIndexAcknowledgment works" {
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
@@ -114,11 +115,11 @@ let tests =
             ackTracker.AddBatchIndexAcknowledgment(message1, Individual, readOnlyDict [("1", 2L)])
             ackTracker.AddBatchIndexAcknowledgment(message2, Individual, EmptyProperties)
             
-            do! Async.Sleep(100)
+            do! Task.Delay(100)
             Expect.equal "" 2 sendPayloadCalledCount
         }
         
-        testAsync "MixedAcknowledgment works" {
+        testTask "MixedAcknowledgment works" {
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
@@ -141,7 +142,7 @@ let tests =
             ackTracker.AddBatchIndexAcknowledgment(message3, Individual, EmptyProperties)
             ackTracker.AddBatchIndexAcknowledgment(message4, Individual, EmptyProperties)
             
-            do! Async.Sleep(100)
+            do! Task.Delay(100)
             Expect.equal "" 1 sendPayloadCalledCount
         }
     ]
