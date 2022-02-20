@@ -194,7 +194,7 @@ let tests =
             let producerName = "concurrentProducer"
             let consumerName = "concurrentConsumer"
 
-            let! (producer : IProducer<byte[]>) =
+            let! producer =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
@@ -236,7 +236,7 @@ let tests =
             try
                 do! Task.WhenAll(resultTasks) 
             with
-            | ex when ex.InnerException.GetType() = typeof<AlreadyClosedException> ->
+            | :? AlreadyClosedException ->
                 ()
             | ex ->
                 failtestf "Incorrect exception type %A" (ex.GetType().FullName)
