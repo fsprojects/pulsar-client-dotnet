@@ -12,7 +12,7 @@ let tests =
 
     testList "Flow" [
 
-        testAsync "Send and receive 100 messages concurrently works fine with small receiver queue size" {
+        testTask "Send and receive 100 messages concurrently works fine with small receiver queue size" {
 
             Log.Debug("Started Send and receive 100 messages concurrently works fine with small receiver queue size")
             let client = getClient()
@@ -21,14 +21,14 @@ let tests =
             let! producer =
                 client.NewProducer()
                     .Topic(topicName)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! consumer =
                 client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .ReceiverQueueSize(10)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -42,12 +42,12 @@ let tests =
                         do! consumeMessages consumer 100 ""
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
 
             Log.Debug("Finished Send and receive 100 messages concurrently works fine with small receiver queue size")
         }
 
-        testAsync "Send and receive 100 messages concurrently works fine with small receiver queue size and no batches" {
+        testTask "Send and receive 100 messages concurrently works fine with small receiver queue size and no batches" {
 
             Log.Debug("Started Send and receive 100 messages concurrently works fine with small receiver queue size and no batches")
             let client = getClient()
@@ -57,14 +57,14 @@ let tests =
                 client.NewProducer()
                     .Topic(topicName)
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! consumer =
                 client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .ReceiverQueueSize(10)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -78,7 +78,7 @@ let tests =
                         do! consumeMessages consumer 100 ""
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
 
             Log.Debug("Finished Send and receive 100 messages concurrently works fine with small receiver queue size and no batches")
         }

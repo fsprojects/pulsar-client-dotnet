@@ -61,7 +61,7 @@ type ProducerInterceptorSendAck() =
 [<Tests>]
 let tests =
     testList "ProducerInterceptor" [
-        testAsync "Check OnClose" {
+        testTask "Check OnClose" {
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
@@ -69,19 +69,19 @@ let tests =
             let prodInterceptor = new ProducerInterceptorSendAck()
             let interceptName = "OnClose"
             
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(interceptName)
                     .Intercept(prodInterceptor)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
             
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let messages =
                 generateMessages numberOfMessages interceptName
@@ -103,12 +103,12 @@ let tests =
                             let! message = consumer.ReceiveAsync()
                             do! consumer.AcknowledgeAsync message.MessageId
                     }:> Task)
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
             
             
             if not prodInterceptor.Closed then failwith "OnClose missed"
         }
-        testAsync "Check Eligible" {
+        testTask "Check Eligible" {
             let client = getClient()
             let numberOfMessages = 10
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
@@ -116,18 +116,18 @@ let tests =
             let interceptName = "Eligible"
 
             
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
-            let! producer =
+                    .SubscribeAsync() 
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(interceptName)
                     .Intercept(prodInterceptor)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
           
 
             let eligibleMessages =
@@ -162,34 +162,34 @@ let tests =
                             ()
                     }:> Task)
             
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
             
             let inEligibleMessages = eligibleMessages |> Seq.map(fun msg -> msg.Value |> Encoding.UTF8.GetString) |> Set.ofSeq
             let beforeMessagesSet = prodInterceptor.BeforeMessages |> Seq.map(fun msg -> msg.Value |> Encoding.UTF8.GetString) |> Set.ofSeq
             if not (beforeMessagesSet - inEligibleMessages).IsEmpty then failwith "BeforeMessagesSet not equal inEligibleMessages"
             ()
         }
-        testAsync "Check BeforeSend" {
+        testTask "Check BeforeSend" {
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
             let interceptName = "BeforeSend"
             
             let prodInterceptor = new ProducerInterceptorBefore()
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .ProducerName(interceptName)
                     .EnableBatching(false)
                     .Topic(topicName)
                     .Intercept(prodInterceptor)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
             
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -211,9 +211,9 @@ let tests =
                             if messageValue <> beforeValue then failwith "The BeforeSend properties is not equal to message data"
                         ()
                     }:> Task)
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
         }
-        testAsync "Check OnSendAcknowledgement" {
+        testTask "Check OnSendAcknowledgement" {
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
@@ -221,19 +221,19 @@ let tests =
             let prodInterceptor = new ProducerInterceptorSendAck()
             let interceptName = "OnSendAcknowledgement"
             
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(interceptName)
                     .Intercept(prodInterceptor)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
             
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(interceptName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let messages =
                 generateMessages numberOfMessages interceptName
@@ -257,7 +257,7 @@ let tests =
                             do! consumer.AcknowledgeAsync message.MessageId
                             ()
                     }:> Task)
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
             
             let inMessages = messages |> Seq.map(fun msg -> msg.Value |> Encoding.UTF8.GetString) |> Set.ofSeq
             let ackMessagesSet = prodInterceptor.AckMessages |> Seq.map(fun msg -> msg.Value |> Encoding.UTF8.GetString) |> Set.ofSeq

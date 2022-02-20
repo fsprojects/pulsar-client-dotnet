@@ -2,6 +2,7 @@ module Pulsar.Client.UnitTests.Common.ToolsTests
 
 open System
 open System.Collections
+open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Common
@@ -64,12 +65,12 @@ let tests =
                 Expect.isFalse "" equalityResult.[i]
         }
         
-        testAsync "Async delay shouldn't crash process" {
+        testTask "Async delay shouldn't crash process" {
             let x = true
             let f = fun () -> failwith "failure"
             asyncDelayMs 20 f
-            do! Async.Sleep 100
-            do! Async.Sleep 100
+            do! Task.Delay 100
+            do! Task.Delay 100
             Console.WriteLine(x)
             Expect.isTrue "" x
         }

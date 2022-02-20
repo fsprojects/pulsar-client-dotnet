@@ -1,6 +1,7 @@
 module Pulsar.Client.UnitTests.Internal.ChunkedMessageTrackerTests
 
 open System
+open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Internal
@@ -126,7 +127,7 @@ let tests =
             Expect.equal "" xMsgId msgId1
         }
         
-        testAsync "Tracker timeout works as expected" {
+        testTask "Tracker timeout works as expected" {
             let mutable xShouldAck = false
             let mutable xMsgId = Unchecked.defaultof<MessageId>
             let ackOrTrack msgId shouldAck =
@@ -143,7 +144,7 @@ let tests =
                 Expect.isNone "" firstTry
             | _ ->
                 failwith "No context"
-            do! Async.Sleep 70
+            do! Task.Delay 70
             tracker.RemoveExpireIncompleteChunkedMessages()
             let metadata3 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"1"; ChunkId = %1 }
             let context = tracker.GetContext(metadata3)

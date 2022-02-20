@@ -20,7 +20,7 @@ let tests =
             CompressionType.ZStd
         |]
 
-    let sendReceive enableBatching (compressionType : CompressionType) = async {
+    let sendReceive enableBatching (compressionType : CompressionType) = task {
 
         let singleOrBatched = if enableBatching then "batched" else "single"
 
@@ -35,14 +35,14 @@ let tests =
                 .ProducerName("compression-single")
                 .EnableBatching(enableBatching)
                 .CompressionType(compressionType)
-                .CreateAsync() |> Async.AwaitTask
+                .CreateAsync() 
 
         let! consumer =
             client.NewConsumer()
                 .Topic(topicName)
                 .ConsumerName("compression-single")
                 .SubscriptionName("test-subscription")
-                .SubscribeAsync() |> Async.AwaitTask
+                .SubscribeAsync() 
 
         let sendMessages = if enableBatching then fastProduceMessages else produceMessages
         let messagesCount = 10
@@ -59,7 +59,7 @@ let tests =
                     do! consumeMessages consumer messagesCount "compression-consumer"
                 }:> Task)
 
-        do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+        do! Task.WhenAll(producerTask, consumerTask) 
 
         Log.Debug("Finished Send and receive {0} compressed message using '{0}'", singleOrBatched, compressionType)
     }
@@ -67,18 +67,17 @@ let tests =
     let sendMessages enableBatching =
         codecs
         |> Seq.map (sendReceive enableBatching)
-        |> Async.Parallel
-        |> Async.Ignore
+        |> Task.FromResult
 
     let sendNonBatchedMessages() = sendMessages false
     let sendBatchedMessages() = sendMessages true
 
     testList "Compression" [
-        testAsync "Send and receive single compressed message using all implemented compression codecs" {
+        testTask "Send and receive single compressed message using all implemented compression codecs" {
             do! sendNonBatchedMessages()
         }
 
-        testAsync "Send and receive batched compressed message using all implemented compression codecs" {
+        testTask "Send and receive batched compressed message using all implemented compression codecs" {
             do! sendBatchedMessages()
         }
     ]

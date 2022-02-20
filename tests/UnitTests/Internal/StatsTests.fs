@@ -1,5 +1,6 @@
 ﻿module Pulsar.Client.UnitTests.Internal.Stats
 
+open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Internal
@@ -11,7 +12,7 @@ let tests =
 
     testList "Stats" [
 
-        testAsync "Producer stats" {
+        testTask "Producer stats" {
             let stats = ProducerStatsImpl("unit_test") :> IProducerStatsRecorder
             let numberOfMessages = 10L
             let messageSize = 50L
@@ -26,7 +27,7 @@ let tests =
             let realBeforeTick = stats.GetStats()
             stats.TickTime(5)
             let realAfterTick = stats.GetStats()
-            do! Async.Sleep 10 // need to have a duration of large zero
+            do! Task.Delay 10 // need to have a duration of large zero
             stats.TickTime(3)
             let realAfter2Tick = stats.GetStats()
             
@@ -92,7 +93,7 @@ let tests =
             Expect.equal "" realAfter2Tick expectedAfter2Tick
         }
         
-        testAsync "Consumer stats" {
+        testTask "Consumer stats" {
             let stats = ConsumerStatsImpl("unit_test") :> IConsumerStatsRecorder
             let numberOfMessages = 10L
             let messageSize = 50L
@@ -107,7 +108,7 @@ let tests =
             let realBeforeTick = stats.GetStats()
             stats.TickTime(5)
             let realAfterTick = stats.GetStats()
-            do! Async.Sleep 10 // need to have a duration of large zero
+            do! Task.Delay 10 // need to have a duration of large zero
             stats.TickTime(3)
             let realAfter2Tick = stats.GetStats()
 

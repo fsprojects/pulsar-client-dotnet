@@ -6,6 +6,7 @@ open System
 open Expecto
 
 open System.Threading.Tasks
+open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.IntegrationTests.Common
 
@@ -13,24 +14,24 @@ open Pulsar.Client.IntegrationTests.Common
 [<Tests>]
 let tests =
     testList "Tls" [
-        testAsync "Tls transport" {
+        testTask "Tls transport" {
             let client = getSslAdminClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
             let messageIds = ResizeArray<MessageId>()
             
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
             
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("concurrent")
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
-
+                    .SubscribeAsync()
+                    
             let producerTask =
                 Task.Run(fun () ->
                     task {
@@ -46,8 +47,7 @@ let tests =
                         do! consumer.DisposeAsync()
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
-
+            do! Task.WhenAll(producerTask, consumerTask) 
         }
 
     ]

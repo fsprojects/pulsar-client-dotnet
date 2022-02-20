@@ -6,6 +6,7 @@ open Expecto
 open System.Text
 open System.Threading.Tasks
 open FSharp.UMX
+open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Serilog
 open Pulsar.Client.IntegrationTests.Common
@@ -16,7 +17,7 @@ let tests =
 
     testList "Keys" [
 
-        testAsync "Keys and properties are propertly passed" {
+        testTask "Keys and properties are propertly passed" {
 
             Log.Debug("Started Keys and properties are propertly passed")
             let client = getClient()
@@ -30,14 +31,14 @@ let tests =
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! consumer =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -51,12 +52,12 @@ let tests =
                         do! consumeMessagesWithProps consumer numMessages consumerName
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
 
             Log.Debug("Finished Keys and properties are propertly passed")
         }
 
-        testAsync "Messages with same key always go to the same consumer" {
+        testTask "Messages with same key always go to the same consumer" {
 
             Log.Debug("Started Messages with same key always go to the same consumer")
             let client = getClient()
@@ -65,30 +66,30 @@ let tests =
             let consumerName2 = "PartitionedConsumer2"
             let producerName = "PartitionedProducer"
 
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            let! consumer1 =
+            let! (consumer1 : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.KeyShared)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .ConsumerName(consumerName1)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
-            let! consumer2 =
+            let! (consumer2 : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.KeyShared)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .ConsumerName(consumerName2)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -146,12 +147,12 @@ let tests =
                         Log.Debug("consumer2Task finished")
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumer1Task, consumer2Task) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumer1Task, consumer2Task)
 
             Log.Debug("Finished Messages with same key always go to the same consumer")
         }
 
-        testAsync "Messages with same key always go to the same consumer, when KeyBased batching is enabled" {
+        testTask "Messages with same key always go to the same consumer, when KeyBased batching is enabled" {
 
             Log.Debug("Started Messages with same key always go to the same consumer, when KeyBased batching is enabled")
             let client = getClient()
@@ -160,32 +161,32 @@ let tests =
             let consumerName2 = "BatchedPartitionedConsumer2"
             let producerName = "BatchedPartitionedProducer"
 
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .BatchBuilder(BatchBuilder.KeyBased)
                     .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(50.0))
                     .EnableBatching(true)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            let! consumer1 =
+            let! (consumer1 : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.KeyShared)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .ConsumerName(consumerName1)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
-            let! consumer2 =
+            let! (consumer2 : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.KeyShared)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .ConsumerName(consumerName2)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -243,12 +244,12 @@ let tests =
                         Log.Debug("consumer2Task finished")
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumer1Task, consumer2Task) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumer1Task, consumer2Task) 
 
             Log.Debug("Finished Messages with same key always go to the same consumer, when KeyBased batching is enabled")
         }
         
-        testAsync "Messages with same ordering key always go to the same consumer, when KeyBased batching is enabled" {
+        testTask "Messages with same ordering key always go to the same consumer, when KeyBased batching is enabled" {
 
             Log.Debug("Started Messages with same ordering key always go to the same consumer, when KeyBased batching is enabled")
             let client = getClient()
@@ -257,32 +258,32 @@ let tests =
             let consumerName2 = "BatchedPartitionedConsumer2"
             let producerName = "BatchedPartitionedProducer"
 
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .BatchBuilder(BatchBuilder.KeyBased)
                     .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(50.0))
                     .EnableBatching(true)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            let! consumer1 =
+            let! (consumer1 : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.KeyShared)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .ConsumerName(consumerName1)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
-            let! consumer2 =
+            let! (consumer2 : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.KeyShared)
                     .AcknowledgementsGroupTime(TimeSpan.FromMilliseconds(50.0))
                     .ConsumerName(consumerName2)
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -340,13 +341,13 @@ let tests =
                         Log.Debug("consumer2Task finished")
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumer1Task, consumer2Task) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumer1Task, consumer2Task) 
 
             Log.Debug("Finished Messages with same ordering key always go to the same consumer, when KeyBased batching is enabled")
         }
 
         // Should be run manually, first with commented consumer, then trigger compaction, then with commented producer
-        ptestAsync "Compacting works as expected" {
+        ptestTask "Compacting works as expected" {
 
             Log.Debug("Started Keys and properties are propertly passed")
             let client = getClient()
@@ -359,7 +360,7 @@ let tests =
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             //let! consumer =
             //    ConsumerBuilder(client)
@@ -390,7 +391,7 @@ let tests =
                         return ()
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
 
             Log.Debug("Finished Keys and properties are propertly passed")
         }

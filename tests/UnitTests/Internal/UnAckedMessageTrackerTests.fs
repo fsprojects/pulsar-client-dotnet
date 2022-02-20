@@ -52,7 +52,7 @@ let tests =
             tracker.Close()
         }
 
-        testAsync "UnAckedMessageTracker redeliver all works" {
+        testTask "UnAckedMessageTracker redeliver all works" {
             
             let scheduler = new ManualInvokeScheduler()
             let getScheduler onTick =
@@ -75,12 +75,12 @@ let tests =
             //first two ticks just needed to get rid of 2 empty redelivery sets
             scheduler.Tick(); scheduler.Tick(); scheduler.Tick()
             
-            let! redelivered = tsc.Task |> Async.AwaitTask
+            let! redelivered = tsc.Task 
             redelivered |> Expect.equal "" 3
             tracker.Close()
         }
 
-        testAsync "UnAckedMessageTracker redeliver one works" {
+        testTask "UnAckedMessageTracker redeliver one works" {
             
             let scheduler = new ManualInvokeScheduler()
             let getScheduler onTick =
@@ -105,7 +105,7 @@ let tests =
             //first two ticks just needed to get rid of 2 empty redelivery sets
             scheduler.Tick(); scheduler.Tick(); scheduler.Tick()            
             
-            let! redelivered = tsc.Task |> Async.AwaitTask
+            let! redelivered = tsc.Task 
             redelivered |> Expect.equal "" 1
             tracker.Close()
         }

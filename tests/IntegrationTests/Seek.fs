@@ -63,7 +63,7 @@ let tests =
     
     testList "Seek" [
         
-        testAsync "Consumer seek earliest redelivers all messages" {
+        testTask "Consumer seek earliest redelivers all messages" {
 
             Log.Debug("Started Consumer seek earliest redelivers all messages")
             let client = getClient()
@@ -77,14 +77,14 @@ let tests =
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             let! consumer =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
             let producerTask =
                 Task.Run(fun () ->
@@ -98,14 +98,14 @@ let tests =
                         do! consumeMessages consumer numberOfMessages consumerName
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
-            do! consumer.SeekAsync(MessageId.Earliest) |> Async.AwaitTask
-            do! consumeMessages consumer numberOfMessages consumerName |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
+            do! consumer.SeekAsync(MessageId.Earliest) 
+            do! consumeMessages consumer numberOfMessages consumerName 
 
             Log.Debug("Finished Consumer seek earliest redelivers all messages")
         }
         
-        testAsync "Consumer seek can be done to serialized message" {
+        testTask "Consumer seek can be done to serialized message" {
 
             Log.Debug("Started Consumer seek can be done to serialized message")
             let client = getClient()
@@ -113,32 +113,32 @@ let tests =
             let producerName = "seekProducer"
             let consumerName = "seekConsumer"
 
-            let! producer =
+            let! (producer : IProducer<string>) =
                 client.NewProducer(Schema.STRING())
                     .Topic(topicName)
                     .ProducerName(producerName)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            let! consumer =
+            let! (consumer : IConsumer<string>) =
                 client.NewConsumer(Schema.STRING())
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
             
-            let! msgId1 = producer.SendAsync("Hello1") |> Async.AwaitTask
-            let! msgId2 = producer.SendAsync("Hello2") |> Async.AwaitTask
+            let! (msgId1 : MessageId) = producer.SendAsync("Hello1") 
+            let! msgId2 = producer.SendAsync("Hello2") 
             let serializedMsgId = msgId1.ToByteArray()
             let deserializedMsgId = MessageId.FromByteArray(serializedMsgId)
 
-            do! consumer.SeekAsync(deserializedMsgId) |> Async.AwaitTask
-            let! msg = consumer.ReceiveAsync() |> Async.AwaitTask
+            do! consumer.SeekAsync(deserializedMsgId) 
+            let! (msg : Message<string>) = consumer.ReceiveAsync() 
             
             Expect.equal "" "Hello2" <| msg.GetValue()
             Log.Debug("Finished Consumer seek can be done to serialized message")
         }
         
-        testAsync "Seek in the middle of the batch works properly" {
+        testTask "Seek in the middle of the batch works properly" {
 
             Log.Debug("Started Seek in the middle of the batch works properly")
             let client = getClient()
@@ -147,43 +147,43 @@ let tests =
             let consumerName = "seekConsumer"
             let numberOfMessages = 3
 
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(true)
                     .BatchingMaxMessages(numberOfMessages)
                     .BatchingMaxPublishDelay(TimeSpan.FromSeconds(50.0))
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
                     .StartMessageIdInclusive()
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
 
-            do! fastProduceMessages producer numberOfMessages producerName |> Async.AwaitTask
-            let! message1 = consumer.ReceiveAsync() |> Async.AwaitTask
-            let! message2 = consumer.ReceiveAsync() |> Async.AwaitTask
-            let! message3 = consumer.ReceiveAsync() |> Async.AwaitTask
+            do! fastProduceMessages producer numberOfMessages producerName 
+            let! (message1 : Message<byte[]>) = consumer.ReceiveAsync() 
+            let! (message2 : Message<byte[]>) = consumer.ReceiveAsync() 
+            let! (message3 : Message<byte[]>) = consumer.ReceiveAsync() 
             do!
                 [|
                   consumer.AcknowledgeAsync(message1.MessageId)
                   consumer.AcknowledgeAsync(message2.MessageId)
                   consumer.AcknowledgeAsync(message3.MessageId)
                 |]
-                |> Task.WhenAll |> Async.AwaitTask |> Async.Ignore
-            do! Async.Sleep 110
-            do! consumer.SeekAsync(message2.MessageId) |> Async.AwaitTask
-            let! message2x = consumer.ReceiveAsync() |> Async.AwaitTask
-            let! message3x = consumer.ReceiveAsync() |> Async.AwaitTask
+                |> Task.WhenAll 
+            do! Task.Delay 110
+            do! consumer.SeekAsync(message2.MessageId) 
+            let! (message2x : Message<byte[]>) = consumer.ReceiveAsync() 
+            let! (message3x : Message<byte[]>) = consumer.ReceiveAsync() 
             do!
                 [|
                   consumer.AcknowledgeAsync(message2x.MessageId)
                   consumer.AcknowledgeAsync(message3x.MessageId)
-                |] |> Task.WhenAll |> Async.AwaitTask |> Async.Ignore  
+                |] |> Task.WhenAll   
              
             Expect.equal "" message2.MessageId message2x.MessageId
             Expect.equal "" message3.MessageId message3x.MessageId
@@ -191,7 +191,7 @@ let tests =
             Log.Debug("Finished Seek in the middle of the batch works properly")
         }
         
-        testAsync "Seek in the middle of the batch works properly 2" {
+        testTask "Seek in the middle of the batch works properly 2" {
 
             Log.Debug("Started Seek in the middle of the batch works properly 2")
             let client = getClient()
@@ -200,21 +200,21 @@ let tests =
             let consumerName = "seekConsumer"
             let numberOfMessages = 3
 
-            let! producer =
+            let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(true)
                     .BatchingMaxMessages(numberOfMessages)
                     .BatchingMaxPublishDelay(TimeSpan.FromSeconds(50.0))
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
-            let! consumer =
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() |> Async.AwaitTask
+                    .SubscribeAsync() 
         
             let tasks =
                 [|
@@ -223,22 +223,22 @@ let tests =
                     producer.SendAsync(Encoding.UTF8.GetBytes("3"))
                 |]
                 
-            let! msgIds = tasks |> Task.WhenAll |> Async.AwaitTask
+            let! (msgIds : MessageId[]) = tasks |> Task.WhenAll 
             
-            do! consumer.SeekAsync(msgIds.[1]) |> Async.AwaitTask
-            let! msg = consumer.ReceiveAsync() |> Async.AwaitTask
+            do! consumer.SeekAsync(msgIds.[1]) 
+            let! (msg : Message<byte[]>) = consumer.ReceiveAsync() 
             
             Expect.equal "" "3" (msg.GetValue() |> Encoding.UTF8.GetString )
    
             Log.Debug("Finished Seek in the middle of the batch works properly 2")
         }
         
-        testAsync "Seek randomly works with batching " {
-            do! testRandomSeek true |> Async.AwaitTask
+        testTask "Seek randomly works with batching " {
+            do! testRandomSeek true 
         }
         
-        testAsync "Seek randomly works without batching " {
-            do! testRandomSeek true |> Async.AwaitTask
+        testTask "Seek randomly works without batching " {
+            do! testRandomSeek true 
         }
        
     ]

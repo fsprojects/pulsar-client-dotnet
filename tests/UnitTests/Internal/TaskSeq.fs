@@ -18,7 +18,7 @@ let tests =
     
     testList "TaskSeq tests" [
 
-        testAsync "Empty input doesn't throw" {
+        testTask "Empty input doesn't throw" {
             let ts = TaskSeq(Seq.empty)
             let task1 = task {
                 let! _ = ts.Next()
@@ -28,11 +28,15 @@ let tests =
                 let! _ = Task.Delay(100)
                 return 2
             }
-            let! result = Task.WhenAny(task1, task2) |> Async.AwaitTask
-            Expect.equal "" 2 result.Result
+                        
+            let! (resultTask : Task<int>) = Task.WhenAny(task1, task2)
+            
+            let! result = resultTask
+            
+            Expect.equal "" 2 result
         }
         
-        testAsync "Initial generators work well" {
+        testTask "Initial generators work well" {
             let gen1 = fun () -> task {
                 do! Task.Delay(100)
                 return 100
@@ -42,10 +46,10 @@ let tests =
                 return 40
             }            
             let ts = TaskSeq([gen1; gen2])
-            let! result1 = ts.Next() |> Async.AwaitTask
-            let! result2 = ts.Next() |> Async.AwaitTask
-            let! result3 = ts.Next() |> Async.AwaitTask
-            let! result4 = ts.Next() |> Async.AwaitTask
+            let! result1 = ts.Next() 
+            let! result2 = ts.Next() 
+            let! result3 = ts.Next() 
+            let! result4 = ts.Next() 
             
             Expect.equal "" 40 result1
             Expect.equal "" 40 result2
@@ -53,7 +57,7 @@ let tests =
             Expect.equal "" 40 result4
         }
         
-        testAsync "Additional generator work well" {
+        testTask "Additional generator work well" {
             let gen1 = fun () -> task {
                 do! Task.Delay(100)
                 return 100
@@ -67,12 +71,12 @@ let tests =
                 return 40
             }
             let ts = TaskSeq([gen1; gen2])
-            let! result1 = ts.Next() |> Async.AwaitTask
+            let! result1 = ts.Next() 
             ts.AddGenerators([gen3])
-            let! result2 = ts.Next() |> Async.AwaitTask
-            let! result3 = ts.Next() |> Async.AwaitTask
-            let! result4 = ts.Next() |> Async.AwaitTask
-            let! result5 = ts.Next() |> Async.AwaitTask
+            let! result2 = ts.Next() 
+            let! result3 = ts.Next() 
+            let! result4 = ts.Next() 
+            let! result5 = ts.Next() 
             
             Expect.equal "" 100 result1
             Expect.equal "" 100 result2
@@ -81,7 +85,7 @@ let tests =
             Expect.equal "" 100 result5
         }
         
-        testAsync "Add/Remove generator work well" {
+        testTask "Add/Remove generator work well" {
             let gen1 = fun () -> task {
                 do! Task.Delay(100)
                 return 100
@@ -93,10 +97,10 @@ let tests =
             let ts = TaskSeq<int>(Seq.empty)
             let result1Task = ts.Next()
             ts.AddGenerators([gen1; gen2])
-            let! result2 = ts.Next() |> Async.AwaitTask
-            let! result3 = ts.Next() |> Async.AwaitTask
+            let! result2 = ts.Next() 
+            let! result3 = ts.Next() 
             ts.RemoveGenerator(gen2)
-            let! result4 = ts.Next() |> Async.AwaitTask
+            let! result4 = ts.Next() 
             
             Expect.equal "" 40 result1Task.Result
             Expect.equal "" 40 result2
@@ -104,7 +108,7 @@ let tests =
             Expect.equal "" 100 result4
         }
         
-        testAsync "Adding generator resets waitAny" {
+        testTask "Adding generator resets waitAny" {
             
             let gen1 = fun () -> task {
                 do! Task.Delay(1000)
@@ -117,15 +121,15 @@ let tests =
             let ts = TaskSeq<int>([gen1])
             let result1Task = ts.Next()
             ts.AddGenerators([gen2])
-            let! result2 = ts.Next() |> Async.AwaitTask
-            let! result3 = ts.Next() |> Async.AwaitTask
+            let! result2 = ts.Next() 
+            let! result3 = ts.Next() 
             
             Expect.equal "" 400 result1Task.Result
             Expect.equal "" 400 result2
             Expect.equal "" 1000 result3
         }
         
-        testAsync "Parallel waiters work fine" {
+        testTask "Parallel waiters work fine" {
             let gen1 = fun () -> task {
                 do! Task.Delay(550)
                 return 550
@@ -147,7 +151,7 @@ let tests =
             let result2Task = ts.Next()
             let result3Task = ts.Next()
             ts.AddGenerators([gen3; gen4])
-            let! result4 = ts.Next() |> Async.AwaitTask
+            let! result4 = ts.Next() 
             
             Expect.equal "" 400 result1Task.Result
             Expect.equal "" 450 result2Task.Result
@@ -155,7 +159,7 @@ let tests =
             Expect.equal "" 550 result4
         }
         
-        testAsync "Multiple add generators works fine" {
+        testTask "Multiple add generators works fine" {
             let gen1 = fun () -> task {
                 do! Task.Delay(550)
                 return 550
@@ -178,7 +182,7 @@ let tests =
             let result3Task = ts.Next()
             ts.AddGenerators([gen3])
             ts.AddGenerators([gen4])
-            let! result4 = ts.Next() |> Async.AwaitTask
+            let! result4 = ts.Next() 
             
             Expect.equal "" 400 result1Task.Result
             Expect.equal "" 450 result2Task.Result
@@ -186,7 +190,7 @@ let tests =
             Expect.equal "" 550 result4
         }
         
-        testAsync "Completed tasks come in unpredicted order" {
+        testTask "Completed tasks come in unpredicted order" {
             
             let gen1 = fun () -> Task.FromResult(1)
             let gen2 = fun () -> Task.FromResult(2)
