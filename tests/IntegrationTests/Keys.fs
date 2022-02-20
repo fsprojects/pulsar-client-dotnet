@@ -347,7 +347,7 @@ let tests =
         }
 
         // Should be run manually, first with commented consumer, then trigger compaction, then with commented producer
-        ptestAsync "Compacting works as expected" {
+        ptestTask "Compacting works as expected" {
 
             Log.Debug("Started Keys and properties are propertly passed")
             let client = getClient()
@@ -360,7 +360,7 @@ let tests =
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)
-                    .CreateAsync() |> Async.AwaitTask
+                    .CreateAsync() 
 
             //let! consumer =
             //    ConsumerBuilder(client)
@@ -391,7 +391,7 @@ let tests =
                         return ()
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) |> Async.AwaitTask
+            do! Task.WhenAll(producerTask, consumerTask) 
 
             Log.Debug("Finished Keys and properties are propertly passed")
         }

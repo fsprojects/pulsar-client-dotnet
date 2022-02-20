@@ -72,7 +72,7 @@ let tests =
         }
 
         // TODO: uncomment and check in 2.8
-        testTask "Failover consumer with PriorityLevel works fine" {
+        ptestTask "Failover consumer with PriorityLevel works fine" {
 
             Log.Debug("Started Failover consumer with PriorityLevel works fine")
             let client = getClient()

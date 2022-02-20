@@ -139,7 +139,7 @@ let tests =
 
         }
         
-        testTask "Eternal loop to test cluster modifications removal/addition" {
+        ptestTask "Eternal loop to test cluster modifications removal/addition" {
 
             Log.Debug("Started Eternal loop to test cluster modifications removal/addition")
             let client = getClient()
@@ -254,7 +254,7 @@ let tests =
             Log.Debug("Finished Subscribe to new topic")
         }
         
-        testTask "2К of topics" {
+        ptestTask "2К of topics" {
     
             Log.Debug("Started 2К of topics")
             let subscriptionName = "testPulsar"
