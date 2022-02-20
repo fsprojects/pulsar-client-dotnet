@@ -315,12 +315,12 @@ let tests =
         }
         
         // uncomment when https://github.com/apache/pulsar/issues/10515 is ready
-        ptestTask "Check StartMessageFromFuturePoint without batching" {
-            do! checkReadingFromFuture false 
+        ptestAsync "Check StartMessageFromFuturePoint without batching" {
+            do! checkReadingFromFuture false |> Async.AwaitTask
         }
         
         // uncomment when https://github.com/apache/pulsar/issues/10515 is ready
-        ptestTask "Check StartMessageFromFuturePoint with batching" {
-            do! checkReadingFromFuture true 
+        ptestAsync "Check StartMessageFromFuturePoint with batching" {
+            do! checkReadingFromFuture true |> Async.AwaitTask
         }
     ]
