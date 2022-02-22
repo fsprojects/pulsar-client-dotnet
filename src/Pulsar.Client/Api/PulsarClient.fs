@@ -3,6 +3,7 @@
 open System
 open System.Text.RegularExpressions
 
+open Pulsar.Client.Api
 open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
 open System.Collections.Generic
@@ -244,7 +245,7 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                     Schema = activeSchema
                     SchemaProvider = schemaProvider
                     Metadata = metadata
-                }                
+                }
                 let! consumer = MultiTopicsConsumerImpl.InitPartitioned(consumerConfig, config, connectionPool, consumerInitInfo,
                                                              lookupService, interceptors, removeConsumer)
                 addConsumer consumer
@@ -309,6 +310,45 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
             return reader
         }
 
+    member internal this.CreateTableViewReaderAsync<'T> (tableViewConfig: TableViewConfiguration, schema: ISchema<'T>) =
+        task {
+            checkIfActive()
+            Log.Logger.LogDebug("CreateTableViewReaderAsync started")
+            let! metadata = lookupService.GetPartitionedTopicMetadata tableViewConfig.Topic.CompleteTopicName
+            let! schemaProvider = this.PreProcessSchemaBeforeSubscribe(schema, tableViewConfig.Topic.CompleteTopicName)
+            let! activeSchema = getActiveScmema schema tableViewConfig.Topic
+            let readerConfig = { 
+                ReaderConfiguration.Default with 
+                    Topic = tableViewConfig.Topic
+                    StartMessageId = Some MessageId.Earliest
+                    ReadCompacted = true
+                    AutoUpdatePartitions = tableViewConfig.AutoUpdatePartitions
+                    AutoUpdatePartitionsInterval = tableViewConfig.AutoUpdatePartitionsInterval
+                }
+            let! reader = 
+                if metadata.IsMultiPartitioned then
+                    let consumerInitInfo = {
+                        TopicName = tableViewConfig.Topic
+                        Schema = activeSchema
+                        SchemaProvider = schemaProvider
+                        Metadata = metadata
+                    }
+                    MultiTopicsReaderImpl.Init(readerConfig, config, connectionPool, consumerInitInfo,
+                                                             schema, schemaProvider, lookupService)
+                else
+                    ReaderImpl.Init(readerConfig, config, connectionPool, schema, schemaProvider, lookupService)
+            post mb (AddConsumer reader)
+            return reader
+        }
+
+    member internal this.CreateTableViewAsync<'T> (tableViewConfig: TableViewConfiguration, schema: ISchema<'T>) =
+        task {
+            checkIfActive()
+            Log.Logger.LogDebug("CreateTableViewAsync started")
+            let! tableView = TableViewImpl.Init((fun () -> this.CreateTableViewReaderAsync(tableViewConfig,schema)))
+            return tableView :> ITableView<'T>
+        }
+
     member private this.Mb with get(): Channel<PulsarClientMessage> = mb
 
     member private this.ClientState
@@ -337,10 +377,13 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
 
     member this.NewReader(schema) =
         ReaderBuilder(this.CreateReaderAsync, schema)
-        
+
     member this.NewTransaction() =
         match transactionClient with
         | Some transClient ->
             TransactionBuilder(transClient)
         | None ->
             failwith "EnableTransaction property is required for starting new transactions"
+
+    member this.NewTableViewBuilder(schema) =
+        TableViewBuilder(this.CreateTableViewAsync, schema)

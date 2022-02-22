@@ -16,6 +16,7 @@
     <Compile Include="Cancellation.fs" />
     <Compile Include="Reader.fs" />
     <Compile Include="Batching.fs" />
+    <Compile Include="TableView.fs" />
     <Compile Include="Acks.fs" />
     <Compile Include="Keys.fs" />
     <Compile Include="Partitions.fs" />
