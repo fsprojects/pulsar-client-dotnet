@@ -1,8 +1,8 @@
 # pulsar-client-dotnet
-![Pulsar.Client](https://github.com/fsharplang-ru/pulsar-client-dotnet/raw/develop/images/pulsar-client-dotnet.png)
+![Pulsar.Client](https://github.com/fsprojects/pulsar-client-dotnet/raw/develop/images/pulsar-client-dotnet.png)
 
-[![.NET Core Windows](https://github.com/fsharplang-ru/pulsar-client-dotnet/workflows/.NET%20Core%20Windows/badge.svg)](https://github.com/fsharplang-ru/pulsar-client-dotnet/actions?query=workflow%3A%22.NET+Core+Windows%22)
-[![.NET Core Ubuntu](https://github.com/fsharplang-ru/pulsar-client-dotnet/workflows/.NET%20Core%20Ubuntu/badge.svg)](https://github.com/fsharplang-ru/pulsar-client-dotnet/actions?query=workflow%3A%22.NET+Core+Ubuntu%22)
+[![.NET Core Windows](https://github.com/fsprojects/pulsar-client-dotnet/workflows/.NET%20Core%20Windows/badge.svg)](https://github.com/fsprojects/pulsar-client-dotnet/actions?query=workflow%3A%22.NET+Core+Windows%22)
+[![.NET Core Ubuntu](https://github.com/fsprojects/pulsar-client-dotnet/workflows/.NET%20Core%20Ubuntu/badge.svg)](https://github.com/fsprojects/pulsar-client-dotnet/actions?query=workflow%3A%22.NET+Core+Ubuntu%22)
 
 ### Contributions and stars ★ are most welcome!
 
@@ -47,6 +47,7 @@ Features list (based on https://github.com/apache/pulsar/wiki/PIP-108:-Pulsar-Fe
 - [X] Cumulative Ack
 - [X] Batch-Index Ack
 - [ ] SNI Routing
+- [X] Table view
 
 ## Quick contributing guide
 
@@ -84,3 +85,7 @@ Features list (based on https://github.com/apache/pulsar/wiki/PIP-108:-Pulsar-Fe
     1. Ensure `public/default` namespace with default settings
     1. Ensure `public/retention` namespace with time or storage size retention configured
  - Send a Pull Request
+
+#### Maintaners
+
+  * @Lanayx
