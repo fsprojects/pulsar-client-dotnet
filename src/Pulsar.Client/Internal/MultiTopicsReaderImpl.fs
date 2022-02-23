@@ -28,6 +28,8 @@ type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfigurati
             ReadCompacted = readerConfig.ReadCompacted
             KeySharedPolicy = readerConfig.KeySharedPolicy
             MessageDecryptor = readerConfig.MessageDecryptor
+            AutoUpdatePartitions = readerConfig.AutoUpdatePartitions
+            AutoUpdatePartitionsInterval = readerConfig.AutoUpdatePartitionsInterval
     }
 
     let consumer =

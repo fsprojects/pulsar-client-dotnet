@@ -180,6 +180,8 @@ type ReaderConfiguration =
         MessageDecryptor: IMessageDecryptor option
         KeySharedPolicy: KeySharedPolicy option
         SubscriptionName: string
+        AutoUpdatePartitions: bool
+        AutoUpdatePartitionsInterval: TimeSpan
     }
     static member Default =
         {
@@ -194,6 +196,8 @@ type ReaderConfiguration =
             MessageDecryptor = None
             KeySharedPolicy = None
             SubscriptionName = ""
+            AutoUpdatePartitions = true
+            AutoUpdatePartitionsInterval = TimeSpan.FromSeconds(60.0)
         }
 
 type TransactionConfiguration =
@@ -203,4 +207,17 @@ type TransactionConfiguration =
     static member Default =
         {
             TxnTimeout = TimeSpan.FromMinutes(1.0)
+        }
+
+type TableViewConfiguration =
+    {
+        Topic: TopicName
+        AutoUpdatePartitions: bool
+        AutoUpdatePartitionsInterval: TimeSpan
+    }
+    static member Default =
+        {
+            Topic = Unchecked.defaultof<TopicName>
+            AutoUpdatePartitions = true
+            AutoUpdatePartitionsInterval = TimeSpan.FromSeconds(60.0)
         }
