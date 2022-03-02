@@ -98,7 +98,12 @@ type MessageId =
                     | (Single, Single) -> true
                     | (Batch (i, _), Batch (j, _)) -> i = j
                     | (Single, Batch (i, _)) -> i = %(-1)
-                    | (Batch (i, _), Single) -> i = %(-1)
+                    | (Batch (i, _), Single) -> i = %(-1) 
+                    &&
+                    match m.ChunkMessageIds, this.ChunkMessageIds with
+                    | Some mchunkMessageIds, Some thisChunkMessageIds when mchunkMessageIds.Length > 0 && thisChunkMessageIds.Length > 0 ->
+                        mchunkMessageIds.[0] = thisChunkMessageIds.[0] // We need to check the first chunk message id if the message is a chunkd message
+                    | _, _ -> true
             | _ ->
                 false
             

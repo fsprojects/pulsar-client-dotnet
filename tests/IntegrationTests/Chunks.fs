@@ -143,4 +143,49 @@ let tests =
              
             Log.Debug("Ended Two parallel chunks-message delivered successfully with short queue")
         }
+
+        testTask "Seek chunk messages and receive correctly" {
+            Log.Debug("Started Seek chunk messages and receive correctly")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let name = "seekChunkMessages"
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(name)
+                    .EnableBatching(false)
+                    .EnableChunking(true)
+                    .CompressionType(CompressionType.Snappy)
+                    .CreateAsync() 
+
+            let! (consumer :  IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(name)
+                    .StartMessageIdInclusive()
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync() 
+
+            let payload = Array.zeroCreate 10_000_000
+            Random().NextBytes(payload)
+            
+            let msgIds = [ for i in 0 .. 9 -> 
+                            producer.NewMessage(payload)
+                            |> producer.SendAsync
+                            |> Async.AwaitTask
+                            |> Async.RunSynchronously]
+
+            for i in 0 .. 9 do
+                do! consumer.ReceiveAsync()
+
+            do! consumer.SeekAsync(msgIds.[1])
+            for i in 1 .. 9 do
+                let! (msgAfterSeek : Message<byte[]>) = consumer.ReceiveAsync()
+                Expect.equal "" msgIds.[i] msgAfterSeek.MessageId
+        
+            do! consumer.UnsubscribeAsync() 
+            do! Task.Delay 100
+            Log.Debug("Ended Seek chunk messages and receive correctly")
+        }
     ]
