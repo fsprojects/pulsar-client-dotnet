@@ -46,16 +46,27 @@ type MessageId =
             }
         member internal this.PrevBatchMessageId
             with get() = { this with EntryId = this.EntryId - %1L; Type = Single }
-        member this.ToByteArray() =
-            let data = MessageIdData(ledgerId = uint64 %this.LedgerId, entryId = uint64 %this.EntryId)
-            if this.Partition >= 0 then
-                data.Partition <- this.Partition
-            match this.Type with
+        static member ToMessageIdData(msgId: MessageId) =
+            let data = MessageIdData(ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)
+            if msgId.Partition >= 0 then
+                data.Partition <- msgId.Partition
+            match msgId.Type with
             | Batch (batchIndex, acker) when %batchIndex >= 0 ->
                 data.BatchIndex <- %batchIndex
                 if acker = BatchMessageAcker.NullAcker |> not then
                     data.BatchSize <- acker.GetBatchSize()
             | _ ->
+                ()
+            data
+        member this.ToByteArray() =
+            let data = MessageId.ToMessageIdData(this)
+            match this.ChunkMessageIds with
+            | Some(chunkMsgIds) -> 
+                match chunkMsgIds |> Array.truncate 1 with
+                | [| firstChunkMsgId |] -> 
+                    data.FirstChunkMessageId <- MessageId.ToMessageIdData(firstChunkMsgId)
+                | _ -> ()
+            | None -> 
                 ()
             use stream = MemoryStreamManager.GetStream()
             Serializer.Serialize(stream, data)
@@ -73,13 +84,25 @@ type MessageId =
                     Batch (%msgData.BatchIndex, acker)
                 else
                     Single
+            let firstChunkIdData = msgData.FirstChunkMessageId
+            let (chunkMessageIds:MessageId[] option) = 
+                match firstChunkIdData with
+                | null -> None
+                | _ -> Some([| {
+                        LedgerId = %(int64 firstChunkIdData.ledgerId)
+                        EntryId = %(int64 firstChunkIdData.entryId)
+                        Type = Single // The chunk message id must be single type
+                        Partition = firstChunkIdData.Partition
+                        TopicName = %""
+                        ChunkMessageIds = None
+                    } |])
             {
                 LedgerId = %(int64 msgData.ledgerId)
                 EntryId = %(int64 msgData.entryId)
                 Type = msgType
                 Partition = msgData.Partition
                 TopicName = %""
-                ChunkMessageIds = None
+                ChunkMessageIds = chunkMessageIds
             }
         static member FromByteArrayWithTopic (data: byte[], topicName: string) =
             let initial = MessageId.FromByteArray(data)

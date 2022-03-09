@@ -184,8 +184,7 @@ let tests =
                 let! (msgAfterSeek : Message<byte[]>) = consumer.ReceiveAsync()
                 Expect.equal "" msgIds.[i] msgAfterSeek.MessageId
         
-            do! consumer.UnsubscribeAsync() 
-            do! Task.Delay 100
+            do! consumer.UnsubscribeAsync()
             Log.Debug("Ended Seek chunk messages and receive correctly")
         }
     ]
