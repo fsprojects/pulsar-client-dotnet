@@ -46,11 +46,11 @@ type MessageId =
             }
         member internal this.PrevBatchMessageId
             with get() = { this with EntryId = this.EntryId - %1L; Type = Single }
-        static member ToMessageIdData(msgId: MessageId) =
-            let data = MessageIdData(ledgerId = uint64 %msgId.LedgerId, entryId = uint64 %msgId.EntryId)
-            if msgId.Partition >= 0 then
-                data.Partition <- msgId.Partition
-            match msgId.Type with
+        member internal this.GetMessageIdData() =
+            let data = MessageIdData(ledgerId = uint64 %this.LedgerId, entryId = uint64 %this.EntryId)
+            if this.Partition >= 0 then
+                data.Partition <- this.Partition
+            match this.Type with
             | Batch (batchIndex, acker) when %batchIndex >= 0 ->
                 data.BatchIndex <- %batchIndex
                 if acker = BatchMessageAcker.NullAcker |> not then
@@ -59,14 +59,11 @@ type MessageId =
                 ()
             data
         member this.ToByteArray() =
-            let data = MessageId.ToMessageIdData(this)
+            let data = this.GetMessageIdData()
             match this.ChunkMessageIds with
-            | Some(chunkMsgIds) -> 
-                match chunkMsgIds |> Array.truncate 1 with
-                | [| firstChunkMsgId |] -> 
-                    data.FirstChunkMessageId <- MessageId.ToMessageIdData(firstChunkMsgId)
-                | _ -> ()
-            | None -> 
+            | Some chunkMsgIds when chunkMsgIds.Length > 0 ->
+                data.FirstChunkMessageId <- chunkMsgIds.[0].GetMessageIdData()
+            | _ ->
                 ()
             use stream = MemoryStreamManager.GetStream()
             Serializer.Serialize(stream, data)
@@ -85,17 +82,18 @@ type MessageId =
                 else
                     Single
             let firstChunkIdData = msgData.FirstChunkMessageId
-            let (chunkMessageIds:MessageId[] option) = 
-                match firstChunkIdData with
-                | null -> None
-                | _ -> Some([| {
+            let chunkMessageIds =
+                if isNull firstChunkIdData then
+                    None
+                else
+                    Some [| {
                         LedgerId = %(int64 firstChunkIdData.ledgerId)
                         EntryId = %(int64 firstChunkIdData.entryId)
                         Type = Single // The chunk message id must be single type
                         Partition = firstChunkIdData.Partition
                         TopicName = %""
                         ChunkMessageIds = None
-                    } |])
+                    } |]
             {
                 LedgerId = %(int64 msgData.ledgerId)
                 EntryId = %(int64 msgData.entryId)

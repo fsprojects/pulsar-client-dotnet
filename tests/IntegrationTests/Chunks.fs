@@ -170,11 +170,11 @@ let tests =
             let payload = Array.zeroCreate 10_000_000
             Random().NextBytes(payload)
             
-            let msgIds = [ for i in 0 .. 9 -> 
-                            producer.NewMessage(payload)
-                            |> producer.SendAsync
-                            |> Async.AwaitTask
-                            |> Async.RunSynchronously]
+            let! (msgIds: MessageId[]) =
+                [| for i in 0 .. 9 do
+                     producer.NewMessage(payload)
+                     |> producer.SendAsync|]
+                |> Task.WhenAll
 
             for i in 0 .. 9 do
                 do! consumer.ReceiveAsync()
