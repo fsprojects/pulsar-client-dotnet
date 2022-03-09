@@ -1064,7 +1064,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let payload, seekMessageId =
                         match seekData with
                         | SeekType.Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
-                        | SeekType.MessageId messageId -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
+                        | SeekType.MessageId messageId -> 
+                            match messageId.ChunkMessageIds with 
+                            | Some chunkMessageIds when chunkMessageIds.Length >0 ->
+                                    Commands.newSeekByMsgId consumerId requestId chunkMessageIds[0], chunkMessageIds[0]
+                            | _ -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
                     let originSeekMessageId = duringSeek
                     duringSeek <- Some seekMessageId
                     try

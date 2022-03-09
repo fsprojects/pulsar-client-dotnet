@@ -46,7 +46,7 @@ type MessageId =
             }
         member internal this.PrevBatchMessageId
             with get() = { this with EntryId = this.EntryId - %1L; Type = Single }
-        member this.ToByteArray() =
+        member internal this.GetMessageIdData() =
             let data = MessageIdData(ledgerId = uint64 %this.LedgerId, entryId = uint64 %this.EntryId)
             if this.Partition >= 0 then
                 data.Partition <- this.Partition
@@ -55,6 +55,14 @@ type MessageId =
                 data.BatchIndex <- %batchIndex
                 if acker = BatchMessageAcker.NullAcker |> not then
                     data.BatchSize <- acker.GetBatchSize()
+            | _ ->
+                ()
+            data
+        member this.ToByteArray() =
+            let data = this.GetMessageIdData()
+            match this.ChunkMessageIds with
+            | Some chunkMsgIds when chunkMsgIds.Length > 0 ->
+                data.FirstChunkMessageId <- chunkMsgIds.[0].GetMessageIdData()
             | _ ->
                 ()
             use stream = MemoryStreamManager.GetStream()
@@ -73,13 +81,26 @@ type MessageId =
                     Batch (%msgData.BatchIndex, acker)
                 else
                     Single
+            let firstChunkIdData = msgData.FirstChunkMessageId
+            let chunkMessageIds =
+                if isNull firstChunkIdData then
+                    None
+                else
+                    Some [| {
+                        LedgerId = %(int64 firstChunkIdData.ledgerId)
+                        EntryId = %(int64 firstChunkIdData.entryId)
+                        Type = Single // The chunk message id must be single type
+                        Partition = firstChunkIdData.Partition
+                        TopicName = %""
+                        ChunkMessageIds = None
+                    } |]
             {
                 LedgerId = %(int64 msgData.ledgerId)
                 EntryId = %(int64 msgData.entryId)
                 Type = msgType
                 Partition = msgData.Partition
                 TopicName = %""
-                ChunkMessageIds = None
+                ChunkMessageIds = chunkMessageIds
             }
         static member FromByteArrayWithTopic (data: byte[], topicName: string) =
             let initial = MessageId.FromByteArray(data)
@@ -98,7 +119,12 @@ type MessageId =
                     | (Single, Single) -> true
                     | (Batch (i, _), Batch (j, _)) -> i = j
                     | (Single, Batch (i, _)) -> i = %(-1)
-                    | (Batch (i, _), Single) -> i = %(-1)
+                    | (Batch (i, _), Single) -> i = %(-1) 
+                    &&
+                    match m.ChunkMessageIds, this.ChunkMessageIds with
+                    | Some mchunkMessageIds, Some thisChunkMessageIds when mchunkMessageIds.Length > 0 && thisChunkMessageIds.Length > 0 ->
+                        mchunkMessageIds.[0] = thisChunkMessageIds.[0] // We need to check the first chunk message id if the message is a chunkd message
+                    | _, _ -> true
             | _ ->
                 false
             

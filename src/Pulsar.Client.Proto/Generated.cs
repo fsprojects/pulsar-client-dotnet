@@ -104,6 +104,9 @@ namespace pulsar.proto
         internal void ResetBatchSize() => __pbn__BatchSize = null;
         private int? __pbn__BatchSize;
 
+        [global::ProtoBuf.ProtoMember(7, Name = @"first_chunk_message_id")]
+        internal MessageIdData FirstChunkMessageId { get; set; }
+
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -689,6 +692,17 @@ namespace pulsar.proto
         internal void ResetSupportsBrokerEntryMetadata() => __pbn__SupportsBrokerEntryMetadata = null;
         private bool? __pbn__SupportsBrokerEntryMetadata;
 
+        [global::ProtoBuf.ProtoMember(3, Name = @"supports_partial_producer")]
+        [global::System.ComponentModel.DefaultValue(false)]
+        internal bool SupportsPartialProducer
+        {
+            get => __pbn__SupportsPartialProducer ?? false;
+            set => __pbn__SupportsPartialProducer = value;
+        }
+        internal bool ShouldSerializeSupportsPartialProducer() => __pbn__SupportsPartialProducer != null;
+        internal void ResetSupportsPartialProducer() => __pbn__SupportsPartialProducer = null;
+        private bool? __pbn__SupportsPartialProducer;
+
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -966,6 +980,19 @@ namespace pulsar.proto
 
         [global::ProtoBuf.ProtoMember(17)]
         internal KeySharedMeta keySharedMeta { get; set; }
+
+        [global::ProtoBuf.ProtoMember(18, Name = @"subscription_properties")]
+        internal global::System.Collections.Generic.List<KeyValue> SubscriptionProperties { get; } = new global::System.Collections.Generic.List<KeyValue>();
+
+        [global::ProtoBuf.ProtoMember(19, Name = @"consumer_epoch")]
+        internal ulong ConsumerEpoch
+        {
+            get => __pbn__ConsumerEpoch.GetValueOrDefault();
+            set => __pbn__ConsumerEpoch = value;
+        }
+        internal bool ShouldSerializeConsumerEpoch() => __pbn__ConsumerEpoch != null;
+        internal void ResetConsumerEpoch() => __pbn__ConsumerEpoch = null;
+        private ulong? __pbn__ConsumerEpoch;
 
         [global::ProtoBuf.ProtoContract()]
         internal enum SubType
@@ -1350,6 +1377,28 @@ namespace pulsar.proto
         internal void ResetTopicEpoch() => __pbn__TopicEpoch = null;
         private ulong? __pbn__TopicEpoch;
 
+        [global::ProtoBuf.ProtoMember(12, Name = @"txn_enabled")]
+        [global::System.ComponentModel.DefaultValue(false)]
+        internal bool TxnEnabled
+        {
+            get => __pbn__TxnEnabled ?? false;
+            set => __pbn__TxnEnabled = value;
+        }
+        internal bool ShouldSerializeTxnEnabled() => __pbn__TxnEnabled != null;
+        internal void ResetTxnEnabled() => __pbn__TxnEnabled = null;
+        private bool? __pbn__TxnEnabled;
+
+        [global::ProtoBuf.ProtoMember(13, Name = @"initial_subscription_name")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string InitialSubscriptionName
+        {
+            get => __pbn__InitialSubscriptionName ?? "";
+            set => __pbn__InitialSubscriptionName = value;
+        }
+        internal bool ShouldSerializeInitialSubscriptionName() => __pbn__InitialSubscriptionName != null;
+        internal void ResetInitialSubscriptionName() => __pbn__InitialSubscriptionName = null;
+        private string __pbn__InitialSubscriptionName;
+
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -1509,6 +1558,16 @@ namespace pulsar.proto
 
         [global::ProtoBuf.ProtoMember(4, Name = @"ack_set")]
         internal long[] AckSets { get; set; }
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"consumer_epoch")]
+        internal ulong ConsumerEpoch
+        {
+            get => __pbn__ConsumerEpoch.GetValueOrDefault();
+            set => __pbn__ConsumerEpoch = value;
+        }
+        internal bool ShouldSerializeConsumerEpoch() => __pbn__ConsumerEpoch != null;
+        internal void ResetConsumerEpoch() => __pbn__ConsumerEpoch = null;
+        private ulong? __pbn__ConsumerEpoch;
 
     }
 
@@ -1794,6 +1853,16 @@ namespace pulsar.proto
 
         [global::ProtoBuf.ProtoMember(2, Name = @"message_ids")]
         internal global::System.Collections.Generic.List<MessageIdData> MessageIds { get; } = new global::System.Collections.Generic.List<MessageIdData>();
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"consumer_epoch")]
+        internal ulong ConsumerEpoch
+        {
+            get => __pbn__ConsumerEpoch.GetValueOrDefault();
+            set => __pbn__ConsumerEpoch = value;
+        }
+        internal bool ShouldSerializeConsumerEpoch() => __pbn__ConsumerEpoch != null;
+        internal void ResetConsumerEpoch() => __pbn__ConsumerEpoch = null;
+        private ulong? __pbn__ConsumerEpoch;
 
     }
 
@@ -2294,6 +2363,55 @@ namespace pulsar.proto
         internal bool ShouldSerializeSchemaVersion() => __pbn__SchemaVersion != null;
         internal void ResetSchemaVersion() => __pbn__SchemaVersion = null;
         private byte[] __pbn__SchemaVersion;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandTcClientConnectRequest : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"tc_id", IsRequired = true)]
+        internal ulong TcId { get; set; }
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandTcClientConnectResponse : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"error")]
+        [global::System.ComponentModel.DefaultValue(ServerError.UnknownError)]
+        internal ServerError Error
+        {
+            get => __pbn__Error ?? ServerError.UnknownError;
+            set => __pbn__Error = value;
+        }
+        internal bool ShouldSerializeError() => __pbn__Error != null;
+        internal void ResetError() => __pbn__Error = null;
+        private ServerError? __pbn__Error;
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"message")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string Message
+        {
+            get => __pbn__Message ?? "";
+            set => __pbn__Message = value;
+        }
+        internal bool ShouldSerializeMessage() => __pbn__Message != null;
+        internal void ResetMessage() => __pbn__Message = null;
+        private string __pbn__Message;
 
     }
 
@@ -3088,6 +3206,12 @@ namespace pulsar.proto
         [global::ProtoBuf.ProtoMember(61)]
         internal CommandEndTxnOnSubscriptionResponse endTxnOnSubscriptionResponse { get; set; }
 
+        [global::ProtoBuf.ProtoMember(62)]
+        internal CommandTcClientConnectRequest tcClientConnectRequest { get; set; }
+
+        [global::ProtoBuf.ProtoMember(63)]
+        internal CommandTcClientConnectResponse tcClientConnectResponse { get; set; }
+
         [global::ProtoBuf.ProtoContract()]
         internal enum Type
         {
@@ -3193,6 +3317,10 @@ namespace pulsar.proto
             EndTxnOnSubscription = 60,
             [global::ProtoBuf.ProtoEnum(Name = @"END_TXN_ON_SUBSCRIPTION_RESPONSE")]
             EndTxnOnSubscriptionResponse = 61,
+            [global::ProtoBuf.ProtoEnum(Name = @"TC_CLIENT_CONNECT_REQUEST")]
+            TcClientConnectRequest = 62,
+            [global::ProtoBuf.ProtoEnum(Name = @"TC_CLIENT_CONNECT_RESPONSE")]
+            TcClientConnectResponse = 63,
         }
 
     }
@@ -3298,6 +3426,10 @@ namespace pulsar.proto
         V16 = 16,
         [global::ProtoBuf.ProtoEnum(Name = @"v17")]
         V17 = 17,
+        [global::ProtoBuf.ProtoEnum(Name = @"v18")]
+        V18 = 18,
+        [global::ProtoBuf.ProtoEnum(Name = @"v19")]
+        V19 = 19,
     }
 
     [global::ProtoBuf.ProtoContract()]

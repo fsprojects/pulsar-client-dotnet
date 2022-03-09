@@ -56,4 +56,12 @@ let tests =
             Expect.equal "" msgId1 msgId4
             Expect.equal "" msgId1 msgId5
         }
+
+        test "Serialization works correctly" {
+            let msgId = { LedgerId = %1L; EntryId = %1L; Type = Single; Partition = 1;  TopicName = %""; 
+                ChunkMessageIds = Some([| { LedgerId = %0L; EntryId = %0L; Type = Single; Partition = 0;  TopicName = %""; ChunkMessageIds = None} |]) }
+            let msgIdData = msgId.ToByteArray()
+            let deserialized = MessageId.FromByteArray msgIdData
+            Expect.equal "" msgId deserialized
+        }
     ]
