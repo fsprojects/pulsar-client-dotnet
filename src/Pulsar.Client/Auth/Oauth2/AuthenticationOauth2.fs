@@ -70,7 +70,7 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
         
     let openAndDeserializeCreds uri =
         task{
-            use fs = new FileStream(uri, FileMode.Open)
+            use fs = new FileStream(uri, FileMode.Open, FileAccess.Read)
             let! temp = JsonSerializer.DeserializeAsync<Credentials>(fs)
             return temp
         }
