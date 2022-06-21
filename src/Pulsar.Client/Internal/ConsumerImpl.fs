@@ -85,7 +85,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
     let mutable hasReachedEndOfTopic = false
     let mutable avalablePermits = 0
-    let mutable startMessageId = startMessageId
+    let mutable startMessageId =
+        match startMessageId with
+        | Some startMsgId ->
+            match startMsgId.ChunkMessageIds with
+            | Some chunkMessageIds when chunkMessageIds.Length > 0 ->
+                Some(chunkMessageIds[0])
+            | _ -> Some(startMsgId)
+        | None -> None
     let mutable lastMessageIdInBroker = MessageId.Earliest
     let mutable lastDequeuedMessageId = MessageId.Earliest
     let mutable duringSeek = None
