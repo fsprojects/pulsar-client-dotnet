@@ -185,6 +185,17 @@ let tests =
                 Expect.equal "" msgIds.[i] msgAfterSeek.MessageId
         
             do! consumer.UnsubscribeAsync()
+            
+            let! (reader :  IReader<byte[]>) =
+                client.NewReader()
+                    .Topic(topicName)
+                    .StartMessageIdInclusive()
+                    .StartMessageId(msgIds.[1])
+                    .CreateAsync()
+                    
+            let! (readMsg : Message<byte[]>) = reader.ReadNextAsync()
+            Expect.equal "" msgIds.[1] readMsg.MessageId      
+            
             Log.Debug("Ended Seek chunk messages and receive correctly")
         }
     ]
