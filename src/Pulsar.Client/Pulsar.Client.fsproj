@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>2.10.1</Version>
+    <Version>2.10.2</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsprojects/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Fix for chunk messages seek</PackageReleaseNotes>
+    <PackageReleaseNotes>Support for chunked StartMessageId</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsprojects/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
-    <PackageVersion>2.10.1</PackageVersion>
+    <PackageVersion>2.10.2</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
@@ -36,7 +36,7 @@
     <PackageIcon>pulsar-client-dotnet.png</PackageIcon>
     <PackageIconUrl />
   </PropertyGroup>
-  <ItemGroup>    
+  <ItemGroup>
     <ProjectReference Include="..\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" PrivateAssets="all" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0" PrivateAssets="All" />
   </ItemGroup>

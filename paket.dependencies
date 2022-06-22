@@ -21,7 +21,7 @@ nuget Snappy.Standard
 nuget ZstdNet
 nuget AvroSchemaGenerator
 nuget Apache.Avro
-nuget NSec.Cryptography
+nuget NSec.Cryptography 20.2.0
 nuget PemUtils
 nuget System.Threading.Channels
 
@@ -43,7 +43,7 @@ group Tests
   nuget Apache.Avro
   nuget protobuf-net
   nuget protobuf-net.Reflection
-  
+
 group Examples
   framework: net6.0
   source https://api.nuget.org/v3/index.json
@@ -61,6 +61,7 @@ group OTel
   storage: none
 
   nuget Pulsar.Client
+  nuget NSec.Cryptography 20.2.0
   nuget Microsoft.Extensions.Logging.Console
   nuget System.Diagnostics.DiagnosticSource
   nuget OpenTelemetry.Api
