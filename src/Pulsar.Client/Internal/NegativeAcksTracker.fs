@@ -25,14 +25,14 @@ type internal NegativeAcksTracker(prefix: string,
     let prefix = prefix + " NegativeTracker"
     let state = SortedDictionary<MessageId, DateTime>()
 
-    
+
     let mb = Channel.CreateUnbounded<NegativeAcksTrackerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (task {
         let mutable continueLoop = true
         while continueLoop do
             match! mb.Reader.ReadAsync() with
             | Add (msgId, channel) ->
-            
+
                 Log.Logger.LogDebug("{0} Adding message {1}", prefix, msgId)
                 if state.ContainsKey(msgId) |> not then
                     state.Add(msgId, DateTime.Now.Add(nackDelay))
@@ -40,9 +40,9 @@ type internal NegativeAcksTracker(prefix: string,
                 else
                     Log.Logger.LogWarning("{0} Duplicate message add {1}", prefix, msgId)
                     channel.SetResult(false)
-            
+
             | TickTime ->
-            
+
                 if state.Count > 0 then
                     let messagesToRedeliver = HashSet<MessageId>()
                     for KeyValue(messageId, expirationDate) in state do
@@ -59,9 +59,9 @@ type internal NegativeAcksTracker(prefix: string,
                         redeliverUnacknowledgedMessages messagesToRedeliver
                 else
                     ()
-            
+
             | Stop ->
-            
+
                 Log.Logger.LogDebug("{0} Stop", prefix)
                 state.Clear()
                 continueLoop <- false
@@ -85,7 +85,7 @@ type internal NegativeAcksTracker(prefix: string,
             getScheduler(fun _ -> post mb TickTime)
 
     member this.Add(msgId) =
-        postAndReply mb (fun channel -> Add (msgId, channel))
+        postAndAsyncReply mb (fun channel -> Add (msgId, channel))
 
     member this.Close() =
         timer.Dispose()

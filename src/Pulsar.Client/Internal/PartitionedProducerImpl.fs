@@ -36,9 +36,9 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
     let _this = this :> IProducer<'T>
     let producerId = Generators.getNextProducerId()
     let prefix = $"p/producer({producerId}, {producerConfig.ProducerName})"
-    
+
     let keyValueProcessor: IKeyValueProcessor option = KeyValueProcessor.GetInstance schema
-    
+
     let producers = ResizeArray<IProducer<'T>>(numPartitions)
     let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let maxPendingMessages = Math.Min(producerConfig.MaxPendingMessages, producerConfig.MaxPendingMessagesAcrossPartitions / numPartitions)
@@ -66,8 +66,8 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             producerConfig.CustomMessageRouter.Value
         | _ ->
             failwith "Unknown MessageRoutingMode"
-            
-            
+
+
     let getAllPartitions () =
         task {
             try
@@ -94,7 +94,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         let mutable totalAcksReceived: int64 = 0L
         let mutable intervalDurationSum: float = 0.0
         let mutable pendingMsgs: int = 0
-        
+
         statsArray |> Array.iter(fun stats ->
             numMsgsSent <- numMsgsSent + stats.NumMsgsSent
             numBytesSent <- numBytesSent + stats.NumBytesSent
@@ -112,7 +112,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             intervalDurationSum <- intervalDurationSum + stats.IntervalDuration
             pendingMsgs <- pendingMsgs + stats.PendingMsgs
             )
-        
+
         {
             NumMsgsSent = numMsgsSent
             NumBytesSent = numBytesSent
@@ -128,9 +128,9 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             TotalSendFailed = totalSendFailed
             TotalAcksReceived = totalAcksReceived
             IntervalDuration = if statsArray.Length > 0 then intervalDurationSum / float statsArray.Length else 0.0
-            PendingMsgs = pendingMsgs 
+            PendingMsgs = pendingMsgs
         }
-    
+
     let timer = new Timer(producerConfig.AutoUpdatePartitionsInterval.TotalMilliseconds)
 
     let stopProducer() =
@@ -177,10 +177,10 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     this.ConnectionState <- Failed
                     producerCreatedTsc.SetException(ex)
                     stopProducer()
-                    
+
                 if this.ConnectionState = Failed then
                     continueLoop <- false
-                    
+
             | LastSequenceId channel ->
 
                 Log.Logger.LogDebug("{0} LastSequenceId", prefix)
@@ -188,9 +188,9 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                 |> Seq.map (fun producer -> producer.LastSequenceId)
                 |> Seq.max
                 |> channel.SetResult
-                
+
             | LastDisconnectedTimestamp channel ->
-                
+
                 Log.Logger.LogDebug("{0} LastDisconnectedTimestamp", prefix)
                 producers
                 |> Seq.map (fun producer -> producer.LastDisconnectedTimestamp)
@@ -226,7 +226,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     let! partitionedTopicNamesOption = getAllPartitions()
                     match partitionedTopicNamesOption with
                     | Some partitionedTopicNames ->
-                    
+
                         Log.Logger.LogDebug("{0} partitions number. old: {1}, new: {2}", prefix, numPartitions, partitionedTopicNames.Length )
                         if numPartitions = partitionedTopicNames.Length then
                             // topic partition number not changed
@@ -267,9 +267,9 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         ()
                 | _ ->
                     ()
-                
+
             | GetStats channel ->
-                
+
                 let! stats =
                     producers
                     |> Seq.map(fun p -> p.GetStatsAsync())
@@ -345,7 +345,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         member this.SendAsync (message: MessageBuilder<'T>) =
             let partition = this.ChoosePartitionIfActive(message)
             producers.[partition].SendAsync(message)
-            
+
         member this.NewMessage (value:'T,
             [<Optional; DefaultParameterValue(null:string)>]key:string,
             [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>]properties: IReadOnlyDictionary<string, string>,
@@ -356,10 +356,10 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             [<Optional; DefaultParameterValue(Nullable():Nullable<TimeStamp>)>]eventTime:Nullable<TimeStamp>,
             [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction,
             [<Optional; DefaultParameterValue(null:string seq)>]replicationClusters:string seq) =
-            
+
             if (txn |> isNull |> not) && producerConfig.SendTimeout > TimeSpan.Zero then
                 raise <| ArgumentException "Only producers disabled sendTimeout are allowed to produce transactional messages"
-            
+
             ProducerImpl.NewMessage(keyValueProcessor, schema, value, key, properties,
                                     deliverAt, sequenceId, keyBytes, orderingKey, eventTime, txn, replicationClusters)
 
@@ -367,15 +367,15 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
         member this.Topic = %producerConfig.Topic.CompleteTopicName
 
-        member this.LastSequenceId = postAndReply mb LastSequenceId
+        member this.LastSequenceId = (postAndAsyncReply mb LastSequenceId).Result
 
         member this.Name = producerConfig.ProducerName
 
         member this.GetStatsAsync() = postAndAsyncReply mb GetStats
-        
-        member this.LastDisconnectedTimestamp = postAndReply mb LastDisconnectedTimestamp
 
-        
+        member this.LastDisconnectedTimestamp = (postAndAsyncReply mb LastDisconnectedTimestamp).Result
+
+
     interface IAsyncDisposable with
         member this.DisposeAsync() =
             task {

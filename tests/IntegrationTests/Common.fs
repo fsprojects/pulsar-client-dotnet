@@ -79,7 +79,7 @@ let sslUser1Client =
         .TlsTrustCertificate(ca)
         .Authentication(sslUser1)
         .BuildAsync().Result
-        
+
 let getSslClient() = sslClient
 
 let getSslAdminClient() = sslAdminClient
@@ -128,7 +128,7 @@ let produceMessagesWithSameKey (producer: IProducer<byte[]>) number key producer
             let! _ = producer.NewMessage(payload, key) |> producer.SendAsync
             ()
     }
-    
+
 let produceMessagesWithTxn (producer: IProducer<byte[]>) (txn: Transaction) number producerName =
     task {
         for i in 1..number do
@@ -212,7 +212,7 @@ let consumeMessagesWithProps (consumer: IConsumer<byte[]>) number consumerName =
                 && message.Properties.["prop2"] = i.ToString()) |> not then
                 failwith <| sprintf "Incorrect properties %s" consumerName
     }
-    
+
 let consumeMessagesWithTxn (consumer: IConsumer<byte[]>) (txn: Transaction) number consumerName =
     task {
         for i in 1..number do

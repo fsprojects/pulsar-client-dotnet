@@ -28,7 +28,7 @@ let int32ToBigEndian(num : Int32) =
 
 let int32FromBigEndian(num : Int32) =
     IPAddress.NetworkToHostOrder(num)
-    
+
 let int16ToBigEndian(num : Int16) =
     IPAddress.HostToNetworkOrder(num)
 let int16FromBigEndian(num : Int16) =
@@ -128,29 +128,30 @@ let toLongArray (bitSet: BitArray) =
         for i in 0..8..resultArray.Length-1 do
             yield BitConverter.ToInt64(resultArray, i)
     |]
-    
+
 let fromLongArray (ackSets: int64[]) (numMessagesInBatch: int) =
     let bitArray = BitArray(numMessagesInBatch)
     let mutable index = 0
     for ackSet in ackSets do
         let stillToGo = numMessagesInBatch - index
-        let currentLimit = if stillToGo > 64 then 64 else stillToGo 
+        let currentLimit = if stillToGo > 64 then 64 else stillToGo
         for bitNumber in 1..currentLimit do
             bitArray.[index] <- (ackSet &&& (1L <<< bitNumber-1)) <> 0L // https://stackoverflow.com/a/4854257/1780648
             index <- index + 1
     bitArray
-    
+
 let tryPeek (queue: Queue<'T>) =
     if queue.Count > 0 then
         queue.Peek() |> Some
     else
         None
-    
+
 let falseTaskTask = false |> Task.FromResult |> Task.FromResult
 let falseTask = false |> Task.FromResult
 let trueTask = true |> Task.FromResult
 let unitTask = () |> Task.FromResult
-        
+let zeroTask = 0 |> Task.FromResult
+
 type Result<'T, 'TError> with
     member this.ToStr() =
         match this with
@@ -162,10 +163,5 @@ let postAndAsyncReply (channel: Channel<'T>) f =
     (f tcs) |> channel.Writer.TryWrite |> ignore
     tcs.Task
 
-let postAndReply (channel: Channel<'T>) f =
-    let tcs = TaskCompletionSource(TaskContinuationOptions.ExecuteSynchronously)
-    (f tcs) |> channel.Writer.TryWrite |> ignore
-    tcs.Task.Result
-    
 let post (channel: Channel<'T>) =
     channel.Writer.TryWrite >> ignore

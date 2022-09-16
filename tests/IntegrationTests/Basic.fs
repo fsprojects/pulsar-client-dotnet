@@ -21,7 +21,7 @@ open FSharp.UMX
 let tests =
 
     testList "Basic" [
-        
+
         testTask "Sent messageId should be equal to received messageId" {
 
             Log.Debug("Started Sent messageId should be equal to received messageId")
@@ -31,34 +31,34 @@ let tests =
             let! (producer1 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
-                    .CreateAsync() 
-                    
+                    .CreateAsync()
+
             let! (producer2 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .EnableBatching(false)
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() 
-                    
-            let! msg1Id = producer1.SendAsync([| 0uy |]) 
-            let! msg2Id = producer2.SendAsync([| 1uy |]) 
-            let! (msg1 : Message<byte[]>) = consumer.ReceiveAsync() 
-            let! (msg2 : Message<byte[]>) = consumer.ReceiveAsync() 
-            
+                    .SubscribeAsync()
+
+            let! msg1Id = producer1.SendAsync([| 0uy |])
+            let! msg2Id = producer2.SendAsync([| 1uy |])
+            let! (msg1 : Message<byte[]>) = consumer.ReceiveAsync()
+            let! (msg2 : Message<byte[]>) = consumer.ReceiveAsync()
+
             Expect.isTrue "" (msg1Id = msg1.MessageId)
             Expect.equal "" [| 0uy |] <| msg1.GetValue()
-            
+
             Expect.isTrue "" (msg2Id = msg2.MessageId)
             Expect.equal "" [| 1uy |] <| msg2.GetValue()
 
             Log.Debug("Finished Sent messageId should be equal to received messageId")
         }
-        
+
         testTask "Send and receive 100 messages concurrently works fine in default configuration" {
 
             Log.Debug("Started Send and receive 100 messages concurrently works fine in default configuration")
@@ -70,14 +70,14 @@ let tests =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName("concurrent")
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let! consumer =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("concurrent")
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let producerTask =
                 Task.Run(fun () ->
@@ -91,7 +91,7 @@ let tests =
                         do! consumeMessages consumer numberOfMessages "concurrent"
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) 
+            do! Task.WhenAll(producerTask, consumerTask)
 
             Log.Debug("Finished Send and receive 100 messages concurrently works fine in default configuration")
         }
@@ -106,9 +106,9 @@ let tests =
                 client.NewProducer()
                     .ProducerName("sequential")
                     .Topic(topicName)
-                    .CreateAsync() 
+                    .CreateAsync()
 
-            do! produceMessages producer 100 "sequential" 
+            do! produceMessages producer 100 "sequential"
 
             let! consumer =
                 client.NewConsumer()
@@ -116,9 +116,9 @@ let tests =
                     .ConsumerName("sequential")
                     .SubscriptionName("test-subscription")
                     .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
-            do! consumeMessages consumer 100 "sequential" 
+            do! consumeMessages consumer 100 "sequential"
             Log.Debug("Finished send 100 messages and then receiving them works fine when retention is set on namespace")
         }
 
@@ -135,26 +135,26 @@ let tests =
                     .Topic(topicName2)
                     .ConsumerName("consumer1")
                     .SubscriptionName("my-subscriptionx")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let! (consumer2 : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName1)
                     .ConsumerName("consumer2")
                     .SubscriptionName("my-subscriptiony")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let! (producer1 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName1)
                     .ProducerName("producer1")
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let! (producer2 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName2)
                     .ProducerName("producer2")
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let t1 = Task.Run(fun () ->
                 fastProduceMessages producer1 messagesNumber "producer1" |> Task.WaitAll
@@ -180,7 +180,7 @@ let tests =
                         ()
                 } :> Task
             )
-            do! [|t1; t2; t3|] |> Task.WhenAll 
+            do! [|t1; t2; t3|] |> Task.WhenAll
 
             Log.Debug("Finished Full roundtrip (emulate Request-Response behaviour)")
         }
@@ -198,14 +198,14 @@ let tests =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName(producerName)
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let producerTasks =
                 [| 1..3 |]
@@ -234,7 +234,7 @@ let tests =
 
             let resultTasks = Array.append consumerTasks producerTasks
             try
-                do! Task.WhenAll(resultTasks) 
+                do! Task.WhenAll(resultTasks)
             with
             | :? AlreadyClosedException ->
                 ()
@@ -242,7 +242,7 @@ let tests =
                 failtestf "Incorrect exception type %A" (ex.GetType().FullName)
             Log.Debug("Finished Concurrent send and receive work fine")
         }
-        
+
         testTask "Client, producer and consumer can't be accessed after close" {
 
             Log.Debug("Started 'Client, producer and consumer can't be accessed after close'")
@@ -255,32 +255,32 @@ let tests =
                     .Topic(topicName)
                     .ConsumerName("ClosingConsumer")
                     .SubscriptionName("closing1-subscription")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let! (consumer2 : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("ClosingConsumer")
                     .SubscriptionName("closing2-subscription")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let! (producer1 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName("ClosingProducer1")
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let! (producer2 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
                     .ProducerName("ClosingProducer2")
-                    .CreateAsync() 
+                    .CreateAsync()
 
-            do! consumer1.DisposeAsync().AsTask() 
+            do! consumer1.DisposeAsync().AsTask()
             Expect.throwsT2<AlreadyClosedException> (fun () -> consumer1.ReceiveAsync().Result |> ignore) |> ignore
-            do! producer1.DisposeAsync().AsTask() 
+            do! producer1.DisposeAsync().AsTask()
             Expect.throwsT2<AlreadyClosedException> (fun () -> producer1.SendAndForgetAsync([||]).Result |> ignore) |> ignore
-            do! client.CloseAsync() 
+            do! client.CloseAsync()
             Expect.throwsT2<AlreadyClosedException> (fun () -> consumer2.UnsubscribeAsync().Result |> ignore) |> ignore
             Expect.throwsT2<AlreadyClosedException> (fun () -> producer2.SendAndForgetAsync([||]).Result |> ignore) |> ignore
             Expect.throwsT2<AlreadyClosedException> (fun () -> client.CloseAsync().Result |> ignore) |> ignore
@@ -304,7 +304,7 @@ let tests =
                 client.NewProducer()
                     .Topic(topicName).EnableBatching(false)
                     .ProducerName(producerName)
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
@@ -312,7 +312,7 @@ let tests =
                     .ConsumerName(consumerName)
                     .SubscriptionName("schedule-subscription")
                     .SubscriptionType(SubscriptionType.Shared)
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let producerTask =
                 Task.Run(fun () ->
@@ -338,7 +338,7 @@ let tests =
                         Log.Debug("{0} acknowledged {1}", consumerName, received)
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) 
+            do! Task.WhenAll(producerTask, consumerTask)
 
             let elapsed = sw.ElapsedMilliseconds
 
@@ -349,9 +349,9 @@ let tests =
 
             Log.Debug("Finished 'Scheduled message should be delivered at requested time'")
         }
-        
+
 #if !NOTLS
-        // Before running this test set 'maxMessageSize' for broker and 'nettyMaxFrameSizeBytes' for bookkeeper 
+        // Before running this test set 'maxMessageSize' for broker and 'nettyMaxFrameSizeBytes' for bookkeeper
         testTask "Send large message works fine" {
 
             Log.Debug("Started Send large message works fine")
@@ -364,19 +364,19 @@ let tests =
                     .Topic(topicName)
                     .ProducerName("bigMessageProducer")
                     .EnableBatching(false)
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("bigMessageConsumer")
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let producerTask =
                 Task.Run(fun () ->
                     task {
-                        let message = Array.create 10_400_000 1uy 
+                        let message = Array.create 10_400_000 1uy
                         let! _ = producer.SendAsync(message)
                         ()
                     }:> Task)
@@ -389,7 +389,7 @@ let tests =
                             failwith "incorrect message received"
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) 
+            do! Task.WhenAll(producerTask, consumerTask)
 
             Log.Debug("Finished Send large message works fine")
         }

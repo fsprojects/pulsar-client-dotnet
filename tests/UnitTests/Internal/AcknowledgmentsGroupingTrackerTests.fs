@@ -71,7 +71,7 @@ let tests =
             ackTracker.AddAcknowledgment(message2, AckType.Cumulative, EmptyProperties)
             do! Task.Delay(100)
             Expect.equal "" 1 sendPayloadCalledCount
-            let isDuplicate = ackTracker.IsDuplicate message1
+            let! isDuplicate = ackTracker.IsDuplicate message1
             Expect.isTrue "" isDuplicate
         }
 
@@ -93,10 +93,10 @@ let tests =
             ackTracker.AddAcknowledgment(message3, AckType.Cumulative, EmptyProperties)
             do! Task.Delay(100)
             Expect.equal "" 1 sendPayloadCalledCount
-            let isDuplicate = ackTracker.IsDuplicate message1
+            let! isDuplicate = ackTracker.IsDuplicate message1
             Expect.isTrue "" isDuplicate
         }
-        
+
         testTask "AddBatchIndexAcknowledgment works" {
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalledCount = 0
@@ -114,11 +114,11 @@ let tests =
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             ackTracker.AddBatchIndexAcknowledgment(message1, Individual, readOnlyDict [("1", 2L)])
             ackTracker.AddBatchIndexAcknowledgment(message2, Individual, EmptyProperties)
-            
+
             do! Task.Delay(100)
             Expect.equal "" 2 sendPayloadCalledCount
         }
-        
+
         testTask "MixedAcknowledgment works" {
             let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
             let mutable sendPayloadCalledCount = 0
@@ -136,12 +136,12 @@ let tests =
             acker2.AckIndividual(%1) |> ignore
             let message3 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Batch(%0, acker2); Partition = 0; TopicName = %""; ChunkMessageIds = None }
             let message4 = { LedgerId = %1L; EntryId = %2L; Type = MessageIdType.Batch(%1, acker2); Partition = 0; TopicName = %""; ChunkMessageIds = None }
-            
+
             let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromMilliseconds(50.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             ackTracker.AddAcknowledgment(message1, Individual, EmptyProperties)
             ackTracker.AddBatchIndexAcknowledgment(message3, Individual, EmptyProperties)
             ackTracker.AddBatchIndexAcknowledgment(message4, Individual, EmptyProperties)
-            
+
             do! Task.Delay(100)
             Expect.equal "" 1 sendPayloadCalledCount
         }
