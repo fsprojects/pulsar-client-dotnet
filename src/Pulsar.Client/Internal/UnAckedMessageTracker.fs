@@ -41,7 +41,7 @@ type internal UnAckedMessageTracker(prefix: string,
             timePartitions.Enqueue(RedeliverSet())
 
     let mb = Channel.CreateUnbounded<UnackedTrackerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
+    do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
             match! mb.Reader.ReadAsync() with

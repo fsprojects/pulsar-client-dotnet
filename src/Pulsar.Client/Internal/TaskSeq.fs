@@ -26,7 +26,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
     let waitingQueue = Queue()
     let mutable resetWhenAnyTcs = TaskCompletionSource()
     let random = Random()
-    
+
     let whenAnyTask () =
         let tasksCount = tasks.Count
         let randIndex = random.Next(0, tasksCount)
@@ -45,27 +45,27 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
             result |> Task.FromResult
         else
             tasks |> Task.WhenAny
-    
+
     let whenAnyTaskToChannel (channel: TaskCompletionSource<Task<'T>>) =
-        task {
+        backgroundTask {
             try
                 let! result = whenAnyTask()
                 channel.SetResult result
             with Flatten ex ->
                 channel.SetException ex
         } |> ignore
-    
+
     let mb = Channel.CreateUnbounded<TaskSeqMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
+    do (backgroundTask {
         while true do
             match! mb.Reader.ReadAsync() with
             | WhenAnyTask channel ->
-                
+
                 Log.Logger.LogTrace("TaskSeq.WhenAnyTask nextWaiting:{0}", nextWaiting)
                 whenAnyTaskToChannel channel
-            
+
             | Next channel ->
-                
+
                 Log.Logger.LogTrace("TaskSeq.Next nextWaiting:{0}", nextWaiting)
                 if not started then
                     for i in [1..generators.Count- 1] do
@@ -76,9 +76,9 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 else
                     nextWaiting <- true
                     whenAnyTaskToChannel channel
-                    
+
             | NextComplete completedTask ->
-                
+
                 Log.Logger.LogTrace("TaskSeq.NextComplete nextWaiting:{0}", nextWaiting)
                 let index = tasks.IndexOf(completedTask)
                 if index > 0 then
@@ -90,19 +90,19 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                     whenAnyTaskToChannel channel
                 else
                     nextWaiting <- false
-                
+
             | RestartCompletedTasks ->
-                
+
                 Log.Logger.LogTrace("TaskSeq.RestartCompleted nextWaiting:{0}", nextWaiting)
                 for index in 0..tasks.Count-1 do
                     if tasks.[index].IsCompleted then
                         tasks.[index] <- generators.[index]()
-                
+
             | AddGenerators newGenerators ->
-                
+
                 Log.Logger.LogTrace("TaskSeq.AddGenerators nextWaiting:{0}", nextWaiting)
                 let noGenerators = tasks.Count = 1
-                newGenerators |> generators.AddRange 
+                newGenerators |> generators.AddRange
                 if started then
                     newGenerators
                     |> Seq.map (fun gen -> gen())
@@ -115,9 +115,9 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                     resetWhenAnyTcs.SetCanceled()
                     resetWhenAnyTcs <- TaskCompletionSource()
                     tasks.[0] <- resetWhenAnyTcs.Task
-                
+
             | RemoveGenerator generator ->
-                
+
                 Log.Logger.LogTrace("TaskSeq.RemoveGenerator nextWaiting:{0}", nextWaiting)
                 let index = generators.IndexOf(generator)
                 if index > 0 then
@@ -133,7 +133,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
             else
                 Log.Logger.LogInformation("Taskseq mailbox has stopped normally"))
     |> ignore
-    
+
     do tasks.Add(resetWhenAnyTcs.Task)
     do generators.Add(Unchecked.defaultof<TaskGenerator<'T>>) // fake generator
     do initialGenerators |> Seq.iter (fun gen -> generators.Add(gen))
@@ -141,17 +141,17 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
     member private this.RestartNext() =
         async {
             let! completedTask = postAndAsyncReply mb WhenAnyTask |> Async.AwaitTask
-            Log.Logger.LogTrace("TaskSeq.RestartNext {0}", completedTask.Status) 
+            Log.Logger.LogTrace("TaskSeq.RestartNext {0}", completedTask.Status)
             if completedTask.IsCanceled then
                 return! this.RestartNext()
             else
                 return completedTask
         }
-        
+
     member this.Next() =
-        task {
+        backgroundTask {
             let! completedTask = postAndAsyncReply mb Next |> Async.AwaitTask
-            Log.Logger.LogTrace("TaskSeq.Next {0}", completedTask.Status) 
+            Log.Logger.LogTrace("TaskSeq.Next {0}", completedTask.Status)
             if completedTask.IsCanceled then
                 let! restartedTask = this.RestartNext()
                 post mb (NextComplete restartedTask)
@@ -160,7 +160,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 post mb (NextComplete completedTask)
                 return! completedTask
         }
-        
+
     member this.AddGenerators generators =
         post mb (AddGenerators generators)
 

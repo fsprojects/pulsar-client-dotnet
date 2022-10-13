@@ -45,12 +45,12 @@ type internal ConnectionHandler( parentPrefix: string,
         | _ -> false
 
     let mb = Channel.CreateUnbounded<ConnectionHandlerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
+    do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
             match! mb.Reader.ReadAsync() with
             | GrabCnx ->
-                
+
                 match this.ConnectionState with
                 | Ready _ ->
                     Log.Logger.LogWarning("{0} Client cnx already set for topic {1}, ignoring reconnection request", prefix, topic);
@@ -76,9 +76,9 @@ type internal ConnectionHandler( parentPrefix: string,
                                     post this.Mb (ReconnectLater ex)
                     else
                         Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", prefix, topic, this.ConnectionState)
-                        
+
             | ReconnectLater ex ->
-                
+
                 if isValidStateForReconnection() then
                     let delay = backoff.Next()
                     Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
@@ -88,9 +88,9 @@ type internal ConnectionHandler( parentPrefix: string,
                     asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
                 else
                     Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
-                    
+
             | ConnectionClosed clientCnx ->
-                
+
                 this.LastDisconnectedTimestamp <- %DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 match this.ConnectionState with
                 | Ready cnx when cnx <> clientCnx ->
@@ -105,7 +105,7 @@ type internal ConnectionHandler( parentPrefix: string,
                         asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
                     else
                         Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
-                
+
             | Close ->
                 continueLoop <- false
         }:> Task).ContinueWith(fun t ->
@@ -148,17 +148,17 @@ type internal ConnectionHandler( parentPrefix: string,
     member this.ConnectionState
         with get() = Volatile.Read(&connectionState)
         and private set(value) = Volatile.Write(&connectionState, value)
-        
+
     member this.LastDisconnectedTimestamp
         with get() : TimeStamp = %(Volatile.Read(&lastDisconnectedTimestamp))
         and private set(value: TimeStamp) = Volatile.Write(&lastDisconnectedTimestamp, %value)
-        
+
     member this.CheckIfActive() =
         match this.ConnectionState with
         | Ready _ | Connecting -> null
         | Closing | Closed -> AlreadyClosedException(prefix + "already closed") :> exn
         | Terminated -> AlreadyClosedException(prefix + " topic was terminated") :> exn
         | Failed | Uninitialized -> NotConnectedException(prefix + " not connected") :> exn
-        
+
     member this.Close() =
         post mb Close

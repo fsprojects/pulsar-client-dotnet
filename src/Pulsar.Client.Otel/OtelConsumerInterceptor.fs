@@ -25,12 +25,12 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
     let activitySource = new ActivitySource(sourceName)
     let Propagator = Propagators.DefaultTextMapPropagator
     static let prefix = "OtelConsumerInterceptor:"
-    
+
     let stopActivitySuccessfully (activity: Activity) ackType =
         activity
             .SetTag("messaging.acknowledge_type", ackType)
             .Dispose()
-    
+
     let endActivity messageId (ackResult: AckResult) =
         match cache.TryGetValue messageId with
         | true, activity ->
@@ -46,21 +46,21 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     .Dispose()
         | _ ->
             log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
-    
+
     let endPreviousActivities msgId (ackResult: AckResult) =
         cache.Keys
         |> Seq.filter (fun key -> key <= msgId)
         |> Seq.iter (fun key -> endActivity key ackResult)
-    
+
     let getter =
         Func<IReadOnlyDictionary<string, string>, string, IEnumerable<string>>
             (fun dict key ->
                 match dict.TryGetValue(key) with
                 | true, v -> seq { v }
                 | false, _ -> Seq.empty)
-    
+
     let mb = Channel.CreateUnbounded<InterceptorCommand>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
+    do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
             match! mb.Reader.ReadAsync() with
@@ -81,7 +81,7 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                 | _ ->
                     cache.Add(msgId, activity)
             | InterceptorCommand.Stop ->
-                for KeyValue(_, activity) in cache do 
+                for KeyValue(_, activity) in cache do
                     activity
                         .SetTag("messaging.acknowledge_type", "InterceptorStopped")
                         .Dispose()
@@ -97,22 +97,22 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
         |> ignore
 
     let postMb msg = mb.Writer.TryWrite(msg) |> ignore
-    
+
     interface IConsumerInterceptor<'T> with
         member this.BeforeConsume(consumer, message) =
             // Extract the PropagationContext of the upstream parent from the message headers.
             let contextToInject = Unchecked.defaultof<PropagationContext>
             let parentContext = Propagator.Extract(contextToInject, message.Properties, getter)
-            
+
             // https://github.com/open-telemetry/opentelemetry-dotnet/blob/main/examples/MicroserviceExample/Utils/Messaging/MessageReceiver.cs#L68
             let activity =
                 activitySource.StartActivity(consumer.Topic + " receive",
                                              ActivityKind.Consumer,
-                                             parentContext.ActivityContext)            
+                                             parentContext.ActivityContext)
             if activity |> isNull |> not then
                 activity
-                    .SetTag("messaging.system", "pulsar") 
-                    .SetTag("messaging.destination_kind", "topic")                    
+                    .SetTag("messaging.system", "pulsar")
+                    .SetTag("messaging.destination_kind", "topic")
                     .SetTag("messaging.destination", consumer.Topic)
                     .SetTag("messaging.consumer_id", $"{consumer.Name} - {consumer.ConsumerId}")
                     .SetTag("messaging.message_id", message.MessageId)
@@ -120,8 +120,8 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     |> ignore
                 if activity.IsAllDataRequested then
                     parentContext.Baggage.GetBaggage()
-                    |> Seq.iter (fun (KeyValue kv) -> 
-                        activity.AddBaggage kv |> ignore) 
+                    |> Seq.iter (fun (KeyValue kv) ->
+                        activity.AddBaggage kv |> ignore)
                     postMb (InterceptorCommand.BeforeConsume(message.MessageId, activity))
             message
 
@@ -149,7 +149,7 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                 | _ ->
                     exn |> Error
             postMb (InterceptorCommand.CumulativeAck(messageId, ackResult))
-            
+
         member this.OnNegativeAcksSend(_, messageId) =
             postMb (InterceptorCommand.NegativeAck(messageId, nameof InterceptorCommand.NegativeAck |> Ok))
-            
+

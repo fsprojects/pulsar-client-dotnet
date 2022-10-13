@@ -8,7 +8,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 
     [<Literal>]
     let MIN_STATS_INTERVAL_SECONDS = 1
-    
+
     let verify(config : PulsarClientConfiguration) =
         let checkValue check config =
             check config |> ignore
@@ -27,7 +27,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
         | (Result.Ok serviceUri) ->
             PulsarClientBuilder { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls }
         | (Result.Error message) -> invalidArg null message
-        
+
     member this.OperationTimeout operationTimeout =
         PulsarClientBuilder
             { config with
@@ -81,32 +81,32 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
                     name
                     |> invalidArgIfBlankString "Param listenerName must not be blank."
                     |> (fun name -> name.Trim()) }
-            
+
     member this.MaxLookupRedirects maxLookupRedirects =
         PulsarClientBuilder
             { config with
                 MaxLookupRedirects = maxLookupRedirects }
-            
+
     member this.EnableTransaction enableTransaction =
         PulsarClientBuilder
             { config with
                 EnableTransaction = enableTransaction }
-            
+
     member this.KeepAliveInterval keepAliveInterval =
         PulsarClientBuilder
             { config with
                 KeepAliveInterval = keepAliveInterval }
-            
+
     member this.BuildAsync() =
         let client =
             config
             |> verify
             |> PulsarClient
-        task {
+        backgroundTask {
             do! client.Init()
             return client
         }
-        
-        
+
+
     member this.Configuration =
         config

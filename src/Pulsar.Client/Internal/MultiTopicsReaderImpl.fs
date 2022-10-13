@@ -40,30 +40,30 @@ type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfigurati
     let castedConsumer = consumer :> IConsumer<'T>
 
     member private this.InitInternal() =
-        task {
+        backgroundTask {
             return! consumer.InitInternal()
         }
 
     static member internal Init(config: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                                 consumerInitInfo: ConsumerInitInfo<'T>,
                                 schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: BinaryLookupService) =
-        task {
+        backgroundTask {
             let reader = MultiTopicsReaderImpl(config, clientConfig, connectionPool, consumerInitInfo, schema, schemaProvider, lookup)
             do! reader.InitInternal()
             return reader :> IReader<'T>
         }
-        
+
     interface IReader<'T> with
 
         member this.ReadNextAsync() =
-            task {
+            backgroundTask {
                 let! message = castedConsumer.ReceiveAsync()
                 castedConsumer.AcknowledgeCumulativeAsync(message.MessageId) |> ignore
                 return message
             }
-            
+
         member this.ReadNextAsync ct =
-            task {
+            backgroundTask {
                 let! message = castedConsumer.ReceiveAsync(ct)
                 castedConsumer.AcknowledgeCumulativeAsync(message.MessageId) |> ignore
                 return message
@@ -74,7 +74,7 @@ type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfigurati
 
         member this.SeekAsync(timestamp: TimeStamp) =
             castedConsumer.SeekAsync(timestamp)
-            
+
         member this.SeekAsync (resolver: Func<string, SeekType>) : Task<Unit>  =
             castedConsumer.SeekAsync(resolver)
 
@@ -88,6 +88,6 @@ type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfigurati
             castedConsumer.Topic
 
     interface IAsyncDisposable with
-        
+
         member this.DisposeAsync() =
             castedConsumer.DisposeAsync()

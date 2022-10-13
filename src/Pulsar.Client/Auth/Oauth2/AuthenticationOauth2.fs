@@ -12,44 +12,44 @@ type Metadata =
     {
         [<JsonPropertyName("issuer")>]
         Issuer:string
-        
+
         [<JsonPropertyName("token_endpoint")>]
         TokenEndpoint:string
-        
+
         [<JsonPropertyName("userinfo_endpoint")>]
         UserInfoEndpoint:string
-        
+
         [<JsonPropertyName("revocation_endpoint")>]
-        RevocationEndpoint:string  
-               
+        RevocationEndpoint:string
+
         [<JsonPropertyName("jwks_uri")>]
         JwksUri:string
-        
+
         [<JsonPropertyName("device_authorization_endpoint")>]
-        DeviceAuthorizationEndpoint:string 
+        DeviceAuthorizationEndpoint:string
     }
 type Credentials =
-    {  
+    {
         [<JsonPropertyName("type")>]
         CredsType : string
-        
+
         [<JsonPropertyName("client_id")>]
         ClientId : string
-        
+
         [<JsonPropertyName("client_secret")>]
-        ClientSecret : string 
+        ClientSecret : string
 
         [<JsonPropertyName("client_email")>]
-        ClientEmail : string 
+        ClientEmail : string
 
         [<JsonPropertyName("issuer_url")>]
         IssuerUrl : string
     }
-    
-type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey: Uri, scope: string) =  
+
+type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey: Uri, scope: string) =
     inherit Authentication()
-    
-    let mutable token : Option<TokenResult * DateTime> = None  
+
+    let mutable token : Option<TokenResult * DateTime> = None
 
     //Gets a well-known metadata URL for the given OAuth issuer URL.
     //https://tools.ietf.org/id/draft-ietf-oauth-discovery-08.html#ASConfig
@@ -57,24 +57,24 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
         Uri(issuerUrl.AbsoluteUri + ".well-known/openid-configuration")
 
     let getMetadata (httpClient: HttpClient) (issuerUrl: Uri)  =
-        task {
+        backgroundTask {
             let metadataDataUrl = getWellKnownMetadataUrl issuerUrl
             let! response = httpClient.GetStreamAsync metadataDataUrl
             return! JsonSerializer.DeserializeAsync<Metadata> response
         }
     let createClient httpClient issuerUrl =
-        task {
-            let! metadata = getMetadata httpClient issuerUrl 
+        backgroundTask {
+            let! metadata = getMetadata httpClient issuerUrl
             return TokenClient(Uri(metadata.TokenEndpoint), httpClient)
         }
-        
+
     let openAndDeserializeCreds uri =
         task{
             use fs = new FileStream(uri, FileMode.Open, FileAccess.Read)
             let! temp = JsonSerializer.DeserializeAsync<Credentials>(fs)
             return temp
         }
-    
+
     //https://datatracker.ietf.org/doc/html/rfc6749#section-4.2.2
     let tryGetToken()  =
         token
@@ -86,10 +86,10 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
             else
                 None
             )
-    
+
     let httpClient = new HttpClient()
     let tokenClientTask  = createClient httpClient issuerUrl
-        
+
     override this.GetAuthMethodName() =
         "token"
     override this.GetAuthData() =
@@ -97,7 +97,7 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
         match tryGetToken() with
         | None ->
             let newToken =
-                (task {
+                (backgroundTask {
                     let! credentials = openAndDeserializeCreds(privateKey.LocalPath)
                     let! tokenTaskResult = tokenClientTask
                     return!
@@ -113,13 +113,12 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
                 token <- Some(tokenResult, issuedTime)
                 upcast AuthenticationDataToken(fun () -> tokenResult.AccessToken)
             | OAuthError e ->
-                raise <| TokenExchangeException $"{e.Error}{Environment.NewLine} {e.ErrorDescription} {Environment.NewLine}{e.ErrorUri}"                    
+                raise <| TokenExchangeException $"{e.Error}{Environment.NewLine} {e.ErrorDescription} {Environment.NewLine}{e.ErrorUri}"
             | HttpError e ->
                 raise <| Exception e
 
         | Some tokenResult ->
             upcast AuthenticationDataToken(fun () -> tokenResult.AccessToken)
-              
+
     override this.Dispose() =
         httpClient.Dispose()
-              

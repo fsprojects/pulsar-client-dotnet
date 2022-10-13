@@ -14,7 +14,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
     let resolveEndPoint() = endPointResolver.Resolve()
 
     member this.GetPartitionsForTopic (topicName: TopicName) =
-        task {
+        backgroundTask {
             let! metadata = this.GetPartitionedTopicMetadata topicName.CompleteTopicName
             if metadata.Partitions > 0 then
                 return Array.init metadata.Partitions topicName.GetPartition
@@ -47,7 +47,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
         }
 
      member this.GetPartitionedTopicMetadata topicName =
-        task {
+        backgroundTask {
             let backoff = Backoff { BackoffConfig.Default with
                                         Initial = TimeSpan.FromMilliseconds(100.0)
                                         MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
@@ -61,7 +61,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
 
     member private this.FindBroker(endpoint: DnsEndPoint, authoritative: bool, topicName: CompleteTopicName,
                                    redirectCount: int) =
-        task {
+        backgroundTask {
             if config.MaxLookupRedirects > 0 && redirectCount > config.MaxLookupRedirects then
                 raise (LookupException <| "Too many redirects: " + string redirectCount)
             let! clientCnx = connectionPool.GetBrokerlessConnection endpoint
@@ -111,7 +111,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
         }
 
     member this.GetTopicsUnderNamespace (ns : NamespaceName, isPersistent : bool) =
-        task {
+        backgroundTask {
             let backoff = Backoff { BackoffConfig.Default with
                                         Initial = TimeSpan.FromMilliseconds(100.0)
                                         MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
@@ -145,7 +145,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
         }
 
     member this.GetSchema(topicName: CompleteTopicName, ?schemaVersion: SchemaVersion) =
-        task {
+        backgroundTask {
             let backoff = Backoff { BackoffConfig.Default with
                                         Initial = TimeSpan.FromMilliseconds(100.0)
                                         MandatoryStop = (config.OperationTimeout + config.OperationTimeout)

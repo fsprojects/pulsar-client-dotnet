@@ -297,7 +297,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             deadLettersProcessor.RemoveMessage messageId
         | AckType.Cumulative ->
             interceptors.OnAcknowledgeCumulative(this, messageId, null)
-            task {
+            backgroundTask {
                 let! count = untrackMessagesTill messageId
                 stats.IncrementNumAcksSent(count)
             } |> ignore
@@ -456,7 +456,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let processPossibleToDLQ (messageId : MessageId) =
         let acknowledge = trySendAcknowledge Individual EmptyProperties None
-        task {
+        backgroundTask {
             try
                 return! deadLettersProcessor.ProcessMessage(messageId, acknowledge)
             with Flatten ex ->
@@ -467,7 +467,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let getRedeliveryMessageIdData ids =
 
-        task {
+        backgroundTask {
             let isDeadTasks = ResizeArray()
             for messageId in ids do
                 let! isDeadTask = processPossibleToDLQ messageId
@@ -475,7 +475,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             let! results =
                 isDeadTasks
                 |> Seq.map(fun (messageId, isDeadTask) ->
-                        task {
+                        backgroundTask {
                             let! isDead = isDeadTask
                             return
                                 if isDead then
@@ -608,7 +608,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 Error ex
 
     let discardCorruptedMessage (msgId: MessageId) (clientCnx: ClientCnx) err =
-        task {
+        backgroundTask {
             let command = Commands.newAck consumerId msgId.LedgerId msgId.EntryId Individual
                             EmptyProperties null (Some err) None None None
             let! discardResult = clientCnx.Send command
@@ -620,7 +620,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         }
 
     let getSchemaDecodeFunction (metadata: Metadata) =
-        task {
+        backgroundTask {
             // mutable workaround for unsupported let! inside let
             let mutable schemaDecodeFunction = Unchecked.defaultof<byte[]->'T>
             if schemaProvider.IsNone || metadata.SchemaVersion.IsNone then
@@ -704,7 +704,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let handleMessagePayload (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel
                                 isMessageUndecryptable isChunkedMessage schemaDecodeFunction =
-        task {
+        backgroundTask {
             let! isDuplicate = acksGroupingTracker.IsDuplicate msgId
             if isDuplicate then
                 Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
@@ -740,7 +740,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let tryHandleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel
                                 isMessageUndecryptable isChunkedMessage schemaDecodeFunction clientCnx =
-        task {
+        backgroundTask {
             try
                 do! handleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel
                         isMessageUndecryptable isChunkedMessage schemaDecodeFunction
@@ -815,7 +815,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     }
 
     let mb = Channel.CreateUnbounded<ConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
+    do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
             match! mb.Reader.ReadAsync() with
@@ -952,7 +952,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             | ConsumerMessage.Acknowledge (messageId, ackType, txnOption, chOption) ->
 
                 Log.Logger.LogDebug("{0} Acknowledge {1} {2} {3}", prefix, messageId, ackType, txnOption)
-                task {
+                backgroundTask {
                     try
                         do! trySendAcknowledge ackType EmptyProperties txnOption messageId
                         chOption |> Option.iter (fun channel -> channel.SetResult())
@@ -1032,7 +1032,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         let batches = messageIds |> Seq.chunkBySize MAX_REDELIVER_UNACKNOWLEDGED
                         for ids in batches do
                             do!
-                                task {
+                                backgroundTask {
                                     let! messageIdData = getRedeliveryMessageIdData ids
                                     if messageIdData.Length > 0 then
                                         let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some messageIdData)
@@ -1124,7 +1124,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     // if we are starting from latest, we should seek to the actual last message first.
                     // allow the last one to be read when read head inclusively.
                     if startMessageId = MessageId.Latest then
-                        task {
+                        backgroundTask {
                             try
                                 let! lastMessageIdResult = getLastMessageIdAsync()
                                 let lastMessageId = lastMessageIdResult.LastMessageId
@@ -1162,7 +1162,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     elif hasMoreMessages this.LastMessageIdInBroker startMessageId consumerConfig.ResetIncludeHead then
                         channel.SetResult(true)
                     else
-                        task {
+                        backgroundTask {
                             try
                                 let! lastMessageIdResult = getLastMessageIdAsync()
                                 this.LastMessageIdInBroker <- lastMessageIdResult.LastMessageId // Concurrent update - handle wisely
@@ -1176,7 +1176,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     if hasMoreMessages this.LastMessageIdInBroker lastDequeuedMessageId false then
                         channel.SetResult(true)
                     else
-                        task {
+                        backgroundTask {
                             try
                                 let! lastMessageIdResult = getLastMessageIdAsync()
                                 this.LastMessageIdInBroker <- lastMessageIdResult.LastMessageId // Concurrent update - handle wisely
@@ -1205,7 +1205,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             | ConsumerMessage.ReconsumeLater (msg, ackType, deliverAt, channel) ->
 
                 let acknowledge = trySendAcknowledge ackType EmptyProperties None
-                task {
+                backgroundTask {
                     try
                         do! deadLettersProcessor.ReconsumeLater(msg, deliverAt, acknowledge)
                         channel.SetResult()
@@ -1389,7 +1389,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         avalablePermits <- 0
 
     member internal this.SendFlowPermits numMessages =
-        task {
+        backgroundTask {
             Log.Logger.LogDebug("{0} SendFlowPermits {1}", prefix, numMessages)
             match connectionHandler.ConnectionState with
             | Ready clientCnx ->
@@ -1429,7 +1429,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                        hasParent: bool, startMessageId: MessageId option, startMessageRollbackDuration: TimeSpan, lookup: BinaryLookupService,
                        createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
                        interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
-        task {
+        backgroundTask {
             let consumer =
                 if consumerConfig.ReceiverQueueSize > 0 then
                     ConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, hasParent,
@@ -1446,7 +1446,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     abstract member ReceiveWrappedAsync: CancellationToken -> Task<ResultOrException<Message<'T>>>
     default this.ReceiveWrappedAsync(cancellationToken: CancellationToken) =
-        task {
+        backgroundTask {
             connectionHandler.CheckIfActive() |> throwIfNotNull
             try
                 let! msgResult = postAndAsyncReply mb (fun channel -> Receive { CancellationToken = cancellationToken; MessageChannel = channel })
@@ -1461,7 +1461,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     interface IConsumer<'T> with
 
         member this.ReceiveAsync(cancellationToken: CancellationToken) =
-            task {
+            backgroundTask {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
                 try
                     let! msgResult = postAndAsyncReply mb (fun channel -> Receive { CancellationToken = cancellationToken; MessageChannel = channel })
@@ -1475,7 +1475,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             _this.ReceiveAsync(CancellationToken.None)
 
         member this.BatchReceiveAsync(cancellationToken: CancellationToken) =
-            task {
+            backgroundTask {
                 connectionHandler.CheckIfActive() |> throwIfNotNull
                 try
                     let! msgResult = postAndAsyncReply mb (fun channel -> BatchReceive { CancellationToken = cancellationToken; MessagesChannel = channel })
@@ -1489,7 +1489,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             _this.BatchReceiveAsync(CancellationToken.None)
 
         member this.AcknowledgeAsync (msgId: MessageId) =
-            task {
+            backgroundTask {
                 let exn = connectionHandler.CheckIfActive()
                 if not (isNull exn) then
                     stats.IncrementNumAcksFailed()
@@ -1501,7 +1501,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
         member this.AcknowledgeAsync (msgId: MessageId, txn: Transaction) =
-            task {
+            backgroundTask {
                 let exn = connectionHandler.CheckIfActive()
                 if not (isNull exn) then
                     stats.IncrementNumAcksFailed()
@@ -1518,7 +1518,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
         member this.AcknowledgeAsync (msgs: Messages<'T>) =
-            task {
+            backgroundTask {
                 let exn = connectionHandler.CheckIfActive()
                 if not (isNull exn) then
                     for msg in msgs do
@@ -1531,7 +1531,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
         member this.AcknowledgeAsync (msgIds: MessageId seq) =
-            task {
+            backgroundTask {
                 let exn = connectionHandler.CheckIfActive()
                 if not (isNull exn) then
                     for msgId in msgIds do
@@ -1559,7 +1559,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 stats.IncrementNumAcksFailed()
                 interceptors.OnAcknowledgeCumulative(this, msgId, exn)
                 raise exn
-            task {
+            backgroundTask {
                 if txn |> isNull |> not then
                     txn.RegisterCumulativeAckConsumer(consumerId, consumerTxnOperations)
                     do! txn.RegisterAckedTopic(topicName.CompleteTopicName, consumerConfig.SubscriptionName)
@@ -1588,7 +1588,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             postAndAsyncReply mb (fun channel -> SeekAsync (startFrom, channel))
 
         member this.GetLastMessageIdAsync () =
-            task {
+            backgroundTask {
                 let! result = getLastMessageIdAsync()
                 return result.LastMessageId
             }
@@ -1617,7 +1617,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         member this.Name = consumerName
 
         member this.GetStatsAsync() =
-            task {
+            backgroundTask {
                 return!
                     match connectionHandler.ConnectionState with
                     | Closed | Closing -> raise <| AlreadyClosedException(prefix + "already closed")
@@ -1625,7 +1625,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
         member this.ReconsumeLaterAsync (msg: Message<'T>, deliverAt: TimeStamp) =
-            task {
+            backgroundTask {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
                 let exn = connectionHandler.CheckIfActive()
@@ -1637,7 +1637,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
         member this.ReconsumeLaterCumulativeAsync (msg: Message<'T>, deliverAt: TimeStamp) =
-            task {
+            backgroundTask {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
                 let exn = connectionHandler.CheckIfActive()
@@ -1649,7 +1649,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
         member this.ReconsumeLaterAsync (msgs: Messages<'T>, deliverAt: TimeStamp) =
-            task {
+            backgroundTask {
                 if not consumerConfig.RetryEnable then
                     failwith "Retry is disabled"
                 let exn = connectionHandler.CheckIfActive()
@@ -1711,7 +1711,7 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
 
     interface IConsumer<'T> with
         override this.ReceiveAsync(cancellationToken: CancellationToken) =
-            task {
+            backgroundTask {
                 match! this.ReceiveWrappedAsync(cancellationToken) with
                 | Ok msg ->
                     return msg
@@ -1723,6 +1723,6 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
             _this.ReceiveAsync(CancellationToken.None)
 
         override this.BatchReceiveAsync() =
-            task {
+            backgroundTask {
                 return raise (NotSupportedException "BatchReceiveAsync not supported.")
             }

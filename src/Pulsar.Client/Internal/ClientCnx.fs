@@ -33,7 +33,7 @@ type internal ProducerOperations =
         RecoverChecksumError: SequenceId -> unit
         RecoverNotAllowedError: SequenceId -> unit
         ConnectionClosed: ClientCnx -> unit
-    }    
+    }
 and internal ConsumerOperations =
     {
         MessageReceived: RawMessage * ClientCnx -> unit
@@ -51,7 +51,7 @@ and internal TransactionMetaStoreOperations =
         EndTxnResponse: RequestId*ResultOrException<unit> -> unit
         ConnectionClosed: ClientCnx -> unit
     }
-    
+
 and internal RequestsOperation =
     | AddRequest of RequestId * BaseCommand.Type * TaskCompletionSource<PulsarResponseType>
     | CompleteRequest of RequestId * BaseCommand.Type * PulsarResponseType
@@ -59,7 +59,7 @@ and internal RequestsOperation =
     | FailAllRequests
     | Stop
     | Tick
-    
+
 and internal CnxOperation =
     | AddProducer of ProducerId * ProducerOperations
     | AddConsumer of ConsumerId * ConsumerOperations
@@ -70,7 +70,7 @@ and internal CnxOperation =
     | ChannelInactive
     | Stop
     | Tick
-    
+
 and internal PulsarCommand =
     | XCommandConnected of CommandConnected
     | XCommandPartitionedTopicMetadataResponse of CommandPartitionedTopicMetadataResponse
@@ -115,7 +115,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 brokerless: bool,
                 initialConnectionTsc: TaskCompletionSource<ClientCnx>,
                 unregisterClientCnx: Broker -> unit) as this =
-    
+
     let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
     let protocolVersion =
         ProtocolVersion.GetValues(typeof<ProtocolVersion>)
@@ -125,7 +125,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     let (LogicalAddress logicalAddress) = broker.LogicalAddress
     let proxyToBroker = if physicalAddress = logicalAddress then None else Some logicalAddress
     let mutable authenticationDataProvider = config.Authentication.GetAuthData(physicalAddress.Host);
-        
+
     let consumers = Dictionary<ConsumerId, ConsumerOperations>()
     let producers = Dictionary<ProducerId, ProducerOperations>()
     let transactionMetaStores = Dictionary<TransactionCoordinatorId, TransactionMetaStoreOperations>()
@@ -145,13 +145,13 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         requestTimeoutTimer.AutoReset <- true
         requestTimeoutTimer.Elapsed.Add(fun _ -> post this.RequestsMb RequestsOperation.Tick)
         requestTimeoutTimer.Start()
-        
+
     let startKeepAliveTimer () =
         keepAliveTimer.Interval <- config.KeepAliveInterval.TotalMilliseconds
         keepAliveTimer.AutoReset <- true
         keepAliveTimer.Elapsed.Add(fun _ -> post this.OperationsMb CnxOperation.Tick)
         keepAliveTimer.Start()
-    
+
     let failRequest reqId commandType (ex: exn) isTimeout =
         match requests.TryGetValue(reqId) with
         | true, tsc ->
@@ -161,7 +161,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | _ ->
             if not isTimeout then
                 Log.Logger.LogWarning(ex, "{0} fail non-existent request {1} type {2}, ignoring", prefix, reqId, commandType)
-    
+
     let rec handleTimeoutedMessages() =
         if requestTimeoutQueue.Count > 0 then
             let request = requestTimeoutQueue.Peek()
@@ -175,28 +175,28 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             else
                 // if there is no request that is timed out then exit the loop
                 ()
-                
+
     let handleKeepAliveTimeout() =
         if this.WaitingForPingResponse then
             connection.Dispose()
         else
             this.WaitingForPingResponse <- true
             post this.SendMb (SocketMessageWithoutReply(Commands.newPing()))
-                
+
     let getTransactionExceptionByServerError error msg =
         match error with
         | ServerError.TransactionCoordinatorNotFound -> CoordinatorNotFoundException msg :> exn
         | ServerError.InvalidTxnStatus -> InvalidTxnStatusException msg :> exn
         | ServerError.TransactionNotFound -> TransactionNotFoundException msg :> exn
         | _ -> Exception(msg)
-    
+
     let failAllRequests() =
         for KeyValue(_, rspTask) in requests do
             rspTask.SetException(ConnectException "Disconnected.")
         requests.Clear()
-    
+
     let requestsMb = Channel.CreateUnbounded<RequestsOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
+    do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
             match! requestsMb.Reader.ReadAsync() with
@@ -240,7 +240,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             post this.RequestsMb RequestsOperation.Stop
 
     let operationsMb = Channel.CreateUnbounded<CnxOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
+    do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
             match! operationsMb.Reader.ReadAsync() with
@@ -297,7 +297,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     let sendSerializedPayload (writePayload, commandType: BaseCommand.Type) =
         Log.Logger.LogDebug("{0} Sending message of type {1}", prefix, commandType)
-        task {
+        backgroundTask {
             try
                 do! connection.Output |> writePayload
                 return true
@@ -306,9 +306,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 post operationsMb ChannelInactive
                 return false
         }
-    
+
     let sendMb = Channel.CreateUnbounded<SocketMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
+    do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
             match! sendMb.Reader.ReadAsync() with
@@ -347,7 +347,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         if (messageCheckSum <> calculatedCheckSum) then
             Log.Logger.LogError("{0} Invalid checksum. Received: {1} Calculated: {2}", prefix, messageCheckSum, calculatedCheckSum)
         (metadata, payload, messageCheckSum = calculatedCheckSum)
-    
+
     let readCommand (command: BaseCommand) reader stream frameLength =
         match command.``type`` with
         | BaseCommand.Type.Connected ->
@@ -399,7 +399,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             Ok (XCommandError command.Error)
         | unknownType ->
             Result.Error (UnknownCommandType unknownType)
-    
+
     let tryParse (buffer: ReadOnlySequence<byte>) =
         let length = int buffer.Length
         if (length >= 8) then
@@ -425,7 +425,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 ArrayPool.Shared.Return array
         else
             Result.Error IncompleteCommand, SequencePosition()
-        
+
 
     let handleSuccess requestId result responseType =
         post requestsMb (CompleteRequest(requestId, responseType, result))
@@ -477,7 +477,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     let getOptionalSchemaVersion =
         Option.ofObj >> Option.map (fun bytes -> { SchemaVersion.Bytes = bytes })
-    
+
     let getMessageReceived (cmd: CommandMessage) (messageMetadata: MessageMetadata) payload checkSumValid =
         let mapCompressionType = function
             | CompressionType.None -> Pulsar.Client.Common.CompressionType.None
@@ -695,7 +695,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 else
                     checkServerError cmd.ErrorCode cmd.ErrorMessage
                     handleError %cmd.RequestId cmd.ErrorCode cmd.ErrorMessage BaseCommand.Type.GetSchemaResponse
-            else            
+            else
                 let result = TopicSchema ({
                     SchemaInfo = getSchemaInfo cmd.Schema
                     SchemaVersion = getOptionalSchemaVersion cmd.SchemaVersion
@@ -765,7 +765,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 let authData = authenticationDataProvider.Authenticate({ Bytes = cmd.Challenge.auth_data })
                 let request = Commands.newAuthResponse methodName authData (int protocolVersion) clientVersion
                 Log.Logger.LogInformation("{0} Mutual auth {1}, requested {2}", prefix, methodName, cmd.Challenge.AuthMethodName)
-                task {
+                backgroundTask {
                     let! result = this.Send(request)
                     if not result then
                         Log.Logger.LogWarning("{0} Failed to send request for mutual auth to broker", prefix)
@@ -780,7 +780,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             handleError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.Error
 
     let readSocket () =
-        task {
+        backgroundTask {
             Log.Logger.LogDebug("{0} Started read socket", prefix)
             let mutable continueLooping = true
             let reader = connection.Input
@@ -825,17 +825,17 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     member private this.SendMb with get(): Channel<SocketMessage> = sendMb
 
     member private this.RequestsMb with get(): Channel<RequestsOperation> = requestsMb
-    
+
     member private this.OperationsMb with get(): Channel<CnxOperation> = operationsMb
 
     member this.MaxMessageSize with get() = maxMessageSize
 
     member this.ClientCnxId with get() = clientCnxId
-    
+
     member this.IsActive
         with get() = Volatile.Read(&isActive)
         and private set value = Volatile.Write(&isActive, value)
-        
+
     member this.WaitingForPingResponse
         with get() = Volatile.Read(&waitingForPingResponse)
         and private set value = Volatile.Write(&waitingForPingResponse, value)
@@ -845,13 +845,13 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         let authData = authenticationDataProvider.Authenticate(AuthData.INIT_AUTH_DATA)
         let authMethodName = config.Authentication.GetAuthMethodName()
         Commands.newConnect authMethodName authData clientVersion protocolVersion proxyToBroker
-    
+
     member this.Send payload =
         if this.IsActive then
             postAndAsyncReply sendMb (fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
         else
             falseTask
-        
+
     member this.SendAndForget (payload: Payload) =
         if this.IsActive then
             post sendMb (SocketMessageWithoutReply payload)
@@ -869,7 +869,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     member this.RemoveProducer (consumerId: ProducerId) =
         if this.IsActive then
             post operationsMb (RemoveProducer(consumerId))
-        
+
     member this.RemoveTransactionMetaStoreHandler (transactionMetaStoreId: TransactionCoordinatorId) =
         if this.IsActive then
             post operationsMb (RemoveTransactionMetaStoreHandler(transactionMetaStoreId))
@@ -886,9 +886,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                                                transactionMetaStoreOperations: TransactionMetaStoreOperations) =
         if this.IsActive then
             post operationsMb (AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations))
-        
+
     member this.Dispose() =
         connection.Dispose()
-        
+
     override this.ToString() =
         prefix

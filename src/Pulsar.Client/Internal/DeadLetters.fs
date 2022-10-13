@@ -26,12 +26,12 @@ type internal DeadLetterProcessor<'T>
     let dlProducer = lazy (
         createProducer dlTopicName
     )
-    
+
     let rlProducer = lazy (
         createProducer policy.RetryLetterTopic
     )
-    
-    let getOptionalKey (message: Message<'T>) = 
+
+    let getOptionalKey (message: Message<'T>) =
             if String.IsNullOrEmpty(%message.Key) then
                 Some { PartitionKey = message.Key; IsBase64Encoded =  message.HasBase64EncodedKey  }
             else
@@ -54,10 +54,10 @@ type internal DeadLetterProcessor<'T>
                 let key = getOptionalKey message
                 let value = Unchecked.defaultof<'T> // no data decoding is needed
                 let msg = MessageBuilder(value, message.Data, key, message.Properties)
-                task {
+                backgroundTask {
                     let! producer = dlProducer.Value
                     return
-                        task {
+                        backgroundTask {
                             let! _ = producer.SendAsync(msg)
                             try
                                 do! acknowledge messageId
@@ -84,7 +84,7 @@ type internal DeadLetterProcessor<'T>
                 propertiesMap.[RetryMessageUtil.SYSTEM_PROPERTY_ORIGIN_MESSAGE_ID] <- message.MessageId.ToString()
             propertiesMap.[RetryMessageUtil.SYSTEM_PROPERTY_RECONSUMETIMES] <- string reconsumetimes
             propertiesMap.[RetryMessageUtil.SYSTEM_PROPERTY_DELIVER_AT] <- deliverAt |> string
-            task {
+            backgroundTask {
                 if reconsumetimes > policy.MaxRedeliveryCount then
                     let dlp = this :> IDeadLetterProcessor<'T>
                     dlp.AddMessage(message.MessageId, message.WithProperties(propertiesMap))
@@ -97,7 +97,7 @@ type internal DeadLetterProcessor<'T>
                     let! _ = rlProducer.SendAsync(msg)
                     do! acknowledge message.MessageId
             }
-        
+
         member this.MaxRedeliveryCount = policy.MaxRedeliveryCount
         member this.TopicName = dlTopicName
 

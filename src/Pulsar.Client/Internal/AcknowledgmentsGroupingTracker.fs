@@ -63,12 +63,12 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         (msgId.LedgerId, msgId.EntryId, ackSet)
 
     let flush (clientCnxOption: ConnectionState option) =
-        task {
+        backgroundTask {
             if not cumulativeAckFlushRequired && pendingIndividualAcks.Count = 0 && pendingIndividualBatchIndexAcks.Count = 0 then
                 return ()
             else
                 let! result =
-                    task {
+                    backgroundTask {
                         let state = clientCnxOption |> Option.defaultWith getState
                         match state with
                         | Ready cnx ->
@@ -138,9 +138,9 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         }
 
     let doImmediateAck (msgId: MessageId) ackType properties =
-        task {
+        backgroundTask {
             let! result =
-                task {
+                backgroundTask {
                     match getState() with
                     | Ready cnx ->
                         let payload = Commands.newAck consumerId msgId.LedgerId msgId.EntryId ackType properties null
@@ -157,9 +157,9 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         }
 
     let doImmediateBatchIndexAck (msgId: MessageId) ackType properties =
-        task {
+        backgroundTask {
             let! result =
-                task {
+                backgroundTask {
                     match getState() with
                     | Ready cnx ->
                         let index, acker = getBatchDetails msgId.Type
@@ -185,7 +185,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         }
 
     let mb = Channel.CreateUnbounded<GroupingTrackerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
+    do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
                 match! mb.Reader.ReadAsync() with

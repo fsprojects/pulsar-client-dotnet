@@ -24,13 +24,13 @@ type TxnOperations =
         Commit: TxnId -> Task<unit>
         Abort: TxnId -> Task<unit>
     }
-    
+
 type ConsumerTxnOperations =
     {
         ClearIncomingMessagesAndGetMessageNumber: unit -> Async<int>
         IncreaseAvailablePermits: int -> unit
     }
-    
+
 type State =
     | OPEN
     | COMMITTING
@@ -41,15 +41,15 @@ type State =
 
 [<AllowNullLiteral>]
 type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnId: TxnId) as this =
-    
-    let mutable state = OPEN    
+
+    let mutable state = OPEN
     let registerPartitionMap = Dictionary<CompleteTopicName, Task<unit>>()
     let registerSubscriptionMap = Dictionary<CompleteTopicName * SubscriptionName, Task<unit>>()
     let sendTasks = ResizeArray<Task<MessageId>>()
     let ackTasks = ResizeArray<Task<Unit>>()
     let cumulativeAckConsumers = Dictionary<ConsumerId, ConsumerTxnOperations>()
     let lockObj = Object()
-    
+
     let allOpComplete() =
         seq {
             for sendTask in sendTasks do
@@ -57,20 +57,20 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             for ackTask in ackTasks do
                 yield (ackTask :> Task)
         } |> Task.WhenAll
-       
-       
+
+
     let checkIfOpen f =
         if this.State = OPEN then
             f()
         else
             raise <| InvalidTxnStatusException $"{txnId} with unexpected state {state}, expected OPEN state!"
-        
+
     let executeInsideLockIfOpen f =
         checkIfOpen (fun () ->
             lock lockObj (fun () ->
                 checkIfOpen f
-        ))        
-            
+        ))
+
     do asyncDelayTask timeout (fun () ->
         match this.State with
         | OPEN ->
@@ -82,7 +82,7 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
     member this.State
         with get() = Volatile.Read(&state)
         and private set value = Volatile.Write(&state, value)
-    
+
     member internal this.RegisterProducedTopic(topic: CompleteTopicName) =
         executeInsideLockIfOpen (fun () ->
             match registerPartitionMap.TryGetValue topic with
@@ -92,12 +92,12 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
                 registerPartitionMap.Add(topic, t)
                 t
         )
-    
+
     member internal this.RegisterSendOp(sendTask: Task<MessageId>) =
         lock lockObj (fun () ->
             sendTasks.Add(sendTask)
         )
-        
+
     member internal this.RegisterAckedTopic(topic: CompleteTopicName, subscription: SubscriptionName) =
         executeInsideLockIfOpen (fun () ->
             let key = topic, subscription
@@ -108,23 +108,23 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
                 registerSubscriptionMap.Add(key, t)
                 t
         )
-       
+
     member internal this.RegisterAckOp(ackTask: Task<Unit>) =
         lock lockObj (fun () ->
             ackTasks.Add(ackTask)
         )
-            
+
     member internal this.RegisterCumulativeAckConsumer(consumerId: ConsumerId, consumerOperations: ConsumerTxnOperations) =
         lock lockObj (fun () ->
             cumulativeAckConsumers.[consumerId] <- consumerOperations
         )
-    
-    member this.Id = txnId    
-    
+
+    member this.Id = txnId
+
     member private this.CommitInner() =
         let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
         this.State <- COMMITTING
-        task {
+        backgroundTask {
             try
                 do! allOpComplete()
             with Flatten ex ->
@@ -140,11 +140,11 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
                 tcs.SetException ex
             return! tcs.Task
         }
-        
+
     member private this.AbortInner() =
         let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
         this.State <- ABORTING
-        task {
+        backgroundTask {
             try
                 do! allOpComplete()
             with ex ->
@@ -152,7 +152,7 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             let! cumulativeConsumersData =
                 cumulativeAckConsumers
                 |> Seq.map(fun (KeyValue(_, consumer)) ->
-                    task {
+                    backgroundTask {
                         let! permits = consumer.ClearIncomingMessagesAndGetMessageNumber()
                         return (consumer, permits)
                     })
@@ -171,17 +171,17 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
                     consumer.IncreaseAvailablePermits permits
                 cumulativeAckConsumers.Clear()
         }
-    
+
     member this.Commit() : Task<unit> =
         checkIfOpen (fun () ->
             this.CommitInner()
         )
-        
-        
+
+
     member this.Abort(): Task<unit> =
         checkIfOpen (fun () ->
             this.AbortInner()
         )
-        
+
     override this.ToString() =
         $"Txn({txnId})"

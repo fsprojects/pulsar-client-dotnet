@@ -38,7 +38,7 @@ let private processSimpleCommand (command : BaseCommand) (stream: Stream) (binar
     stream.Seek(0L, SeekOrigin.Begin) |> ignore
 
     stream.CopyToAsync(output)
-    
+
 let private processComplexCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[])
                                     (stream: Stream) (binaryWriter: BinaryWriter) (output: Stream) =
     // write fake totalLength
@@ -87,26 +87,26 @@ let private processComplexCommand (command : BaseCommand) (metadata: MessageMeta
     stream.CopyToAsync(output)
 
 let serializeSimpleCommand(command : BaseCommand) =
-    let f = 
+    let f =
         fun (output: Stream) ->
-            task {
+            backgroundTask {
                 use stream = MemoryStreamManager.GetStream()
                 use binaryWriter = new BinaryWriter(stream)
                 return! processSimpleCommand command stream binaryWriter output
             }
     (f, command.``type``)
-        
+
 
 let serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[]) =
-    let f = 
+    let f =
         fun (output: Stream) ->
-            task {
+            backgroundTask {
                 use stream = MemoryStreamManager.GetStream()
                 use binaryWriter = new BinaryWriter(stream)
                 return! processComplexCommand command metadata payload stream binaryWriter output
             }
     (f, command.``type``)
-    
+
 let newPartitionMetadataRequest(topicName : CompleteTopicName) (requestId : RequestId) : Payload =
     let request = CommandPartitionedTopicMetadata(Topic = %topicName, RequestId = %requestId)
     let command = BaseCommand(``type`` = CommandType.PartitionedMetadata, partitionMetadata = request)
@@ -189,7 +189,7 @@ let newPong () : Payload =
     command |> serializeSimpleCommand
 
 let newLookup (topicName : CompleteTopicName) (requestId : RequestId) (authoritative : bool) (listenerName: string) =
-    let request = CommandLookupTopic(Topic = %topicName, Authoritative = authoritative, RequestId = uint64(%requestId))    
+    let request = CommandLookupTopic(Topic = %topicName, Authoritative = authoritative, RequestId = uint64(%requestId))
     if listenerName |> String.IsNullOrEmpty |> not then
         request.AdvertisedListenerName <- listenerName
     let command = BaseCommand(``type`` = CommandType.Lookup, lookupTopic = request)
@@ -215,7 +215,7 @@ let newSeekByMsgId (consumerId: ConsumerId) (requestId : RequestId) (messageId: 
                 ledgerId = uint64(%messageId.LedgerId),
                 entryId = uint64(%messageId.EntryId)
             )
-        )    
+        )
     match messageId.Type with
     | Batch (batchIndex, acker) ->
         let batchSize =
@@ -323,38 +323,38 @@ let newGetLastMessageId (consumerId: ConsumerId) (requestId: RequestId) =
     let request = CommandGetLastMessageId(ConsumerId = %consumerId, RequestId = %requestId)
     let command = BaseCommand(``type`` = CommandType.GetLastMessageId, getLastMessageId = request)
     command |> serializeSimpleCommand
-    
+
 let newGetSchema (topicName: CompleteTopicName) (requestId : RequestId) (schemaVersion: Option<SchemaVersion>) =
     let request = CommandGetSchema(Topic = %topicName, RequestId = %requestId)
     match schemaVersion with
     | Some sv -> request.SchemaVersion <- sv.Bytes
-    | None -> ()        
+    | None -> ()
     let command = BaseCommand(``type`` = CommandType.GetSchema, getSchema = request)
     command |> serializeSimpleCommand
-    
+
 let newTxn (tcId: TransactionCoordinatorId) (requestId: RequestId) (ttl: TimeSpan) =
     let request = CommandNewTxn(TcId = %tcId, RequestId = %requestId, TxnTtlSeconds = uint64 ttl.TotalMilliseconds)
     let command = BaseCommand(``type`` = CommandType.NewTxn, newTxn = request)
     command |> serializeSimpleCommand
-    
+
 let newAddPartitionToTxn (txn: TxnId) (requestId: RequestId) (partition: CompleteTopicName) =
     let request = CommandAddPartitionToTxn(TxnidLeastBits = txn.LeastSigBits, TxnidMostBits = txn.MostSigBits, RequestId = %requestId)
     request.Partitions.Add(%partition)
     let command = BaseCommand(``type`` = CommandType.AddPartitionToTxn, addPartitionToTxn = request)
     command |> serializeSimpleCommand
-    
+
 let newAddSubscriptionToTxn (txn: TxnId) (requestId: RequestId) (topic: CompleteTopicName) (subscription: SubscriptionName) =
     let request = CommandAddSubscriptionToTxn(TxnidLeastBits = txn.LeastSigBits, TxnidMostBits = txn.MostSigBits, RequestId = %requestId)
     request.Subscriptions.Add(Subscription(Topic = %topic, subscription = %subscription))
     let command = BaseCommand(``type`` = CommandType.AddSubscriptionToTxn, addSubscriptionToTxn = request)
     command |> serializeSimpleCommand
-    
+
 let newEndTxn (txn: TxnId) (requestId: RequestId)  (action: TxnAction)  =
     let request = CommandEndTxn(TxnidLeastBits = txn.LeastSigBits, TxnidMostBits = txn.MostSigBits, RequestId = %requestId,
-                                TxnAction = action)    
+                                TxnAction = action)
     let command = BaseCommand(``type`` = CommandType.EndTxn, endTxn = request)
     command |> serializeSimpleCommand
-    
+
 let newAuthResponse (authMethod: string) (clientData: AuthData) (protocolVersion: int) (clientVersion: string) =
     let response = pulsar.proto.AuthData(AuthMethodName = authMethod, auth_data = clientData.Bytes)
     let request = CommandAuthResponse(ClientVersion = clientVersion, Response = response, ProtocolVersion = protocolVersion)

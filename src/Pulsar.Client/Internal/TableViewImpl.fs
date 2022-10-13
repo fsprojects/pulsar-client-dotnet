@@ -10,20 +10,20 @@ open System
 
 type internal TableViewImpl<'T> private (reader: IReader<'T>) =
     let data = ConcurrentDictionary<String, 'T>()
-    
-    member private this.HandleMessage(msg: Message<'T>) = 
+
+    member private this.HandleMessage(msg: Message<'T>) =
         if not (String.IsNullOrEmpty(%msg.Key)) then
             data.AddOrUpdate(%msg.Key, msg.GetValue(), (fun _ _ -> msg.GetValue())) |> ignore
 
-    member private this.ReadTailMessages(reader: IReader<'T>) = 
-        task {
+    member private this.ReadTailMessages(reader: IReader<'T>) =
+        backgroundTask {
             let! msg = reader.ReadNextAsync()
             this.HandleMessage(msg)
             this.ReadTailMessages(reader) |> ignore
         }
 
-    member private this.ReadAllExistingMessages(reader: IReader<'T>) = 
-        task {
+    member private this.ReadAllExistingMessages(reader: IReader<'T>) =
+        backgroundTask {
             let! hasMessage = reader.HasMessageAvailableAsync()
             if hasMessage then
                 let! msg = reader.ReadNextAsync()
@@ -35,7 +35,7 @@ type internal TableViewImpl<'T> private (reader: IReader<'T>) =
         }
 
     static member internal Init(createReader: _ -> Task<IReader<'T>>) =
-        task {
+        backgroundTask {
             let! reader = createReader()
             let tableView = TableViewImpl(reader)
             tableView.ReadAllExistingMessages(reader).Wait()
@@ -66,9 +66,9 @@ type internal TableViewImpl<'T> private (reader: IReader<'T>) =
 
         member this.TryGetValue(key, value) =
             data.TryGetValue(key, &value)
-    
+
     interface IAsyncDisposable with
        member this.DisposeAsync() =
-           task {
+           backgroundTask {
                reader.DisposeAsync() |> ignore
            } |> ValueTask

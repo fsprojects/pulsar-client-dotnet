@@ -44,32 +44,32 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
     let castedConsumer = consumer :> IConsumer<'T>
 
     member private this.InitInternal() =
-        task {
+        backgroundTask {
             return! consumer.InitInternal()
         }
 
     static member internal Init(config: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                                 schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: BinaryLookupService) =
-        task {
+        backgroundTask {
             let reader = ReaderImpl(config, clientConfig, connectionPool, schema, schemaProvider, lookup)
             do! reader.InitInternal()
             return reader :> IReader<'T>
         }
-        
+
     static member internal DISABLED_BATCH_RECEIVE_POLICY =
             BatchReceivePolicy(1, 0L, TimeSpan.Zero)
-        
+
     interface IReader<'T> with
 
         member this.ReadNextAsync() =
-            task {
+            backgroundTask {
                 let! message = castedConsumer.ReceiveAsync()
                 castedConsumer.AcknowledgeCumulativeAsync(message.MessageId) |> ignore
                 return message
             }
-            
+
         member this.ReadNextAsync ct =
-            task {
+            backgroundTask {
                 let! message = castedConsumer.ReceiveAsync(ct)
                 castedConsumer.AcknowledgeCumulativeAsync(message.MessageId) |> ignore
                 return message
@@ -80,7 +80,7 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
 
         member this.SeekAsync(timestamp: TimeStamp) =
             castedConsumer.SeekAsync(timestamp)
-            
+
         member this.SeekAsync (resolver: Func<string, SeekType>) : Task<Unit>  =
             castedConsumer.SeekAsync(resolver)
 
@@ -94,6 +94,6 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
             castedConsumer.Topic
 
     interface IAsyncDisposable with
-        
+
         member this.DisposeAsync() =
             castedConsumer.DisposeAsync()

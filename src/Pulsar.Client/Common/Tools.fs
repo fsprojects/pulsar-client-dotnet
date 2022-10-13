@@ -88,7 +88,7 @@ let convertToDateTime (msTimestamp: int64) =
 // Mix
 
 let asyncDelay (delay: TimeSpan) work =
-    task {
+    backgroundTask {
         do! Task.Delay delay
         try
             work()
@@ -97,7 +97,7 @@ let asyncDelay (delay: TimeSpan) work =
     } |> ignore
 
 let asyncDelayTask (delay: TimeSpan) work =
-    task {
+    backgroundTask {
         do! Task.Delay delay
         try
             return! work()
@@ -106,7 +106,7 @@ let asyncDelayTask (delay: TimeSpan) work =
     } |> ignore
 
 let asyncDelayMs (delay: int) work =
-    task {
+    backgroundTask {
         do! Task.Delay delay
         try
             work()

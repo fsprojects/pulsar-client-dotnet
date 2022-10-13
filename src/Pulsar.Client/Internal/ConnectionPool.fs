@@ -38,7 +38,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         args.RemoteEndPoint <- endpoint
         Log.Logger.LogDebug("Socket connecting to {0}", endpoint)
 
-        task {
+        backgroundTask {
             try
                 if socket.ConnectAsync args |> not then
                     args.Complete()
@@ -89,7 +89,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                     let statusList = chain.ChainStatus |> Seq.map string |> String.concat "; "
                     Log.Logger.LogError("Builds an X.509 chain faild, status: {0}", statusList)
                     false
-                        
+
         match errors with
         | SslPolicyErrors.None ->
             Log.Logger.LogDebug("No certificate errors")
@@ -121,25 +121,25 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
     let unregisterClientCnx brokerless (broker: Broker) =
         let key = (brokerless, broker.LogicalAddress)
         match connections.TryRemove(key) with
-        | true, _ ->  Log.Logger.LogInformation("Connection task {0} removed", key)
-        | false, _ -> Log.Logger.LogDebug("Connection task {0} was not removed", key)
-    
+        | true, _ ->  Log.Logger.LogInformation("Connection backgroundTask {0} removed", key)
+        | false, _ -> Log.Logger.LogDebug("Connection backgroundTask {0} was not removed", key)
+
     let connect (broker: Broker, maxMessageSize: int, brokerless: bool) =
         Log.Logger.LogInformation("Connecting to {0} with maxMessageSize: {1}, brokerless: {2}",
                                   broker, maxMessageSize, brokerless)
-        task {
+        backgroundTask {
             let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
             let pipeOptions = PipeOptions(pauseWriterThreshold = int64 maxMessageSize )
             let! socket = getSocket physicalAddress
 
             let! connection =
-                task {
+                backgroundTask {
                     if config.UseTls then
                         Log.Logger.LogDebug("Configuring ssl for {0}", physicalAddress)
                         let sslStream = new SslStream(new NetworkStream(socket), false, RemoteCertificateValidationCallback(remoteCertificateValidationCallback))
                         let clientCertificates = config.Authentication.GetAuthData(physicalAddress.Host).GetTlsCertificates()
                         do! sslStream.AuthenticateAsClientAsync(physicalAddress.Host, clientCertificates, config.TlsProtocols, false)
-                        
+
                         let pipeConnection = StreamConnection.GetDuplex(sslStream, pipeOptions)
                         let writerStream = StreamConnection.GetWriter(pipeConnection.Output)
                         return
@@ -160,7 +160,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                 }
             Log.Logger.LogDebug("Connection established for {0}", physicalAddress)
             let initialConnectionTsc = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
-            
+
             let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, brokerless, initialConnectionTsc,
                                       unregisterClientCnx brokerless)
             let connectPayload = clientCnx.NewConnectCommand()
@@ -180,13 +180,13 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             | true, _ -> Log.Logger.LogInformation("Removed faulted connection task to {0}", key)
             | false, _ -> Log.Logger.LogDebug("Faulted connection task to {0} wasn't removed", key)
         t
-            
+
     member this.GetBrokerlessConnection (address: DnsEndPoint) =
         this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address },
                            Commands.DEFAULT_MAX_MESSAGE_SIZE, true)
 
     member this.CloseAsync() =
-        task {
+        backgroundTask {
             for KeyValue(_, connectionTask) in connections do
                 try
                     let! cnx = connectionTask.Value

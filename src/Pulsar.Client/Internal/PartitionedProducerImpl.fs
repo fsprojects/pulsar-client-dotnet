@@ -69,7 +69,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
 
     let getAllPartitions () =
-        task {
+        backgroundTask {
             try
                 let! results = lookup.GetPartitionsForTopic(producerConfig.Topic)
                 return Some results
@@ -139,7 +139,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let mb = Channel.CreateUnbounded<PartitionedProducerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
+    do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
             match! mb.Reader.ReadAsync() with
@@ -150,7 +150,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         let partititonedConfig = { producerConfig with
                                                     MaxPendingMessages = maxPendingMessages
                                                     Topic = partitionedTopic }
-                        task {
+                        backgroundTask {
                             let! producer = ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup,
                                                 schema, interceptors, fun _ -> ())
                             return producer :> IProducer<'T>
@@ -172,7 +172,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     Log.Logger.LogError(ex, "{0} could not create", prefix)
                     do! producerTasks
                         |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
-                        |> Seq.map (fun t -> task { return! t.Result.DisposeAsync() })
+                        |> Seq.map (fun t -> backgroundTask { return! t.Result.DisposeAsync() })
                         |> Task.WhenAll :> Task
                     this.ConnectionState <- Failed
                     producerCreatedTsc.SetException(ex)
@@ -205,7 +205,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     continueLoop <- false
                 | _ ->
                     this.ConnectionState <- Closing
-                    let producersTasks = producers |> Seq.map(fun producer -> task { return! producer.DisposeAsync() })
+                    let producersTasks = producers |> Seq.map(fun producer -> backgroundTask { return! producer.DisposeAsync() })
                     try
                         let! _ = Task.WhenAll producersTasks
                         this.ConnectionState <- Closed
@@ -239,7 +239,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                                     let partititonedConfig = { producerConfig with
                                                                 MaxPendingMessages = maxPendingMessages
                                                                 Topic = partitionedTopic }
-                                    task {
+                                    backgroundTask {
                                         let! producer = ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup,
                                                             schema, interceptors, fun _ -> ())
                                         return producer :> IProducer<'T>
@@ -257,7 +257,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                                     prefix, numPartitions, partitionedTopicNames.Length )
                                 do! producerTasks
                                     |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
-                                    |> Seq.map (fun t -> task { return! t.Result.DisposeAsync() })
+                                    |> Seq.map (fun t -> backgroundTask { return! t.Result.DisposeAsync() })
                                     |> Task.WhenAll :> Task
                                 Log.Logger.LogInformation("{0} disposed partially created producers", prefix)
                         else
@@ -321,7 +321,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
     static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                         partitions: int, lookup: BinaryLookupService, schema: ISchema<'T>,
                         interceptors:ProducerInterceptors<'T>, cleanup: PartitionedProducerImpl<'T> -> unit) =
-        task {
+        backgroundTask {
             let producer = PartitionedProducerImpl(producerConfig, clientConfig, connectionPool, partitions, lookup,
                                                    schema, interceptors, cleanup)
             do! producer.InitInternal()
@@ -378,7 +378,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
     interface IAsyncDisposable with
         member this.DisposeAsync() =
-            task {
+            backgroundTask {
                 match this.ConnectionState with
                 | Closing | Closed ->
                     return ()

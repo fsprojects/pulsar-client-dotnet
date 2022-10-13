@@ -37,7 +37,7 @@ type internal ProducerMessage<'T> =
     | Close of TaskCompletionSource<ResultOrException<unit>>
     | Tick of ProducerTickType
     | GetStats of TaskCompletionSource<ProducerStats>
-    
+
 type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, lookup: BinaryLookupService, schema: ISchema<'T>,
                            interceptors: ProducerInterceptors<'T>, cleanup: ProducerImpl<'T> -> unit) as this =
@@ -99,7 +99,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
         stats.IncrementSendFailed()
         tcs |> Option.iter (fun tcs -> tcs.SetException(ex))
-    
+
     let failPendingMessage msg (ex: exn) =
         match msg.Callback with
         | SingleCallback (chunkDetails, message, tcs) ->
@@ -146,7 +146,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             statTimer.AutoReset <- true
             statTimer.Elapsed.Add(fun _ -> post this.Mb (Tick StatTick))
             statTimer.Start()
-    
+
     let cryptoTimer = new Timer()
     let startCryptoTimer () =
         match producerConfig.MessageEncryptor with
@@ -156,7 +156,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             cryptoTimer.Elapsed.Add(fun _ -> post this.Mb (Tick (UpdateEncryptionKeys encryptor)))
             cryptoTimer.Start()
         | None -> ()
-        
+
     let encrypt =
         match producerConfig.MessageEncryptor with
         | Some msgCrypto ->
@@ -181,7 +181,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             Log.Logger.LogDebug("{0} CryptoKeyReader not present, encryption not possible", prefix)
             fun _ payload ->
                 Ok payload
-    
+
     let sendMessage (pendingMessage: PendingMessage<'T>) =
         Log.Logger.LogDebug("{0} sendMessage sequenceId={1}", prefix, %pendingMessage.SequenceId)
         pendingMessages.Enqueue(pendingMessage)
@@ -190,14 +190,14 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             clientCnx.SendAndForget pendingMessage.Payload
         | _ ->
             Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
-    
+
     let dequeuePendingMessage () =
         if (blockedRequests.Count > 0) then
             blockedRequests.Dequeue()
             |> BeginSendMessage
             |> post this.Mb
         pendingMessages.Dequeue()
-    
+
     let resendMessages (clientCnx: ClientCnx) =
         if pendingMessages.Count > 0 then
             Log.Logger.LogInformation("{0} resending {1} pending messages", prefix, pendingMessages.Count)
@@ -206,9 +206,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         else
             Log.Logger.LogDebug("{0} No pending messages to resend", prefix)
             producerCreatedTsc.TrySetResult() |> ignore
-            
+
     let verifyIfLocalBufferIsCorrupted (msg: PendingMessage<'T>) =
-        task {
+        backgroundTask {
             use stream = MemoryStreamManager.GetStream()
             use reader = new BinaryReader(stream)
             do! (fst msg.Payload) (stream :> Stream) // materialize stream
@@ -221,7 +221,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             let computedCheckSum = CRC32C.Get(0u, stream, checkSumPayload) |> int32
             return checkSum <> computedCheckSum
         }
-        
+
     let canAddToBatch (message : MessageBuilder<'T>) =
         producerConfig.BatchingEnabled && message.DeliverAt.IsNone
 
@@ -281,19 +281,19 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             metadata.ReplicateToes.AddRange(replicationClusters)
         | None ->
             ()
-                
+
         metadata
 
     let getHighestSequenceId (pendingMessage: PendingMessage<'T>): SequenceId =
         %Math.Max(%pendingMessage.SequenceId, %pendingMessage.HighestSequenceId)
-        
+
     let processOpSendMsg { OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId;
                           PartitionKey = partitionKey; OrderingKey = orderingKey; TxnId = txnId; ReplicationClusters = replicationClusters } =
         let batchPayload, batchCallbacks = opSendMsg;
         let batchSize = batchCallbacks.Length
         let metadata = createMessageMetadata lowestSequenceId txnId (Some batchSize)
                            batchPayload partitionKey EmptyProps None orderingKey None replicationClusters
-        let compressedBatchPayload = compressionCodec.Encode batchPayload 
+        let compressedBatchPayload = compressionCodec.Encode batchPayload
         if (compressedBatchPayload.Length > maxMessageSize) then
             batchCallbacks
             |> Seq.iter (fun (_, message, tcs) ->
@@ -318,7 +318,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 batchCallbacks
                 |> Seq.iter (fun (_, message, tcs) ->
                     failMessage message tcs ex)
-            
+
     let canAddToCurrentBatch (msg: MessageBuilder<'T>) =
         batchMessageContainer.HaveEnoughSpace(msg) && batchMessageContainer.HasSameTxn(msg)
 
@@ -337,11 +337,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         Log.Logger.LogDebug("{0} Closing out batch to accommodate large message with size {1}", prefix, batchItem.Message.Payload.Length)
         batchMessageAndSend()
         batchMessageContainer.Add(batchItem) |> ignore
-    
+
     let updateMaxMessageSize messageSize =
         maxMessageSize <- messageSize
         batchMessageContainer.MaxMessageSize <- messageSize
-        
+
     let canEnqueueRequest (channel: TaskCompletionSource<MessageId>) sendRequest msgCount =
         if pendingMessages.Count + msgCount > producerConfig.MaxPendingMessages then
             if producerConfig.BlockIfQueueFull then
@@ -351,7 +351,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             false
         else
             true
-        
+
     let beginSendMessage (sendRequest: SendMessageRequest<'T>) =
         let message, channel, isFireAndForget = sendRequest
         if canEnqueueRequest channel sendRequest 1 then
@@ -389,7 +389,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         // and non-duplicated messages into a batch.
                         if isLastSequenceIdPotentialDuplicated then
                             doBatchSendAndAdd batchItem
-                        else                                    
+                        else
                             // handle boundary cases where message being added would exceed
                             // batch size and/or max message size
                             if batchMessageContainer.Add(batchItem) then
@@ -417,8 +417,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     while chunkId < totalChunks && not chunkError do
                         let metadata = createMessageMetadata sequenceId txnId None
                                            message.Payload message.Key message.Properties message.DeliverAt
-                                           message.OrderingKey message.EventTime message.ReplicationClusters 
-                        let chunkPayload = 
+                                           message.OrderingKey message.EventTime message.ReplicationClusters
+                        let chunkPayload =
                             if isChunked && producerConfig.Topic.IsPersistent then
                                 metadata.Uuid <- uuid
                                 metadata.ChunkId <- chunkId
@@ -451,16 +451,16 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         | Error ex ->
                             chunkError <- true
                             failMessage message channel ex
-    
+
     let stopProducer() =
         sendTimeoutTimer.Stop()
         batchTimer.Stop()
-        connectionHandler.Close()       
+        connectionHandler.Close()
         interceptors.Close()
         statTimer.Stop()
         cleanup(this)
         Log.Logger.LogInformation("{0} stopped", prefix)
-        
+
     let producerOperations = {
         AckReceived = fun sendReceipt -> post this.Mb (AckReceived sendReceipt)
         TopicTerminatedError = fun () -> post this.Mb TopicTerminatedError
@@ -470,7 +470,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     }
 
     let mb = Channel.CreateUnbounded<ProducerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
-    do (task {
+    do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
             match! mb.Reader.ReadAsync() with
@@ -491,23 +491,23 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             prefix <- $"producer({producerId}, {producerName}, {partitionIndex})"
                         Log.Logger.LogInformation("{0} registered", prefix)
                         schemaVersion <- success.SchemaVersion
-                        connectionHandler.ResetBackoff()    
-            
+                        connectionHandler.ResetBackoff()
+
                         if msgIdGenerator = %0L && producerConfig.InitialSequenceId.IsNone then
                             // Only update sequence id generator if it wasn't already modified. That means we only want
                             // to update the id generator the first time the producer gets established, and ignore the
                             // sequence id sent by broker in subsequent producer reconnects
                             lastSequenceIdPublished <- %success.LastSequenceId
                             msgIdGenerator <- success.LastSequenceId + %1L
-            
+
                         if producerConfig.BatchingEnabled then
                             startSendBatchTimer()
-            
+
                         resendMessages clientCnx
                     with Flatten ex ->
                         clientCnx.RemoveProducer producerId
                         Log.Logger.LogError(ex, "{0} Failed to create", prefix)
-                        match ex with                            
+                        match ex with
                         | :? TopicDoesNotExistException ->
                             match connectionHandler.ConnectionState with
                             | Failed ->
@@ -522,7 +522,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             Log.Logger.LogWarning("{0} is blocked on creation because backlog exceeded. {1}", prefix, ex.Message)
                         | _ ->
                             ()
-            
+
                         match ex with
                         | :? TopicTerminatedException ->
                             Log.Logger.LogWarning("{0} is terminated. {1}", prefix, ex.Message)
@@ -541,32 +541,32 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             stopProducer()
                 | _ ->
                     Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
-                                
+
                 if connectionHandler.ConnectionState = Failed then
                     continueLoop <- false
-            
+
             | ProducerMessage.ConnectionClosed clientCnx ->
-            
+
                 Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
                 connectionHandler.ConnectionClosed clientCnx
                 clientCnx.RemoveProducer(producerId)
-            
+
             | ProducerMessage.ConnectionFailed ex ->
-            
+
                 Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
                 if (DateTime.Now > createProducerTimeout && producerCreatedTsc.TrySetException(ex)) then
                     Log.Logger.LogInformation("{0} creation failed", prefix)
                     connectionHandler.Failed()
                     stopProducer()
                     continueLoop <- false
-            
+
             | ProducerMessage.BeginSendMessage sendRequest ->
-            
+
                 Log.Logger.LogDebug("{0} BeginSendMessage", prefix)
                 beginSendMessage sendRequest
-            
+
             | ProducerMessage.AckReceived receipt ->
-            
+
                 let sequenceId = receipt.SequenceId
                 let highestSequenceId = receipt.HighestSequenceId
                 if pendingMessages.Count > 0 then
@@ -597,7 +597,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                     let currentMessageId =
                                         { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
                                             Type = MessageIdType.Single; TopicName = %""; ChunkMessageIds = None }
-                                    let msgId = 
+                                    let msgId =
                                         match chunkDetailsOption with
                                         | Some chunkDetail ->
                                             chunkDetail.MessageIds.[chunkDetail.ChunkId] <- currentMessageId
@@ -614,7 +614,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                                 { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
                                                     Type = MessageIdType.Single; TopicName = %""; ChunkMessageIds = None }
                                     chunkDetails.MessageIds.[chunkDetails.ChunkId] <- currentMsgId
-                                                    
+
                             | BatchCallbacks tcss ->
                                 tcss
                                 |> Array.iter (fun (msgId, msg, tcs) ->
@@ -633,9 +633,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             | _ -> ()
                 else
                     Log.Logger.LogInformation("{0} Got ack for timed out msg {1} - {2}", prefix, sequenceId, highestSequenceId)
-            
+
             | ProducerMessage.RecoverChecksumError sequenceId ->
-            
+
                 //* Checks message checksum to retry if message was corrupted while sending to broker. Recomputes checksum of the
                 //* message header-payload again.
                 //* <ul>
@@ -659,14 +659,14 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             match connectionHandler.ConnectionState with
                             | Ready clientCnx -> resendMessages clientCnx
                             | _ -> Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
-                                            
+
                     else
                         Log.Logger.LogDebug("{0} Corrupt message is already timed out {1}", prefix, sequenceId)
                 else
                     Log.Logger.LogDebug("{0} Got send failure for timed out seqId {1}", prefix, sequenceId)
-                                
+
             | ProducerMessage.RecoverNotAllowedError sequenceId ->
-                               
+
                 Log.Logger.LogWarning("{0} RecoverNotAllowedError seqId={1}", prefix, sequenceId)
                 if pendingMessages.Count > 0 then
                     let pendingMessage = pendingMessages.Peek()
@@ -679,19 +679,19 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         Log.Logger.LogDebug("{0} Not allowed message is already timed out {1}", prefix, sequenceId)
                 else
                     Log.Logger.LogDebug("{0} Got send failure for timed out seqId {1}", prefix, sequenceId)
-            
+
             | ProducerMessage.TopicTerminatedError ->
-            
+
                 match connectionHandler.ConnectionState with
                 | Closed | Terminated -> ()
                 | _ ->
                     connectionHandler.Terminate()
                     failPendingMessages(TopicTerminatedException("The topic has been terminated"))
-            
+
             | ProducerMessage.Tick tickType ->
-                                
+
                 match tickType with
-                | SendBatchTick -> 
+                | SendBatchTick ->
                     batchMessageAndSend()
                 | SendTimeoutTick ->
                     match connectionHandler.ConnectionState with
@@ -712,13 +712,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         encryptor.UpdateEncryptionKeys()
                     with ex ->
                         Log.Logger.LogError(ex, "{0} Couldn't update encryption keys", prefix)
-            
-            
+
+
             | ProducerMessage.GetStats channel ->
                 channel.SetResult <| stats.GetStats()
-                            
+
             | ProducerMessage.Close channel ->
-            
+
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
                     connectionHandler.Closing()
@@ -757,7 +757,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     do startCryptoTimer()
 
     member private this.SendMessage (message : MessageBuilder<'T>, isFireAndForget: bool): Task<MessageId> =
-        task {
+        backgroundTask {
             match message.Txn with
             | Some txn ->
                 do! txn.RegisterProducedTopic(producerConfig.Topic.CompleteTopicName)
@@ -775,7 +775,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     override this.GetHashCode () = int producerId
 
     member private this.InitInternal() =
-       task {
+       backgroundTask {
            do connectionHandler.GrabCnx()
            return! producerCreatedTsc.Task
        }
@@ -783,7 +783,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                        partitionIndex: int, lookup: BinaryLookupService, schema: ISchema<'T>,
                        interceptors: ProducerInterceptors<'T>, cleanup: ProducerImpl<'T> -> unit) =
-        task {
+        backgroundTask {
             let producer = ProducerImpl(producerConfig, clientConfig, connectionPool, partitionIndex, lookup, schema,
                                         interceptors, cleanup)
             do! producer.InitInternal()
@@ -838,7 +838,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 let (Flatten ex) = sendTask.Exception
                 Task.FromException<Unit> ex
             else
-                task {
+                backgroundTask {
                     let! _ =  sendTask
                     return ()
                 }
@@ -851,7 +851,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 Task.FromException<Unit> ex
             else
                 message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
-                task {
+                backgroundTask {
                     let! _ =  sendTask
                     return ()
                 }
@@ -878,13 +878,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             [<Optional; DefaultParameterValue(Nullable():Nullable<TimeStamp>)>]eventTime:Nullable<TimeStamp>,
             [<Optional; DefaultParameterValue(null:Transaction)>]txn:Transaction,
             [<Optional; DefaultParameterValue(null:string seq)>]replicationClusters:string seq) =
-            
+
             if (txn |> isNull |> not) && producerConfig.SendTimeout > TimeSpan.Zero then
                 raise <| ArgumentException "Only producers disabled sendTimeout are allowed to produce transactional messages"
-            
+
             ProducerImpl.NewMessage(keyValueProcessor, schema, value, key, properties,
                                     deliverAt, sequenceId, keyBytes, orderingKey, eventTime, txn, replicationClusters)
-                
+
         member this.ProducerId = producerId
 
         member this.Topic = %producerConfig.Topic.CompleteTopicName
@@ -892,25 +892,25 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         member this.LastSequenceId = %Interlocked.Read(&lastSequenceIdPublished)
 
         member this.Name = producerName
-        
+
         member this.GetStatsAsync() =
             postAndAsyncReply mb ProducerMessage.GetStats
-            
+
         member this.LastDisconnectedTimestamp =
             connectionHandler.LastDisconnectedTimestamp
-        
+
     interface IAsyncDisposable with
-        
-        member this.DisposeAsync() =     
+
+        member this.DisposeAsync() =
             match connectionHandler.ConnectionState with
             | Closing | Closed ->
                 ValueTask()
             | _ ->
-                task {
+                backgroundTask {
                     let! result = postAndAsyncReply mb ProducerMessage.Close
                     match result with
                     | Ok () -> ()
-                    | Error ex -> reraize ex 
+                    | Error ex -> reraize ex
                 } |> ValueTask
-            
-            
+
+
