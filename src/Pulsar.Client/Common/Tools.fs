@@ -10,6 +10,7 @@ open System.Runtime.ExceptionServices
 open System.Collections.Generic
 open Microsoft.Extensions.Logging
 open System.Threading.Channels
+open FSharp.Logf
 
 
 let MemoryStreamManager = RecyclableMemoryStreamManager()
@@ -93,7 +94,7 @@ let asyncDelay (delay: TimeSpan) work =
         try
             work()
         with ex ->
-            Log.Logger.LogError(ex, "Error in delayed action")
+            elogfe Log.Logger ex "Error in delayed action"
     } |> ignore
 
 let asyncDelayTask (delay: TimeSpan) work =
@@ -102,7 +103,7 @@ let asyncDelayTask (delay: TimeSpan) work =
         try
             return! work()
         with ex ->
-            Log.Logger.LogError(ex, "Error in delayed action")
+            elogfe Log.Logger ex "Error in delayed action"
     } |> ignore
 
 let asyncDelayMs (delay: int) work =
@@ -111,7 +112,7 @@ let asyncDelayMs (delay: int) work =
         try
             work()
         with ex ->
-            Log.Logger.LogError(ex, "Error in delayed action")
+            elogfe Log.Logger ex "Error in delayed action"
     } |> ignore
 
 let signSafeMod dividend divisor =

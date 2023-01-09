@@ -9,7 +9,7 @@ open FSharp.UMX
 open System
 open ProtoBuf
 open System.Collections.Generic
-open Microsoft.Extensions.Logging
+open FSharp.Logf
 
 module internal BatchHelpers =
     [<Literal>]
@@ -71,7 +71,7 @@ type internal MessageContainer<'T>(config: ProducerConfiguration) =
 
     abstract member Add: BatchItem<'T> -> bool
     member this.AddStart (prefix, batchItem) =
-        Log.Logger.LogDebug("{0} add message to batch, num messages in batch so far is {1}", prefix, this.NumMessagesInBatch)
+        logfd Log.Logger "%s{prefix} add message to batch, num messages in batch so far is %A{nummMessagesInBatch}" prefix this.NumMessagesInBatch
         this.CurrentBatchSizeBytes <- this.CurrentBatchSizeBytes + batchItem.Message.Payload.Length
         this.NumMessagesInBatch <- this.NumMessagesInBatch + 1
         match this.CurrentTxnId, batchItem.Message.Txn with

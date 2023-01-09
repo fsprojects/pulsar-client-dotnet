@@ -5,7 +5,7 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System
 open System.Net
-open Microsoft.Extensions.Logging
+open FSharp.Logf
 
 type internal BinaryLookupService (config: PulsarClientConfiguration, connectionPool: ConnectionPool) =
 
@@ -41,7 +41,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                     || (ex :? TooManyRequestsException)
                 if nextDelay <= 0 || isLookupThrottling then
                     reraize ex
-                Log.Logger.LogWarning(ex, "GetPartitionedTopicMetadata failed will retry in {0} ms", nextDelay)
+                elogfw Log.Logger ex "GetPartitionedTopicMetadata failed will retry in %i{retryMs} ms" nextDelay
                 do! Async.Sleep nextDelay
                 return! this.GetPartitionedTopicMetadataInner(topicName, backoff, remainingTimeMs - nextDelay)
         }
@@ -79,7 +79,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
             let resultEndpoint = DnsEndPoint(uri.Host, uri.Port)
             // (2) redirect to given address if response is: redirect
             if lookupTopicResult.Redirect then
-                Log.Logger.LogDebug("Redirecting to {0} topicName {1}", resultEndpoint, topicName)
+                logfd Log.Logger "Redirecting to %A{endpoint} topicName %A{topicName}" resultEndpoint topicName
                 return! this.FindBroker(resultEndpoint, lookupTopicResult.Authoritative, topicName, redirectCount + 1)
             else
                 // (3) received correct broker to connect
@@ -105,7 +105,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 let delay = Math.Min(backoff.Next(), remainingTimeMs)
                 if delay <= 0 then
                     raise (TimeoutException "Could not getTopicsUnderNamespace within configured timeout.")
-                Log.Logger.LogWarning(ex, "GetTopicsUnderNamespace failed will retry in {0} ms", delay)
+                elogfw Log.Logger ex "GetTopicsUnderNamespace failed will retry in %i{delay} ms" delay
                 do! Async.Sleep delay
                 return! this.GetTopicsUnderNamespaceInner(ns, backoff, remainingTimeMs - delay, isPersistent)
         }
@@ -133,13 +133,13 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
                 let schema = PulsarResponseType.GetTopicSchema response
                 if schema.IsNone then
-                    Log.Logger.LogWarning("No schema found for topic {0} version {1}", topicName, schemaVersion)
+                    logfw Log.Logger "No schema found for topic %A{topicName} version %A{schemaVersion}" topicName schemaVersion
                 return schema
             with Flatten ex ->
                 let delay = Math.Min(backoff.Next(), remainingTimeMs)
                 if delay <= 0 then
                     raise (TimeoutException "Could not GetSchema within configured timeout.")
-                Log.Logger.LogWarning(ex, "GetSchema failed will retry in {0} ms", delay)
+                elogfw Log.Logger ex "GetSchema failed will retry in %i{delay} ms" delay
                 do! Async.Sleep delay
                 return! this.GetSchemaInner(topicName, schemaVersion, backoff, remainingTimeMs - delay)
         }

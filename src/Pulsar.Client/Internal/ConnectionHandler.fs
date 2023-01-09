@@ -1,6 +1,5 @@
 ﻿namespace Pulsar.Client.Internal
 
-open Microsoft.Extensions.Logging
 open System.Threading
 open Pulsar.Client.Api
 open Pulsar.Client.Common
@@ -8,6 +7,7 @@ open System
 open FSharp.UMX
 open System.Threading.Channels
 open System.Threading.Tasks
+open FSharp.Logf
 
 
 type internal ConnectionHandlerMessage =
@@ -53,67 +53,67 @@ type internal ConnectionHandler( parentPrefix: string,
 
                 match this.ConnectionState with
                 | Ready _ ->
-                    Log.Logger.LogWarning("{0} Client cnx already set for topic {1}, ignoring reconnection request", prefix, topic);
+                    logfw Log.Logger "%s{prefix} Client cnx already set for topic %A{topic}, ignoring reconnection request" prefix topic
                 | _ ->
                     if isValidStateForReconnection() then
                         try
-                            Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic)
+                            logfd Log.Logger "%s{prefix} Starting reconnect to %A{topic}" prefix topic
                             let! broker = lookup.GetBroker(topic)
                             let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize, false)
                             this.ConnectionState <- Ready clientCnx
-                            Log.Logger.LogDebug("{0} Successfuly reconnected to {1}, {2}", prefix, topic, clientCnx)
+                            logfd Log.Logger "%s{prefix} Successfuly reconnected to %A{topic}, %A{clientCnx}" prefix topic clientCnx
                             connectionOpened epoch
                         with Flatten ex ->
                             match ex with
                             | MaxMessageSizeChanged newSize ->
-                                Log.Logger.LogInformation("{0} MaxMessageSizeChanged to {1}", prefix, newSize)
+                                logfd Log.Logger "%s{prefix} MaxMessageSizeChanged to %i{newSize}" prefix newSize
                                 maxMessageSize <- newSize
                                 post this.Mb GrabCnx
                             | _ ->
-                                Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                                elogfw Log.Logger ex "%s{prefix} Error reconnecting to %A{topic} Current state %A{connectionState}" prefix topic this.ConnectionState
                                 connectionFailed ex
                                 if isValidStateForReconnection() then
                                     post this.Mb (ReconnectLater ex)
                     else
-                        Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                        logfi Log.Logger "%s{prefix} Ignoring GrabCnx to %A{topic} Current state %A{connectionState}" prefix topic this.ConnectionState
 
             | ReconnectLater ex ->
 
                 if isValidStateForReconnection() then
                     let delay = backoff.Next()
-                    Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
-                        prefix, topic, this.ConnectionState, delay)
+                    elogfw Log.Logger ex "%s{prefix} Could not get connection to %A{topic} Current state %A{connectionState} -- Will try again in %i{delay}ms"
+                        prefix topic this.ConnectionState delay
                     this.ConnectionState <- Connecting
                     epoch <- epoch + 1UL
                     asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
                 else
-                    Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                    logfi Log.Logger "%s{prefix} Ignoring ReconnectLater to %A{topic} Current state %A{connectionState}" prefix topic this.ConnectionState
 
             | ConnectionClosed clientCnx ->
 
                 this.LastDisconnectedTimestamp <- %DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 match this.ConnectionState with
                 | Ready cnx when cnx <> clientCnx ->
-                    Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
+                    logfi Log.Logger "Closing %i{clientCnxId1} but %i{clientCnxId2} is already active" clientCnx.ClientCnxId cnx.ClientCnxId
                 | _ ->
                     if isValidStateForReconnection() then
                         let delay = backoff.Next()
-                        Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {3}ms ",
-                            prefix, topic, this.ConnectionState, delay)
+                        logfi Log.Logger "%s{prefix} Closed connection to %A{topic} Current state %A{connectionState} -- Will try again in %i{delay}ms"
+                            prefix topic this.ConnectionState delay
                         this.ConnectionState <- Connecting
                         epoch <- epoch + 1UL
                         asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
                     else
-                        Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                        logfi Log.Logger "%s{prefix} Ignoring ConnectionClosed to %A{topic} Current state %A{connectionState}" prefix topic this.ConnectionState
 
             | Close ->
                 continueLoop <- false
         }:> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} ConnectionHandler mailbox failure", prefix)
+                elogfc Log.Logger ex "%s{prefix} ConnectionHandler mailbox failure" prefix
             else
-                Log.Logger.LogInformation("{0} ConnectionHandler mailbox has stopped normally", prefix))
+                logfi Log.Logger "%s{prefix} ConnectionHandler mailbox has stopped normally" prefix)
     |> ignore
 
     member private __.Mb with get() : Channel<ConnectionHandlerMessage> = mb

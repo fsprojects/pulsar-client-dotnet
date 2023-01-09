@@ -9,6 +9,7 @@ open System.Timers
 open FSharp.UMX
 open System.Threading.Tasks
 open System.Threading.Channels
+open FSharp.Logf
 
 
 type internal GroupingTrackerMessage =
@@ -85,7 +86,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                 let! ackSuccess = sendAckPayload cnx payload
                                 if ackSuccess then
                                     cumulativeAckFlushRequired <- false
-                                    Log.Logger.LogDebug("{0} newAck completed, acked {1} cumulatively", prefix, lastCumulativeAck)
+                                    logfd Log.Logger "%s{prefix} newAck completed, acked %A{lastCumulativeAck} cumulatively" prefix lastCumulativeAck
                                 success <- ackSuccess
                             let allMultiackMessages = ResizeArray()
                             if success && pendingIndividualAcks.Count > 0 then
@@ -125,15 +126,15 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                 let payload = Commands.newMultiMessageAck consumerId allMultiackMessages
                                 let! ackSuccess = sendAckPayload cnx payload
                                 if ackSuccess then
-                                    Log.Logger.LogDebug("{0} newMultiMessageAck completed, acked {1} messages",
-                                                        prefix, allMultiackMessages.Count)
+                                    logfd Log.Logger "%s{prefix} newMultiMessageAck completed, acked %i{allMultiackMessagesCount} messages"
+                                        prefix allMultiackMessages.Count
                                 success <- ackSuccess
                             return success
                         | _ ->
                             return false
                     }
                 if not result then
-                    Log.Logger.LogDebug("{0} Cannot flush pending acks since we're not connected to broker", prefix)
+                    logfd Log.Logger "%s{prefix} Cannot flush pending acks since we're not connected to broker" prefix
                 return ()
         }
 
@@ -150,9 +151,9 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                         return false
                 }
             if result then
-                Log.Logger.LogDebug("{0} Successfully acked {1}", prefix, msgId)
+                logfd Log.Logger "%s{prefix} Successfully acked %A{1}" prefix msgId
             else
-                Log.Logger.LogWarning("{0} Cannot doImmediateAck since we're not connected to broker", prefix)
+                logfw Log.Logger "%s{prefix} Cannot doImmediateAck since we're not connected to broker" prefix
             return ()
         }
 
@@ -180,7 +181,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                         return false
                 }
             if not result then
-                Log.Logger.LogWarning("{0} Cannot doImmediateAck since we're not connected to broker", prefix)
+                logfw Log.Logger "%s{prefix} Cannot doImmediateAck since we're not connected to broker" prefix
             return ()
         }
 
@@ -192,7 +193,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                 | GroupingTrackerMessage.IsDuplicate (msgId, channel) ->
 
                     if msgId <= lastCumulativeAck then
-                        Log.Logger.LogDebug("{0} Message {1} already included in a cumulative ack", prefix, msgId)
+                        logfd Log.Logger "%s{prefix} Message %A{messageId} already included in a cumulative ack" prefix msgId
                         channel.SetResult(true)
                     else
                         channel.SetResult(pendingIndividualAcks.Contains msgId)
@@ -203,7 +204,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                         // We cannot group acks if the delay is 0 or when there are properties attached to it. Fortunately that's an
                         // uncommon condition since it's only used for the compaction subscription
                         do! doImmediateAck msgId ackType properties
-                        Log.Logger.LogDebug("{0} messageId {1} has been immediately acked", prefix, msgId)
+                        logfd Log.Logger "%s{prefix} messageId %A{messageId} has been immediately acked" prefix msgId
                     elif ackType = AckType.Cumulative then
                         // cumulative ack
                         doCumulativeAck msgId false
@@ -212,24 +213,24 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                         if pendingIndividualAcks.Add msgId then
                             if pendingIndividualAcks.Count >= MAX_ACK_GROUP_SIZE then
                                 do! flush None
-                                Log.Logger.LogWarning("{0} messageId {1} MAX_ACK_GROUP_SIZE reached and flushed", prefix, msgId)
+                                logfw Log.Logger "%s{prefix} messageId %O{messageId} MAX_ACK_GROUP_SIZE reached and flushed" prefix msgId
                         else
-                            Log.Logger.LogWarning("{0} messageId {1} has already been added to the ack tracker", prefix, msgId)
+                            logfw Log.Logger "%s{prefix} messageId %A{messageId} has already been added to the ack tracker" prefix msgId
 
                 | GroupingTrackerMessage.AddBatchIndexAcknowledgment (msgId, ackType, properties) ->
 
                     if ackGroupTime = TimeSpan.Zero || properties.Count > 0 then
                         do! doImmediateBatchIndexAck msgId ackType properties
-                        Log.Logger.LogDebug("{0} messageId {1} has been immediately batch index acked", prefix, msgId)
+                        logfd Log.Logger "%s{prefix} messageId %A{messageId} has been immediately batch index acked" prefix msgId
                     elif ackType = AckType.Cumulative then
                         doCumulativeAck msgId true
                     else
                         if pendingIndividualBatchIndexAcks.Add(msgId) then
                             if pendingIndividualBatchIndexAcks.Count >= MAX_ACK_GROUP_SIZE then
                                 do! flush None
-                                Log.Logger.LogWarning("{0} messageId {1} MAX_ACK_GROUP_SIZE reached and flushed", prefix, msgId)
+                                logfw Log.Logger "%s{prefix} messageId %A{messageId} MAX_ACK_GROUP_SIZE reached and flushed" prefix msgId
                         else
-                            Log.Logger.LogWarning("{0} messageId {1} has already been added", prefix, msgId)
+                            logfw Log.Logger "%s{prefix} messageId %A{messageId} has already been added" prefix msgId
 
                 | GroupingTrackerMessage.FlushAndClean ->
 
@@ -254,9 +255,9 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         } :> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                elogfc Log.Logger ex "%s{prefix} mailbox failure" prefix
             else
-                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+                logfi Log.Logger "%s{prefix} mailbox has stopped normally" prefix)
         |> ignore
 
     let timer = new Timer()

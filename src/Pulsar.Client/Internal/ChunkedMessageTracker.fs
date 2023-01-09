@@ -6,7 +6,7 @@ open System.Collections.Generic
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open FSharp.UMX
-open Microsoft.Extensions.Logging
+open FSharp.Logf
 
 type internal ChunkedMessageCtx(totalChunksCount: int, totalChunksSize: int) =
     let chunkedMessageIds = Array.zeroCreate totalChunksCount
@@ -46,7 +46,7 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
         
     let removeOldestPendingChunkedMessage() =
         let firstPendingMsgUuid = pendingChunkedMessageUuidQueue.First.Value
-        Log.Logger.LogWarning("{0} RemoveOldestPendingChunkedMessage {1}", prefix, firstPendingMsgUuid)
+        logfw Log.Logger "%s{prefix} RemoveOldestPendingChunkedMessage %A{messageId}" prefix firstPendingMsgUuid
         let ctx = chunkedMessagesMap.[firstPendingMsgUuid]
         pendingChunkedMessageUuidQueue.RemoveFirst()
         removeChunkMessage firstPendingMsgUuid ctx autoAckOldestChunkedMessageOnQueueFull
@@ -88,7 +88,7 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
             let firstMsgUuid = pendingChunkedMessageUuidQueue.First.Value
             let ctx = chunkedMessagesMap.[firstMsgUuid]
             if DateTime.Now > ctx.ReceivedTime.Add(expireTimeOfIncompleteChunkedMessage) then
-                Log.Logger.LogWarning("{0} RemoveExpireIncompleteChunkedMessages {1}", prefix, pendingChunkedMessageUuidQueue.First.Value)
+                logfw Log.Logger "%s{prefix} RemoveExpireIncompleteChunkedMessages %A{pendingChunkedMessageUuidQueue}" prefix pendingChunkedMessageUuidQueue.First.Value
                 pendingChunkedMessageUuidQueue.RemoveFirst()
                 removeChunkMessage firstMsgUuid ctx true
                 this.RemoveExpireIncompleteChunkedMessages()

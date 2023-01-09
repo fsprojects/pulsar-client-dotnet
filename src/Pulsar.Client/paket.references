@@ -20,3 +20,4 @@ NSec.Cryptography
 PemUtils
 protobuf-net.Reflection
 System.Threading.Channels
+FSharp.Logf

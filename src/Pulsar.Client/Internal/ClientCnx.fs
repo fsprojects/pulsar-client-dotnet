@@ -4,7 +4,6 @@ open System.Reflection
 open Pulsar.Client.Common
 open System.Collections.Generic
 
-open Microsoft.Extensions.Logging
 open System.Threading.Tasks
 open Pulsar.Client.Transaction
 open pulsar.proto
@@ -17,6 +16,7 @@ open System.Threading
 open Pulsar.Client.Api
 open System.Timers
 open System.Threading.Channels
+open FSharp.Logf
 
 type internal RequestTime =
     {
@@ -155,12 +155,12 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     let failRequest reqId commandType (ex: exn) isTimeout =
         match requests.TryGetValue(reqId) with
         | true, tsc ->
-            Log.Logger.LogWarning(ex, "{0} fail request {1} type {2}", prefix, reqId, commandType)
+            elogfw Log.Logger ex "%s{prefix} fail request %A{requestId} type %A{commandType}" prefix reqId commandType
             tsc.SetException ex
             requests.Remove reqId |> ignore
         | _ ->
             if not isTimeout then
-                Log.Logger.LogWarning(ex, "{0} fail non-existent request {1} type {2}, ignoring", prefix, reqId, commandType)
+                elogfw Log.Logger ex "%s{prefix} fail non-existent request %A{requestId} type %A{commandType}, ignoring" prefix reqId commandType
 
     let rec handleTimeoutedMessages() =
         if requestTimeoutQueue.Count > 0 then
@@ -201,36 +201,36 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         while continueLoop do
             match! requestsMb.Reader.ReadAsync() with
             | AddRequest (reqId, commandType, tsc) ->
-                Log.Logger.LogDebug("{0} add request {1} type {2}", prefix, reqId, commandType)
+                logfd Log.Logger "%s{prefix} add request %A{requestId} type %A{commandType}" prefix reqId commandType
                 requests.Add(reqId, tsc)
                 requestTimeoutQueue.Enqueue({ RequestStartTime = DateTime.Now; RequestId = reqId; ResponseTcs = tsc; CommandType = commandType })
             | CompleteRequest (reqId, commandType, result) ->
                 match requests.TryGetValue(reqId) with
                 | true, tsc ->
-                    Log.Logger.LogDebug("{0} complete request {1} type {2}", prefix, reqId, commandType)
+                    logfd Log.Logger "%s{prefix} complete request %A{requestId} type %A{commandType}" prefix reqId commandType
                     tsc.SetResult result
                     requests.Remove reqId |> ignore
                 | _ ->
-                    Log.Logger.LogWarning("{0} complete non-existent request {1} type {2}, ignoring", prefix, reqId, commandType)
+                    logfw Log.Logger "%s{prefix} complete non-existent request %A{requestId} type %A{commandType}, ignoring" prefix reqId commandType
             | FailRequest (reqId, commandType, ex) ->
                 failRequest reqId commandType ex false
             | FailAllRequests ->
-                Log.Logger.LogDebug("{0} fail requests", prefix)
+                logfd Log.Logger "%s{prefix} fail requests" prefix
                 failAllRequests()
             | RequestsOperation.Stop ->
-                Log.Logger.LogDebug("{0} has stopped", prefix)
+                logfd Log.Logger "%s{prefix} has stopped" prefix
                 failAllRequests()
                 requestTimeoutTimer.Stop()
                 continueLoop <- false
             | RequestsOperation.Tick ->
-                Log.Logger.LogTrace("{0} timeout tick", prefix)
+                logft Log.Logger "%s{prefix} timeout tick" prefix
                 handleTimeoutedMessages()
         } :> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} requestsMb mailbox failure", prefix)
+                elogfc Log.Logger ex "%s{prefix} requestsMb mailbox failure" prefix
             else
-                Log.Logger.LogInformation("{0} requestsMb mailbox has stopped normally", prefix))
+                logfi Log.Logger "%s{prefix} requestsMb mailbox has stopped normally" prefix)
         |> ignore
 
     let tryStopMailboxes() =
@@ -245,32 +245,32 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         while continueLoop do
             match! operationsMb.Reader.ReadAsync() with
             | AddProducer (producerId, producerOperation) ->
-                Log.Logger.LogDebug("{0} adding producer {1}", prefix, producerId)
+                logfd Log.Logger "%s{prefix} adding producer %i{producerId}" prefix producerId
                 producers.Add(producerId, producerOperation)
             | AddConsumer (consumerId, consumerOperation) ->
-                Log.Logger.LogDebug("{0} adding consumer {1}", prefix, consumerId)
+                logfd Log.Logger "%s{prefix} adding consumer %d{consumerId}" prefix consumerId
                 consumers.Add(consumerId, consumerOperation)
             | AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations) ->
-                Log.Logger.LogDebug("{0} adding transaction metastore {1}", prefix, transactionMetaStoreId)
+                logfd Log.Logger "%s{prefix} adding transaction metastore %i{transactionMetaStoreId}" prefix transactionMetaStoreId
                 transactionMetaStores.[transactionMetaStoreId] <- transactionMetaStoreOperations
             | RemoveConsumer consumerId ->
-                Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
+                logfd Log.Logger "%s{prefix} removing consumer {%i}" prefix consumerId
                 consumers.Remove(consumerId) |> ignore
                 if this.IsActive |> not then
                     tryStopMailboxes()
             | RemoveProducer producerId ->
-                Log.Logger.LogDebug("{0} removing producer {1}", prefix, producerId)
+                logfd Log.Logger "%s{prefix} removing producer %i{producerId}" prefix producerId
                 producers.Remove(producerId) |> ignore
                 if this.IsActive |> not then
                     tryStopMailboxes()
             | RemoveTransactionMetaStoreHandler transactionMetaStoreId ->
-                Log.Logger.LogDebug("{0} removing transactionMetaStore {1}", prefix, transactionMetaStoreId)
+                logfd Log.Logger "%s{prefix} removing transactionMetaStore %i{transactionMetaStoreId}" prefix transactionMetaStoreId
                 transactionMetaStores.Remove(transactionMetaStoreId) |> ignore
                 if this.IsActive |> not then
                     tryStopMailboxes()
             | ChannelInactive ->
                 if this.IsActive then
-                    Log.Logger.LogDebug("{0} ChannelInactive", prefix)
+                    logfd Log.Logger "%s{prefix} ChannelInactive" prefix
                     this.IsActive <- false
                     unregisterClientCnx(broker)
                     consumers |> Seq.iter(fun (KeyValue(_,consumerOperation)) ->
@@ -281,28 +281,28 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                         transactionMetaStoreOperation.ConnectionClosed(this))
                     post requestsMb FailAllRequests
             | CnxOperation.Stop ->
-                Log.Logger.LogDebug("{0} operationsMb stopped", prefix)
+                logfd Log.Logger "%s{prefix} operationsMb stopped" prefix
                 keepAliveTimer.Stop()
                 continueLoop <- false
             | CnxOperation.Tick ->
-                Log.Logger.LogDebug("{0} keepalive tick", prefix)
+                logfd Log.Logger "%s{prefix} keepalive tick" prefix
                 handleKeepAliveTimeout()
         } :> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} operationsMb mailbox failure", prefix)
+                elogfc Log.Logger ex "%s{prefix} operationsMb mailbox failure" prefix
             else
-                Log.Logger.LogInformation("{0} operationsMb mailbox has stopped normally", prefix))
+                logfi Log.Logger "%s{prefix} operationsMb mailbox has stopped normally" prefix)
     |> ignore
 
     let sendSerializedPayload (writePayload, commandType: BaseCommand.Type) =
-        Log.Logger.LogDebug("{0} Sending message of type {1}", prefix, commandType)
+        logfd Log.Logger "%s{0} Sending message of type %A{1}" prefix commandType
         backgroundTask {
             try
                 do! connection.Output |> writePayload
                 return true
             with ex ->
-                Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally on writing {1}", prefix, commandType)
+                elogfw Log.Logger ex "%s{prefix} Socket was disconnected exceptionally on writing %A{commandType}" prefix commandType
                 post operationsMb ChannelInactive
                 return false
         }
@@ -323,14 +323,14 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 let! _ = sendSerializedPayload payload
                 ()
             | SocketMessage.Stop ->
-                Log.Logger.LogDebug("{0} sendMb stopped", prefix)
+                logfd Log.Logger "%s{prefix} sendMb stopped" prefix
                 continueLoop <- false
         }:> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} sendMb mailbox failure", prefix)
+                elogfc Log.Logger ex "%s{prefix} sendMb mailbox failure" prefix
             else
-                Log.Logger.LogInformation("{0} sendMb mailbox has stopped normally", prefix))
+                logfi Log.Logger "%s{prefix} sendMb mailbox has stopped normally" prefix)
     |> ignore
 
     let readMessage (reader: BinaryReader) (stream: MemoryStream) frameLength =
@@ -345,7 +345,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         stream.Seek(metadataPointer, SeekOrigin.Begin) |> ignore
         let calculatedCheckSum = CRC32C.Get(0u, stream, metadataLength + payloadLength) |> int32
         if (messageCheckSum <> calculatedCheckSum) then
-            Log.Logger.LogError("{0} Invalid checksum. Received: {1} Calculated: {2}", prefix, messageCheckSum, calculatedCheckSum)
+            logfe Log.Logger "%s{prefix} Invalid checksum. Received: %i{messageCheckSum} Calculated: %i{calculatedCheckSum}" prefix messageCheckSum calculatedCheckSum
         (metadata, payload, messageCheckSum = calculatedCheckSum)
 
     let readCommand (command: BaseCommand) reader stream frameLength =
@@ -412,7 +412,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 let frameLength = totalength + 4
                 if (length >= frameLength) then
                     let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
-                    Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
+                    logfd Log.Logger "%s{prefix} Got message of type %A{commandType}" prefix command.``type``
                     let consumed = int64 frameLength |> buffer.GetPosition
                     try
                         let wrappedCommand = readCommand command reader stream frameLength
@@ -463,7 +463,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     let checkServerError serverError errMsg =
         if (serverError = ServerError.ServiceNotReady) then
-            Log.Logger.LogError("{0} Close connection because received internal-server error {1}", prefix, errMsg);
+            logfe Log.Logger "%s{prefix} Close connection because received internal-server error %s{errorMessage}" prefix errMsg
             this.Dispose()
         elif (serverError = ServerError.TooManyRequests) then
             let rejectedRequests = Interlocked.Increment(&numberOfRejectedRequests)
@@ -471,8 +471,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 // schedule timer
                 asyncDelayMs (rejectedRequestResetTimeSec*1000) (fun() -> Interlocked.Exchange(&numberOfRejectedRequests, 0) |> ignore)
             elif (rejectedRequests >= maxNumberOfRejectedRequestPerConnection) then
-                Log.Logger.LogError("{0} Close connection because received {1} rejected request in {2} seconds ", prefix,
-                        rejectedRequests, rejectedRequestResetTimeSec);
+                logfe Log.Logger "%s{prefix} Close connection because received %i{rejectedRequests} rejected request in %i{rejectedRequestResetTimeSec} seconds " prefix
+                        rejectedRequests rejectedRequestResetTimeSec
                 this.Dispose()
 
     let getOptionalSchemaVersion =
@@ -548,8 +548,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         this.WaitingForPingResponse <- false
         match xcmd with
         | XCommandConnected cmd ->
-            Log.Logger.LogInformation("{0} Connected ProtocolVersion: {1} ServerVersion: {2} MaxMessageSize: {3} Brokerless: {4}",
-                prefix, cmd.ProtocolVersion, cmd.ServerVersion, cmd.MaxMessageSize, brokerless)
+            logfi Log.Logger "%s{prefix} Connected ProtocolVersion: %A{protocolVersion} ServerVersion: %A{serverVersion} MaxMessageSize: %i{maxMessageSize} Brokerless: %b{brokerless}"
+                prefix cmd.ProtocolVersion cmd.ServerVersion cmd.MaxMessageSize brokerless
             if cmd.ShouldSerializeMaxMessageSize() && (not brokerless) && maxMessageSize <> cmd.MaxMessageSize then
                 initialConnectionTsc.SetException(MaxMessageSizeChanged cmd.MaxMessageSize)
             else
@@ -571,7 +571,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     HighestSequenceId = %(int64 cmd.HighestSequenceId)
                 }
             | _ ->
-                Log.Logger.LogWarning("{0} producer {1} wasn't found on CommandSendReceipt", prefix, %cmd.ProducerId)
+                logfw Log.Logger "%s{prefix} producer %i{producerId} wasn't found on CommandSendReceipt" prefix %cmd.ProducerId
         | XCommandAckResponse cmd ->
             match consumers.TryGetValue %cmd.ConsumerId with
             | true, consumerOperations ->
@@ -581,9 +581,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 else
                     consumerOperations.AckReceipt(%cmd.RequestId)
             | _ ->
-                Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandAckResponse", prefix, %cmd.ConsumerId)
+                logfw Log.Logger "%s{prefix} consumer %i{consumerId} wasn't found on CommandAckResponse" prefix %cmd.ConsumerId
         | XCommandSendError cmd ->
-            Log.Logger.LogWarning("{0} Received send error from server: {1} : {2}", prefix, cmd.Error, cmd.Message)
+            logfw Log.Logger "%s{prefix} Received send error from server: %A{errorType} : %s{errorMessage}" prefix cmd.Error cmd.Message
             match producers.TryGetValue %cmd.ProducerId with
             | true, producerOperations ->
                 match cmd.Error with
@@ -598,7 +598,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     // to take place and re-establish the produce again
                     this.Dispose()
             | _ ->
-                Log.Logger.LogWarning("{0} producer {1} wasn't found on CommandSendError", prefix, %cmd.ProducerId)
+                logfw Log.Logger "%s{prefix} producer %i{producerId} wasn't found on CommandSendError" prefix %cmd.ProducerId
         | XCommandPing _ ->
             post sendMb (SocketMessageWithoutReply(Commands.newPong()))
         | XCommandPong _ ->
@@ -609,7 +609,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 let msgReceived = getMessageReceived cmd metadata payload checkSumValid
                 consumerOperations.MessageReceived(msgReceived, this)
             | _ ->
-                Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandMessage", prefix, %cmd.ConsumerId)
+                logfw Log.Logger "%s{prefix} consumer %i{consumerId} wasn't found on CommandMessage" prefix %cmd.ConsumerId
         | XCommandLookupResponse cmd ->
             if cmd.ShouldSerializeError() then
                 checkServerError cmd.Error cmd.Message
@@ -636,19 +636,19 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | true, producerOperations ->
                 producerOperations.ConnectionClosed(this)
             | _ ->
-                Log.Logger.LogWarning("{0} producer {1} wasn't found on CommandCloseProducer", prefix, %cmd.ProducerId)
+                logfw Log.Logger "%s{prefix} producer %i{producerId} wasn't found on CommandCloseProducer" prefix %cmd.ProducerId
         | XCommandCloseConsumer cmd ->
             match consumers.TryGetValue %cmd.ConsumerId with
             | true, consumerOperations ->
                 consumerOperations.ConnectionClosed(this)
             | _ ->
-                Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandCloseConsumer", prefix, %cmd.ConsumerId)
+                logfw Log.Logger "%s{prefix} consumer %i{producerId} wasn't found on CommandCloseConsumer" prefix %cmd.ConsumerId
         | XCommandReachedEndOfTopic cmd ->
             match consumers.TryGetValue %cmd.ConsumerId with
             | true, consumerOperations ->
                 consumerOperations.ReachedEndOfTheTopic()
             | _ ->
-                Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandReachedEndOfTopic", prefix, %cmd.ConsumerId)
+                logfw Log.Logger "%s{prefix} consumer %i{consumerId} wasn't found on CommandReachedEndOfTopic" prefix %cmd.ConsumerId
         | XCommandGetTopicsOfNamespaceResponse cmd ->
             let result = TopicsOfNamespace cmd.Topics
             handleSuccess %cmd.RequestId result BaseCommand.Type.GetTopicsOfNamespaceResponse
@@ -686,7 +686,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | true, consumerOperations ->
                 consumerOperations.ActiveConsumerChanged(cmd.IsActive)
             | _ ->
-                Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandActiveConsumerChange", prefix, %cmd.ConsumerId)
+                logfw Log.Logger "%s{prefix} consumer %i{consumerId} wasn't found on CommandActiveConsumerChange" prefix %cmd.ConsumerId
         | XCommandGetSchemaResponse cmd ->
             if cmd.ShouldSerializeErrorCode() then
                 if cmd.ErrorCode = ServerError.TopicNotFound then
@@ -716,7 +716,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                          } |> Ok
                 tmsOperations.NewTxnResponse (%cmd.RequestId, result)
             | _ ->
-                Log.Logger.LogWarning("{0} tms {1} wasn't found on CommandNewTxnResponse", prefix, tcId)
+                logfw Log.Logger "%s{prefix} tms %i{transactionCoordinatorId} wasn't found on CommandNewTxnResponse" prefix tcId
         | XCommandAddPartitionToTxnResponse cmd ->
             let tcId = %cmd.TxnidMostBits
             match transactionMetaStores.TryGetValue tcId with
@@ -729,7 +729,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                          Ok ()
                 tmsOperations.AddPartitionToTxnResponse (%cmd.RequestId, result)
             | _ ->
-                Log.Logger.LogWarning("{0} tms {1} wasn't found on CommandAddPartitionToTxnResponse", prefix, tcId)
+                logfw Log.Logger "%s{prefix} tms %i{transactionCoordinatorId} wasn't found on CommandAddPartitionToTxnResponse" prefix tcId
         | XCommandAddSubscriptionToTxnResponse cmd ->
             let tcId = %cmd.TxnidMostBits
             match transactionMetaStores.TryGetValue tcId with
@@ -742,7 +742,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                          Ok ()
                 tmsOperations.AddSubscriptionToTxnResponse (%cmd.RequestId, result)
             | _ ->
-                Log.Logger.LogWarning("{0} tms {1} wasn't found on XCommandAddSubscriptionToTxnResponse", prefix, tcId)
+                logfw Log.Logger "%s{prefix} tms %i{transactionCoordinatorId} wasn't found on XCommandAddSubscriptionToTxnResponse" prefix tcId
         | XCommandEndTxnResponse cmd ->
             let tcId = %cmd.TxnidMostBits
             match transactionMetaStores.TryGetValue tcId with
@@ -755,33 +755,33 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                          Ok ()
                 tmsOperations.EndTxnResponse (%cmd.RequestId, result)
             | _ ->
-                Log.Logger.LogWarning("{0} tms {1} wasn't found on XCommandAddSubscriptionToTxnResponse", prefix, tcId)
+                logfw Log.Logger "%s{prefix} tms %i{transactionCoordinatorId} wasn't found on XCommandAddSubscriptionToTxnResponse" prefix tcId
         | XCommandAuthChallenge cmd ->
             if cmd.Challenge |> isNull |> not then
                 if (cmd.Challenge.auth_data |> Array.compareWith Operators.compare AuthData.REFRESH_AUTH_DATA_BYTES) = 0 then
-                    Log.Logger.LogDebug("{0} Refreshed authentication provider", prefix)
+                    logfd Log.Logger "%s{prefix} Refreshed authentication provider" prefix
                     authenticationDataProvider <- config.Authentication.GetAuthData(physicalAddress.Host)
                 let methodName = config.Authentication.GetAuthMethodName()
                 let authData = authenticationDataProvider.Authenticate({ Bytes = cmd.Challenge.auth_data })
                 let request = Commands.newAuthResponse methodName authData (int protocolVersion) clientVersion
-                Log.Logger.LogInformation("{0} Mutual auth {1}, requested {2}", prefix, methodName, cmd.Challenge.AuthMethodName)
+                logfi Log.Logger "%s{prefix} Mutual auth %s{authMethodName}, requested %s{challengeAuthMethodName}" prefix methodName cmd.Challenge.AuthMethodName
                 backgroundTask {
                     let! result = this.Send(request)
                     if not result then
-                        Log.Logger.LogWarning("{0} Failed to send request for mutual auth to broker", prefix)
+                        logfw Log.Logger "%s{prefix} Failed to send request for mutual auth to broker" prefix
                         NotConnectedException "Failed to send request for mutual auth to broker"
                         |> initialConnectionTsc.TrySetException
                         |> ignore
                 } |> ignore
             else
-                Log.Logger.LogWarning("{0} CommandAuthChallenge with empty challenge", prefix)
+                logfw Log.Logger "%s{prefix} CommandAuthChallenge with empty challenge" prefix
         | XCommandError cmd ->
-            Log.Logger.LogError("{0} CommandError Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
+            logfe Log.Logger "%s{prefix} CommandError Error: %A{errorType}. Message: %s{errorMessage}" prefix cmd.Error cmd.Message
             handleError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.Error
 
     let readSocket () =
         backgroundTask {
-            Log.Logger.LogDebug("{0} Started read socket", prefix)
+            logfd Log.Logger "%s{prefix} Started read socket" prefix
             let mutable continueLooping = true
             let reader = connection.Input
 
@@ -791,8 +791,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     let buffer = result.Buffer
                     if result.IsCompleted then
                         if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
-                            Log.Logger.LogWarning("{0} New connection was aborted", prefix)
-                        Log.Logger.LogWarning("{0} Socket was disconnected normally while reading", prefix)
+                            logfw Log.Logger "%s{prefix} New connection was aborted" prefix
+                        logfw Log.Logger "%s{prefix} Socket was disconnected normally while reading" prefix
                         post operationsMb ChannelInactive
                         continueLooping <- false
                     else
@@ -801,21 +801,21 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                             handleCommand xcmd
                             reader.AdvanceTo consumed
                         | Result.Error IncompleteCommand, _ ->
-                            Log.Logger.LogDebug("{0} IncompleteCommand received", prefix)
+                            logfd Log.Logger "%s{prefix} IncompleteCommand received" prefix
                             reader.AdvanceTo(buffer.Start, buffer.End)
                         | Result.Error (CorruptedCommand ex), consumed ->
-                            Log.Logger.LogError(ex, "{0} Ignoring corrupted command.", prefix)
+                            elogfe Log.Logger ex "%s{prefix} Ignoring corrupted command." prefix
                             reader.AdvanceTo consumed
                         | Result.Error (UnknownCommandType unknownType), consumed ->
-                            Log.Logger.LogError("{0} UnknownCommandType {1}, ignoring message", prefix, unknownType)
+                            logfe Log.Logger "%s{0} UnknownCommandType %A{unknownType}, ignoring message" prefix unknownType
                             reader.AdvanceTo consumed
             with Flatten ex ->
                 if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
-                    Log.Logger.LogWarning("{0} New connection was aborted", prefix)
-                Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally while reading", prefix)
+                    logfw Log.Logger "%s{prefix} New connection was aborted" prefix
+                elogfw Log.Logger ex "%s{prefix} Socket was disconnected exceptionally while reading" prefix
                 post operationsMb ChannelInactive
 
-            Log.Logger.LogDebug("{0} readSocket stopped", prefix)
+            logfd Log.Logger "%s{prefix} readSocket stopped" prefix
         } :> Task
 
     do startRequestTimeoutTimer()
