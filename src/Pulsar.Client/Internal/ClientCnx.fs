@@ -116,7 +116,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 initialConnectionTsc: TaskCompletionSource<ClientCnx>,
                 unregisterClientCnx: Broker -> unit) as this =
 
-    let clientVersion = "Pulsar.Client v" + Assembly.GetExecutingAssembly().GetName().Version.ToString()
+    let clientVersion = Assembly.GetExecutingAssembly().GetName().Version.ToString()
     let protocolVersion =
         ProtocolVersion.GetValues(typeof<ProtocolVersion>)
         :?> ProtocolVersion[]
