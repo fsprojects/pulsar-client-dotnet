@@ -6,17 +6,17 @@
     <Title>Pulsar.Client.Otel</Title>
     <RootNamespace>Pulsar.Client.Otel</RootNamespace>
     <AssemblyName>Pulsar.Client.Otel</AssemblyName>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <Company>F# community</Company>
     <Description>OpenTelemetry plugin for Pulsar.Client</Description>
     <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Changed constant names and values to standard</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed memory leak</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
-    <PackageVersion>0.1.1</PackageVersion>
+    <PackageVersion>0.1.2</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
