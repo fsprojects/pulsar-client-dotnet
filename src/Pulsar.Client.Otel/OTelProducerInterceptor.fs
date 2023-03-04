@@ -20,35 +20,36 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
         Action<Dictionary<string,string>,string,string>
             (fun msg key value -> msg.Add (key,value))
 
+    let addToCache activityId activity =
+        match cache.TryAdd(activityId, activity) with
+        | true ->
+            ()
+        | _ ->
+            activity
+                .SetTag("messaging.acknowledge_type", "Duplicate")
+                .Dispose()
+            log.LogWarning("{0} Duplicate activity detected", prefix)
+
     interface IProducerInterceptor<'T> with
         member this.BeforeSend(producer, message) =
             let mutableDict =  Dictionary<string,string>(message.Properties.Count)
             message.Properties
             |> Seq.iter (fun (KeyValue kv) -> mutableDict.Add kv)
-            
-            let addToCache activity =
-                match cache.TryAdd(mutableDict.[activityKey], activity) with
-                | true ->
-                    ()
-                | _ ->
-                    activity
-                        .SetTag("messaging.acknowledge_type", "Duplicate")
-                        .Dispose()
-                    log.LogWarning("{0} Duplicate activity detected", prefix)
-                        
+
+
             let activity =
                 activitySource.StartActivity(producer.Topic + " send", ActivityKind.Producer)
-            
+
             if isNull activity then
-                message    //If there are no listeners interested in this activity, the activity above will be null <..> Ensure that all subsequent calls using this activity are protected with a null check.                
+                message  //If there are no listeners interested in this activity, the activity above will be null.
             else
                 activity
-                    .SetTag("messaging.system", "pulsar") 
-                    .SetTag("messaging.destination_kind", "topic") 
+                    .SetTag("messaging.system", "pulsar")
+                    .SetTag("messaging.destination_kind", "topic")
                     .SetTag("messaging.destination", producer.Topic)
                     .SetTag("messaging.operation", "send")
                     .SetTag("messaging.producer_id",$"{producer.Name} - {producer.ProducerId}")
-                    |> ignore                
+                    |> ignore
                 if activity.IsAllDataRequested then
                    // It is highly recommended to check activity.IsAllDataRequested,
                    // before populating any tags which are not readily available.
@@ -58,28 +59,28 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                    //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/messaging.md
                    //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
                    let contextToInject = activity.Context
-                   Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)                                     
-                   addToCache activity
-                   message.WithProperties(mutableDict) 
+                   Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
+                   addToCache mutableDict.[activityKey] activity
+                   message.WithProperties(mutableDict)
                 else
-                   addToCache activity 
+                   //don't handle activity
                    message
-                   
+
         member this.Dispose() =
-            for KeyValue(_, activity) in cache do 
+            for KeyValue(_, activity) in cache do
                 activity
                     .SetTag("messaging.acknowledge_type", "InterceptorStopped")
                     .Dispose()
             activitySource.Dispose()
             cache.Clear()
             log.LogInformation("{0} Closed", prefix)
-            
+
         member this.Eligible _ = true
-        
+
         member this.OnSendAcknowledgement(_, builder, messageId, exn) =
                 match builder.Properties.TryGetValue(activityKey) with
                 | true, activityId ->
-                    match cache.TryGetValue(activityId) with
+                    match cache.TryRemove(activityId) with
                     | true, activity ->
                         match exn with
                         | null ->
@@ -88,11 +89,11 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                                 .SetTag("messaging.message_id", messageId)
                                 .Dispose()
                         |  _ ->
-                            //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md                                             
+                            //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md
                             activity
                                 .SetTag("messaging.acknowledge_type", "Error")
-                                .SetTag("exception.type", exn.GetType().FullName) 
-                                .SetTag("exception.message", exn.Message) 
+                                .SetTag("exception.type", exn.GetType().FullName)
+                                .SetTag("exception.message", exn.Message)
                                 .SetTag("exception.stacktrace", exn.StackTrace)
                                 .Dispose()
                     | _ ->

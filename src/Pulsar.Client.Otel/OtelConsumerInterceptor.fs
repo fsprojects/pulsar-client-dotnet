@@ -44,6 +44,7 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     .SetTag("exception.message", exn.Message)
                     .SetTag("exception.stacktrace", exn.StackTrace)
                     .Dispose()
+            cache.Remove messageId |> ignore
         | _ ->
             log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
 
@@ -123,6 +124,9 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     |> Seq.iter (fun (KeyValue kv) ->
                         activity.AddBaggage kv |> ignore)
                     postMb (InterceptorCommand.BeforeConsume(message.MessageId, activity))
+                else
+                   //don't handle activity
+                    ()
             message
 
 
