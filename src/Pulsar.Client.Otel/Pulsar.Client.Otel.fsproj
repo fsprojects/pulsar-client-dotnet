@@ -9,10 +9,10 @@
     <Version>0.1.2</Version>
     <Company>F# community</Company>
     <Description>OpenTelemetry plugin for Pulsar.Client</Description>
-    <RepositoryUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</RepositoryUrl>
+    <RepositoryUrl>https://github.com/fsprojects/pulsar-client-dotnet</RepositoryUrl>
     <PackageReleaseNotes>Fixed memory leak</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/fsharplang-ru/pulsar-client-dotnet</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/fsprojects/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>F# community</Authors>
