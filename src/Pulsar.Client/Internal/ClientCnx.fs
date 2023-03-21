@@ -273,6 +273,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     Log.Logger.LogDebug("{0} ChannelInactive", prefix)
                     this.IsActive <- false
                     unregisterClientCnx(broker)
+                    this.Dispose()
                     consumers |> Seq.iter(fun (KeyValue(_,consumerOperation)) ->
                         consumerOperation.ConnectionClosed(this))
                     producers |> Seq.iter(fun (KeyValue(_,producerOperation)) ->
