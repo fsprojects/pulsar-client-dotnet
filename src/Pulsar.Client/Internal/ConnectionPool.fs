@@ -132,43 +132,51 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             let pipeOptions = PipeOptions(pauseWriterThreshold = int64 maxMessageSize )
             let! socket = getSocket physicalAddress
 
-            let! connection =
-                backgroundTask {
-                    if config.UseTls then
-                        Log.Logger.LogDebug("Configuring ssl for {0}", physicalAddress)
-                        let sslStream = new SslStream(new NetworkStream(socket), false, RemoteCertificateValidationCallback(remoteCertificateValidationCallback))
-                        let clientCertificates = config.Authentication.GetAuthData(physicalAddress.Host).GetTlsCertificates()
-                        do! sslStream.AuthenticateAsClientAsync(physicalAddress.Host, clientCertificates, config.TlsProtocols, false)
+            try
+                let! connection =
+                    backgroundTask {
+                        if config.UseTls then
+                            Log.Logger.LogDebug("Configuring ssl for {0}", physicalAddress)
+                            let sslStream = new SslStream(new NetworkStream(socket), false, RemoteCertificateValidationCallback(remoteCertificateValidationCallback))
+                            let clientCertificates = config.Authentication.GetAuthData(physicalAddress.Host).GetTlsCertificates()
+                            do! sslStream.AuthenticateAsClientAsync(physicalAddress.Host, clientCertificates, config.TlsProtocols, false)
 
-                        let pipeConnection = StreamConnection.GetDuplex(sslStream, pipeOptions)
-                        let writerStream = StreamConnection.GetWriter(pipeConnection.Output)
-                        return
-                            {
-                                Input = pipeConnection.Input
-                                Output = writerStream
-                                Dispose = sslStream.Dispose
-                            }
-                    else
-                        let pipeConnection = SocketConnection.Create(socket, pipeOptions)
-                        let writerStream = StreamConnection.GetWriter(pipeConnection.Output)
-                        return
-                            {
-                                Input = pipeConnection.Input
-                                Output = writerStream
-                                Dispose = pipeConnection.Dispose
-                            }
-                }
-            Log.Logger.LogDebug("Connection established for {0}", physicalAddress)
-            let initialConnectionTsc = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
+                            let pipeConnection = StreamConnection.GetDuplex(sslStream, pipeOptions)
+                            let writerStream = StreamConnection.GetWriter(pipeConnection.Output)
+                            return
+                                {
+                                    Input = pipeConnection.Input
+                                    Output = writerStream
+                                    Dispose = sslStream.Dispose
+                                }
+                        else
+                            let pipeConnection = SocketConnection.Create(socket, pipeOptions)
+                            let writerStream = StreamConnection.GetWriter(pipeConnection.Output)
+                            return
+                                {
+                                    Input = pipeConnection.Input
+                                    Output = writerStream
+                                    Dispose = pipeConnection.Dispose
+                                }
+                    }
+                Log.Logger.LogDebug("Connection established for {0}", physicalAddress)
+                let initialConnectionTsc = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
 
-            let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, brokerless, initialConnectionTsc,
-                                      unregisterClientCnx brokerless)
-            let connectPayload = clientCnx.NewConnectCommand()
-            let! success = clientCnx.Send connectPayload
-            if not success then
-                raise (ConnectionFailedOnSend "ConnectionPool connect")
-            Log.Logger.LogInformation("Connected to {0}", broker)
-            return! initialConnectionTsc.Task
+                let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, brokerless, initialConnectionTsc,
+                                          unregisterClientCnx brokerless)
+                let connectPayload = clientCnx.NewConnectCommand()
+                let! success = clientCnx.Send connectPayload
+                if not success then
+                    clientCnx.Dispose()
+                    raise (ConnectionFailedOnSend "ConnectionPool connect")
+                Log.Logger.LogInformation("Connected to {0}", broker)
+                return! initialConnectionTsc.Task
+            with Flatten ex ->
+                try socket.Shutdown(SocketShutdown.Receive) with _ -> ()
+                try socket.Shutdown(SocketShutdown.Send) with _ -> ()
+                try socket.Close() with _ -> ()
+                try socket.Dispose() with _ -> ()
+                return reraize ex
         }
 
     member this.GetConnection (broker: Broker, maxMessageSize: int, brokerless: bool) =
