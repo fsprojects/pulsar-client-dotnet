@@ -270,8 +270,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     tryStopMailboxes()
             | ChannelInactive ->
                 if this.IsActive then
-                    Log.Logger.LogDebug("{0} ChannelInactive", prefix)
                     this.IsActive <- false
+                    Log.Logger.LogDebug("{0} ChannelInactive", prefix)
                     unregisterClientCnx(broker)
                     this.Dispose()
                     consumers |> Seq.iter(fun (KeyValue(_,consumerOperation)) ->
