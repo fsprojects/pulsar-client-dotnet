@@ -281,6 +281,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     transactionMetaStores |> Seq.iter(fun (KeyValue(_,transactionMetaStoreOperation)) ->
                         transactionMetaStoreOperation.ConnectionClosed(this))
                     post requestsMb FailAllRequests
+                tryStopMailboxes()
+
             | CnxOperation.Stop ->
                 Log.Logger.LogDebug("{0} operationsMb stopped", prefix)
                 keepAliveTimer.Stop()

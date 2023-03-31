@@ -19,7 +19,7 @@ nuget zlib.net-mutliplatform
 nuget K4os.Compression.LZ4
 nuget Snappy.Standard
 nuget ZstdNet
-nuget AvroSchemaGenerator
+nuget AvroSchemaGenerator 2.8.1
 nuget Apache.Avro
 nuget NSec.Cryptography 20.2.0
 nuget PemUtils
@@ -66,4 +66,4 @@ group OTel
   nuget System.Diagnostics.DiagnosticSource
   nuget OpenTelemetry.Api
   nuget System.Threading.Channels
-  nuget AvroSchemaGenerator
+  nuget AvroSchemaGenerator 2.8.1

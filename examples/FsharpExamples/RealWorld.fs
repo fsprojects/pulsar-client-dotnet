@@ -12,12 +12,12 @@ open System.Threading.Tasks
 
 
 
-let internal processMessages<'a> (consumer: IConsumer<byte[]>, logger: ILogger, f: Message<byte[]> -> Task<unit>, cancellationToken: CancellationToken) =
+let internal processMessages<'a> (consumer: IConsumer<byte[]>, logger: ILogger, f: Message<byte[]> -> Task<unit>, ct: CancellationToken) =
     task {
         try
-            while not cancellationToken.IsCancellationRequested do
+            while not ct.IsCancellationRequested do
                 let mutable success = false
-                let! message = consumer.ReceiveAsync()
+                let! message = consumer.ReceiveAsync(ct)
                 try
                     do! f message
                     success <- true
@@ -30,10 +30,12 @@ let internal processMessages<'a> (consumer: IConsumer<byte[]>, logger: ILogger, 
                     do! consumer.AcknowledgeAsync(message.MessageId)
                     logger.LogDebug("Message acknowledged")
         with
+            | :? TaskCanceledException ->
+                logger.LogInformation("ProcessMessages cancelled for {0}", consumer.Topic)
             | ex ->
                 logger.LogError(ex, "ProcessMessages failed for {0}", consumer.Topic)
    }
-    
+
 let internal sendMessage (producer: IProducer<byte[]>, logger: ILogger, message: byte[]) =
     task {
         try
@@ -45,12 +47,12 @@ let internal sendMessage (producer: IProducer<byte[]>, logger: ILogger, message:
 
 let runRealWorld (logger: ILogger) =
 
-    let serviceUrl = "pulsar://my-pulsar-cluster:30002"
+    let serviceUrl = "pulsar://127.0.0.1:6650"
     let subscriptionName = "my-subscription"
     let topicName = sprintf "my-topic-%i" DateTime.Now.Ticks;
 
     task {
-        
+
         let! client =
             PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
@@ -67,21 +69,21 @@ let runRealWorld (logger: ILogger) =
                 .Topic(topicName)
                 .SubscriptionName(subscriptionName)
                 .SubscribeAsync()
-        
-        let cts = new CancellationTokenSource()
+
+        use cts = new CancellationTokenSource()
         let token = cts.Token
         Task.Run(fun () ->
             task {
-                do! processMessages(consumer, logger, (fun (message) ->        
+                do! processMessages(consumer, logger, (fun (message) ->
                                     let messageText = Encoding.UTF8.GetString(message.Data)
                                     logger.LogInformation("Received: {0}", messageText)
                                     Task.FromResult()), token)
-            } :> Task) |> ignore
+            }, cts.Token) |> ignore
 
         for i in 1..100 do
             do! sendMessage(producer, logger, Encoding.UTF8.GetBytes(sprintf "Sent from C# at %A message %i" DateTime.Now i))
-        
-        cts.Dispose()
+
+        cts.Cancel()
         do! Task.Delay(200);// wait for pending acknowledgments to complete
         do! consumer.DisposeAsync()
         do! producer.DisposeAsync()

@@ -23,7 +23,7 @@ namespace CsharpExamples
                 logger.LogError(ex, "Error on produce message to {0}", producer.Topic);
             }
         }
-        
+
         internal static async Task ProcessMessages(IConsumer<byte[]> consumer, ILogger logger, Func<Message<byte[]>, Task> f,
             CancellationToken ct)
         {
@@ -32,7 +32,7 @@ namespace CsharpExamples
                 while (!ct.IsCancellationRequested)
                 {
                     var success = false;
-                    var message = await consumer.ReceiveAsync();
+                    var message = await consumer.ReceiveAsync(ct);
                     try
                     {
                         await f(message);
@@ -50,6 +50,10 @@ namespace CsharpExamples
                         logger.LogDebug("Message acknowledged");
                     }
                 }
+            }
+            catch (TaskCanceledException)
+            {
+                logger.LogInformation("ProcessMessages cancelled for {0}", consumer.Topic);
             }
             catch (Exception ex)
             {
@@ -78,20 +82,23 @@ namespace CsharpExamples
                 .SubscriptionName(subscriptionName)
                 .SubscribeAsync();
 
-            var cts = new CancellationTokenSource();
-            Task.Run(() => ProcessMessages(consumer, logger, (message) =>
-            {
-                var messageText = Encoding.UTF8.GetString(message.Data);
-                logger.LogInformation("Received: {0}", messageText);
-                return Task.CompletedTask;
-            }, cts.Token));
+            using var cts = new CancellationTokenSource();
+            var ctsToken = cts.Token;
+            Task.Run(() =>
+                ProcessMessages(consumer, logger, (message) =>
+                {
+                    var messageText = Encoding.UTF8.GetString(message.Data);
+                    logger.LogInformation("Received: {0}", messageText);
+                    return Task.CompletedTask;
+                }, ctsToken),
+                ctsToken);
 
             for (int i = 0; i < 100; i++)
             {
                 await SendMessage(producer, logger, Encoding.UTF8.GetBytes($"Sent from C# at {DateTime.Now} message #{i}"));
             }
-            
-            cts.Dispose();
+
+            cts.Cancel();
             await Task.Delay(200);// wait for pending acknowledgments to complete
             await consumer.DisposeAsync();
             await producer.DisposeAsync();
