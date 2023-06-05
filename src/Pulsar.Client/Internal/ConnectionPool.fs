@@ -52,6 +52,11 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                 return reraize ex
         }
 
+    let getChainStatusString (chainStatuses: X509ChainStatus[]) =
+        chainStatuses
+        |> Seq.map (fun cs -> string cs.Status)
+        |> String.concat "|"
+
     let remoteCertificateValidationCallback (_: obj) (cert: X509Certificate) (_: X509Chain) (errors: SslPolicyErrors) =
         let CheckRemoteCertWithTrustCertificate() =
             if isNull config.TlsTrustCertificate then
@@ -68,9 +73,9 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                 chain.ChainPolicy.ExtraStore.Add ca |> ignore
                 use cert2 = new X509Certificate2(cert)
                 if chain.Build(cert2) then
-                    let lastChainElm = chain.ChainElements.[chain.ChainElements.Count - 1]
+                    let lastChainElm = chain.ChainElements[chain.ChainElements.Count - 1]
                     if lastChainElm.ChainElementStatus.Length = 1 then
-                        let status = lastChainElm.ChainElementStatus.[0].Status
+                        let status = lastChainElm.ChainElementStatus[0].Status
                         if status = X509ChainStatusFlags.UntrustedRoot then
                             if System.Linq.Enumerable.SequenceEqual(lastChainElm.Certificate.RawData, ca.RawData) then
                                 Log.Logger.LogDebug("Used TlsTrustCertificate")
@@ -82,12 +87,12 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                             Log.Logger.LogError("Root certificate status {0} no equal UntrustedRoot", status)
                             false
                     else
-                        let statusList =  chain.ChainStatus |> Seq.map string |> String.concat "; "
-                        Log.Logger.LogError("Root certificate status count > 1, status: {0}", statusList)
+                        let statusList = getChainStatusString chain.ChainStatus
+                        Log.Logger.LogError("Building X.509 chain should have single status, statuses: [{0}]", statusList)
                         false
                 else
-                    let statusList = chain.ChainStatus |> Seq.map string |> String.concat "; "
-                    Log.Logger.LogError("Builds an X.509 chain faild, status: {0}", statusList)
+                    let statusList = getChainStatusString chain.ChainStatus
+                    Log.Logger.LogError("Building X.509 chain has failed, statuses: [{0}]", statusList)
                     false
 
         match errors with
