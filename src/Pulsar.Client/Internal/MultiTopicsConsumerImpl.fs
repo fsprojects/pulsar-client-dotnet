@@ -59,8 +59,8 @@ type internal MultiTopicConsumerMessage<'T> =
     | GetStats of TaskCompletionSource<ConsumerStats array>
     | ReconsumeLater of Message<'T> * TimeStamp * TaskCompletionSource<unit>
     | ReconsumeLaterCumulative of Message<'T> * TimeStamp * TaskCompletionSource<unit>
-    | RemoveWaiter of Waiter<'T>
-    | RemoveBatchWaiter of BatchWaiter<'T>
+    | CancelWaiter of Waiter<'T>
+    | CancelBatchWaiter of BatchWaiter<'T>
     | LastDisconnectedTimestamp of TaskCompletionSource<TimeStamp>
     | HasMessageAvailable of TaskCompletionSource<bool>
 
@@ -197,10 +197,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         pollerCts.Dispose()
         while waiters.Count > 0 do
             let waitingChannel = waiters |> dequeueWaiter
-            AlreadyClosedException "Consumer is already closed" |> waitingChannel.SetException
+            AlreadyClosedException "Consumer is already closed" |> waitingChannel.TrySetException |> ignore
         while batchWaiters.Count > 0 do
             let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
-            AlreadyClosedException "Consumer is already closed" |> batchWaitingChannel.SetException
+            AlreadyClosedException "Consumer is already closed" |> batchWaitingChannel.TrySetException |> ignore
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let singleInit (consumerInitInfo: ConsumerInitInfo<'T>) =
@@ -542,8 +542,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         let rec cancellationTokenRegistration =
                             cancellationToken.Register((fun () ->
                                 Log.Logger.LogDebug("{0} receive cancelled", prefix)
-                                channel.SetCanceled()
-                                post this.Mb (RemoveWaiter(cancellationTokenRegistration, channel))
+                                post this.Mb (CancelWaiter(cancellationTokenRegistration, channel))
                             ), false) |> Some
                         cancellationTokenRegistration
                     else
@@ -567,9 +566,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         let rec cancellationTokenRegistration =
                             cancellationToken.Register((fun () ->
                                 Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
-                                batchCts.Cancel()
-                                channel.SetCanceled()
-                                post this.Mb (RemoveBatchWaiter(batchCts, cancellationTokenRegistration, channel))
+                                post this.Mb (CancelBatchWaiter(batchCts, cancellationTokenRegistration, channel))
                             ), false)
                             |> Some
                         cancellationTokenRegistration
@@ -773,18 +770,27 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     post this.Mb (RedeliverAllUnacknowledged None)
                     Log.Logger.LogInformation("{0} We cannot redeliver single messages if subscription type is not Shared", prefix)
 
-            | RemoveWaiter waiter ->
+            | CancelWaiter waiter ->
 
-                waiters.Remove(waiter) |> ignore
-                let ctrOpt, _ = waiter
-                ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+                if waiters.Remove waiter then
+                    Log.Logger.LogDebug("{0} CancelWaiter, removed waiter", prefix)
+                    let ctrOpt, channel = waiter
+                    channel.SetCanceled()
+                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+                else
+                    Log.Logger.LogDebug("{0} CancelWaiter, no waiter found", prefix)
 
-            | RemoveBatchWaiter batchWaiter ->
+            | CancelBatchWaiter batchWaiter ->
 
-                batchWaiters.Remove(batchWaiter) |> ignore
-                let cts, ctrOpt, _ = batchWaiter
-                ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
-                cts.Dispose()
+                if batchWaiters.Remove batchWaiter then
+                    Log.Logger.LogDebug("{0} CancelBatchWaiter, removed waiter", prefix)
+                    let batchCts, ctrOpt, channel = batchWaiter
+                    batchCts.Cancel()
+                    batchCts.Dispose()
+                    channel.SetCanceled()
+                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+                else
+                    Log.Logger.LogDebug("{0} CancelBatchWaiter, no waiter found", prefix)
 
             | HasReachedEndOfTheTopic channel ->
 
@@ -882,7 +888,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             |> Task.WhenAll
                         channel.SetResult(statsTask)
                     with Flatten ex ->
-                            channel.SetException ex
+                        channel.SetException ex
                 } |> ignore
 
             | ReconsumeLater (msg, deliverAt, channel) ->

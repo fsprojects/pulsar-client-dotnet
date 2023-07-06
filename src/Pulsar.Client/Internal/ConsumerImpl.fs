@@ -558,10 +558,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let failWaiters (ex: exn) =
         while waiters.Count > 0 do
             let waitingChannel = waiters |> dequeueWaiter
-            waitingChannel.SetException ex
+            waitingChannel.TrySetException ex |> ignore
         while batchWaiters.Count > 0 do
             let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
-            batchWaitingChannel.SetException ex
+            batchWaitingChannel.TrySetException ex |> ignore
 
     let stopConsumer () =
         unAckedMessageTracker.Close()
