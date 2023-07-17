@@ -7,6 +7,6 @@ open Serilog
 [<EntryPoint>]
 let main argv =
     Common.configureLogging()
-    let result = Tests.runTestsInAssembly defaultConfig argv
+    let result = Tests.runTestsInAssemblyWithCLIArgs [] argv
     Log.CloseAndFlush() |> ignore
     result

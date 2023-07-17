@@ -26,6 +26,6 @@ let configureLogging() =
 [<EntryPoint>]
 let main argv =
     configureLogging()
-    let result = Tests.runTestsInAssembly defaultConfig argv    
+    let result = Tests.runTestsInAssemblyWithCLIArgs [] argv
     Log.CloseAndFlush() |> ignore
     result
