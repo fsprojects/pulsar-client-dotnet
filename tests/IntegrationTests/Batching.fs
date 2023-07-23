@@ -276,7 +276,7 @@ let tests =
             Log.Debug("Finished Batch recieve works with regular consumer")
         }
 
-        ftestTask "Second batch is formed well after the first one" {
+        testTask "Second batch is formed well after the first one" {
 
             Log.Debug("Started 'Second batch is formed well after the first one'")
 
