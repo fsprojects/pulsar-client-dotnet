@@ -282,7 +282,7 @@ let tests =
 
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let messagesNumber = 4
+            let messagesNumber = 5
 
             let! (consumer: IConsumer<byte[]>) =
                 client.NewConsumer()

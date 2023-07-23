@@ -197,10 +197,12 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 match pendingMessage.Callback with
                 | SingleCallback _ -> 1
                 | BatchCallbacks callbacks -> callbacks.Length
-            for _ in 1..messagesToRelease do
+            let mutable i = messagesToRelease
+            while i > 0 && blockedRequests.Count > 0 do
                 blockedRequests.Dequeue()
                 |> BeginSendMessage
                 |> post this.Mb
+                i <- i - 1
         pendingMessages.Dequeue() |> ignore
 
     let resendMessages (clientCnx: ClientCnx) =
