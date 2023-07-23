@@ -3,6 +3,8 @@ module Pulsar.Client.IntegrationTests.Batching
 open System
 open System.Diagnostics
 open Expecto
+open Expecto.Flip
+open FSharp.UMX
 open Pulsar.Client.Api
 
 open System.Threading.Tasks
@@ -31,7 +33,7 @@ let tests =
                     .Topic(topicName)
                     .ConsumerName("batch consumer")
                     .SubscriptionName("batch-subscription")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let! producer =
                 client.NewProducer()
@@ -39,10 +41,10 @@ let tests =
                     .ProducerName("batch producer")
                     .EnableBatching(true)
                     .BatchingMaxMessages(messagesNumber)
-                    .CreateAsync() 
+                    .CreateAsync()
 
-            do! fastProduceMessages producer messagesNumber "batch producer" 
-            do! consumeMessages consumer messagesNumber "batch consumer" 
+            do! fastProduceMessages producer messagesNumber "batch producer"
+            do! consumeMessages consumer messagesNumber "batch consumer"
 
             Log.Debug("Finished 'Batch get sended if batch size exceeds'")
 
@@ -62,7 +64,7 @@ let tests =
                     .Topic(topicName)
                     .ConsumerName("batch consumer")
                     .SubscriptionName("batch-subscription")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let! producer =
                 client.NewProducer()
@@ -71,13 +73,13 @@ let tests =
                     .EnableBatching(true)
                     .BatchingMaxMessages(batchSize)
                     .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(100.0))
-                    .CreateAsync() 
+                    .CreateAsync()
 
-            do! fastProduceMessages producer messagesNumber "batch producer" 
+            do! fastProduceMessages producer messagesNumber "batch producer"
 
             do! Task.Delay 200
 
-            do! consumeMessages consumer messagesNumber "batch consumer" 
+            do! consumeMessages consumer messagesNumber "batch consumer"
 
             Log.Debug("Finished 'Batch get sended if timeout exceeds'")
 
@@ -96,7 +98,7 @@ let tests =
                     .Topic(topicName)
                     .ConsumerName("batch consumer")
                     .SubscriptionName("batch-subscription")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let! producer =
                 client.NewProducer()
@@ -104,14 +106,14 @@ let tests =
                     .ProducerName("batch producer")
                     .EnableBatching(true)
                     .BatchingMaxMessages(messagesNumber)
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let taskData = createSendAndWaitTasks producer messagesNumber "batch producer"
             let tasks = taskData |> Array.map fst
             let sentMessages = taskData |> Array.map snd
 
-            do! tasks |> Task.WhenAll 
-            do! consumeAndVerifyMessages consumer "batch consumer" sentMessages 
+            do! tasks |> Task.WhenAll
+            do! consumeAndVerifyMessages consumer "batch consumer" sentMessages
 
             Log.Debug("Finished 'Batch get created from several tasks'")
         }
@@ -129,14 +131,14 @@ let tests =
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(true)
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let! consumer =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let producerTask =
                 Task.Run(fun () ->
@@ -171,14 +173,14 @@ let tests =
                     .EnableBatching(true)
                     .BatchingMaxPublishDelay(TimeSpan.FromMilliseconds(100.0))
                     .BatchBuilder(BatchBuilder.KeyBased)
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let! consumer =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let producer1Task =
                 Task.Run(fun () ->
@@ -199,10 +201,10 @@ let tests =
                         do! consumeMessages consumer numberOfMessages consumerName
                     }:> Task)
 
-            do! Task.WhenAll(producer1Task, producer2Task, consumerTask) 
+            do! Task.WhenAll(producer1Task, producer2Task, consumerTask)
             Log.Debug("Finished Keys and properties are propertly passed with key-based batching")
         }
-        
+
         testTask "Batch recieve works with regular consumer"{
             Log.Debug("Started Batch recieve works with regular consumer")
             let client = getClient()
@@ -217,7 +219,7 @@ let tests =
                     .Topic(topicName)
                     .ProducerName(producerName)
                     .EnableBatching(false)
-                    .CreateAsync() 
+                    .CreateAsync()
 
             let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
@@ -225,14 +227,14 @@ let tests =
                     .ConsumerName(consumerName)
                     .SubscriptionName("test-subscription")
                     .BatchReceivePolicy(BatchReceivePolicy(8, -1L, batchTimeout))
-                    .SubscribeAsync() 
+                    .SubscribeAsync()
 
             let producerTask =
                 Task.Run(fun () ->
                     task {
                         do! produceMessages producer numberOfMessages producerName
                     }:> Task)
-            
+
             let consumerTask =
                 Task.Run(fun () ->
                     task {
@@ -243,8 +245,8 @@ let tests =
                         if firstBatchTime > TimeSpan.FromSeconds(0.5) then
                                 failwith <| sprintf "Too long to receive first batch consumer %s passed %f ms" consumerName firstBatchTime.TotalMilliseconds
                         let mutable i = 1
-                        for message in messagesBatch do    
-                            let received = Encoding.UTF8.GetString(message.Data)                        
+                        for message in messagesBatch do
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("{0} received {1}", consumerName, received)
                             do! consumer.AcknowledgeAsync(message.MessageId)
                             Log.Debug("{0} acknowledged {1}", consumerName, received)
@@ -257,8 +259,8 @@ let tests =
                         let secondBatchTime = sw.Elapsed
                         if secondBatchTime < (batchTimeout - TimeSpan.FromMilliseconds(15.0)) then
                                 failwith <| sprintf "Too fast to get second batch consumer %s passed %f ms" consumerName secondBatchTime.TotalMilliseconds
-                        for message in messagesBatch2 do    
-                            let received = Encoding.UTF8.GetString(message.Data)                        
+                        for message in messagesBatch2 do
+                            let received = Encoding.UTF8.GetString(message.Data)
                             Log.Debug("{0} received {1}", consumerName, received)
                             do! consumer.AcknowledgeAsync(message.MessageId)
                             Log.Debug("{0} acknowledged {1}", consumerName, received)
@@ -266,11 +268,54 @@ let tests =
                             if received.StartsWith(expected) |> not then
                                 failwith <| sprintf "Incorrect message expected %s received %s consumer %s" expected received consumerName
                             i <- i + 1
-                                
+
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) 
+            do! Task.WhenAll(producerTask, consumerTask)
 
             Log.Debug("Finished Batch recieve works with regular consumer")
+        }
+
+        ftestTask "Second batch is formed well after the first one" {
+
+            Log.Debug("Started 'Second batch is formed well after the first one'")
+
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let messagesNumber = 4
+
+            let! (consumer: IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("batch consumer")
+                    .SubscriptionName("batch-subscription")
+                    .SubscribeAsync()
+
+            let! (producer: IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName("batch producer")
+                    .EnableBatching(true)
+                    .BatchingMaxMessages(messagesNumber / 2)
+                    .BatchingMaxBytes(100)
+                    .MaxPendingMessages(1)
+                    .BlockIfQueueFull(true)
+                    .CreateAsync()
+
+            for i in 0 .. messagesNumber-1 do
+                let buffer = Array.zeroCreate<byte> 50
+                Random.Shared.NextBytes(buffer)
+                producer.SendAsync(buffer) |> ignore
+
+            for i in 0 .. messagesNumber-1 do
+                let! (message: Message<byte[]>) = consumer.ReceiveAsync()
+                match message.MessageId.Type with
+                | Batch (index, _) ->
+                    Expect.equal $"Run {i} failed" (i % 2) %index
+                | _ ->
+                    failwith "Expected batch message"
+
+            Log.Debug("Finished 'Second batch is formed well after the first one'")
+
         }
     ]
