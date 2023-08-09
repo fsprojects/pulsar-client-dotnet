@@ -79,7 +79,7 @@ type internal MessageContainer<'T>(config: ProducerConfiguration) =
             this.CurrentTxnId <- Some txn.Id
         | _ ->
             ()
-            
+
     member this.HaveEnoughSpace (msgBuilder: MessageBuilder<'T>) =
         let messageSize = msgBuilder.Payload.Length
         ((maxBytesInBatch <= 0 && (messageSize + this.CurrentBatchSizeBytes) <= this.MaxMessageSize)
@@ -145,18 +145,25 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
     inherit MessageContainer<'T>(config)
 
     let prefix = prefix + " KeyBasedBatcher"
-    let keyBatchItems = Dictionary<MessageKey option, ResizeArray<BatchItem<'T>>>()
-    
+    let keyBatchItems = Dictionary<MessageKey, ResizeArray<BatchItem<'T>>>()
+
     let getKey (msg: MessageBuilder<'T>) =
         match msg.OrderingKey with
-        | Some orderingKey -> 
+        | Some orderingKey ->
             {
                 PartitionKey = %Convert.ToBase64String(orderingKey)
                 IsBase64Encoded = true
-            } |> Some
+            }
         | None ->
-            msg.Key
-    
+            match msg.Key with
+            | Some key -> key
+            | None ->
+                {
+                    PartitionKey = %""
+                    IsBase64Encoded = false
+                }
+
+
     override this.Add batchItem =
         this.AddStart(prefix, batchItem)
         let key = batchItem.Message |> getKey
