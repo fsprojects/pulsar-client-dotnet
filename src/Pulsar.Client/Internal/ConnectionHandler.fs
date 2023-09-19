@@ -64,16 +64,10 @@ type internal ConnectionHandler( parentPrefix: string,
                             Log.Logger.LogDebug("{0} Successfuly reconnected to {1}, {2}", prefix, topic, clientCnx)
                             connectionOpened epoch
                         with Flatten ex ->
-                            match ex with
-                            | MaxMessageSizeChanged newSize ->
-                                Log.Logger.LogInformation("{0} MaxMessageSizeChanged to {1}", prefix, newSize)
-                                maxMessageSize <- newSize
-                                post this.Mb GrabCnx
-                            | _ ->
-                                Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
-                                connectionFailed ex
-                                if isValidStateForReconnection() then
-                                    post this.Mb (ReconnectLater ex)
+                            Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                            connectionFailed ex
+                            if isValidStateForReconnection() then
+                                post this.Mb (ReconnectLater ex)
                     else
                         Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", prefix, topic, this.ConnectionState)
 

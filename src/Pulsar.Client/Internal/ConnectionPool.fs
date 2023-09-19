@@ -129,7 +129,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         | true, _ ->  Log.Logger.LogInformation("Connection backgroundTask {0} removed", key)
         | false, _ -> Log.Logger.LogDebug("Connection backgroundTask {0} was not removed", key)
 
-    let connect (broker: Broker, maxMessageSize: int) =
+    let rec connect (broker: Broker, maxMessageSize: int) =
         Log.Logger.LogInformation("Connecting to {0} with maxMessageSize: {1}",
                                   broker, maxMessageSize)
         backgroundTask {
@@ -181,7 +181,12 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                 try socket.Shutdown(SocketShutdown.Send) with _ -> ()
                 try socket.Close() with _ -> ()
                 try socket.Dispose() with _ -> ()
-                return reraize ex
+                match ex with
+                | MaxMessageSizeChanged newSize ->
+                    Log.Logger.LogInformation("MaxMessageSizeChanged to {0}", newSize)
+                    return! connect(broker, newSize)
+                | _ ->
+                    return reraize ex
         }
 
     member this.GetConnection (broker: Broker, maxMessageSize: int) =
