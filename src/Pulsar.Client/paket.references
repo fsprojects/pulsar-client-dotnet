@@ -2,6 +2,7 @@ FSharp.Core
 FSharp.UMX
 Pipelines.Sockets.Unofficial
 Microsoft.IO.RecyclableMemoryStream
+Microsoft.Extensions.Http
 Microsoft.Extensions.Logging
 Microsoft.Extensions.Logging.Abstractions
 Microsoft.Bcl.AsyncInterfaces

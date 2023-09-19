@@ -5,7 +5,9 @@ open System.IO
 open System.Text.Json
 open System.Net.Http
 open System.Text.Json.Serialization
+open Microsoft.Extensions.DependencyInjection
 open Pulsar.Client.Api
+open Microsoft.Extensions.Http
 
 open Pulsar.Client.Auth
 type Metadata =
@@ -50,6 +52,11 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
     inherit Authentication()
 
     let mutable token : Option<TokenResult * DateTime> = None
+    let httpClientFactory =
+        ServiceCollection()
+            .AddHttpClient()
+            .BuildServiceProvider()
+            .GetService<IHttpClientFactory>()
 
     //Gets a well-known metadata URL for the given OAuth issuer URL.
     //https://tools.ietf.org/id/draft-ietf-oauth-discovery-08.html#ASConfig
@@ -62,14 +69,15 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
             let! response = httpClient.GetStreamAsync metadataDataUrl
             return! JsonSerializer.DeserializeAsync<Metadata> response
         }
-    let createClient httpClient issuerUrl =
+    let getClient() =
         backgroundTask {
+            let httpClient = httpClientFactory.CreateClient()
             let! metadata = getMetadata httpClient issuerUrl
             return TokenClient(Uri(metadata.TokenEndpoint), httpClient)
         }
 
     let openAndDeserializeCreds uri =
-        task{
+        backgroundTask {
             use fs = new FileStream(uri, FileMode.Open, FileAccess.Read)
             let! temp = JsonSerializer.DeserializeAsync<Credentials>(fs)
             return temp
@@ -87,8 +95,6 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
                 None
             )
 
-    let httpClient = new HttpClient()
-    let tokenClientTask  = createClient httpClient issuerUrl
 
     override this.GetAuthMethodName() =
         "token"
@@ -99,7 +105,7 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
             let newToken =
                 (backgroundTask {
                     let! credentials = openAndDeserializeCreds(privateKey.LocalPath)
-                    let! tokenTaskResult = tokenClientTask
+                    let! tokenTaskResult = getClient()
                     return!
                         tokenTaskResult.ExchangeClientCredentials(
                             credentials.ClientId,
@@ -119,6 +125,3 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
 
         | Some tokenResult ->
             upcast AuthenticationDataToken(fun () -> tokenResult.AccessToken)
-
-    override this.Dispose() =
-        httpClient.Dispose()
