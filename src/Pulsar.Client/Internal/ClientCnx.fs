@@ -112,7 +112,6 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 broker: Broker,
                 connection: Connection,
                 maxMessageSize: int,
-                brokerless: bool,
                 initialConnectionTsc: TaskCompletionSource<ClientCnx>,
                 unregisterClientCnx: Broker -> unit) as this =
 
@@ -551,9 +550,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         this.WaitingForPingResponse <- false
         match xcmd with
         | XCommandConnected cmd ->
-            Log.Logger.LogInformation("{0} Connected ProtocolVersion: {1} ServerVersion: {2} MaxMessageSize: {3} Brokerless: {4}",
-                prefix, cmd.ProtocolVersion, cmd.ServerVersion, cmd.MaxMessageSize, brokerless)
-            if cmd.ShouldSerializeMaxMessageSize() && (not brokerless) && maxMessageSize <> cmd.MaxMessageSize then
+            Log.Logger.LogInformation("{0} Connected ProtocolVersion: {1} ServerVersion: {2} MaxMessageSize: {3}",
+                prefix, cmd.ProtocolVersion, cmd.ServerVersion, cmd.MaxMessageSize)
+            if cmd.ShouldSerializeMaxMessageSize() && maxMessageSize <> cmd.MaxMessageSize then
                 initialConnectionTsc.SetException(MaxMessageSizeChanged cmd.MaxMessageSize)
             else
                 initialConnectionTsc.SetResult(this)

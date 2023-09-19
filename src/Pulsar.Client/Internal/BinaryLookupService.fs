@@ -27,7 +27,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
             try
                 let! clientCnx =
                     resolveEndPoint()
-                    |> connectionPool.GetBrokerlessConnection
+                    |> connectionPool.GetBasicConnection
                     |> Async.AwaitTask
                 let requestId = Generators.getNextRequestId()
                 let payload = Commands.newPartitionMetadataRequest topicName requestId
@@ -64,7 +64,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
         backgroundTask {
             if config.MaxLookupRedirects > 0 && redirectCount > config.MaxLookupRedirects then
                 raise (LookupException <| "Too many redirects: " + string redirectCount)
-            let! clientCnx = connectionPool.GetBrokerlessConnection endpoint
+            let! clientCnx = connectionPool.GetBasicConnection endpoint
             let requestId = Generators.getNextRequestId()
             let payload = Commands.newLookup topicName requestId authoritative config.ListenerName
             let! response = clientCnx.SendAndWaitForReply requestId payload
@@ -94,7 +94,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
             try
                 let! clientCnx =
                     resolveEndPoint()
-                    |> connectionPool.GetBrokerlessConnection
+                    |> connectionPool.GetBasicConnection
                     |> Async.AwaitTask
                 let requestId = Generators.getNextRequestId()
                 let payload = Commands.newGetTopicsOfNamespaceRequest ns requestId isPersistent
@@ -126,7 +126,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
             try
                 let! clientCnx =
                     resolveEndPoint()
-                    |> connectionPool.GetBrokerlessConnection
+                    |> connectionPool.GetBasicConnection
                     |> Async.AwaitTask
                 let requestId = Generators.getNextRequestId()
                 let payload = Commands.newGetSchema topicName requestId schemaVersion

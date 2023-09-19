@@ -59,7 +59,7 @@ type internal ConnectionHandler( parentPrefix: string,
                         try
                             Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic)
                             let! broker = lookup.GetBroker(topic)
-                            let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize, false)
+                            let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize)
                             this.ConnectionState <- Ready clientCnx
                             Log.Logger.LogDebug("{0} Successfuly reconnected to {1}, {2}", prefix, topic, clientCnx)
                             connectionOpened epoch

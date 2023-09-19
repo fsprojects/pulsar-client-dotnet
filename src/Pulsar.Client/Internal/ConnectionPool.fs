@@ -17,7 +17,7 @@ open System.Security.Cryptography.X509Certificates
 type internal ConnectionPool (config: PulsarClientConfiguration) =
 
 
-    let connections = ConcurrentDictionary<bool*LogicalAddress, Lazy<Task<ClientCnx>>>()
+    let connections = ConcurrentDictionary<LogicalAddress, Lazy<Task<ClientCnx>>>()
 
     // from https://github.com/mgravell/Pipelines.Sockets.Unofficial/blob/master/src/Pipelines.Sockets.Unofficial/SocketConnection.Connect.cs
     let getSocket (endpoint: DnsEndPoint) =
@@ -123,15 +123,15 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
             Log.Logger.LogError("Unknown ssl error: {0}", error)
             false
 
-    let unregisterClientCnx brokerless (broker: Broker) =
-        let key = (brokerless, broker.LogicalAddress)
+    let unregisterClientCnx (broker: Broker) =
+        let key = broker.LogicalAddress
         match connections.TryRemove(key) with
         | true, _ ->  Log.Logger.LogInformation("Connection backgroundTask {0} removed", key)
         | false, _ -> Log.Logger.LogDebug("Connection backgroundTask {0} was not removed", key)
 
-    let connect (broker: Broker, maxMessageSize: int, brokerless: bool) =
-        Log.Logger.LogInformation("Connecting to {0} with maxMessageSize: {1}, brokerless: {2}",
-                                  broker, maxMessageSize, brokerless)
+    let connect (broker: Broker, maxMessageSize: int) =
+        Log.Logger.LogInformation("Connecting to {0} with maxMessageSize: {1}",
+                                  broker, maxMessageSize)
         backgroundTask {
             let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
             let pipeOptions = PipeOptions(pauseWriterThreshold = int64 maxMessageSize )
@@ -167,8 +167,8 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                 Log.Logger.LogDebug("Connection established for {0}", physicalAddress)
                 let initialConnectionTsc = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
 
-                let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, brokerless, initialConnectionTsc,
-                                          unregisterClientCnx brokerless)
+                let clientCnx = ClientCnx(config, broker, connection, maxMessageSize, initialConnectionTsc,
+                                          unregisterClientCnx)
                 let connectPayload = clientCnx.NewConnectCommand()
                 let! success = clientCnx.Send connectPayload
                 if not success then
@@ -184,19 +184,19 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                 return reraize ex
         }
 
-    member this.GetConnection (broker: Broker, maxMessageSize: int, brokerless: bool) =
-        let t = connections.GetOrAdd((brokerless, broker.LogicalAddress), fun _ ->
-                lazy connect(broker, maxMessageSize, brokerless)).Value
+    member this.GetConnection (broker: Broker, maxMessageSize: int) =
+        let t = connections.GetOrAdd(broker.LogicalAddress, fun _ ->
+                lazy connect(broker, maxMessageSize)).Value
         if t.IsFaulted then
-            let key = (brokerless, broker.LogicalAddress)
+            let key = broker.LogicalAddress
             match connections.TryRemove(key) with
             | true, _ -> Log.Logger.LogInformation("Removed faulted connection task to {0}", key)
             | false, _ -> Log.Logger.LogDebug("Faulted connection task to {0} wasn't removed", key)
         t
 
-    member this.GetBrokerlessConnection (address: DnsEndPoint) =
+    member this.GetBasicConnection (address: DnsEndPoint) =
         this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address },
-                           Commands.DEFAULT_MAX_MESSAGE_SIZE, true)
+                           Commands.DEFAULT_MAX_MESSAGE_SIZE)
 
     member this.CloseAsync() =
         backgroundTask {
