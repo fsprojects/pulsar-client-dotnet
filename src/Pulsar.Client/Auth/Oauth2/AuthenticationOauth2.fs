@@ -69,7 +69,7 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
             let! response = httpClient.GetStreamAsync metadataDataUrl
             return! JsonSerializer.DeserializeAsync<Metadata> response
         }
-    let getClient() =
+    let getTokenClient() =
         backgroundTask {
             let httpClient = httpClientFactory.CreateClient()
             let! metadata = getMetadata httpClient issuerUrl
@@ -105,9 +105,9 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
             let newToken =
                 (backgroundTask {
                     let! credentials = openAndDeserializeCreds(privateKey.LocalPath)
-                    let! tokenTaskResult = getClient()
+                    let! tokenClient = getTokenClient()
                     return!
-                        tokenTaskResult.ExchangeClientCredentials(
+                        tokenClient.ExchangeClientCredentials(
                             credentials.ClientId,
                             credentials.ClientSecret,
                             audience,
