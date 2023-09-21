@@ -1,2 +1,4 @@
 protobuf-net
 System.Text.Json
+
+Microsoft.IO.RecyclableMemoryStream

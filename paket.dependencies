@@ -46,7 +46,7 @@ group Tests
   nuget protobuf-net.Reflection
 
 group Examples
-  framework: net7.0
+  framework: net8.0
   source https://api.nuget.org/v3/index.json
   storage: none
 

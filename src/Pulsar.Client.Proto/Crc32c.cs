@@ -3,7 +3,10 @@
 // You may use this program, or
 // code or tables extracted from it, as desired without restriction.
 
+using System;
+using System.Buffers;
 using System.IO;
+using Microsoft.IO;
 
 
 namespace Pulsar.Client.Common
@@ -83,13 +86,46 @@ namespace Pulsar.Client.Common
         }
 
         // Custom version of original, replaced buf with stream
-        internal static uint Get(uint crc, Stream str, int size)
+        internal static uint OldGet(Stream str, int size)
         {
-            crc = crc ^ ~0U; //0xFFFFFFFF
+            var crc = ~0U; //0xFFFFFFFF
             while (size-- > 0)
                 crc = crc32_tab[(crc ^ str.ReadByte()) & 0xFF] ^ (crc >> 8);
-
             return crc ^ ~0U; //0xFFFFFFFF
+        }
+
+
+        internal static uint Get(Stream stream, int size)
+        {
+            var crc = ~0U; //0xFFFFFFFF
+            if (stream is RecyclableMemoryStream recyclableStream)
+            {
+                var memorySequence = recyclableStream.GetReadOnlySequence().Slice(stream.Position);
+                foreach (var memory in memorySequence)
+                {
+
+                    var span = memory.Span;
+                    var currentBlockLength = span.Length;
+                    var i = 0;
+                    while (size-- > 0 && i < currentBlockLength)
+                    {
+                        crc = crc32_tab[(crc ^ span[i]) & 0xFF] ^ (crc >> 8);
+                        i++;
+                    }
+
+                }
+                return crc ^ ~0U; //0xFFFFFFFF
+            }
+            if (stream is MemoryStream memStream)
+            {
+                var buf = memStream.GetBuffer();
+                var offset = stream.Position;
+                for (var i = 0; i < size; i++)
+                    crc = crc32_tab[(crc ^ buf[offset + i]) & 0xFF] ^ (crc >> 8);
+
+                return crc ^ ~0U; //0xFFFFFFFF
+            }
+            throw new System.NotImplementedException();
         }
     }
 }

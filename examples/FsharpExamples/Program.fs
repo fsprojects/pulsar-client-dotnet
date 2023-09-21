@@ -8,7 +8,7 @@ open ReaderApi
 open RealWorld
 open Schema
 open Transaction
-open Telemetry
+//open Telemetry
 open Oauth2
 
 [<EntryPoint>]
@@ -17,10 +17,10 @@ let main _ =
     let loggerFactory =
         LoggerFactory.Create(fun builder ->
             builder
-                .SetMinimumLevel(LogLevel.Information)
+                .SetMinimumLevel(LogLevel.Warning)
                 .AddConsole() |> ignore
         )
-    PulsarClient.Logger <- loggerFactory.CreateLogger("PulsarLogger") 
+    PulsarClient.Logger <- loggerFactory.CreateLogger("PulsarLogger")
 
     runSimple().Wait()
 //    runTlsAuthentication().Wait()

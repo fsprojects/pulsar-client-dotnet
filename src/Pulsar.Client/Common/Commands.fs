@@ -40,7 +40,7 @@ let private processSimpleCommand (command : BaseCommand) (stream: Stream) (binar
     stream.CopyToAsync(output)
 
 let private processComplexCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[])
-                                    (stream: Stream) (binaryWriter: BinaryWriter) (output: Stream) =
+                                    (stream: MemoryStream) (binaryWriter: BinaryWriter) (output: Stream) =
     // write fake totalLength
     for i in 1..4 do
         stream.WriteByte(0uy)
@@ -75,7 +75,7 @@ let private processComplexCommand (command : BaseCommand) (metadata: MessageMeta
 
     //write CRC
     stream.Seek(int64 crcPayloadStart, SeekOrigin.Begin) |> ignore
-    let crc = int32 <| CRC32C.Get(0u, stream, totalMetadataSize + payloadSize)
+    let crc = int32 <| CRC32C.Get(stream, totalMetadataSize + payloadSize)
     stream.Seek(int64 crcStart, SeekOrigin.Begin) |> ignore
     binaryWriter.Write(int32ToBigEndian crc)
 

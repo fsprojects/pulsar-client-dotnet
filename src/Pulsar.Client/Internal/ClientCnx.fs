@@ -345,7 +345,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         let payloadLength = frameLength - (int payloadPointer)
         let payload = reader.ReadBytes(payloadLength)
         stream.Seek(metadataPointer, SeekOrigin.Begin) |> ignore
-        let calculatedCheckSum = CRC32C.Get(0u, stream, metadataLength + payloadLength) |> int32
+        let calculatedCheckSum = CRC32C.Get(stream, metadataLength + payloadLength) |> int32
         if (messageCheckSum <> calculatedCheckSum) then
             Log.Logger.LogError("{0} Invalid checksum. Received: {1} Calculated: {2}", prefix, messageCheckSum, calculatedCheckSum)
         (metadata, payload, messageCheckSum = calculatedCheckSum)
@@ -408,7 +408,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let array = ArrayPool.Shared.Rent length
             try
                 buffer.CopyTo(Span(array))
-                use stream =  new MemoryStream(array)
+                use stream =  new MemoryStream(array, 0, array.Length, true, true)
                 use reader = new BinaryReader(stream)
                 let totalength = reader.ReadInt32() |> int32FromBigEndian
                 let frameLength = totalength + 4

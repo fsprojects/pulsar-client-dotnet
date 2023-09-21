@@ -225,7 +225,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             stream.Seek((10+cmdSize) |> int64, SeekOrigin.Begin) |> ignore
             let checkSum = reader.ReadInt32() |> int32FromBigEndian
             let checkSumPayload = (int streamSize) - 14 - cmdSize
-            let computedCheckSum = CRC32C.Get(0u, stream, checkSumPayload) |> int32
+            let computedCheckSum = CRC32C.Get(stream, checkSumPayload) |> int32
             return checkSum <> computedCheckSum
         }
 
