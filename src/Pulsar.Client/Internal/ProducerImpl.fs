@@ -4,6 +4,7 @@ open System.Threading
 
 open System.Threading.Tasks
 open FSharp.UMX
+open Microsoft.IO
 open pulsar.proto
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
@@ -216,7 +217,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
     let verifyIfLocalBufferIsCorrupted (msg: PendingMessage<'T>) =
         backgroundTask {
-            use stream = MemoryStreamManager.GetStream()
+            use stream = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
             use reader = new BinaryReader(stream)
             do! (fst msg.Payload) (stream :> Stream) // materialize stream
             let streamSize = stream.Length
@@ -225,7 +226,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             stream.Seek((10+cmdSize) |> int64, SeekOrigin.Begin) |> ignore
             let checkSum = reader.ReadInt32() |> int32FromBigEndian
             let checkSumPayload = (int streamSize) - 14 - cmdSize
-            let computedCheckSum = CRC32C.Get(stream, checkSumPayload) |> int32
+            let computedCheckSum = CRC32C.GetForRMS(stream, checkSumPayload) |> int32
             return checkSum <> computedCheckSum
         }
 

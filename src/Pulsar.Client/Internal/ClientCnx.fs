@@ -345,7 +345,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         let payloadLength = frameLength - (int payloadPointer)
         let payload = reader.ReadBytes(payloadLength)
         stream.Seek(metadataPointer, SeekOrigin.Begin) |> ignore
-        let calculatedCheckSum = CRC32C.Get(stream, metadataLength + payloadLength) |> int32
+        let calculatedCheckSum = CRC32C.GetForMS(stream, metadataLength + payloadLength) |> int32
         if (messageCheckSum <> calculatedCheckSum) then
             Log.Logger.LogError("{0} Invalid checksum. Received: {1} Calculated: {2}", prefix, messageCheckSum, calculatedCheckSum)
         (metadata, payload, messageCheckSum = calculatedCheckSum)

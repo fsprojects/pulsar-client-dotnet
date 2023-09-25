@@ -112,8 +112,9 @@ module CommandsTests =
 
                 let crcArrayStart = 8 + commandSize + 6
                 let crcArray = bytes.AsSpan(crcArrayStart, 4 + medataSize + resultPayload.Length).ToArray()
+                use crcStream = new MemoryStream(crcArray, 0, crcArray.Length, true, true)
 
-                let currentCrc32 = CRC32C.Get(uint32 0, crcArray, crcArray.Length) |> int32
+                let currentCrc32 = CRC32C.GetForMS(crcStream, crcArray.Length) |> int32
 
                 magicNumber |> Expect.equal "" MagicNumber
                 crc32 |> Expect.equal "" currentCrc32

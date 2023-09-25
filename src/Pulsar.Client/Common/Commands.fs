@@ -2,6 +2,7 @@
 
 open System.Collections
 open System.Collections.Generic
+open Microsoft.IO
 open Pulsar.Client.Transaction
 open pulsar.proto
 open FSharp.UMX
@@ -9,7 +10,6 @@ open System
 open ProtoBuf
 open System.IO
 open System.Net
-open Microsoft.Extensions.Logging
 open Pulsar.Client.Internal
 open Pulsar.Client.Api
 open Pulsar.Client.Common
@@ -40,7 +40,7 @@ let private processSimpleCommand (command : BaseCommand) (stream: Stream) (binar
     stream.CopyToAsync(output)
 
 let private processComplexCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: byte[])
-                                    (stream: MemoryStream) (binaryWriter: BinaryWriter) (output: Stream) =
+                                    (stream: RecyclableMemoryStream) (binaryWriter: BinaryWriter) (output: Stream) =
     // write fake totalLength
     for i in 1..4 do
         stream.WriteByte(0uy)
@@ -75,7 +75,7 @@ let private processComplexCommand (command : BaseCommand) (metadata: MessageMeta
 
     //write CRC
     stream.Seek(int64 crcPayloadStart, SeekOrigin.Begin) |> ignore
-    let crc = int32 <| CRC32C.Get(stream, totalMetadataSize + payloadSize)
+    let crc = int32 <| CRC32C.GetForRMS(stream, totalMetadataSize + payloadSize)
     stream.Seek(int64 crcStart, SeekOrigin.Begin) |> ignore
     binaryWriter.Write(int32ToBigEndian crc)
 
@@ -101,7 +101,7 @@ let serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) 
     let f =
         fun (output: Stream) ->
             backgroundTask {
-                use stream = MemoryStreamManager.GetStream()
+                use stream = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
                 use binaryWriter = new BinaryWriter(stream)
                 return! processComplexCommand command metadata payload stream binaryWriter output
             }
@@ -167,7 +167,7 @@ let newMultiMessageAck (consumerId : ConsumerId) (messages: seq<LedgerId*EntryId
     serializeSimpleCommand command
 
 let newConnect (authMethodName: string) (authData: AuthData) (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) : Payload =
-    let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = (int) protocolVersion, AuthMethodName = authMethodName)
+    let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = int protocolVersion, AuthMethodName = authMethodName)
     if authMethodName = "ycav1" then
         request.AuthMethod <- AuthMethod.AuthMethodYcaV1
     if authData.Bytes.Length > 0 then
