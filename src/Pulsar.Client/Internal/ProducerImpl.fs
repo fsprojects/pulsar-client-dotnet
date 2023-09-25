@@ -82,10 +82,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                           producerConfig.Topic.CompleteTopicName,
                           (fun epoch -> post this.Mb (ProducerMessage.ConnectionOpened epoch)),
                           (fun ex -> post this.Mb (ProducerMessage.ConnectionFailed ex)),
-                          Backoff { BackoffConfig.Default with
-                                        Initial = clientConfig.InitialBackoffInterval
-                                        Max = clientConfig.MaxBackoffInterval
-                                        MandatoryStop = TimeSpan.FromMilliseconds(Math.Max(100.0, sendTimeoutMs - 100.0))})
+                          Backoff {
+                            Initial = clientConfig.InitialBackoffInterval
+                            Max = clientConfig.MaxBackoffInterval
+                            MandatoryStop = TimeSpan.FromMilliseconds(Math.Max(100.0, sendTimeoutMs - 100.0))})
 
     let batchMessageContainer =
         match producerConfig.BatchBuilder with
@@ -607,7 +607,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                     let msgId =
                                         match chunkDetailsOption with
                                         | Some chunkDetail ->
-                                            chunkDetail.MessageIds.[chunkDetail.ChunkId] <- currentMessageId
+                                            chunkDetail.MessageIds[chunkDetail.ChunkId] <- currentMessageId
                                             { currentMessageId with ChunkMessageIds = Some chunkDetail.MessageIds }
                                         | None ->
                                             currentMessageId
@@ -620,7 +620,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                     let currentMsgId =
                                                 { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
                                                     Type = MessageIdType.Single; TopicName = %""; ChunkMessageIds = None }
-                                    chunkDetails.MessageIds.[chunkDetails.ChunkId] <- currentMsgId
+                                    chunkDetails.MessageIds[chunkDetails.ChunkId] <- currentMsgId
 
                             | BatchCallbacks tcss ->
                                 tcss

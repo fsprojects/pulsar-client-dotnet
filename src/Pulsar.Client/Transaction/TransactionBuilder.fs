@@ -26,8 +26,7 @@ type TransactionBuilder internal (transactionClient: TransactionCoordinatorClien
 
 
     member this.TransactionTimeout transactionTimeout =
-        { config with
-            TxnTimeout = transactionTimeout }
+        { TxnTimeout = transactionTimeout }
         |> this.With
 
     member this.BuildAsync() =

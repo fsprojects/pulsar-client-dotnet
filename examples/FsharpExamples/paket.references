@@ -1,5 +1,5 @@
 group Examples
 FSharp.Core
-Microsoft.Extensions.Logging.Console
 OpenTelemetry.Exporter.Console
 OpenTelemetry
+Microsoft.Extensions.Logging.Console

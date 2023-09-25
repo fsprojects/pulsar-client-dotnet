@@ -48,10 +48,12 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
 
      member this.GetPartitionedTopicMetadata topicName =
         backgroundTask {
-            let backoff = Backoff { BackoffConfig.Default with
-                                        Initial = TimeSpan.FromMilliseconds(100.0)
-                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
-                                        Max = TimeSpan.FromMinutes(1.0) }
+            let backoff =
+                Backoff {
+                    Initial = TimeSpan.FromMilliseconds(100.0)
+                    MandatoryStop = config.OperationTimeout + config.OperationTimeout
+                    Max = TimeSpan.FromMinutes(1.0)
+                }
             let! result = this.GetPartitionedTopicMetadataInner(topicName, backoff, int config.OperationTimeout.TotalMilliseconds)
             return result
         }
@@ -112,10 +114,12 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
 
     member this.GetTopicsUnderNamespace (ns : NamespaceName, isPersistent : bool) =
         backgroundTask {
-            let backoff = Backoff { BackoffConfig.Default with
-                                        Initial = TimeSpan.FromMilliseconds(100.0)
-                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
-                                        Max = TimeSpan.FromMinutes(1.0) }
+            let backoff =
+                Backoff {
+                    Initial = TimeSpan.FromMilliseconds(100.0)
+                    MandatoryStop = config.OperationTimeout + config.OperationTimeout
+                    Max = TimeSpan.FromMinutes(1.0)
+                }
             let! result = this.GetTopicsUnderNamespaceInner(ns, backoff, int config.OperationTimeout.TotalMilliseconds, isPersistent)
             return result
         }
@@ -146,10 +150,12 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
 
     member this.GetSchema(topicName: CompleteTopicName, ?schemaVersion: SchemaVersion) =
         backgroundTask {
-            let backoff = Backoff { BackoffConfig.Default with
-                                        Initial = TimeSpan.FromMilliseconds(100.0)
-                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
-                                        Max = TimeSpan.FromMinutes(1.0) }
+            let backoff =
+                Backoff {
+                    Initial = TimeSpan.FromMilliseconds(100.0)
+                    MandatoryStop = config.OperationTimeout + config.OperationTimeout
+                    Max = TimeSpan.FromMinutes(1.0)
+                }
             let! result = this.GetSchemaInner(topicName, schemaVersion, backoff, int config.OperationTimeout.TotalMilliseconds)
             return result
         }

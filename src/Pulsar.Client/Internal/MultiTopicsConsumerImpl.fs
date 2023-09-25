@@ -471,7 +471,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                     {
                                         consumerInitInfo with
                                             Metadata = {
-                                                consumerInitInfo.Metadata with Partitions = newPartitionsCount
+                                                Partitions = newPartitionsCount
                                             }
                                     }
                                 let newConsumerTasks =
