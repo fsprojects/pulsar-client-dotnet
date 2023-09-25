@@ -54,7 +54,7 @@ let private processComplexCommand (command : BaseCommand) (metadata: MessageMeta
     stream.WriteByte(14uy)
     stream.WriteByte(1uy)
 
-    // write fake CRC sum and fake metadata length
+    // write fake CRC sum
     for i in 1..4 do
         stream.WriteByte(0uy)
 
