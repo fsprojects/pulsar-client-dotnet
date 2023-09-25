@@ -16,7 +16,7 @@ namespace Pulsar.Client.Common
         {
             if (String.IsNullOrEmpty(value))
                 return 0;
-            
+
             int maxBytesCount = value.Length * sizeof(char);
 
             //fallback to default hash heap calculation when input string is too long.
@@ -24,23 +24,14 @@ namespace Pulsar.Client.Common
                 return HashWithAllocs(value);
 
             Span<byte> bytes = stackalloc byte[maxBytesCount];
-            unsafe
-            {
-                fixed (char* inputChars = value)
-                {
-                    fixed (byte* fixedBytes = &bytes.GetPinnableReference())
-                    {
-                        int bytesCount = Encoding.UTF8.GetBytes(inputChars, value.Length, fixedBytes, bytes.Length);
-                        return Hash(bytes, bytesCount, 0) & Int32.MaxValue;
-                    }
-                }
-            }
+            int bytesCount = Encoding.UTF8.GetBytes(value.AsSpan(),bytes);
+            return Hash(bytes, bytesCount, 0) & Int32.MaxValue;
         }
         public static int HashWithAllocs(string value)
         {
             if (String.IsNullOrEmpty(value))
                 return 0;
-            
+
             byte[] input = Encoding.UTF8.GetBytes(value);
             using (var stream = new MemoryStream(input))
                 return Hash(stream, 0) & Int32.MaxValue;

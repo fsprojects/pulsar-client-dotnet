@@ -4,5 +4,11 @@
     <TargetFramework>net8.0</TargetFramework>
     <LangVersion>default</LangVersion>
   </PropertyGroup>
-  <Import Project="..\..\.paket\Paket.Restore.targets" />
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="7.0.0" />
+    <PackageReference Include="Pulsar.Client" Version="2.13.0" />
+    <PackageReference Include="Pulsar.Client.Otel" Version="0.1.2" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.6.0" />
+    <PackageReference Include="OpenTelemetry" Version="1.6.0" />
+  </ItemGroup>
 </Project>

@@ -18,6 +18,7 @@ type MessageEncryptor(keyNames: string seq, keyReader: ICryptoKeyReader) =
     let mutable symmetricKey: Key = null
     let mutable nonce = Nonce()
     let mutable encryptionKeys: EncryptionKey [] = null
+    let generator = RandomNumberGenerator.Create()
 
     let createKey () =
         Log.Logger.LogDebug("MessageEncryptor create new symmetric key")
@@ -42,7 +43,7 @@ type MessageEncryptor(keyNames: string seq, keyReader: ICryptoKeyReader) =
         let encKey = rsa.Encrypt(symmetricKey.Export(KeyBlobFormat.RawSymmetricKey), RSAEncryptionPadding.OaepSHA1)
         let encryptionKeys = EncryptionKey(keyName, encKey, publicKeyInfo.Metadata)
         encryptionKeys
-   
+
     let createEncryptionKeys () =
         keyNames
         |> Seq.map loadPublicKey
@@ -66,7 +67,7 @@ type MessageEncryptor(keyNames: string seq, keyReader: ICryptoKeyReader) =
         member this.UpdateEncryptionKeys() =
             Log.Logger.LogDebug("MessageEncryptor update encryptionKeys")
             init()
-            
+
 
 
 type MessageDecryptor(keyReader: ICryptoKeyReader) =

@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <PackageId>Pulsar.Client.Otel</PackageId>
     <Title>Pulsar.Client.Otel</Title>
     <RootNamespace>Pulsar.Client.Otel</RootNamespace>
@@ -27,9 +27,15 @@
     <NoWarn>3186;40</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <None Include="paket.references" />
     <Compile Include="OTelProducerInterceptor.fs" />
     <Compile Include="OtelConsumerInterceptor.fs" />
   </ItemGroup>
-  <Import Project="..\..\.paket\Paket.Restore.targets" />
+  <ItemGroup>
+    <PackageReference Include="Pulsar.Client" Version="2.13.0" />
+    <PackageReference Include="OpenTelemetry.Api" Version="1.6.0" />
+    <PackageReference Include="AvroSchemaGenerator" Version="2.9.2" />
+    <!--Microsoft-->
+    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="8.0.0-rc.1.23419.4" />
+    <PackageReference Include="System.Threading.Channels" Version="8.0.0-rc.1.23419.4" />
+  </ItemGroup>
 </Project>

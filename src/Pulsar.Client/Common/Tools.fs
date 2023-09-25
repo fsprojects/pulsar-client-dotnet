@@ -159,7 +159,7 @@ type Result<'T, 'TError> with
         | Error err -> $"Error {err}"
 
 let postAndAsyncReply (channel: Channel<'T>) f =
-    let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
+    let tcs = TaskCompletionSource<_>(TaskContinuationOptions.RunContinuationsAsynchronously)
     (f tcs) |> channel.Writer.TryWrite |> ignore
     tcs.Task
 

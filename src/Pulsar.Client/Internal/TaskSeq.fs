@@ -24,7 +24,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
     let mutable started = false
     let mutable nextWaiting = false
     let waitingQueue = Queue()
-    let mutable resetWhenAnyTcs = TaskCompletionSource()
+    let mutable resetWhenAnyTcs = TaskCompletionSource<'T>()
     let random = Random()
 
     let whenAnyTask () =
@@ -113,7 +113,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                     whenAnyTaskToChannel channel
                 else
                     resetWhenAnyTcs.SetCanceled()
-                    resetWhenAnyTcs <- TaskCompletionSource()
+                    resetWhenAnyTcs <- TaskCompletionSource<'T>()
                     tasks.[0] <- resetWhenAnyTcs.Task
 
             | RemoveGenerator generator ->

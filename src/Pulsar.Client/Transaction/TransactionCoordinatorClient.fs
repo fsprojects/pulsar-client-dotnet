@@ -63,14 +63,14 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                                 if partitionMeta.Partitions > 0 then
                                     seq {
                                         for i in 0..partitionMeta.Partitions-1 do
-                                            let tcs = TaskCompletionSource()
+                                            let tcs = TaskCompletionSource<unit>()
                                             let handler = TransactionMetaStoreHandler(clientConfig, %(uint64 i),
                                                                                      getTCAssignTopicName(i), connectionPool, lookup, tcs)
                                             handlers.Add(handler)
                                             yield tcs.Task
                                     }
                                 else
-                                    let tcs = TaskCompletionSource()
+                                    let tcs = TaskCompletionSource<unit>()
                                     let handler = TransactionMetaStoreHandler(clientConfig, %0UL,
                                                                               getTCAssignTopicName(-1), connectionPool, lookup, tcs)
                                     handlers.Add(handler)

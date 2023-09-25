@@ -75,13 +75,13 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
 
     let startRequest (clientCnx: ClientCnx) requestId msg command =
         if operationsLeft > 0 then
-            let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let tcs = TaskCompletionSource<TxnRequest>(TaskCreationOptions.RunContinuationsAsynchronously)
             clientCnx.SendAndForget command
             pendingRequests.Add(requestId, tcs)
             timeoutQueue.Enqueue({ CreationTime = DateTime.Now; RequestId = requestId })
             tcs.Task
         elif blockIfReachMaxPendingOps then
-            let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let tcs = TaskCompletionSource<TxnRequest>(TaskCreationOptions.RunContinuationsAsynchronously)
             blockedRequests.Enqueue(msg)
             tcs.Task
         else

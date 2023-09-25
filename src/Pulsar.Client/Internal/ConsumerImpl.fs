@@ -382,7 +382,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | _ ->
                     Commands.newAck consumerId messageId.LedgerId messageId.EntryId ackType properties null
                             None (Some txnId) (Some requestId) None
-            let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let tcs = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
             ackRequests.Add(requestId, (messageId, txnId, tcs))
             match ackType with
             | Individual -> unAckedMessageTracker.Remove(messageId) |> ignore
