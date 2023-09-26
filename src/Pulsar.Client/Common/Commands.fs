@@ -2,6 +2,7 @@
 
 open System.Collections
 open System.Collections.Generic
+open System.Threading.Tasks
 open Microsoft.IO
 open Pulsar.Client.Transaction
 open pulsar.proto
@@ -46,8 +47,8 @@ let private serializeSimpleCommand (command : BaseCommand) =
 
 let private serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: MemoryStream) =
     (fun output ->
-        use temp = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
-        use binaryWriter = new BinaryWriter(temp)
+        let temp = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
+        let binaryWriter = new BinaryWriter(temp)
 
         // write fake totalLength
         for i in 1..4 do
@@ -93,7 +94,13 @@ let private serializePayloadCommand (command : BaseCommand) (metadata: MessageMe
         binaryWriter.Write(int32ToBigEndian totalSize)
 
         temp.Seek(0L, SeekOrigin.Begin) |> ignore
-        temp.CopyToAsync(output)
+        backgroundTask {
+            try
+                return! temp.CopyToAsync(output)
+            finally
+                temp.Dispose()
+                binaryWriter.Dispose()
+        } :> Task
     ), command.``type``
 
 let newPartitionMetadataRequest (topicName : CompleteTopicName) (requestId : RequestId) =

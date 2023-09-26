@@ -7,6 +7,7 @@ open System.IO
 open System.Net
 open System.Runtime.InteropServices
 open System.Threading.Tasks
+open Microsoft.FSharp.NativeInterop
 open Microsoft.IO
 open System.Runtime.ExceptionServices
 open System.Collections.Generic
@@ -170,3 +171,7 @@ let post (channel: Channel<'T>) =
 
 let getSpan (stream: MemoryStream) =
     stream.GetBuffer().AsSpan(0, int stream.Length)
+
+let inline stackallocspan<'a when 'a: unmanaged> size =
+    let p = NativePtr.stackalloc<'a> size |> NativePtr.toVoidPtr
+    Span<'a>(p, size)
