@@ -1,5 +1,6 @@
 ﻿module Pulsar.Client.UnitTests.Internal.CompressionCodecTests
 
+open System.IO
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open Expecto
@@ -26,8 +27,9 @@ let tests =
 
     let testEncode compressionType expectedBytes =
         let codec = compressionType |> createCodec
-        let encoded = hello |> getBytes |> codec.Encode
-        Expect.isTrue "" (encoded = expectedBytes)
+        let ms = new MemoryStream(helloNone, 0, helloNone.Length, true, true)
+        let encoded = ms |> codec.Encode |> (fun ms -> ms.ToArray())
+        encoded |> Expect.sequenceEqual "" expectedBytes
 
     let testDecode compressionType encodedBytes =
         let uncompressedSize = helloNone.Length

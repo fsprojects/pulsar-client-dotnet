@@ -33,7 +33,7 @@ type internal IAcknowledgmentsGroupingTracker =
 
 type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: ConsumerId, ackGroupTime: TimeSpan,
                                     getState: unit -> ConnectionState,
-                                    sendAckPayload: ClientCnx -> Payload -> Task<bool>) =
+                                    sendAckPayload: ClientCnx -> SendTask -> Task<bool>) =
 
     [<Literal>]
     let MAX_ACK_GROUP_SIZE = 1000

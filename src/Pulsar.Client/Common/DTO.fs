@@ -26,17 +26,17 @@ type SchemaVersion =
     }
     member private this.EqualsInner other =
         Array.compareWith (fun (x: byte) (y: byte) -> x.CompareTo(y)) this.Bytes other.Bytes = 0
-    
+
     override this.Equals obj =
         obj :?> SchemaVersion |> this.EqualsInner
-        
+
     override this.GetHashCode() =
         this.Bytes |> Array.fold (fun acc el -> acc * 23 + (int el)) 17
-    
+
     interface IEquatable<SchemaVersion> with
         member this.Equals other =
             this.EqualsInner other
-        
+
 
 type internal ProducerSuccess =
     {
@@ -53,7 +53,7 @@ type internal LookupTopicResult =
         Redirect: bool
         Authoritative: bool
     }
-    
+
 type internal LastMessageIdResult =
     {
         LastMessageId: MessageId
@@ -93,7 +93,7 @@ type SchemaInfo =
         Type: SchemaType
         Properties: IReadOnlyDictionary<string, string>
     }
-    
+
 type internal TopicSchema =
     {
         SchemaInfo: SchemaInfo
@@ -147,7 +147,7 @@ type internal LogicalAddress =
         override this.ToString() =
             let (LogicalAddress l) = this
             $"LogicalAddres {l.ToString()}"
-        
+
 type internal PhysicalAddress =
     PhysicalAddress of DnsEndPoint
         override this.ToString() =
@@ -168,22 +168,22 @@ type CompressionType =
     | ZLib = 2
     | ZStd = 3
     | Snappy = 4
-    
+
 type EncryptionKey(name: string, value: byte [],
                     [<Optional; DefaultParameterValue(null:IReadOnlyDictionary<string, string>)>] metadata: IReadOnlyDictionary<string, string>) =
-    
+
     let metadata = if isNull metadata then EmptyMetadata else metadata
-    
+
     member this.Name = name
     member this.Value = value
     member this.Metadata = metadata
-   
+
     static member internal ToProto(encKey: EncryptionKey) =
         let result = EncryptionKeys(Key = encKey.Name, Value = encKey.Value)
         for KeyValue(k, v) in encKey.Metadata do
              result.Metadatas.Add(KeyValue(Key = k, Value = v))
         result
-    
+
     static member internal FromProto(encKey: EncryptionKeys) =
         let metadata =
             if encKey.Metadatas.Count > 0 then
@@ -196,7 +196,7 @@ type EncryptionKey(name: string, value: byte [],
 
 type internal Metadata =
     {
-        NumMessages: int 
+        NumMessages: int
         NumChunks: int
         TotalChunkMsgSize: int
         HasNumMessagesInBatch: bool
@@ -290,7 +290,7 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
     member this.RedeliveryCount = redeliveryCount
     /// Get name of cluster, from which the message is replicated.
     member this.ReplicatedFrom = replicatedFrom
-    
+
     /// Get the de-serialized value of the message, according the configured Schema.
     member this.GetValue() =
         getValue()
@@ -317,7 +317,7 @@ type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
     let mutable currentSizeOfMessages = 0L
 
     let messageList = if maxNumberOfMessages > 0 then ResizeArray<Message<'T>>(maxNumberOfMessages) else ResizeArray<Message<'T>>()
-    
+
     member this.Count with get() =
         currentNumberOfMessages
     member this.Size with get() =
@@ -326,7 +326,7 @@ type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
     member internal this.IsFull with get() =
         currentNumberOfMessages = maxNumberOfMessages
         || currentSizeOfMessages = maxSizeOfMessages
-    
+
     member internal this.CanAdd(message: Message<'T>) =
         (maxNumberOfMessages > 0 && currentNumberOfMessages + 1 > maxNumberOfMessages)
             || (maxSizeOfMessages > 0L && currentSizeOfMessages + (int64 message.Data.Length) > maxSizeOfMessages)
@@ -354,7 +354,7 @@ type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey 
             ?eventTime: TimeStamp,
             ?txn: Transaction,
             ?replicationClusters: string seq) =
-            
+
     let properties = defaultArg properties0 EmptyProps
     member this.Value = value
     member this.Payload = payload
@@ -366,7 +366,7 @@ type MessageBuilder<'T> internal (value : 'T, payload: byte[], key : MessageKey 
     member this.EventTime = eventTime
     member this.Txn = txn
     member this.ReplicationClusters = replicationClusters
-            
+
     /// Get a new instance of the message with updated properties
     member this.WithProperties properties =
         MessageBuilder(value, payload, key, properties, ?deliverAt = deliverAt,
@@ -403,7 +403,7 @@ type MessageBuilder =
         DisableReplication
 
 type internal WriterStream = Stream
-type internal Payload = (WriterStream -> Task<unit>) * BaseCommand.Type
+type internal SendTask = (WriterStream -> Task) * BaseCommand.Type
 type internal Connection =
     {
         Input: PipeReader
@@ -424,7 +424,7 @@ type ChunkDetails =
 
 type internal SingleCallback<'T> = ChunkDetails option * MessageBuilder<'T> * TaskCompletionSource<MessageId> option
 type internal BatchCallback<'T> = BatchDetails * MessageBuilder<'T> * TaskCompletionSource<MessageId> option
-type internal PendingCallback<'T> = 
+type internal PendingCallback<'T> =
     | SingleCallback of SingleCallback<'T>
     | BatchCallbacks of BatchCallback<'T>[]
 
@@ -433,7 +433,7 @@ type internal PendingMessage<'T> =
         CreatedAt: DateTime
         SequenceId: SequenceId
         HighestSequenceId: SequenceId
-        Payload: Payload
+        Payload: SendTask
         Callback : PendingCallback<'T>
     }
 
@@ -473,7 +473,7 @@ type internal PulsarResponseType =
     static member GetLastMessageId = function
         | LastMessageId msgIdResult -> msgIdResult
         | _ -> failwith "Incorrect return type"
-        
+
     static member GetTopicSchema = function
         | TopicSchema x -> x
         | _ -> failwith "Incorrect return type"
@@ -512,7 +512,7 @@ type ProducerStats = {
     NumMsgsSent: int64
     /// Number of bytes sent in the last interval
     NumBytesSent: int64
-    /// Number of failed send operations in the last interval    
+    /// Number of failed send operations in the last interval
     NumSendFailed: int64
     /// Number of send acknowledges received by broker in the last interval
     NumAcksReceived: int64
@@ -574,8 +574,8 @@ type ConsumerStats = {
     /// The number of prefetched messages at the end of the last interval
     IncomingMsgs: int
 }
-        
-type EncryptedMessage(encPayload: byte [], encryptionKeys: EncryptionKey [],
+
+type EncryptedMessage(encPayload: byte[], encryptionKeys: EncryptionKey [],
                       encryptionAlgo: string, encryptionParam: byte []) =
     member val EncPayload = encPayload
     member val EncryptionKeys = encryptionKeys

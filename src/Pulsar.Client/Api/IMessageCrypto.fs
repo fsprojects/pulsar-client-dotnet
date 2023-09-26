@@ -9,6 +9,5 @@ type IMessageEncryptor =
     abstract member UpdateEncryptionKeys: unit -> unit
 
 type IMessageDecryptor =
-    
+
     abstract member Decrypt: encryptedPayload: EncryptedMessage -> byte []
-    

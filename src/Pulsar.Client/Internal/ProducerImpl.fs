@@ -158,30 +158,28 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             cryptoTimer.Start()
         | None -> ()
 
-    let encrypt =
+    let encrypt (msgMetadata: MessageMetadata) (payload: MemoryStream) =
         match producerConfig.MessageEncryptor with
         | Some msgCrypto ->
-            fun (msgMetadata: MessageMetadata) (payload: byte []) ->
-                try
-                    let encMsg = msgCrypto.Encrypt(payload)
-                    encMsg.EncryptionKeys |> Array.iter (EncryptionKey.ToProto >> msgMetadata.EncryptionKeys.Add)
-                    msgMetadata.EncryptionAlgo <- encMsg.EncryptionAlgo
-                    msgMetadata.EncryptionParam <- encMsg.EncryptionParam
-                    Ok encMsg.EncPayload
-                with ex ->
-                    match producerConfig.ProducerCryptoFailureAction with
-                    | ProducerCryptoFailureAction.SEND ->
-                        Log.Logger.LogWarning(ex,
-                            "{0} Failed to encrypt message. Proceeding with publishing unencrypted message", prefix)
-                        Ok payload
-                    | ProducerCryptoFailureAction.FAIL ->
-                        Log.Logger.LogError(ex, "{0} Producer cannot encrypt message, failing", prefix)
-                        Error ex
-                    | _ -> failwith "Unknown ProducerCryptoFailureAction"
+            try
+                let encMsg = msgCrypto.Encrypt(payload.GetBuffer())
+                encMsg.EncryptionKeys |> Array.iter (EncryptionKey.ToProto >> msgMetadata.EncryptionKeys.Add)
+                msgMetadata.EncryptionAlgo <- encMsg.EncryptionAlgo
+                msgMetadata.EncryptionParam <- encMsg.EncryptionParam
+                Ok <| new MemoryStream(encMsg.EncPayload)
+            with ex ->
+                match producerConfig.ProducerCryptoFailureAction with
+                | ProducerCryptoFailureAction.SEND ->
+                    Log.Logger.LogWarning(ex,
+                        "{0} Failed to encrypt message. Proceeding with publishing unencrypted message", prefix)
+                    Ok payload
+                | ProducerCryptoFailureAction.FAIL ->
+                    Log.Logger.LogError(ex, "{0} Producer cannot encrypt message, failing", prefix)
+                    Error ex
+                | _ -> failwith "Unknown ProducerCryptoFailureAction"
         | None ->
             Log.Logger.LogDebug("{0} CryptoKeyReader not present, encryption not possible", prefix)
-            fun _ payload ->
-                Ok payload
+            Ok payload
 
     let sendMessage (pendingMessage: PendingMessage<'T>) =
         Log.Logger.LogDebug("{0} sendMessage sequenceId={1}", prefix, %pendingMessage.SequenceId)
@@ -219,7 +217,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         backgroundTask {
             use stream = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
             use reader = new BinaryReader(stream)
-            do! (fst msg.Payload) (stream :> Stream) // materialize stream
+            let send, _ = msg.Payload
+            do! send stream // materialize stream
             let streamSize = stream.Length
             stream.Seek(4L, SeekOrigin.Begin) |> ignore
             let cmdSize = reader.ReadInt32() |> int32FromBigEndian
@@ -234,16 +233,16 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         producerConfig.BatchingEnabled && message.DeliverAt.IsNone
 
     let createMessageMetadata (sequenceId: SequenceId) (txnId: TxnId option) (numMessagesInBatch: int option)
-        (payload: byte[]) (key: MessageKey option) (properties: IReadOnlyDictionary<string, string>) (deliverAt: TimeStamp option)
+        (payloadLength: int) (key: MessageKey option) (properties: IReadOnlyDictionary<string, string>) (deliverAt: TimeStamp option)
         (orderingKey: byte[] option) (eventTime: TimeStamp option) (replicationClusters: IEnumerable<string> option) =
         let metadata =
             MessageMetadata (
                 SequenceId = (sequenceId |> uint64),
                 PublishTime = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() |> uint64),
                 ProducerName = producerConfig.ProducerName,
-                UncompressedSize = (payload.Length |> uint32)
+                UncompressedSize = (payloadLength |> uint32)
             )
-        if payload.Length = 0 then
+        if payloadLength = 0 then
             metadata.NullValue <- true
         if protoCompressionType <> pulsar.proto.CompressionType.None then
             metadata.Compression <- protoCompressionType
@@ -296,12 +295,14 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         %Math.Max(%pendingMessage.SequenceId, %pendingMessage.HighestSequenceId)
 
     let processOpSendMsg { OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId;
-                          PartitionKey = partitionKey; OrderingKey = orderingKey; TxnId = txnId; ReplicationClusters = replicationClusters } =
-        let batchPayload, batchCallbacks = opSendMsg
+                          PartitionKey = partitionKey; OrderingKey = orderingKey; TxnId = txnId; ReplicationClusters = replicationClusters;
+                          Stream = stream } =
+        let payloadLength = int stream.Length
+        let batchCallbacks = opSendMsg
         let batchSize = batchCallbacks.Length
         let metadata = createMessageMetadata lowestSequenceId txnId (Some batchSize)
-                           batchPayload partitionKey EmptyProps None orderingKey None replicationClusters
-        let compressedBatchPayload = compressionCodec.Encode batchPayload
+                           payloadLength partitionKey EmptyProps None orderingKey None replicationClusters
+        let compressedBatchPayload = compressionCodec.Encode stream
         if (compressedBatchPayload.Length > maxMessageSize) then
             batchCallbacks
             |> Seq.iter (fun (_, message, tcs) ->
@@ -311,17 +312,18 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             let encryptResult = encrypt metadata compressedBatchPayload
             match encryptResult with
             | Ok encryptedBatchPayload ->
-                stats.UpdateNumMsgsSent(batchSize, compressedBatchPayload.Length)
-                let payload = Commands.newSend producerId lowestSequenceId (Some highestSequenceId) batchSize metadata encryptedBatchPayload
+                stats.UpdateNumMsgsSent(batchSize, int compressedBatchPayload.Length)
+                let sendTask =
+                    Commands.newSend producerId lowestSequenceId (Some highestSequenceId) batchSize metadata encryptedBatchPayload
                 let pendingMessage = {
                     SequenceId = lowestSequenceId
                     HighestSequenceId = highestSequenceId
-                    Payload = payload
+                    Payload = sendTask
                     Callback = BatchCallbacks batchCallbacks
                     CreatedAt = DateTime.Now
                 }
-                lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
                 sendMessage pendingMessage
+                lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
             | Error ex ->
                 batchCallbacks
                 |> Seq.iter (fun (_, message, tcs) ->
@@ -334,11 +336,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         let batchSize = batchMessageContainer.NumMessagesInBatch
         Log.Logger.LogTrace("{0} Batching the messages from the batch container with {1} messages", prefix, batchSize)
         if batchSize > 0 then
+            use stream = MemoryStreamManager.GetStream()
             if batchMessageContainer.IsMultiBatches then
-                batchMessageContainer.CreateOpSendMsgs()
-                |> Seq.iter processOpSendMsg
+                for msg in batchMessageContainer.CreateOpSendMsgs stream do
+                    processOpSendMsg msg
             else
-                batchMessageContainer.CreateOpSendMsg() |> processOpSendMsg
+                let msg = batchMessageContainer.CreateOpSendMsg stream
+                processOpSendMsg msg
         batchMessageContainer.Clear()
 
     let doBatchSendAndAdd batchItem =
@@ -407,14 +411,15 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 else
                    doBatchSendAndAdd batchItem
             else
-                let compressedPayload = compressionCodec.Encode message.Payload
-                if compressedPayload.Length > maxMessageSize && not producerConfig.ChunkingEnabled then
+                let compressedPayload = compressionCodec.Encode (new MemoryStream(message.Payload))
+                let payloadLength = int compressedPayload.Length
+                if payloadLength > maxMessageSize && not producerConfig.ChunkingEnabled then
                     let ex = InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes"
                     failMessage message channel ex
                 else
                     let totalChunks =
-                        Math.Max(1, compressedPayload.Length) / maxMessageSize
-                            + (if Math.Max(1, compressedPayload.Length) % maxMessageSize = 0 then 0 else 1)
+                        Math.Max(1, payloadLength) / maxMessageSize
+                            + (if Math.Max(1, payloadLength) % maxMessageSize = 0 then 0 else 1)
                     let mutable readStartIndex = 0
                     let mutable chunkError = false
                     let mutable chunkId = 0
@@ -424,22 +429,23 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     let txnId = message.Txn |> Option.map (fun txn -> txn.Id)
                     while chunkId < totalChunks && not chunkError do
                         let metadata = createMessageMetadata sequenceId txnId None
-                                           message.Payload message.Key message.Properties message.DeliverAt
+                                           message.Payload.Length message.Key message.Properties message.DeliverAt
                                            message.OrderingKey message.EventTime message.ReplicationClusters
                         let chunkPayload =
                             if isChunked && producerConfig.Topic.IsPersistent then
                                 metadata.Uuid <- uuid
                                 metadata.ChunkId <- chunkId
                                 metadata.NumChunksFromMsg <- totalChunks
-                                metadata.TotalChunkMsgSize <- compressedPayload.Length
-                                Array.sub compressedPayload readStartIndex (Math.Min(maxMessageSize, compressedPayload.Length - readStartIndex))
+                                metadata.TotalChunkMsgSize <- payloadLength
+                                new MemoryStream(compressedPayload.GetBuffer(), readStartIndex, Math.Min(maxMessageSize, payloadLength - readStartIndex) )
                             else
                                 compressedPayload
                         let encryptResult = encrypt metadata chunkPayload
                         match encryptResult with
                         | Ok encryptedPayload ->
-                            stats.UpdateNumMsgsSent(1, chunkPayload.Length)
-                            let payload = Commands.newSend producerId sequenceId None 1 metadata encryptedPayload
+                            stats.UpdateNumMsgsSent(1, int chunkPayload.Length)
+                            let payload =
+                                Commands.newSend producerId sequenceId None 1 metadata encryptedPayload
                             let chunkDetails =
                                 if isChunked then
                                     Some { TotalChunks = totalChunks; ChunkId = chunkId; MessageIds = messageIds }
@@ -490,8 +496,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     clientCnx.AddProducer(producerId, producerOperations)
                     let requestId = Generators.getNextRequestId()
                     try
-                        let payload = Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName
-                                            producerId requestId schema.SchemaInfo epoch
+                        let payload =
+                            Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName
+                                producerId requestId schema.SchemaInfo epoch
                         let! response = clientCnx.SendAndWaitForReply requestId payload
                         let success = response |> PulsarResponseType.GetProducerSuccess
                         if String.IsNullOrEmpty producerName then

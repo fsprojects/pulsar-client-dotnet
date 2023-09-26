@@ -53,13 +53,13 @@ module CommandsTests =
 
         (bytes, totalSize, commandSize, command, magicNumber, crc32, medataSize, metadata, payload)
 
-    let serializeDeserializeSimpleCommand ((cmd, _): Payload) =
+    let serializeDeserializeSimpleCommand ((cmd, _): SendTask) =
         let stream = new MemoryStream()
         (cmd stream).Wait()
         let commandBytes = stream.ToArray()
         commandBytes |> deserializeSimpleCommand
 
-    let serializeDeserializePayloadCommand ((cmd, _): Payload) =
+    let serializeDeserializePayloadCommand ((cmd, _): SendTask) =
         let stream = new MemoryStream()
         (cmd stream).Wait()
         let commandBytes = stream.ToArray()
@@ -106,9 +106,10 @@ module CommandsTests =
                 let numMessages =  1
                 let metadata = MessageMetadata(ProducerName = "TestMe")
                 let payload = [| 1uy; 17uy; |]
+                let streamPayload = new MemoryStream(payload)
 
                 let (bytes, totalSize, commandSize, command, magicNumber, crc32, medataSize, resultMetadata, resultPayload) =
-                    serializeDeserializePayloadCommand (newSend producerId sequenceId None numMessages metadata payload)
+                    serializeDeserializePayloadCommand (newSend producerId sequenceId None numMessages metadata streamPayload)
 
                 let crcArrayStart = 8 + commandSize + 6
                 let crcArray = bytes.AsSpan(crcArrayStart, 4 + medataSize + resultPayload.Length).ToArray()

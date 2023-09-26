@@ -15,17 +15,17 @@ module internal BatchHelpers =
     [<Literal>]
     let INITIAL_BATCH_BUFFER_SIZE = 1024
 
-    let makeBatch<'T> (batchItems: BatchItem<'T> seq) =
-        use messageStream = MemoryStreamManager.GetStream()
-        use messageWriter = new BinaryWriter(messageStream)
+    let makeBatch<'T> (messageStream: MemoryStream) (batchItems: BatchItem<'T> seq) =
+        let messageWriter = new BinaryWriter(messageStream)
         let batchCallbacks =
             batchItems
             |> Seq.mapi (fun index batchItem ->
                 let message = batchItem.Message
-                let smm = SingleMessageMetadata(
-                           PayloadSize = message.Payload.Length,
-                           SequenceId = (batchItem.SequenceId |> uint64)
-                       )
+                let smm =
+                    SingleMessageMetadata(
+                       PayloadSize = message.Payload.Length,
+                       SequenceId = (batchItem.SequenceId |> uint64)
+                   )
                 match message.Key with
                 | Some key ->
                     smm.PartitionKey <- %key.PartitionKey
@@ -49,11 +49,11 @@ module internal BatchHelpers =
                 messageWriter.Write(message.Payload)
                 (BatchDetails(%index, BatchMessageAcker.NullAcker), message, batchItem.Tcs))
             |> Seq.toArray
-        let batchPayload = messageStream.ToArray()
-        (batchPayload, batchCallbacks)
+        batchCallbacks
 
-type internal OpSendMsg<'T> = byte[] * BatchCallback<'T>[]
+type internal OpSendMsg<'T> = BatchCallback<'T>[]
 type internal OpSendMsgWrapper<'T> = {
+    Stream: MemoryStream
     OpSendMsg: OpSendMsg<'T>
     LowestSequenceId: SequenceId
     HighestSequenceId: SequenceId
@@ -95,8 +95,8 @@ type internal MessageContainer<'T>(config: ProducerConfiguration) =
             txn.Id = currentTxnId
         | _ ->
             true
-    abstract member CreateOpSendMsg: unit -> OpSendMsgWrapper<'T>
-    abstract member CreateOpSendMsgs: unit -> seq<OpSendMsgWrapper<'T>>
+    abstract member CreateOpSendMsg: MemoryStream -> OpSendMsgWrapper<'T>
+    abstract member CreateOpSendMsgs: MemoryStream -> seq<OpSendMsgWrapper<'T>>
     abstract member Clear: unit -> unit
     abstract member IsMultiBatches: bool
     abstract member Discard: exn -> unit
@@ -117,19 +117,20 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
         this.AddStart(prefix, batchItem)
         batchItems.Add(batchItem)
         this.IsBatchFull()
-    override this.CreateOpSendMsg () =
+    override this.CreateOpSendMsg (stream: MemoryStream) =
         let lowestSequenceId = batchItems.[0].SequenceId
         let highestSequenceId = batchItems.[batchItems.Count - 1].SequenceId
         {
-            OpSendMsg = makeBatch batchItems
+            OpSendMsg = makeBatch stream batchItems
             LowestSequenceId = lowestSequenceId
             HighestSequenceId = highestSequenceId
             PartitionKey = batchItems.[0].Message.Key
             OrderingKey = batchItems.[0].Message.OrderingKey
             TxnId = this.CurrentTxnId
             ReplicationClusters = batchItems.[0].Message.ReplicationClusters
+            Stream = stream
         }
-    override this.CreateOpSendMsgs () =
+    override this.CreateOpSendMsgs _ =
         raise <| NotSupportedException()
     override this.Clear() =
         batchItems.Clear()
@@ -175,21 +176,22 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
             arr.Add(batchItem)
             keyBatchItems.Add(key, arr)
         this.IsBatchFull()
-    override this.CreateOpSendMsg () =
+    override this.CreateOpSendMsg _ =
         raise <| NotSupportedException()
-    override this.CreateOpSendMsgs () =
+    override this.CreateOpSendMsgs (stream: MemoryStream) =
         keyBatchItems
         |> Seq.map (fun (KeyValue(_, batchItems)) ->
             let lowestSequenceId = batchItems.[0].SequenceId
             let highestSequenceId = batchItems.[batchItems.Count - 1].SequenceId
             {
-                OpSendMsg = makeBatch batchItems
+                OpSendMsg = makeBatch stream batchItems
                 LowestSequenceId = lowestSequenceId
                 HighestSequenceId = highestSequenceId
                 PartitionKey = batchItems.[0].Message.Key
                 OrderingKey = batchItems.[0].Message.OrderingKey
                 TxnId = this.CurrentTxnId
                 ReplicationClusters = batchItems.[0].Message.ReplicationClusters
+                Stream = stream
             })
     override this.Clear() =
         keyBatchItems.Clear()

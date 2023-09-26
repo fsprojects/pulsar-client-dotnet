@@ -103,9 +103,9 @@ and internal CommandParseError =
     | UnknownCommandType of BaseCommand.Type
 
 and internal SocketMessage =
-    | SocketMessageWithReply of Payload * TaskCompletionSource<bool>
-    | SocketMessageWithoutReply of Payload
-    | SocketRequestMessageWithReply of RequestId * Payload * TaskCompletionSource<PulsarResponseType>
+    | SocketMessageWithReply of SendTask * TaskCompletionSource<bool>
+    | SocketMessageWithoutReply of SendTask
+    | SocketRequestMessageWithReply of RequestId * SendTask * TaskCompletionSource<PulsarResponseType>
     | Stop
 
 and internal ClientCnx (config: PulsarClientConfiguration,
@@ -297,7 +297,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogInformation("{0} operationsMb mailbox has stopped normally", prefix))
     |> ignore
 
-    let sendSerializedPayload (writePayload, commandType: BaseCommand.Type) =
+    let sendSerializedPayload (writePayload: WriterStream -> Task, commandType: BaseCommand.Type) =
         Log.Logger.LogDebug("{0} Sending message of type {1}", prefix, commandType)
         backgroundTask {
             try
@@ -854,7 +854,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         else
             falseTask
 
-    member this.SendAndForget (payload: Payload) =
+    member this.SendAndForget payload =
         if this.IsActive then
             post sendMb (SocketMessageWithoutReply payload)
 

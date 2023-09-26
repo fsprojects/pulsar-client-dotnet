@@ -3,7 +3,9 @@ module internal Pulsar.Client.Common.Tools
 
 open System
 open System.Collections
+open System.IO
 open System.Net
+open System.Runtime.InteropServices
 open System.Threading.Tasks
 open Microsoft.IO
 open System.Runtime.ExceptionServices
@@ -165,3 +167,6 @@ let postAndAsyncReply (channel: Channel<'T>) f =
 
 let post (channel: Channel<'T>) =
     channel.Writer.TryWrite >> ignore
+
+let getSpan (stream: MemoryStream) =
+    stream.GetBuffer().AsSpan(0, int stream.Length)
