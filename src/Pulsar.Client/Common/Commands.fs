@@ -83,13 +83,13 @@ let private serializePayloadCommand (command : BaseCommand) (metadata: MessageMe
         let crcStart = stream1Size + 2
         let crcPayloadStart = crcStart + 4
 
-        //write CRC
+        // write CRC
         temp.Seek(int64 crcPayloadStart, SeekOrigin.Begin) |> ignore
         let crc = int32 <| CRC32C.GetForRMS(temp, totalMetadataSize + payloadSize)
         temp.Seek(int64 crcStart, SeekOrigin.Begin) |> ignore
         binaryWriter.Write(int32ToBigEndian crc)
 
-        //write total size and command size
+        // write total size
         temp.Seek(0L, SeekOrigin.Begin) |> ignore
         binaryWriter.Write(int32ToBigEndian totalSize)
 
