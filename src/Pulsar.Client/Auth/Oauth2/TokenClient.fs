@@ -2,12 +2,14 @@
 
 open System
 open System.Collections.Generic
+open System.Diagnostics
 open System.Net
 open System.Net.Http
 open System.Net.Http.Headers
 open System.Text.Json.Serialization
 open System.Text.Json
-
+open Pulsar.Client.Common
+open FSharp.UMX
 
 type TokenError =
     {
@@ -37,7 +39,7 @@ type TokenResult =
     }
 
 type internal TokenExchangeResult =
-    | Result of TokenResult * DateTime
+    | Result of TokenResult * TimeStamp
     | OAuthError of TokenError
     | HttpError of string
 
@@ -67,7 +69,7 @@ type internal TokenClient (tokenUrl: Uri, client: HttpClient) =
             match response.StatusCode with
             | HttpStatusCode.OK ->
                 let! result = JsonSerializer.DeserializeAsync<TokenResult>(resultContent)
-                return TokenExchangeResult.Result (result, DateTime.Now)
+                return TokenExchangeResult.Result (result, %Stopwatch.GetTimestamp())
             | HttpStatusCode.BadRequest
             | HttpStatusCode.Unauthorized ->
                 let! resultContent = response.Content.ReadAsStreamAsync()

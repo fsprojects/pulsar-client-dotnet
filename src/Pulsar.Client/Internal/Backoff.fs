@@ -1,6 +1,7 @@
 ﻿namespace Pulsar.Client.Internal
 
 open System
+open System.Diagnostics
 open Pulsar.Client.Common
 
 type internal BackoffConfig =
@@ -23,7 +24,7 @@ type internal Backoff (config: BackoffConfig) =
     let mandatoryStop = config.MandatoryStop.TotalMilliseconds
     let mutable next = initial
     let mutable mandatoryStopMade = false
-    let mutable firstBackoffTime = DateTime.MinValue
+    let mutable firstBackoffTime = 0L
 
     member this.Next() =
         let mutable current = next;
@@ -32,12 +33,12 @@ type internal Backoff (config: BackoffConfig) =
 
         // Check for mandatory stop
         if not mandatoryStopMade then
-            let now = DateTime.Now
+            let now = Stopwatch.GetTimestamp()
             let mutable timeElapsedSinceFirstBackoff = 0.0;
             if initial = current then
                 firstBackoffTime <- now
             else
-                timeElapsedSinceFirstBackoff <- (now - firstBackoffTime).TotalMilliseconds
+                timeElapsedSinceFirstBackoff <- Stopwatch.GetElapsedTime(firstBackoffTime, now).TotalMilliseconds
 
             if (timeElapsedSinceFirstBackoff + current > mandatoryStop) then
                 current <- Math.Max(initial, mandatoryStop - timeElapsedSinceFirstBackoff)

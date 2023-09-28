@@ -1,13 +1,15 @@
 ﻿namespace Pulsar.Client.Auth.OAuth2
 
 open System
+open System.Diagnostics
 open System.IO
 open System.Text.Json
 open System.Net.Http
 open System.Text.Json.Serialization
 open Microsoft.Extensions.DependencyInjection
 open Pulsar.Client.Api
-open Microsoft.Extensions.Http
+open Pulsar.Client.Common
+open FSharp.UMX
 
 open Pulsar.Client.Auth
 type Metadata =
@@ -51,7 +53,7 @@ type Credentials =
 type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey: Uri, scope: string) =
     inherit Authentication()
 
-    let mutable token : Option<TokenResult * DateTime> = None
+    let mutable token : Option<TokenResult * TimeStamp> = None
     let httpClientFactory =
         ServiceCollection()
             .AddHttpClient()
@@ -88,8 +90,7 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
         token
         |> Option.bind (fun (tokenResult, issuedTime) ->
             let tokenDuration = TimeSpan.FromSeconds(float tokenResult.ExpiresIn)
-            let tokenExpiration = issuedTime.Add tokenDuration
-            if DateTime.Now < tokenExpiration then
+            if Stopwatch.GetElapsedTime(%issuedTime) < tokenDuration then
                 Some tokenResult
             else
                 None

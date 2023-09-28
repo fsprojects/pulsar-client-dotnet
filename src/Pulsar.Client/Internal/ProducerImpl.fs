@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
+open System.Diagnostics
 open System.Threading
 
 open System.Threading.Tasks
@@ -69,7 +70,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         | CompressionType.Snappy -> pulsar.proto.CompressionType.Snappy
         | _ -> pulsar.proto.CompressionType.None
 
-    let createProducerTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
+    let createProducerStartTime = Stopwatch.GetTimestamp()
     let sendTimeoutMs = producerConfig.SendTimeout.TotalMilliseconds
     let stats =
         if clientConfig.StatsInterval = TimeSpan.Zero then
@@ -320,7 +321,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     HighestSequenceId = highestSequenceId
                     Payload = sendTask
                     Callback = BatchCallbacks batchCallbacks
-                    CreatedAt = DateTime.Now
+                    CreatedAt = %Stopwatch.GetTimestamp()
                 }
                 sendMessage pendingMessage
                 lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
@@ -456,7 +457,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 HighestSequenceId = %(-1L)
                                 Payload = payload
                                 Callback = SingleCallback (chunkDetails, message, channel)
-                                CreatedAt = DateTime.Now
+                                CreatedAt = %Stopwatch.GetTimestamp()
                             }
                             lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
                             sendMessage pendingMessage
@@ -546,7 +547,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             producerCreatedTsc.TrySetException(ex) |> ignore
                             stopProducer()
                         | _ when producerCreatedTsc.Task.IsCompleted
-                                    || (PulsarClientException.isRetriableError ex && DateTime.Now < createProducerTimeout) ->
+                                    || (Stopwatch.GetElapsedTime(createProducerStartTime) > clientConfig.OperationTimeout) ->
                             // Either we had already created the producer once (producerCreatedFuture.isDone()) or we are
                             // still within the initial timeout budget and we are dealing with a retryable error
                             connectionHandler.ReconnectLater ex
@@ -569,7 +570,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             | ProducerMessage.ConnectionFailed ex ->
 
                 Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
-                if (DateTime.Now > createProducerTimeout && producerCreatedTsc.TrySetException(ex)) then
+                if Stopwatch.GetElapsedTime(createProducerStartTime) > clientConfig.OperationTimeout then
                     Log.Logger.LogInformation("{0} creation failed", prefix)
                     connectionHandler.Failed()
                     stopProducer()
@@ -620,7 +621,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                         | None ->
                                             currentMessageId
                                     interceptors.OnSendAcknowledgement(this, msg, msgId, null)
-                                    stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
+                                    stats.IncrementNumAcksReceived(Stopwatch.GetElapsedTime(%pendingMessage.CreatedAt))
                                     tcs |> Option.iter (fun tcs -> tcs.SetResult(msgId))
                                 else
                                     // updating messageIds array
@@ -636,7 +637,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                     let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
                                                     Type = Batch msgId; TopicName = %""; ChunkMessageIds = None }
                                     interceptors.OnSendAcknowledgement(this, msg, msgId, null)
-                                    stats.IncrementNumAcksReceived(DateTime.Now - pendingMessage.CreatedAt)
+                                    stats.IncrementNumAcksReceived(Stopwatch.GetElapsedTime(%pendingMessage.CreatedAt))
                                     tcs |> Option.iter (fun tcs -> tcs.SetResult(msgId)))
                         else
                             Log.Logger.LogWarning("{0} Got ack for batch msg error. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
@@ -714,7 +715,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     | _ ->
                         if pendingMessages.Count > 0 then
                             let firstMessage = pendingMessages.Peek()
-                            if firstMessage.CreatedAt.AddMilliseconds(sendTimeoutMs) <= DateTime.Now then
+                            if Stopwatch.GetElapsedTime(%firstMessage.CreatedAt) > TimeSpan.FromMilliseconds(sendTimeoutMs) then
                                 // The diff is less than or equal to zero, meaning that the message has been timed out.
                                 // Set the callback to timeout on every message, then clear the pending queue.
                                 Log.Logger.LogInformation("{0} Message send timed out. Failing {1} messages", prefix, pendingMessages.Count)

@@ -2,18 +2,20 @@ namespace Pulsar.Client.Internal
 
 open System
 open System.Collections.Generic
+open System.Diagnostics
 open System.Threading.Tasks
 open System.Timers
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Microsoft.Extensions.Logging
+open FSharp.UMX
 
 open Pulsar.Client.Transaction
 open pulsar.proto
 open System.Threading.Channels
 
 type internal TransRequestTime = {
-    CreationTime: DateTime
+    CreationTime: TimeStamp
     RequestId: RequestId
 }
 
@@ -78,7 +80,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
             let tcs = TaskCompletionSource<TxnRequest>(TaskCreationOptions.RunContinuationsAsynchronously)
             clientCnx.SendAndForget command
             pendingRequests.Add(requestId, tcs)
-            timeoutQueue.Enqueue({ CreationTime = DateTime.Now; RequestId = requestId })
+            timeoutQueue.Enqueue({ CreationTime = %Stopwatch.GetTimestamp(); RequestId = requestId })
             tcs.Task
         elif blockIfReachMaxPendingOps then
             let tcs = TaskCompletionSource<TxnRequest>(TaskCreationOptions.RunContinuationsAsynchronously)
@@ -99,7 +101,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
 
     let rec checkTimeoutedMessages () =
         if timeoutQueue.Count > 0
-            && timeoutQueue.Peek().CreationTime + clientConfig.OperationTimeout < DateTime.Now then
+            && Stopwatch.GetElapsedTime(%timeoutQueue.Peek().CreationTime) > clientConfig.OperationTimeout then
                 let lastPolled = timeoutQueue.Dequeue()
                 match pendingRequests.TryGetValue lastPolled.RequestId with
                 | true, op ->

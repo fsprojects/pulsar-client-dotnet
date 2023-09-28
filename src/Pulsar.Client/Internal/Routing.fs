@@ -22,9 +22,8 @@ type internal RoundRobinPartitionMessageRouterImpl (startPartitionIndex: int, is
     interface IMessageRouter with
         member this.ChoosePartition (partitionKey, numPartitions) =
             if String.IsNullOrEmpty(%partitionKey) then
-                if isBatchingEnabled
-                then
-                    let currentMs = DateTime.Now.Millisecond
+                if isBatchingEnabled then
+                    let currentMs = DateTime.UtcNow.Millisecond
                     signSafeMod (currentMs / partitionSwitchMs + startPartitionIndex) numPartitions
                 else
                     signSafeMod (Interlocked.Increment(&partitionIndex)) numPartitions

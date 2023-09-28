@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Internal
 
+open System.Diagnostics
 open System.Reflection
 open Pulsar.Client.Common
 open System.Collections.Generic
@@ -20,7 +21,7 @@ open System.Threading.Channels
 
 type internal RequestTime =
     {
-        RequestStartTime: DateTime
+        RequestStartTime: TimeStamp
         RequestId: RequestId
         ResponseTcs: TaskCompletionSource<PulsarResponseType>
         CommandType: BaseCommand.Type
@@ -164,7 +165,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     let rec handleTimeoutedMessages() =
         if requestTimeoutQueue.Count > 0 then
             let request = requestTimeoutQueue.Peek()
-            let currentDiff = DateTime.Now - request.RequestStartTime
+            let currentDiff = Stopwatch.GetElapsedTime(%request.RequestStartTime)
             if currentDiff >= config.OperationTimeout then
                 let request = requestTimeoutQueue.Dequeue()
                 let ex = TimeoutException <| String.Format("{0} request {1} type {2} timed out after {3}ms",
@@ -202,7 +203,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | AddRequest (reqId, commandType, tsc) ->
                 Log.Logger.LogDebug("{0} add request {1} type {2}", prefix, reqId, commandType)
                 requests.Add(reqId, tsc)
-                requestTimeoutQueue.Enqueue({ RequestStartTime = DateTime.Now; RequestId = reqId; ResponseTcs = tsc; CommandType = commandType })
+                requestTimeoutQueue.Enqueue({ RequestStartTime = %Stopwatch.GetTimestamp(); RequestId = reqId; ResponseTcs = tsc; CommandType = commandType })
             | CompleteRequest (reqId, commandType, result) ->
                 match requests.TryGetValue(reqId) with
                 | true, tsc ->

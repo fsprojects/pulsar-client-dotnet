@@ -430,7 +430,7 @@ type internal PendingCallback<'T> =
 
 type internal PendingMessage<'T> =
     {
-        CreatedAt: DateTime
+        CreatedAt: TimeStamp
         SequenceId: SequenceId
         HighestSequenceId: SequenceId
         Payload: SendTask

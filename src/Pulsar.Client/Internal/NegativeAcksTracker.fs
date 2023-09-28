@@ -1,12 +1,14 @@
 ﻿namespace Pulsar.Client.Internal
 
 open System
+open System.Diagnostics
 open Pulsar.Client.Common
 open System.Collections.Generic
 open System.Timers
 open Microsoft.Extensions.Logging
 open System.Threading.Channels
 open System.Threading.Tasks
+open FSharp.UMX
 
 
 type internal NegativeAcksTrackerMessage =
@@ -23,7 +25,7 @@ type internal NegativeAcksTracker(prefix: string,
     let nackDelay = if negativeAckRedeliveryDelay > MIN_NACK_DELAY then negativeAckRedeliveryDelay else MIN_NACK_DELAY
     let timerIntervalms = nackDelay.TotalMilliseconds / 3.0
     let prefix = prefix + " NegativeTracker"
-    let state = SortedDictionary<MessageId, DateTime>()
+    let state = SortedDictionary<MessageId, TimeStamp>()
 
 
     let mb = Channel.CreateUnbounded<NegativeAcksTrackerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
@@ -35,7 +37,7 @@ type internal NegativeAcksTracker(prefix: string,
 
                 Log.Logger.LogDebug("{0} Adding message {1}", prefix, msgId)
                 if state.ContainsKey(msgId) |> not then
-                    state.Add(msgId, DateTime.Now.Add(nackDelay))
+                    state.Add(msgId, %Stopwatch.GetTimestamp())
                     channel.SetResult(true)
                 else
                     Log.Logger.LogWarning("{0} Duplicate message add {1}", prefix, msgId)
@@ -45,8 +47,8 @@ type internal NegativeAcksTracker(prefix: string,
 
                 if state.Count > 0 then
                     let messagesToRedeliver = HashSet<MessageId>()
-                    for KeyValue(messageId, expirationDate) in state do
-                        if expirationDate < DateTime.Now then
+                    for KeyValue(messageId, postedDate) in state do
+                        if Stopwatch.GetElapsedTime(%postedDate) > nackDelay then
                             match messageId.ChunkMessageIds with
                             | Some msgIds ->
                                 msgIds |> Array.iter (messagesToRedeliver.Add >> ignore)

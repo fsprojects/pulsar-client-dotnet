@@ -2,6 +2,7 @@
 
 open System.Collections
 
+open System.Diagnostics
 open System.Threading.Tasks
 open FSharp.UMX
 open System.Collections.Generic
@@ -82,7 +83,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let subscribeTsc = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
     let ackRequests = Dictionary<RequestId, MessageId * TxnId * TaskCompletionSource<unit>>()
     let prefix = $"consumer({consumerId}, {consumerName}, {partitionIndex})"
-    let subscribeTimeout = DateTime.Now.Add(clientConfig.OperationTimeout)
+    let createConsumerStartTime = Stopwatch.GetTimestamp()
     let mutable hasReachedEndOfTopic = false
     let mutable avalablePermits = 0
     let mutable startMessageId =
@@ -870,7 +871,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         clientCnx.RemoveConsumer consumerId
                         Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
                         match ex with
-                        | _ when PulsarClientException.isRetriableError ex && DateTime.Now < subscribeTimeout ->
+                        | _ when PulsarClientException.isRetriableError ex
+                                && (Stopwatch.GetElapsedTime(createConsumerStartTime) > clientConfig.OperationTimeout) ->
                             connectionHandler.ReconnectLater ex
                         | _ when not subscribeTsc.Task.IsCompleted ->
                             // unable to create new consumer, fail operation
@@ -1229,7 +1231,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                 Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
                 let nonRetriableError = ex |> PulsarClientException.isRetriableError |> not
-                let timeout = DateTime.Now > subscribeTimeout
+                let timeout = Stopwatch.GetElapsedTime(createConsumerStartTime) > clientConfig.OperationTimeout
                 if ((nonRetriableError || timeout) && subscribeTsc.TrySetException(ex)) then
                     Log.Logger.LogInformation("{0} creation failed {1}", prefix,
                                                 if nonRetriableError then "with unretriableError" else "after timeout")
