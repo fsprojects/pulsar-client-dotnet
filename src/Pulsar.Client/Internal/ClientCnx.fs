@@ -252,7 +252,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 consumers.Add(consumerId, consumerOperation)
             | AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations) ->
                 Log.Logger.LogDebug("{0} adding transaction metastore {1}", prefix, transactionMetaStoreId)
-                transactionMetaStores.[transactionMetaStoreId] <- transactionMetaStoreOperations
+                transactionMetaStores[transactionMetaStoreId] <- transactionMetaStoreOperations
             | RemoveConsumer consumerId ->
                 Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
                 consumers.Remove(consumerId) |> ignore
@@ -299,7 +299,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     |> ignore
 
     let sendSerializedPayload (writePayload: WriterStream -> Task, commandType: BaseCommand.Type) =
-        Log.Logger.LogDebug("{0} Sending message of type {1}", prefix, commandType)
+        if Log.Logger.IsEnabled LogLevel.Debug then
+            Log.Logger.LogDebug("{0} Sending message of type {1}", prefix, commandType)
         backgroundTask {
             try
                 do! connection.Output |> writePayload

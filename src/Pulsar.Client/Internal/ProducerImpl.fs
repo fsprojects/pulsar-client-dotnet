@@ -347,7 +347,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         batchMessageContainer.Clear()
 
     let doBatchSendAndAdd batchItem =
-        Log.Logger.LogDebug("{0} Closing out batch to accommodate large message with size {1}", prefix, batchItem.Message.Payload.Length)
+        if Log.Logger.IsEnabled LogLevel.Debug then
+            Log.Logger.LogDebug("{0} Closing out batch to accommodate large message with size {1}", prefix, batchItem.Message.Payload.Length)
         batchMessageAndSend()
         batchMessageContainer.Add(batchItem) |> ignore
 
@@ -567,7 +568,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 connectionHandler.ConnectionClosed clientCnx
                 clientCnx.RemoveProducer(producerId)
 
-            | ProducerMessage.ConnectionFailed ex ->
+            | ProducerMessage.ConnectionFailed _ ->
 
                 Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
                 if Stopwatch.GetElapsedTime(createProducerStartTime) > clientConfig.OperationTimeout then
