@@ -167,6 +167,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 encMsg.EncryptionKeys |> Array.iter (EncryptionKey.ToProto >> msgMetadata.EncryptionKeys.Add)
                 msgMetadata.EncryptionAlgo <- encMsg.EncryptionAlgo
                 msgMetadata.EncryptionParam <- encMsg.EncryptionParam
+                payload.Dispose()
                 Ok <| new MemoryStream(encMsg.EncPayload)
             with ex ->
                 match producerConfig.ProducerCryptoFailureAction with
@@ -176,6 +177,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     Ok payload
                 | ProducerCryptoFailureAction.FAIL ->
                     Log.Logger.LogError(ex, "{0} Producer cannot encrypt message, failing", prefix)
+                    payload.Dispose()
                     Error ex
                 | _ -> failwith "Unknown ProducerCryptoFailureAction"
         | None ->
@@ -337,7 +339,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         let batchSize = batchMessageContainer.NumMessagesInBatch
         Log.Logger.LogTrace("{0} Batching the messages from the batch container with {1} messages", prefix, batchSize)
         if batchSize > 0 then
-            use stream = MemoryStreamManager.GetStream()
+            let stream = MemoryStreamManager.GetStream()
             if batchMessageContainer.IsMultiBatches then
                 for msg in batchMessageContainer.CreateOpSendMsgs stream do
                     processOpSendMsg msg
