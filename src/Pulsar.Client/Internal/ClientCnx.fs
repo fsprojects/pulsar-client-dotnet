@@ -397,6 +397,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             Ok (XCommandAddSubscriptionToTxnResponse command.addSubscriptionToTxnResponse)
         | BaseCommand.Type.EndTxnResponse ->
             Ok (XCommandEndTxnResponse command.endTxnResponse)
+        | BaseCommand.Type.AuthChallenge ->
+            Ok (XCommandAuthChallenge command.authChallenge)
         | BaseCommand.Type.Error ->
             Ok (XCommandError command.Error)
         | unknownType ->
