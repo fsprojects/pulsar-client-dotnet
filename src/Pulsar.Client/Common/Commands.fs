@@ -23,7 +23,7 @@ let DEFAULT_MAX_MESSAGE_SIZE = 5_242_880 //5 * 1024 * 1024
 
 
 let private serializeSimpleCommand (command : BaseCommand) =
-    (fun output ->
+    (fun (output: Stream) ->
         use temp = MemoryStreamManager.GetStream()
         use binaryWriter = new BinaryWriter(temp)
 
@@ -46,7 +46,7 @@ let private serializeSimpleCommand (command : BaseCommand) =
 
 
 let private serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: MemoryStream) =
-    (fun output ->
+    (fun (output: Stream) ->
         let temp = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
         let binaryWriter = new BinaryWriter(temp)
 
