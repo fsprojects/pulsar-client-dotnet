@@ -24,16 +24,14 @@ namespace Pulsar.Client.Common
         {
             var currentBlockLength = span.Length;
             var i = 0;
-            var bigStepsCount = currentBlockLength / 8;
-            while (i < bigStepsCount)
+            var bigStepsEnds = currentBlockLength - 8;
+            while (i < bigStepsEnds)
             {
-                var start = i * 8;
-                var batch = BitConverter.ToUInt64(span.Slice(start, 8));
+                var batch = BitConverter.ToUInt64(span.Slice(i, 8));
                 crc = BitOperations.Crc32C(crc, batch);
-                i++;
+                i+=8;
             }
-
-            i = bigStepsCount * 8;
+            size -= i;
             while (size > 0 && i < currentBlockLength)
             {
                 crc = BitOperations.Crc32C(crc, span[i]);
