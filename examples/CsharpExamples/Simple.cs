@@ -36,12 +36,13 @@ namespace CsharpExamples
             // warmup
             for (var i = 0; i < n / 10; i++)
             {
-                await consumer.ReceiveAsync();
+                var message = await consumer.ReceiveAsync();
+                await consumer.AcknowledgeAsync(message.MessageId);
             }
 
             var sw = new Stopwatch();
             sw.Start();
-            for (var i = 0; i < n / 10; i++)
+            for (var i = 0; i < n; i++)
             {
                 var message = await consumer.ReceiveAsync();
                 await consumer.AcknowledgeAsync(message.MessageId);
