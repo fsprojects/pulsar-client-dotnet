@@ -45,7 +45,7 @@ namespace Pulsar.Client.Common
             var crc = ~0U; //0xFFFFFFFF
             var buf = stream.GetBuffer();
             var offset = (int) stream.Position;
-            var span = buf.AsSpan(offset);
+            var span = buf.AsSpan(offset, size);
             CrcAlgorithm(ref size, span, ref crc);
             return crc ^ ~0U; //0xFFFFFFFF
         }

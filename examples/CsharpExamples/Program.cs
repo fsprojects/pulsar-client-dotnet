@@ -12,7 +12,7 @@ namespace CsharpExamples
             var loggerFactory =
                LoggerFactory.Create(builder =>
                    builder
-                       .SetMinimumLevel(LogLevel.Debug)
+                       .SetMinimumLevel(LogLevel.Warning)
                        .AddConsole()
                );
             PulsarClient.Logger = loggerFactory.CreateLogger("PulsarLogger");
