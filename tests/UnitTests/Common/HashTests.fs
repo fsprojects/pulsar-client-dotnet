@@ -48,11 +48,28 @@ let crc32cTests =
             Expect.equal "" 2789859932u hash
         }
 
-        test "CRC32Hash test4" {
+        test "CRC32Hash MS" {
             let input = "Съешь ещё этих мягких французских булок, да выпей чаю" |> System.Text.Encoding.UTF8.GetBytes
             let stream = new MemoryStream(input, 0, input.Length, false, true)
             let hash = CRC32C.GetForMS(stream, input.Length)
             Expect.equal "" 2789859932u hash
         }
+
+        test "CRC32Hash long RMS" {
+            let input: byte[] = Array.create 750000 1uy
+            let recycl = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
+            recycl.Write(input)
+            recycl.Seek(0L, SeekOrigin.Begin) |> ignore
+            let hash = CRC32C.GetForRMS(recycl, input.Length)
+            Expect.equal "" 174843280u hash
+        }
+
+        test "CRC32Hash long MS" {
+            let input: byte[] = Array.create 750000 1uy
+            let stream = new MemoryStream(input, 0, input.Length, false, true)
+            let hash = CRC32C.GetForMS(stream, input.Length)
+            Expect.equal "" 174843280u hash
+        }
+
     ]
 

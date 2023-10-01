@@ -15,12 +15,12 @@ namespace Pulsar.Client.Common
             foreach (var memory in memorySequence)
             {
                 var span = memory.Span;
-                crc = CrcAlgorithm(size, span, crc);
+                CrcAlgorithm(ref size, span, ref crc);
             }
             return crc ^ ~0U; //0xFFFFFFFF
         }
 
-        private static uint CrcAlgorithm(int size, ReadOnlySpan<byte> span, uint crc)
+        private static void CrcAlgorithm(ref int size, ReadOnlySpan<byte> span, ref uint crc)
         {
             var currentBlockLength = span.Length;
             var i = 0;
@@ -38,7 +38,6 @@ namespace Pulsar.Client.Common
                 size--;
                 i++;
             }
-            return crc;
         }
 
         internal static uint GetForMS(MemoryStream stream, int size)
@@ -47,7 +46,7 @@ namespace Pulsar.Client.Common
             var buf = stream.GetBuffer();
             var offset = (int) stream.Position;
             var span = buf.AsSpan(offset);
-            crc = CrcAlgorithm(size, span, crc);
+            CrcAlgorithm(ref size, span, ref crc);
             return crc ^ ~0U; //0xFFFFFFFF
         }
     }
