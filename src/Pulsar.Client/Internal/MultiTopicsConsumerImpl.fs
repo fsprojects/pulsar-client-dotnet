@@ -418,7 +418,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 if messages.CanAdd msgPeeked then
                     match dequeueMessage() with
                     | Ok msg ->
-                        unAckedMessageTracker.Add msg.MessageId |> ignore
+                        unAckedMessageTracker.Add msg.MessageId
                         messages.Add msg
                     | _ -> failwith "Impossible branch in replyWithBatch"
                 else
@@ -522,7 +522,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let replyWithMessage (channel: TaskCompletionSource<Message<'T>>) (message: ResultOrException<Message<'T>>) =
         match message with
         | Ok msg ->
-            unAckedMessageTracker.Add msg.MessageId |> ignore
+            unAckedMessageTracker.Add msg.MessageId
             channel.SetResult msg
         | Error ex ->
             channel.SetException ex
@@ -689,7 +689,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             do! consumer.AcknowledgeAsync(msgId, txn)
                         | None ->
                             do! consumer.AcknowledgeAsync(msgId)
-                        unAckedMessageTracker.Remove msgId |> ignore
+                        unAckedMessageTracker.Remove msgId
                         channel.SetResult()
                     with Flatten ex ->
                         channel.SetException(ex)
@@ -702,7 +702,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 backgroundTask {
                     try
                         do! consumer.NegativeAcknowledge msgId
-                        unAckedMessageTracker.Remove msgId |> ignore
+                        unAckedMessageTracker.Remove msgId
                         channel.SetResult()
                     with Flatten ex ->
                         channel.SetException ex
@@ -898,7 +898,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 backgroundTask {
                     try
                         do! consumer.ReconsumeLaterAsync(msg, deliverAt)
-                        unAckedMessageTracker.Remove msg.MessageId |> ignore
+                        unAckedMessageTracker.Remove msg.MessageId
                         channel.SetResult()
                     with Flatten ex ->
                         channel.SetException ex

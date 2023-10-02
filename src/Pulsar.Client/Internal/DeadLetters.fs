@@ -59,13 +59,8 @@ type internal DeadLetterProcessor<'T>
                     return
                         backgroundTask {
                             let! _ = producer.SendAsync(msg)
-                            try
-                                do! acknowledge messageId
-                                return true
-                            with Flatten ex ->
-                                Log.Logger.LogWarning(ex, "Failed to acknowledge the message topic: {0}, messageId: {1} but send to the DLQ successfully",
-                                                      dlTopicName, messageId)
-                                return true
+                            acknowledge messageId
+                            return true
                         }
                 }
             | false, _ ->
@@ -95,7 +90,7 @@ type internal DeadLetterProcessor<'T>
                     let key = getOptionalKey message
                     let msg = MessageBuilder(message.GetValue(), message.Data, key, propertiesMap, deliverAt)
                     let! _ = rlProducer.SendAsync(msg)
-                    do! acknowledge message.MessageId
+                    acknowledge message.MessageId
             }
 
         member this.MaxRedeliveryCount = policy.MaxRedeliveryCount

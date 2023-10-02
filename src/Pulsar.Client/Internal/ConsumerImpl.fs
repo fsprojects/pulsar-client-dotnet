@@ -37,7 +37,7 @@ type internal ConsumerMessage<'T> =
     | Receive of ReceiveCallback<'T>
     | BatchReceive of ReceiveCallbacks<'T>
     | SendBatchByTimeout
-    | Acknowledge of MessageId * AckType * Transaction option * TaskCompletionSource<Unit> option
+    | Acknowledge of MessageId * AckType * (Transaction * TaskCompletionSource<Unit>) option
     | NegativeAcknowledge of MessageId
     | RedeliverUnacknowledged of RedeliverSet
     | RedeliverAllUnacknowledged of TaskCompletionSource<unit> option
@@ -270,11 +270,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let trackMessage msgId =
         if not hasParentConsumer then
-            unAckedMessageTracker.Add msgId |> ignore
+            unAckedMessageTracker.Add msgId
 
     let untrackMessage msgId =
         if not hasParentConsumer then
-            unAckedMessageTracker.Remove msgId |> ignore
+            unAckedMessageTracker.Remove msgId
 
     let untrackMessagesTill msgId =
         if not hasParentConsumer then
@@ -346,7 +346,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 prefix, ackType, outstandingAcks, batchSize)
             false
 
-    let doTransactionAcknowledgeForResponse ackType properties txnId (messageId: MessageId) =
+    let doTransactionAcknowledgeForResponse ackType properties txnId tcs (messageId: MessageId) =
         match connectionHandler.ConnectionState with
         | Ready clientCnx ->
             let requestId = Generators.getNextRequestId()
@@ -383,22 +383,20 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 | _ ->
                     Commands.newAck consumerId messageId.LedgerId messageId.EntryId ackType properties null
                             None (Some txnId) (Some requestId) None
-            let tcs = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
             ackRequests.Add(requestId, (messageId, txnId, tcs))
             match ackType with
-            | Individual -> unAckedMessageTracker.Remove(messageId) |> ignore
+            | Individual -> unAckedMessageTracker.Remove(messageId)
             | AckType.Cumulative -> unAckedMessageTracker.RemoveMessagesTill(messageId) |> ignore
             clientCnx.SendAndForget(command)
-            tcs.Task
         | _ ->
             Log.Logger.LogWarning("{0} not ready, can't do transactionAcknowledge. State: {1}",
                                   prefix, connectionHandler.ConnectionState)
-            Task.FromException<unit>(NotConnectedException("TransactionAcknowledge failed"))
+            tcs.SetException(NotConnectedException("TransactionAcknowledge failed"))
 
-    let trySendAcknowledge ackType properties (txnOption: Transaction option) (messageId: MessageId) =
+    let trySendAcknowledge ackType properties (txnOption: (Transaction * TaskCompletionSource<unit>) option) (messageId: MessageId) =
         match txnOption with
-        | Some txn ->
-            doTransactionAcknowledgeForResponse ackType properties txn.Id messageId
+        | Some (txn, tcs) ->
+            doTransactionAcknowledgeForResponse ackType properties txn.Id tcs messageId
         | None ->
             match messageId.Type with
             | Batch batchDetails when not (markAckForBatchMessage messageId batchDetails ackType properties) ->
@@ -407,8 +405,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 // other messages in batch are still pending ack.
             | _ ->
                 sendAcknowledge messageId ackType properties
-                Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
-            unitTask
+                if Log.Logger.IsEnabled(LogLevel.Debug) then
+                    Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
 
     let isPriorEntryIndex idx =
         match startMessageId with
@@ -703,7 +701,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let ch = batchWaiters |> dequeueBatchWaiter
                     replyWithBatch ch
 
-    let handleMessagePayload (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel
+    let handleMessagePayload clientCnx (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel
                                 isMessageUndecryptable isChunkedMessage schemaDecodeFunction =
         backgroundTask {
             let! isDuplicate = acksGroupingTracker.IsDuplicate msgId
@@ -725,36 +723,22 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         handleSingleMessagePayload rawMessage msgId bytes hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
                 elif rawMessage.Metadata.NumMessages > 0 then
                     // handle batch message enqueuing; uncompressed payload has all messages in batch
-                    try
-                        this.ReceiveIndividualMessagesFromBatch rawMessage schemaDecodeFunction
-                    with ex ->
+                    match wrapException (fun () ->
+                        this.ReceiveIndividualMessagesFromBatch rawMessage schemaDecodeFunction) with
+                    | Ok () ->
+                        // try respond to channel
+                        if hasWaitingChannel && incomingMessages.Count > 0 then
+                            let waitingChannel = waiters |> dequeueWaiter
+                            replyWithMessage waitingChannel <| dequeueMessage()
+                        elif hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                            let ch = batchWaiters |> dequeueBatchWaiter
+                            replyWithBatch ch
+                    | Error ex ->
                         Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
-                        raise <| BatchDeserializationException "Batch reading exception"
-                    // try respond to channel
-                    if hasWaitingChannel && incomingMessages.Count > 0 then
-                        let waitingChannel = waiters |> dequeueWaiter
-                        replyWithMessage waitingChannel <| dequeueMessage()
-                    elif hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                        let ch = batchWaiters |> dequeueBatchWaiter
-                        replyWithBatch ch
+                        do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
                 else
                     Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
         }
-
-    let tryHandleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel
-                                isMessageUndecryptable isChunkedMessage schemaDecodeFunction clientCnx =
-        backgroundTask {
-            try
-                do! handleMessagePayload rawMessage msgId hasWaitingChannel hasWaitingBatchChannel
-                        isMessageUndecryptable isChunkedMessage schemaDecodeFunction
-                with Flatten ex ->
-                    match ex with
-                    | :? BatchDeserializationException ->
-                        do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
-                    | _ ->
-                        reraize ex
-        }
-
 
     let receive (receiveCallback: ReceiveCallback<'T>) =
         Log.Logger.LogDebug("{0} Receive", prefix)
@@ -905,8 +889,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 let hasWaitingChannel = waiters.Count > 0
                 let hasWaitingBatchChannel = batchWaiters.Count > 0
                 let msgId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
-                Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
-                    prefix, msgId, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
+                if Log.Logger.IsEnabled(LogLevel.Debug) then
+                    Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
+                        prefix, msgId, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
 
                 if rawMessage.CheckSumValid then
                     let! isDuplicate = acksGroupingTracker.IsDuplicate msgId
@@ -918,9 +903,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             if decryptedMessage.Payload.Length <= clientCnx.MaxMessageSize then
                                 match decompressMessage decryptedMessage isChunked with
                                 | Ok decompressedMessage ->
-                                    do! tryHandleMessagePayload
+                                    do! handleMessagePayload clientCnx
                                             decompressedMessage msgId hasWaitingChannel hasWaitingBatchChannel false
-                                            isChunked schemaDecodeFunction clientCnx
+                                            isChunked schemaDecodeFunction
                                 | Error _ ->
                                     do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecompressionError
                             else
@@ -930,9 +915,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             | ConsumerCryptoFailureAction.CONSUME ->
                                 Log.Logger.LogWarning("{0} {1} Decryption failed. Consuming encrypted message.",
                                                         prefix, msgId)
-                                do! tryHandleMessagePayload
+                                do! handleMessagePayload clientCnx
                                         rawMessage msgId hasWaitingChannel hasWaitingBatchChannel true
-                                        isChunked schemaDecodeFunction clientCnx
+                                        isChunked schemaDecodeFunction
                             | ConsumerCryptoFailureAction.DISCARD ->
                                 Log.Logger.LogWarning("{0} {1}. Decryption failed. Discarding encrypted message.",
                                                         prefix, msgId)
@@ -940,7 +925,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             | ConsumerCryptoFailureAction.FAIL ->
                                 Log.Logger.LogError("{0} {1}. Decryption failed. Failing encrypted message.",
                                                         prefix, msgId)
-                                unAckedMessageTracker.Add msgId |> ignore
+                                unAckedMessageTracker.Add msgId
                             | _ ->
                                 failwith "Unknown ConsumerCryptoFailureAction"
                     else
@@ -953,16 +938,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                 receive receiveCallback
 
-            | ConsumerMessage.Acknowledge (messageId, ackType, txnOption, chOption) ->
+            | ConsumerMessage.Acknowledge (messageId, ackType, txnOption) ->
 
-                Log.Logger.LogDebug("{0} Acknowledge {1} {2} {3}", prefix, messageId, ackType, txnOption)
-                backgroundTask {
-                    try
-                        do! trySendAcknowledge ackType EmptyProperties txnOption messageId
-                        chOption |> Option.iter (fun channel -> channel.SetResult())
-                    with Flatten ex ->
-                        chOption |> Option.iter (fun channel -> channel.SetException ex)
-                } |> ignore
+                if Log.Logger.IsEnabled(LogLevel.Debug) then
+                    Log.Logger.LogDebug("{0} Acknowledge {1} {2} {3}", prefix, messageId, ackType, txnOption)
+                trySendAcknowledge ackType EmptyProperties txnOption messageId
 
             | ConsumerMessage.BatchReceive receiveCallbacks ->
 
@@ -1451,8 +1431,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     abstract member ReceiveWrappedAsync: CancellationToken -> Task<ResultOrException<Message<'T>>>
     default this.ReceiveWrappedAsync(cancellationToken: CancellationToken) =
+        connectionHandler.CheckIfActive() |> throwIfNotNull
         backgroundTask {
-            connectionHandler.CheckIfActive() |> throwIfNotNull
             try
                 let! msgResult = postAndAsyncReply mb (fun channel -> Receive { CancellationToken = cancellationToken; MessageChannel = channel })
                 return Ok msgResult
@@ -1466,8 +1446,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     interface IConsumer<'T> with
 
         member this.ReceiveAsync(cancellationToken: CancellationToken) =
+            connectionHandler.CheckIfActive() |> throwIfNotNull
             backgroundTask {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
                 try
                     let! msgResult = postAndAsyncReply mb (fun channel -> Receive { CancellationToken = cancellationToken; MessageChannel = channel })
                     return msgResult
@@ -1480,8 +1460,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             _this.ReceiveAsync(CancellationToken.None)
 
         member this.BatchReceiveAsync(cancellationToken: CancellationToken) =
+            connectionHandler.CheckIfActive() |> throwIfNotNull
             backgroundTask {
-                connectionHandler.CheckIfActive() |> throwIfNotNull
                 try
                     let! msgResult = postAndAsyncReply mb (fun channel -> BatchReceive { CancellationToken = cancellationToken; MessagesChannel = channel })
                     return msgResult
@@ -1494,59 +1474,55 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             _this.BatchReceiveAsync(CancellationToken.None)
 
         member this.AcknowledgeAsync (msgId: MessageId) =
-            backgroundTask {
-                let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then
-                    stats.IncrementNumAcksFailed()
-                    interceptors.OnAcknowledge(this, msgId, exn)
-                    raise exn
+            let exn = connectionHandler.CheckIfActive()
+            if not (isNull exn) then
+                stats.IncrementNumAcksFailed()
+                interceptors.OnAcknowledge(this, msgId, exn)
+                raise exn
 
-                // no need to IncrementNumAcksFailed, since ack can't fail
-                return! postAndAsyncReply mb (fun ch -> Acknowledge(msgId, Individual, None, Some ch))
-            }
+            // no need to IncrementNumAcksFailed, since ack can't fail
+            post mb (Acknowledge(msgId, Individual, None))
+            unitTask
 
         member this.AcknowledgeAsync (msgId: MessageId, txn: Transaction) =
+            let exn = connectionHandler.CheckIfActive()
+            if not (isNull exn) then
+                stats.IncrementNumAcksFailed()
+                interceptors.OnAcknowledge(this, msgId, exn)
+                raise exn
             backgroundTask {
-                let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then
-                    stats.IncrementNumAcksFailed()
-                    interceptors.OnAcknowledge(this, msgId, exn)
-                    raise exn
-
                 if txn |> isNull |> not then
                     do! txn.RegisterAckedTopic(topicName.CompleteTopicName, consumerConfig.SubscriptionName)
 
-                let task = postAndAsyncReply mb (fun ch -> Acknowledge(msgId, Individual, Some txn, Some ch))
+                let task = postAndAsyncReply mb (fun ch -> Acknowledge(msgId, Individual, Some (txn, ch)))
                 if (not task.IsFaulted) && (txn |> isNull |> not) then
                     txn.RegisterAckOp(task)
                 return! task
             }
 
         member this.AcknowledgeAsync (msgs: Messages<'T>) =
-            backgroundTask {
-                let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then
-                    for msg in msgs do
-                        stats.IncrementNumAcksFailed()
-                        interceptors.OnAcknowledge(this, msg.MessageId, exn)
-                    raise exn
-
+            let exn = connectionHandler.CheckIfActive()
+            if not (isNull exn) then
                 for msg in msgs do
-                    post mb (Acknowledge(msg.MessageId, Individual, None, None))
-            }
+                    stats.IncrementNumAcksFailed()
+                    interceptors.OnAcknowledge(this, msg.MessageId, exn)
+                raise exn
+
+            for msg in msgs do
+                post mb (Acknowledge(msg.MessageId, Individual, None))
+            unitTask
 
         member this.AcknowledgeAsync (msgIds: MessageId seq) =
-            backgroundTask {
-                let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then
-                    for msgId in msgIds do
-                        stats.IncrementNumAcksFailed()
-                        interceptors.OnAcknowledge(this, msgId, exn)
-                    raise exn
-
+            let exn = connectionHandler.CheckIfActive()
+            if not (isNull exn) then
                 for msgId in msgIds do
-                    post mb (Acknowledge(msgId, AckType.Individual, None, None))
-            }
+                    stats.IncrementNumAcksFailed()
+                    interceptors.OnAcknowledge(this, msgId, exn)
+                raise exn
+
+            for msgId in msgIds do
+                post mb (Acknowledge(msgId, AckType.Individual, None))
+            unitTask
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
             let exn = connectionHandler.CheckIfActive()
@@ -1556,7 +1532,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 raise exn
 
             // no need to IncrementNumAcksFailed, since ack can't fail
-            postAndAsyncReply mb (fun ch -> Acknowledge(msgId, AckType.Cumulative, None, Some ch))
+            post mb (Acknowledge(msgId, AckType.Cumulative, None))
+            unitTask
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId, txn: Transaction) =
             let exn = connectionHandler.CheckIfActive()
@@ -1569,7 +1546,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     txn.RegisterCumulativeAckConsumer(consumerId, consumerTxnOperations)
                     do! txn.RegisterAckedTopic(topicName.CompleteTopicName, consumerConfig.SubscriptionName)
 
-                let task = postAndAsyncReply mb (fun ch -> Acknowledge(msgId, Cumulative, Some txn, Some ch))
+                let task = postAndAsyncReply mb (fun ch -> Acknowledge(msgId, Cumulative, Some (txn, ch)))
                 if (not task.IsFaulted) && (txn |> isNull |> not) then
                     txn.RegisterAckOp(task)
                 return! task
@@ -1630,42 +1607,43 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
         member this.ReconsumeLaterAsync (msg: Message<'T>, deliverAt: TimeStamp) =
-            backgroundTask {
-                if not consumerConfig.RetryEnable then
-                    failwith "Retry is disabled"
-                let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then
-                    stats.IncrementNumAcksFailed()
-                    interceptors.OnAcknowledge(this, msg.MessageId, exn)
-                    raise exn
-                return! postAndAsyncReply mb (fun channel -> ReconsumeLater(msg, Individual, deliverAt, channel))
-            }
+            if not consumerConfig.RetryEnable then
+                failwith "Retry is disabled"
+            let exn = connectionHandler.CheckIfActive()
+            if not (isNull exn) then
+                stats.IncrementNumAcksFailed()
+                interceptors.OnAcknowledge(this, msg.MessageId, exn)
+                raise exn
+            postAndAsyncReply mb (fun channel -> ReconsumeLater(msg, Individual, deliverAt, channel))
 
         member this.ReconsumeLaterCumulativeAsync (msg: Message<'T>, deliverAt: TimeStamp) =
-            backgroundTask {
-                if not consumerConfig.RetryEnable then
-                    failwith "Retry is disabled"
-                let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then
-                    stats.IncrementNumAcksFailed()
-                    interceptors.OnAcknowledgeCumulative(this, msg.MessageId, exn)
-                    raise exn
-                return! postAndAsyncReply mb (fun channel -> ReconsumeLater(msg, AckType.Cumulative, deliverAt, channel))
-            }
+            if not consumerConfig.RetryEnable then
+                failwith "Retry is disabled"
+            let exn = connectionHandler.CheckIfActive()
+            if not (isNull exn) then
+                stats.IncrementNumAcksFailed()
+                interceptors.OnAcknowledgeCumulative(this, msg.MessageId, exn)
+                raise exn
+            postAndAsyncReply mb (fun channel -> ReconsumeLater(msg, AckType.Cumulative, deliverAt, channel))
 
         member this.ReconsumeLaterAsync (msgs: Messages<'T>, deliverAt: TimeStamp) =
-            backgroundTask {
-                if not consumerConfig.RetryEnable then
-                    failwith "Retry is disabled"
-                let exn = connectionHandler.CheckIfActive()
-                if not (isNull exn) then
-                    for msg in msgs do
-                        stats.IncrementNumAcksFailed()
-                        interceptors.OnAcknowledge(this, msg.MessageId, exn)
-                    raise exn
+            if not consumerConfig.RetryEnable then
+                failwith "Retry is disabled"
+            let exn = connectionHandler.CheckIfActive()
+            if not (isNull exn) then
                 for msg in msgs do
-                    do! postAndAsyncReply mb (fun channel -> ReconsumeLater(msg, Individual, deliverAt, channel))
+                    stats.IncrementNumAcksFailed()
+                    interceptors.OnAcknowledge(this, msg.MessageId, exn)
+                raise exn
+            backgroundTask {
+                let! _ =
+                    [|
+                        for msg in msgs do
+                            postAndAsyncReply mb (fun channel -> ReconsumeLater(msg, Individual, deliverAt, channel))
+                    |] |> Task.WhenAll
+                return ()
             }
+
 
         member this.LastDisconnectedTimestamp =
             connectionHandler.LastDisconnectedTimestamp

@@ -10,8 +10,8 @@ open System.Threading.Tasks
 
 
 type internal UnackedTrackerMessage =
-    | Add of (MessageId*TaskCompletionSource<bool>)
-    | Remove of (MessageId*TaskCompletionSource<bool>)
+    | Add of MessageId
+    | Remove of MessageId
     | RemoveMessagesTill of (MessageId*TaskCompletionSource<int>)
     | TickTime
     | Clear
@@ -19,8 +19,8 @@ type internal UnackedTrackerMessage =
 
 type internal IUnAckedMessageTracker =
     abstract member Clear: unit -> unit
-    abstract member Add: MessageId -> Task<bool>
-    abstract member Remove: MessageId -> Task<bool>
+    abstract member Add: MessageId -> unit
+    abstract member Remove: MessageId -> unit
     abstract member RemoveMessagesTill: MessageId -> Task<int>
     abstract member Close: unit -> unit
 
@@ -45,28 +45,24 @@ type internal UnAckedMessageTracker(prefix: string,
         let mutable continueLoop = true
         while continueLoop do
             match! mb.Reader.ReadAsync() with
-            | UnackedTrackerMessage.Add (msgId, channel) ->
+            | UnackedTrackerMessage.Add msgId ->
 
                 Log.Logger.LogDebug("{0} Adding message {1}", prefix, msgId)
                 if messageIdPartitionMap.ContainsKey msgId then
-                    channel.SetResult(false)
                     Log.Logger.LogWarning("{0} Duplicate message add {1}", prefix, msgId)
                 else
                     messageIdPartitionMap.Add(msgId, currentPartition)
                     currentPartition.Add(msgId) |> ignore
-                    channel.SetResult(true)
 
-            | UnackedTrackerMessage.Remove (msgId, channel) ->
+            | UnackedTrackerMessage.Remove msgId ->
 
                 Log.Logger.LogDebug("{0} Removing message {1}", prefix, msgId)
                 let mutable targetState: RedeliverSet = null
                 if messageIdPartitionMap.TryGetValue(msgId, &targetState) then
                     targetState.Remove(msgId) |> ignore
                     messageIdPartitionMap.Remove(msgId) |> ignore
-                    channel.SetResult(true)
                 else
                     Log.Logger.LogDebug("{0} Unexisting message remove {1}", prefix, msgId)
-                    channel.SetResult(false)
 
             | UnackedTrackerMessage.RemoveMessagesTill (msgId, channel) ->
 
@@ -138,9 +134,9 @@ type internal UnAckedMessageTracker(prefix: string,
         member this.Clear() =
             post mb UnackedTrackerMessage.Clear
         member this.Add(msgId) =
-            postAndAsyncReply mb (fun channel -> UnackedTrackerMessage.Add (msgId, channel))
+            post mb (UnackedTrackerMessage.Add msgId)
         member this.Remove(msgId) =
-            postAndAsyncReply mb (fun channel -> UnackedTrackerMessage.Remove (msgId, channel))
+            post mb (UnackedTrackerMessage.Remove msgId)
         member this.RemoveMessagesTill(msgId) =
             postAndAsyncReply mb (fun channel -> UnackedTrackerMessage.RemoveMessagesTill (msgId, channel))
 
@@ -154,8 +150,8 @@ type internal UnAckedMessageTracker(prefix: string,
         {
             new IUnAckedMessageTracker with
                 member this.Clear() = ()
-                member this.Add(msgId) = trueTask
-                member this.Remove(msgId) = trueTask
+                member this.Add(msgId) = ()
+                member this.Remove(msgId) = ()
                 member this.RemoveMessagesTill(msgId) = zeroTask
                 member this.Close() = ()
         }

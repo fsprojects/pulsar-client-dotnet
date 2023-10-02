@@ -175,3 +175,9 @@ let getSpan (stream: MemoryStream) =
 let inline stackallocspan<'a when 'a: unmanaged> size =
     let p = NativePtr.stackalloc<'a> size |> NativePtr.toVoidPtr
     Span<'a>(p, size)
+
+let wrapException (f: unit -> 'a) =
+    try
+        Ok(f())
+    with ex ->
+        Error(ex)
