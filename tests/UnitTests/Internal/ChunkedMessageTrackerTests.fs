@@ -1,6 +1,7 @@
 module Pulsar.Client.UnitTests.Internal.ChunkedMessageTrackerTests
 
 open System
+open System.IO
 open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
@@ -11,7 +12,7 @@ open FSharp.UMX
 [<Tests>]
 let tests =
 
-    let testMetadata = 
+    let testMetadata =
         {
             NumMessages = 0
             NumChunks = 0
@@ -31,13 +32,13 @@ let tests =
             OrderingKey = [||]
             ReplicatedFrom = ""
         }
-        
+
     let testRawMessage =
         {
             MessageId = Unchecked.defaultof<MessageId>
             Metadata = Unchecked.defaultof<Metadata>
             RedeliveryCount = 0
-            Payload = [||]
+            Payload = new MemoryStream [||]
             MessageKey = ""
             IsKeyBase64Encoded = false
             CheckSumValid = false
@@ -45,13 +46,13 @@ let tests =
             AckSet = null
         }
     let testCodec = CompressionCodec.get CompressionType.None
-    
+
     testList "ChunkedMessageTracker" [
         test "One-message chunk works" {
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_1", 2, true, TimeSpan.Zero, fun _ _ -> ())
             let metadata = { testMetadata with NumChunks = 1; TotalChunkMsgSize = 1 }
             let msgId = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
-            let rawMessage = { testRawMessage with MessageId = msgId; Metadata = metadata; Payload = [| 1uy |] }
+            let rawMessage = { testRawMessage with MessageId = msgId; Metadata = metadata; Payload = new MemoryStream [| 1uy |] }
             let context = tracker.GetContext(metadata)
             match context with
             | Ok ctx ->
@@ -64,12 +65,12 @@ let tests =
             | _ ->
                 failwith "No context"
         }
-        
+
         test "Two-message chunk works" {
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_2", 2, true, TimeSpan.Zero, fun _ _ -> ())
             let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 1 }
             let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
-            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = [| 1uy |] }
+            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 1uy |] }
             let context = tracker.GetContext(metadata1)
             match context with
             | Ok ctx ->
@@ -79,7 +80,7 @@ let tests =
                 failwith "No context"
             let metadata2 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; ChunkId = %1 }
             let msgId2 = { EntryId = %2L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
-            let rawMessage2 = { testRawMessage with MessageId = msgId2; Metadata = metadata2; Payload = [| 2uy |] }
+            let rawMessage2 = { testRawMessage with MessageId = msgId2; Metadata = metadata2; Payload = new MemoryStream [| 2uy |] }
             let context = tracker.GetContext(metadata2)
             match context with
             | Ok ctx ->
@@ -92,7 +93,7 @@ let tests =
             | _ ->
                 failwith "No context"
         }
-        
+
         test "Tracker overflow works as expected" {
             let mutable xShouldAck = true
             let mutable xMsgId = Unchecked.defaultof<MessageId>
@@ -102,7 +103,7 @@ let tests =
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_3", 1, false, TimeSpan.Zero, ackOrTrack) // one pending context allowed
             let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 1; Uuid = %"1" }
             let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
-            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = [| 1uy |] }
+            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 1uy |] }
             let context = tracker.GetContext(metadata1)
             match context with
             | Ok ctx ->
@@ -112,7 +113,7 @@ let tests =
                 failwith "No context"
             let metadata2 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"2" }
             let msgId2 = { EntryId = %2L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
-            let rawMessage2 = { testRawMessage with MessageId = msgId2; Metadata = metadata2; Payload = [| 2uy |] }
+            let rawMessage2 = { testRawMessage with MessageId = msgId2; Metadata = metadata2; Payload = new MemoryStream [| 2uy |] }
             let context = tracker.GetContext(metadata2)
             match context with
             | Ok ctx ->
@@ -126,7 +127,7 @@ let tests =
             Expect.isFalse "" xShouldAck
             Expect.equal "" xMsgId msgId1
         }
-        
+
         testTask "Tracker timeout works as expected" {
             let mutable xShouldAck = false
             let mutable xMsgId = Unchecked.defaultof<MessageId>
@@ -136,7 +137,7 @@ let tests =
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_4", 2, false, TimeSpan.FromMilliseconds(50.0), ackOrTrack) // one pending context allowed
             let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 1; Uuid = %"1" }
             let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
-            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = [| 1uy |] }
+            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 1uy |] }
             let context = tracker.GetContext(metadata1)
             match context with
             | Ok ctx ->
@@ -152,12 +153,12 @@ let tests =
             Expect.isTrue "" xShouldAck
             Expect.equal "" xMsgId msgId1
         }
-        
+
         test "Wrong chunk order handled as expected" {
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_5", 2, true, TimeSpan.Zero, fun _ _ -> ())
             let metadata1 = { testMetadata with NumChunks = 3; TotalChunkMsgSize = 3 }
             let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
-            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = [| 1uy |] }
+            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 1uy |] }
             let context = tracker.GetContext(metadata1)
             match context with
             | Ok ctx ->

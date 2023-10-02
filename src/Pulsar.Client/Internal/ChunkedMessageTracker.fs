@@ -9,7 +9,7 @@ open Microsoft.Extensions.Logging
 
 type internal ChunkedMessageCtx(totalChunksCount: int, totalChunksSize: int) =
     let chunkedMessageIds = Array.zeroCreate totalChunksCount
-    let chunkedMsgBuffer = ArrayPool.Shared.Rent totalChunksSize
+    let chunkedMsgBuffer: byte[] = ArrayPool.Shared.Rent totalChunksSize
     let receivedTime = Stopwatch.GetTimestamp()
     let mutable lastChunkId: ChunkId = %(-1)
     let mutable currentBufferLength = 0
@@ -18,8 +18,8 @@ type internal ChunkedMessageCtx(totalChunksCount: int, totalChunksSize: int) =
         member this.MessageReceived(msg: RawMessage) =
             // append the chunked payload and update lastChunkedMessage-id
             chunkedMessageIds[%msg.Metadata.ChunkId] <- msg.MessageId
-            msg.Payload.CopyTo(chunkedMsgBuffer, currentBufferLength)
-            currentBufferLength <- currentBufferLength + msg.Payload.Length
+            msg.Payload.Read(chunkedMsgBuffer, currentBufferLength, int msg.Payload.Length) |> ignore
+            currentBufferLength <- currentBufferLength + int msg.Payload.Length
             lastChunkId <- msg.Metadata.ChunkId
         member this.LastChunkId = lastChunkId
         member this.ChunkedMessageIds = chunkedMessageIds

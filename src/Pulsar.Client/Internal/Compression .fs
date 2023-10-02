@@ -12,31 +12,39 @@ open ZstdNet
 
 type ICompressionCodec =
     abstract member Encode: src:MemoryStream -> MemoryStream
-    abstract member Decode: uncompressedSize:int * src:byte[] -> byte[]
+    abstract member Decode: uncompressedSize:int * src:MemoryStream -> MemoryStream
     abstract member Decode: uncompressedSize:int * src:byte[] * payloadLength: int -> byte[]
 
 module internal CompressionCodec =
 
     type ZLibCompression() =
-        let zlibEncode (capacity: int) (payload: MemoryStream) payloadLength =
-            let ms = new MemoryStream(capacity)
+        let zlibEncode (payload: MemoryStream) =
+            let ms = MemoryStreamManager.GetStream()
             let zlib = new ZOutputStream(ms, zlibConst.Z_DEFAULT_COMPRESSION)
             zlib.FlushMode <- zlibConst.Z_SYNC_FLUSH
-            zlib.Write(payload.GetBuffer(), 0, payloadLength)
+            zlib.Write(payload.GetBuffer(), 0, int payload.Length)
             payload.Dispose()
             ms
 
-        let zlibDecode (capacity: int) (bytes : byte[]) payloadLength =
-            use ms = MemoryStreamManager.GetStream(null, capacity)
+        let zlibDecode (uncompressedSize: int) (payload: MemoryStream) =
+            let ms = MemoryStreamManager.GetStream(null, uncompressedSize)
+            let zlib = new ZOutputStream(ms)
+            zlib.FlushMode <- zlibConst.Z_SYNC_FLUSH
+            zlib.Write(payload.GetBuffer(), 0, int payload.Length)
+            payload.Dispose()
+            ms
+
+        let zlibDecodeBytes (uncompressedSize: int) (bytes : byte[]) payloadLength =
+            use ms = MemoryStreamManager.GetStream(null, uncompressedSize)
             use zlib = new ZOutputStream(ms)
             zlib.FlushMode <- zlibConst.Z_SYNC_FLUSH
             zlib.Write(bytes, 0, payloadLength)
             ms.ToArray()
 
         interface ICompressionCodec with
-            member this.Encode src = zlibEncode 0 src (int src.Length)
-            member this.Decode (uncompressedSize, src) = zlibDecode uncompressedSize src src.Length
-            member this.Decode (uncompressedSize, src, payloadLength) = zlibDecode uncompressedSize src payloadLength
+            member this.Encode src = zlibEncode src
+            member this.Decode (uncompressedSize, src) = zlibDecode uncompressedSize src
+            member this.Decode (uncompressedSize, src, payloadLength) = zlibDecodeBytes uncompressedSize src payloadLength
 
     type LZ4Compression() =
         interface ICompressionCodec with
@@ -44,15 +52,24 @@ module internal CompressionCodec =
                 let target = LZ4Codec.MaximumOutputSize (int payload.Length) |> ArrayPool.Shared.Rent
                 try
                     let sourceSpan = getSpan payload
-                    let count = LZ4Codec.Encode(sourceSpan, target.AsSpan())
-                    new MemoryStream(target |> Array.take count)
+                    let targetSpan = target.AsSpan()
+                    let count = LZ4Codec.Encode(sourceSpan, targetSpan)
+                    let ms = MemoryStreamManager.GetStream()
+                    ms.Write(targetSpan.Slice(0, count))
+                    ms
                 finally
                     payload.Dispose()
                     target |> ArrayPool.Shared.Return
-            member this.Decode (uncompressedSize, bytes) =
-                let target = Array.zeroCreate uncompressedSize
-                LZ4Codec.Decode(bytes, 0, bytes.Length, target, 0, target.Length) |> ignore
-                target
+            member this.Decode (uncompressedSize, payload) =
+                let target: byte[] = uncompressedSize |> ArrayPool.Shared.Rent
+                try
+                    LZ4Codec.Decode(payload.GetBuffer(), 0, int payload.Length, target, 0, uncompressedSize) |> ignore
+                    let ms = MemoryStreamManager.GetStream(null, uncompressedSize)
+                    ms.Write(target, 0, uncompressedSize)
+                    ms
+                finally
+                    payload.Dispose()
+                    target |> ArrayPool.Shared.Return
             member this.Decode (uncompressedSize, bytes, payloadLength) =
                 let target = Array.zeroCreate uncompressedSize
                 LZ4Codec.Decode(bytes, 0, payloadLength, target, 0, target.Length) |> ignore
@@ -68,15 +85,23 @@ module internal CompressionCodec =
                     let sourceSpan = getSpan payload
                     sourceSpan.CopyTo(source)
                     let count = SnappyCodec.Compress(source, 0, length, target, 0)
-                    new MemoryStream(target |> Array.take count)
+                    let ms = MemoryStreamManager.GetStream()
+                    ms.Write(target.AsSpan(0, count))
+                    ms
                 finally
                     payload.Dispose()
                     source |> ArrayPool.Shared.Return
                     target |> ArrayPool.Shared.Return
-            member this.Decode (uncompressedSize, bytes) =
-                let target = Array.zeroCreate uncompressedSize
-                SnappyCodec.Uncompress(bytes, 0, bytes.Length, target, 0) |> ignore
-                target
+            member this.Decode (uncompressedSize, payload) =
+                let target: byte[] = uncompressedSize |> ArrayPool.Shared.Rent
+                try
+                    SnappyCodec.Uncompress(payload.GetBuffer(), 0, int payload.Length, target, 0) |> ignore
+                    let ms = MemoryStreamManager.GetStream(null, uncompressedSize)
+                    ms.Write(target, 0, uncompressedSize)
+                    ms
+                finally
+                    payload.Dispose()
+                    target |> ArrayPool.Shared.Return
             member this.Decode (uncompressedSize, bytes, payloadLength) =
                 let target = Array.zeroCreate uncompressedSize
                 SnappyCodec.Uncompress(bytes, 0, payloadLength, target, 0) |> ignore
@@ -85,14 +110,31 @@ module internal CompressionCodec =
     type ZstdCompression() =
         interface ICompressionCodec with
             member this.Encode payload =
-                use zstdCompressor = new Compressor()
-                let sourceSpan = getSpan payload
-                let result = new MemoryStream(zstdCompressor.Wrap sourceSpan)
-                payload.Dispose()
-                result
-            member this.Decode (uncompressedSize, bytes) =
-                use zstdDecompressor = new Decompressor()
-                zstdDecompressor.Unwrap(bytes, uncompressedSize)
+                let target: byte[] = Compressor.GetCompressBound(int payload.Length) |> ArrayPool.Shared.Rent
+                let zstdCompressor = new Compressor()
+                try
+                    let sourceSpan = getSpan payload
+                    let count = zstdCompressor.Wrap(sourceSpan, target)
+                    let ms = MemoryStreamManager.GetStream()
+                    ms.Write(target.AsSpan(0, count))
+                    ms
+                finally
+                    zstdCompressor.Dispose()
+                    payload.Dispose()
+                    target |> ArrayPool.Shared.Return
+            member this.Decode (uncompressedSize, payload) =
+                let target: byte[] = uncompressedSize |> ArrayPool.Shared.Rent
+                let zstdDecompressor = new Decompressor()
+                try
+                    let sourceSpan = getSpan payload
+                    zstdDecompressor.Unwrap(sourceSpan, target) |> ignore
+                    let ms = MemoryStreamManager.GetStream(null, uncompressedSize)
+                    ms.Write(target, 0, uncompressedSize)
+                    ms
+                finally
+                    zstdDecompressor.Dispose()
+                    payload.Dispose()
+                    target |> ArrayPool.Shared.Return
             member this.Decode (uncompressedSize, bytes, payloadLength) =
                 use zstdDecompressor = new Decompressor()
                 zstdDecompressor.Unwrap(ArraySegment<byte>(bytes, 0, payloadLength), uncompressedSize)

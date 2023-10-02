@@ -76,7 +76,7 @@ and internal PulsarCommand =
     | XCommandConnected of CommandConnected
     | XCommandPartitionedTopicMetadataResponse of CommandPartitionedTopicMetadataResponse
     | XCommandSendReceipt of CommandSendReceipt
-    | XCommandMessage of (CommandMessage * MessageMetadata * byte[] * bool )
+    | XCommandMessage of (CommandMessage * MessageMetadata * MemoryStream * bool )
     | XCommandPing of CommandPing
     | XCommandPong of CommandPong
     | XCommandLookupResponse of CommandLookupTopicResponse
@@ -345,7 +345,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         let payloadPointer = stream.Position
         let metadataLength = payloadPointer - metadataPointer |> int
         let payloadLength = frameLength - (int payloadPointer)
-        let payload = reader.ReadBytes(payloadLength)
+        let payload = MemoryStreamManager.GetStream()
+        let payloadBytes = stream.GetBuffer().AsSpan().Slice(int payloadPointer, payloadLength)
+        payload.Write(payloadBytes)
         stream.Seek(metadataPointer, SeekOrigin.Begin) |> ignore
         let calculatedCheckSum = CRC32C.GetForMS(stream, metadataLength + payloadLength) |> int32
         if (messageCheckSum <> calculatedCheckSum) then

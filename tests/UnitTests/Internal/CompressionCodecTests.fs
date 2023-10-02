@@ -34,7 +34,8 @@ let tests =
     let testDecode compressionType encodedBytes =
         let uncompressedSize = helloNone.Length
         let codec = compressionType |> createCodec
-        let decoded = codec.Decode(uncompressedSize, encodedBytes) |> getString
+        let ms = new MemoryStream(encodedBytes, 0, encodedBytes.Length, true, true)
+        let decoded = codec.Decode(uncompressedSize, ms) |> (fun ms -> ms.ToArray())|>  getString
         decoded |> Expect.equal "" hello
 
     testList "CompressionCodec" [

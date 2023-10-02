@@ -586,10 +586,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 match consumerConfig.MessageDecryptor with
                 | Some msgCrypto ->
                     let encryptionKeys = rawMessage.Metadata.EncryptionKeys
-                    let encMsg = EncryptedMessage(rawMessage.Payload, encryptionKeys,
+                    let encMsg = EncryptedMessage(rawMessage.Payload.GetBuffer(), encryptionKeys,
                                                   rawMessage.Metadata.EncryptionAlgo, rawMessage.Metadata.EncryptionParam)
                     let decryptPayload = msgCrypto.Decrypt(encMsg)
-                    { rawMessage with Payload = decryptPayload } |> Ok
+                    { rawMessage with Payload = new MemoryStream(decryptPayload) } |> Ok
                 | None ->
                     raise <| CryptoException "Message is encrypted, but no encryption configured"
             with ex ->
@@ -718,9 +718,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         | Some (chunkedPayload, msgIdWithChunk) ->
                             handleSingleMessagePayload rawMessage msgIdWithChunk chunkedPayload hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
                         | None ->
-                            ()
+                            rawMessage.Payload.Dispose()
                     else
-                        handleSingleMessagePayload rawMessage msgId rawMessage.Payload hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
+                        let bytes = rawMessage.Payload.ToArray()
+                        rawMessage.Payload.Dispose()
+                        handleSingleMessagePayload rawMessage msgId bytes hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
                 elif rawMessage.Metadata.NumMessages > 0 then
                     // handle batch message enqueuing; uncompressed payload has all messages in batch
                     try
@@ -1322,7 +1324,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
         let mutable skippedMessages = 0
-        use stream = new MemoryStream(rawMessage.Payload)
+        use stream = rawMessage.Payload
+        stream.Seek(0L, SeekOrigin.Begin) |> ignore
         use binaryReader = new BinaryReader(stream)
         for i in 0..batchSize-1 do
             Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
