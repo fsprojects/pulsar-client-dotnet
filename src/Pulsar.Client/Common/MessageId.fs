@@ -7,8 +7,9 @@ open ProtoBuf
 open Pulsar.Client.Internal
 open pulsar.proto
 
-type BatchDetails = BatchIndex * BatchMessageAcker
+type BatchDetails = (struct(BatchIndex * BatchMessageAcker))
 
+[<Struct>]
 type MessageIdType =
     | Single
     | Batch of BatchDetails
@@ -119,7 +120,7 @@ type MessageId =
                     | (Single, Single) -> true
                     | (Batch (i, _), Batch (j, _)) -> i = j
                     | (Single, Batch (i, _)) -> i = %(-1)
-                    | (Batch (i, _), Single) -> i = %(-1) 
+                    | (Batch (i, _), Single) -> i = %(-1)
                     &&
                     match m.ChunkMessageIds, this.ChunkMessageIds with
                     | Some mchunkMessageIds, Some thisChunkMessageIds when mchunkMessageIds.Length > 0 && thisChunkMessageIds.Length > 0 ->
@@ -127,14 +128,14 @@ type MessageId =
                     | _, _ -> true
             | _ ->
                 false
-            
+
         override this.GetHashCode() =
             match this.Type with
             | Single ->
                 (31 * ((int this.LedgerId) + 31 * (int this.EntryId)) + this.Partition)
             | Batch (batchIndex, _) ->
                 (31 * ((int this.LedgerId) + 31 * (int this.EntryId)) + (31 * this.Partition) + %batchIndex)
-                
+
         interface IComparable<MessageId> with
             member this.CompareTo(other) =
                 if this.LedgerId > other.LedgerId then
@@ -165,7 +166,7 @@ type MessageId =
                             | partitionComparison -> partitionComparison
                         | _ ->
                             typeComparison
-                    
+
         interface IComparable with
             member this.CompareTo(other) =
                 match other with

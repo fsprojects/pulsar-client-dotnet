@@ -1449,8 +1449,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             connectionHandler.CheckIfActive() |> throwIfNotNull
             backgroundTask {
                 try
-                    let! msgResult = postAndAsyncReply mb (fun channel -> Receive { CancellationToken = cancellationToken; MessageChannel = channel })
-                    return msgResult
+                    return! postAndAsyncReply mb (fun channel -> Receive { CancellationToken = cancellationToken; MessageChannel = channel })
                 with Flatten ex ->
                     stats.IncrementNumReceiveFailed()
                     return reraize ex
@@ -1463,8 +1462,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             connectionHandler.CheckIfActive() |> throwIfNotNull
             backgroundTask {
                 try
-                    let! msgResult = postAndAsyncReply mb (fun channel -> BatchReceive { CancellationToken = cancellationToken; MessagesChannel = channel })
-                    return msgResult
+                    return! postAndAsyncReply mb (fun channel -> BatchReceive { CancellationToken = cancellationToken; MessagesChannel = channel })
                 with Flatten ex ->
                     stats.IncrementNumBatchReceiveFailed()
                     return reraize ex

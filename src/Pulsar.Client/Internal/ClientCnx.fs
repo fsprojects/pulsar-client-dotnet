@@ -303,9 +303,9 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             Log.Logger.LogDebug("{0} Sending message of type {1}", prefix, commandType)
         backgroundTask {
             try
-                do! connection.Output |> writePayload
+                do! writePayload connection.Output
                 return true
-            with ex ->
+            with Flatten ex ->
                 Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally on writing {1}", prefix, commandType)
                 post operationsMb ChannelInactive
                 return false

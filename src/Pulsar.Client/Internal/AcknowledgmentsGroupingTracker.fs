@@ -58,7 +58,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
     let prefix = prefix + " GroupingTracker"
 
     let getAckData (msgId: MessageId) =
-        let _, acker = getBatchDetails msgId.Type
+        let struct(_, acker) = getBatchDetails msgId.Type
         let ackSet = acker.BitSet |> toLongArray
         (msgId.LedgerId, msgId.EntryId, ackSet)
 
@@ -76,7 +76,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                             if cumulativeAckFlushRequired then
                                 let ackSet =
                                     if lastCumulativeAckIsBatch then
-                                        let _, acker = lastCumulativeAck.Type |> getBatchDetails
+                                        let struct(_, acker) = lastCumulativeAck.Type |> getBatchDetails
                                         acker.BitSet |> toLongArray
                                     else
                                         null
@@ -162,16 +162,16 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                 backgroundTask {
                     match getState() with
                     | Ready cnx ->
-                        let index, acker = getBatchDetails msgId.Type
+                        let struct(index, acker) = getBatchDetails msgId.Type
                         let i = %index
                         let bitSet = BitArray(acker.GetBatchSize(), true)
                         let payload =
                                 match ackType with
                                 | Individual ->
-                                    bitSet.[i] <- false
+                                    bitSet[i] <- false
                                 | AckType.Cumulative ->
                                     for j in 0 .. i do
-                                        bitSet.[j] <- false
+                                        bitSet[j] <- false
                                 let ackSet = bitSet |> toLongArray
                                 Commands.newAck consumerId msgId.LedgerId msgId.EntryId ackType properties ackSet
                                     None None None None
