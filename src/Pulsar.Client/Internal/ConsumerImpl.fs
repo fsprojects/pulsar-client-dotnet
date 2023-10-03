@@ -33,11 +33,11 @@ type internal ConsumerMessage<'T> =
     | ConnectionFailed of exn
     | ConnectionClosed of ClientCnx
     | ReachedEndOfTheTopic
-    | MessageReceived of RawMessage * ClientCnx
+    | MessageReceived of struct(RawMessage * ClientCnx)
     | Receive of ReceiveCallback<'T>
     | BatchReceive of ReceiveCallbacks<'T>
     | SendBatchByTimeout
-    | Acknowledge of MessageId * AckType * (Transaction * TaskCompletionSource<Unit>) option
+    | Acknowledge of struct(MessageId * AckType * (Transaction * TaskCompletionSource<Unit>) option)
     | NegativeAcknowledge of MessageId
     | RedeliverUnacknowledged of RedeliverSet
     | RedeliverAllUnacknowledged of TaskCompletionSource<unit> option
@@ -329,8 +329,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         let outstandingAcks = batchAcker.GetOutstandingAcks()
         let batchSize = batchAcker.GetBatchSize()
         if isAllMsgsAcked then
-            Log.Logger.LogDebug("{0} can ack message acktype {1}, cardinality {2}, length {3}",
-                prefix, ackType, outstandingAcks, batchSize)
+            if Log.Logger.IsEnabled LogLevel.Debug then
+                Log.Logger.LogDebug("{0} can ack message acktype {1}, cardinality {2}, length {3}",
+                    prefix, ackType, outstandingAcks, batchSize)
             true
         else
             match ackType with
@@ -342,8 +343,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 interceptors.OnAcknowledgeCumulative(this, msgId, null)
             | Individual ->
                 interceptors.OnAcknowledge(this, msgId, null)
-            Log.Logger.LogDebug("{0} cannot ack message acktype {1}, cardinality {2}, length {3}",
-                prefix, ackType, outstandingAcks, batchSize)
+            if Log.Logger.IsEnabled LogLevel.Debug then
+                Log.Logger.LogDebug("{0} cannot ack message acktype {1}, cardinality {2}, length {3}",
+                    prefix, ackType, outstandingAcks, batchSize)
             false
 
     let doTransactionAcknowledgeForResponse ackType properties txnId tcs (messageId: MessageId) =
@@ -405,7 +407,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 // other messages in batch are still pending ack.
             | _ ->
                 sendAcknowledge messageId ackType properties
-                if Log.Logger.IsEnabled(LogLevel.Debug) then
+                if Log.Logger.IsEnabled LogLevel.Debug then
                     Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
 
     let isPriorEntryIndex idx =
@@ -760,7 +762,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         cancellationTokenRegistration
                     else
                         None
-                waiters.AddLast((tokenRegistration, channel)) |> ignore
+                waiters.AddLast(struct(tokenRegistration, channel)) |> ignore
                 Log.Logger.LogDebug("{0} Receive waiting", prefix)
 
     let batchReceive (receiveCallbacks: ReceiveCallbacks<'T>) =
@@ -784,7 +786,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         cancellationTokenRegistration
                     else
                         None
-                batchWaiters.AddLast((batchCts, registration, channel)) |> ignore
+                batchWaiters.AddLast(struct(batchCts, registration, channel)) |> ignore
                 asyncDelay
                     consumerConfig.BatchReceivePolicy.Timeout
                     (fun () ->
@@ -889,7 +891,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 let hasWaitingChannel = waiters.Count > 0
                 let hasWaitingBatchChannel = batchWaiters.Count > 0
                 let msgId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
-                if Log.Logger.IsEnabled(LogLevel.Debug) then
+                if Log.Logger.IsEnabled LogLevel.Debug then
                     Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
                         prefix, msgId, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
 
@@ -940,7 +942,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
             | ConsumerMessage.Acknowledge (messageId, ackType, txnOption) ->
 
-                if Log.Logger.IsEnabled(LogLevel.Debug) then
+                if Log.Logger.IsEnabled LogLevel.Debug then
                     Log.Logger.LogDebug("{0} Acknowledge {1} {2} {3}", prefix, messageId, ackType, txnOption)
                 trySendAcknowledge ackType EmptyProperties txnOption messageId
 
@@ -966,7 +968,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                 if waiters.Remove waiter then
                     Log.Logger.LogDebug("{0} CancelWaiter, removed waiter", prefix)
-                    let ctrOpt, channel = waiter
+                    let struct(ctrOpt, channel) = waiter
                     channel.SetCanceled()
                     ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
                 else
@@ -976,7 +978,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                 if batchWaiters.Remove batchWaiter then
                     Log.Logger.LogDebug("{0} CancelBatchWaiter, removed waiter", prefix)
-                    let batchCts, ctrOpt, channel = batchWaiter
+                    let struct(batchCts, ctrOpt, channel) = batchWaiter
                     batchCts.Cancel()
                     batchCts.Dispose()
                     channel.SetCanceled()
@@ -1308,7 +1310,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         stream.Seek(0L, SeekOrigin.Begin) |> ignore
         use binaryReader = new BinaryReader(stream)
         for i in 0..batchSize-1 do
-            if Log.Logger.IsEnabled(LogLevel.Debug) then
+            if Log.Logger.IsEnabled LogLevel.Debug then
                 Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
             let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
             let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)

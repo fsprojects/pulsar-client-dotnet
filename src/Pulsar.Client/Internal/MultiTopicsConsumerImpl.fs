@@ -547,7 +547,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         cancellationTokenRegistration
                     else
                         None
-                waiters.AddLast((tokenRegistration, channel)) |> ignore
+                waiters.AddLast(struct(tokenRegistration, channel)) |> ignore
                 Log.Logger.LogDebug("{0} Receive waiting", prefix)
 
     let batchReceive (receiveCallbacks: ReceiveCallbacks<'T>) =
@@ -572,7 +572,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         cancellationTokenRegistration
                     else
                         None
-                batchWaiters.AddLast((batchCts, registration, channel)) |> ignore
+                batchWaiters.AddLast(struct(batchCts, registration, channel)) |> ignore
                 asyncDelay
                     consumerConfig.BatchReceivePolicy.Timeout
                     (fun () ->
@@ -774,7 +774,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
                 if waiters.Remove waiter then
                     Log.Logger.LogDebug("{0} CancelWaiter, removed waiter", prefix)
-                    let ctrOpt, channel = waiter
+                    let struct(ctrOpt, channel) = waiter
                     channel.SetCanceled()
                     ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
                 else
@@ -784,7 +784,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
                 if batchWaiters.Remove batchWaiter then
                     Log.Logger.LogDebug("{0} CancelBatchWaiter, removed waiter", prefix)
-                    let batchCts, ctrOpt, channel = batchWaiter
+                    let struct(batchCts, ctrOpt, channel) = batchWaiter
                     batchCts.Cancel()
                     batchCts.Dispose()
                     channel.SetCanceled()

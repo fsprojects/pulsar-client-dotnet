@@ -37,7 +37,7 @@ type internal ProducerOperations =
     }
 and internal ConsumerOperations =
     {
-        MessageReceived: RawMessage * ClientCnx -> unit
+        MessageReceived: struct(RawMessage * ClientCnx) -> unit
         ReachedEndOfTheTopic: unit -> unit
         ActiveConsumerChanged: bool -> unit
         ConnectionClosed: ClientCnx -> unit
@@ -418,7 +418,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 let frameLength = totalength + 4
                 if (length >= frameLength) then
                     let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
-                    Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
+                    if Log.Logger.IsEnabled LogLevel.Debug then
+                        Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
                     let consumed = int64 frameLength |> buffer.GetPosition
                     try
                         let wrappedCommand = readCommand command reader stream frameLength
