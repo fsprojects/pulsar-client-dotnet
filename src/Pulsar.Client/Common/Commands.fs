@@ -24,8 +24,8 @@ let DEFAULT_MAX_MESSAGE_SIZE = 5_242_880 //5 * 1024 * 1024
 
 let private serializeSimpleCommand (command : BaseCommand) =
     (fun (output: Stream) ->
-        use temp = MemoryStreamManager.GetStream()
-        use binaryWriter = new BinaryWriter(temp)
+        let temp = MemoryStreamManager.GetStream()
+        let binaryWriter = new BinaryWriter(temp)
 
         // write fake totalLength
         for i in 1..4 do
@@ -41,7 +41,13 @@ let private serializeSimpleCommand (command : BaseCommand) =
         temp.Seek(0L,SeekOrigin.Begin) |> ignore
         binaryWriter.Write(int32ToBigEndian totalSize)
         temp.Seek(0L, SeekOrigin.Begin) |> ignore
-        temp.CopyToAsync(output)
+        backgroundTask {
+            try
+                return! temp.CopyToAsync(output)
+            finally
+                temp.Dispose()
+                binaryWriter.Dispose()
+        } :> Task
     ),  command.``type``
 
 
@@ -170,7 +176,7 @@ let newConnect (authMethodName: string) (authData: AuthData) (clientVersion: str
     if authData.Bytes.Length > 0 then
         request.AuthData <- authData.Bytes
     match proxyToBroker with
-    | Some logicalAddress -> request.ProxyToBrokerUrl <- sprintf "%s:%d" logicalAddress.Host logicalAddress.Port
+    | Some logicalAddress -> request.ProxyToBrokerUrl <- $"%s{logicalAddress.Host}:%d{logicalAddress.Port}"
     | None -> ()
     let command = BaseCommand(``type`` = CommandType.Connect, Connect = request)
     command |> serializeSimpleCommand

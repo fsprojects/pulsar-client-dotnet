@@ -185,7 +185,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             Ok payload
 
     let sendMessage (pendingMessage: PendingMessage<'T>) =
-        Log.Logger.LogDebug("{0} sendMessage sequenceId={1}", prefix, %pendingMessage.SequenceId)
+        if Log.Logger.IsEnabled(LogLevel.Debug) then
+            Log.Logger.LogDebug("{0} sendMessage sequenceId={1}", prefix, %pendingMessage.SequenceId)
         pendingMessages.Enqueue(pendingMessage)
         match connectionHandler.ConnectionState with
         | Ready clientCnx ->

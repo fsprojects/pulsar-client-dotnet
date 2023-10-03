@@ -10,7 +10,7 @@ type BatchMessageAcker internal (batchSize: int) =
     let mutable unackedCount = batchSize
 
     member internal this.AckIndividual (batchIndex: BatchIndex) =
-        let previous = bitSet.[%batchIndex]
+        let previous = bitSet[%batchIndex]
         if previous then
             bitSet.Set(%batchIndex, false)
             unackedCount <- unackedCount - 1
@@ -18,13 +18,13 @@ type BatchMessageAcker internal (batchSize: int) =
 
     member internal this.AckCumulative (batchIndex: BatchIndex) =
         for i in 0 .. %batchIndex do
-            if bitSet.[i] then
-                bitSet.[i] <- false
+            if bitSet[i] then
+                bitSet[i] <- false
                 unackedCount <- unackedCount - 1
         unackedCount = 0
-    
+
     member internal this.BitSet = bitSet
-    
+
     // debug purpose
     member internal this.GetOutstandingAcks() =
         unackedCount
@@ -45,7 +45,7 @@ type BatchMessageAcker internal (batchSize: int) =
     override this.ToString() =
         let sb1 = StringBuilder()
         for i in 0..bitSet.Length-1 do
-            sb1.Append(if bitSet.[i] then '1' else '0') |> ignore
+            sb1.Append(if bitSet[i] then '1' else '0') |> ignore
         let sb2 = StringBuilder()
         sb2.Append("BatchMessageAcker{")
             .Append("batchSize=").Append(batchSize)

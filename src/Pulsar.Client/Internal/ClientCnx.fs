@@ -345,7 +345,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         let payloadPointer = stream.Position
         let metadataLength = payloadPointer - metadataPointer |> int
         let payloadLength = frameLength - (int payloadPointer)
-        let payload = MemoryStreamManager.GetStream()
+        let payload = MemoryStreamManager.GetStream(null, payloadLength)
         let payloadBytes = stream.GetBuffer().AsSpan().Slice(int payloadPointer, payloadLength)
         payload.Write(payloadBytes)
         stream.Seek(metadataPointer, SeekOrigin.Begin) |> ignore

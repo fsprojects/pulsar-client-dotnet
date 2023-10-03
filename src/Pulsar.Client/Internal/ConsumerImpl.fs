@@ -1308,7 +1308,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         stream.Seek(0L, SeekOrigin.Begin) |> ignore
         use binaryReader = new BinaryReader(stream)
         for i in 0..batchSize-1 do
-            Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
+            if Log.Logger.IsEnabled(LogLevel.Debug) then
+                Log.Logger.LogDebug("{0} processing message num - {1} in batch", prefix, i)
             let singleMessageMetadata = Serializer.DeserializeWithLengthPrefix<SingleMessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
             let singleMessagePayload = binaryReader.ReadBytes(singleMessageMetadata.PayloadSize)
 
@@ -1321,13 +1322,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             elif rawMessage.AckSet.Count > 0 && not rawMessage.AckSet[i] then
                 skippedMessages <- skippedMessages + 1
             else
-                let messageId =
-                    {
-                        rawMessage.MessageId with
-                            Partition = partitionIndex
-                            Type = Batch(%i, acker)
-                            TopicName = %""
-                    }
+                let messageId = {
+                    rawMessage.MessageId with
+                        Partition = partitionIndex
+                        Type = Batch(%i, acker)
+                        TopicName = %""
+                }
                 let msgKey = singleMessageMetadata.PartitionKey
                 let getValue () =
                     keyValueProcessor
@@ -1335,32 +1335,32 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     |> Option.defaultWith (fun() -> schemaDecodeFunction singleMessagePayload)
                 let properties =
                     if singleMessageMetadata.Properties.Count > 0 then
-                                singleMessageMetadata.Properties
-                                |> Seq.map (fun prop -> (prop.Key, prop.Value))
-                                |> readOnlyDict
-                            else
-                                EmptyProps
+                        singleMessageMetadata.Properties
+                        |> Seq.map (fun prop -> (prop.Key, prop.Value))
+                        |> readOnlyDict
+                    else
+                        EmptyProps
                 let eventTime =
                     if singleMessageMetadata.ShouldSerializeEventTime() then
                         Nullable(%(int64 singleMessageMetadata.EventTime))
                     else
                         Nullable()
                 let message = Message (
-                                messageId,
-                                singleMessagePayload,
-                                %msgKey,
-                                singleMessageMetadata.PartitionKeyB64Encoded,
-                                properties,
-                                EncryptionContext.FromMetadata rawMessage.Metadata,
-                                getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                                %(int64 singleMessageMetadata.SequenceId),
-                                singleMessageMetadata.OrderingKey,
-                                rawMessage.Metadata.PublishTime,
-                                eventTime,
-                                rawMessage.RedeliveryCount,
-                                rawMessage.Metadata.ReplicatedFrom,
-                                getValue
-                            )
+                    messageId,
+                    singleMessagePayload,
+                    %msgKey,
+                    singleMessageMetadata.PartitionKeyB64Encoded,
+                    properties,
+                    EncryptionContext.FromMetadata rawMessage.Metadata,
+                    getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+                    %(int64 singleMessageMetadata.SequenceId),
+                    singleMessageMetadata.OrderingKey,
+                    rawMessage.Metadata.PublishTime,
+                    eventTime,
+                    rawMessage.RedeliveryCount,
+                    rawMessage.Metadata.ReplicatedFrom,
+                    getValue
+                )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                     deadLettersProcessor.AddMessage(messageId, message)
                 enqueueMessage message

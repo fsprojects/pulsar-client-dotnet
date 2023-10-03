@@ -178,6 +178,6 @@ let inline stackallocspan<'a when 'a: unmanaged> size =
 
 let wrapException (f: unit -> 'a) =
     try
-        Ok(f())
+        Ok <| f()
     with ex ->
-        Error(ex)
+        Error ex
