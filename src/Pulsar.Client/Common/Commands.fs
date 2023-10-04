@@ -2,6 +2,7 @@
 
 open System.Collections
 open System.Collections.Generic
+open System.IO.Pipelines
 open System.Threading.Tasks
 open Microsoft.IO
 open Pulsar.Client.Transaction
@@ -23,8 +24,8 @@ let DEFAULT_MAX_MESSAGE_SIZE = 5_242_880 //5 * 1024 * 1024
 
 
 let private serializeSimpleCommand (command : BaseCommand) =
-    (fun (output: Stream) ->
-        let temp = MemoryStreamManager.GetStream()
+    (fun (output: PipeWriter) ->
+        let temp = MemoryStreamManager.GetStream("simple")
         let binaryWriter = new BinaryWriter(temp)
 
         // write fake totalLength
@@ -52,8 +53,8 @@ let private serializeSimpleCommand (command : BaseCommand) =
 
 
 let private serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: MemoryStream) =
-    (fun (output: Stream) ->
-        let temp = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
+    (fun (output: PipeWriter) ->
+        let temp = MemoryStreamManager.GetStream("payload") :?> RecyclableMemoryStream
         let binaryWriter = new BinaryWriter(temp)
 
         // write fake totalLength

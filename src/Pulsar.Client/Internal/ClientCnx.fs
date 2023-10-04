@@ -1,6 +1,7 @@
 ﻿namespace Pulsar.Client.Internal
 
 open System.Diagnostics
+open System.IO.Pipelines
 open System.Reflection
 open Pulsar.Client.Common
 open System.Collections.Generic
@@ -298,7 +299,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogInformation("{0} operationsMb mailbox has stopped normally", prefix))
     |> ignore
 
-    let sendSerializedPayload (writePayload: WriterStream -> Task, commandType: BaseCommand.Type) =
+    let sendSerializedPayload (writePayload: PipeWriter -> Task, commandType: BaseCommand.Type) =
         if Log.Logger.IsEnabled LogLevel.Debug then
             Log.Logger.LogDebug("{0} Sending message of type {1}", prefix, commandType)
         backgroundTask {
@@ -345,7 +346,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         let payloadPointer = stream.Position
         let metadataLength = payloadPointer - metadataPointer |> int
         let payloadLength = frameLength - (int payloadPointer)
-        let payload = MemoryStreamManager.GetStream(null, payloadLength)
+        let payload = MemoryStreamManager.GetStream("payload", payloadLength)
         let payloadBytes = stream.GetBuffer().AsSpan().Slice(int payloadPointer, payloadLength)
         payload.Write(payloadBytes)
         stream.Seek(metadataPointer, SeekOrigin.Begin) |> ignore

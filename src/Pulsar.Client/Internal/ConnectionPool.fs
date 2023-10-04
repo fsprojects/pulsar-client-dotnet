@@ -147,20 +147,18 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                             do! sslStream.AuthenticateAsClientAsync(physicalAddress.Host, clientCertificates, config.TlsProtocols, false)
 
                             let pipeConnection = StreamConnection.GetDuplex(sslStream, pipeOptions)
-                            let writerStream = StreamConnection.GetWriter(pipeConnection.Output)
                             return
                                 {
                                     Input = pipeConnection.Input
-                                    Output = writerStream
+                                    Output = pipeConnection.Output
                                     Dispose = sslStream.Dispose
                                 }
                         else
                             let pipeConnection = SocketConnection.Create(socket, pipeOptions)
-                            let writerStream = StreamConnection.GetWriter(pipeConnection.Output)
                             return
                                 {
                                     Input = pipeConnection.Input
-                                    Output = writerStream
+                                    Output = pipeConnection.Output
                                     Dispose = pipeConnection.Dispose
                                 }
                     }

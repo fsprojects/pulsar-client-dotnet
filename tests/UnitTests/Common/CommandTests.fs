@@ -2,6 +2,7 @@
 
 open System
 open System.IO
+open System.IO.Pipelines
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Common
@@ -55,13 +56,17 @@ module CommandsTests =
 
     let serializeDeserializeSimpleCommand ((cmd, _): SendTask) =
         let stream = new MemoryStream()
-        (cmd stream).Wait()
+        let writer = PipeWriter.Create(stream, StreamPipeWriterOptions(leaveOpen = true))
+        (cmd writer).Wait()
+        writer.Complete()
         let commandBytes = stream.ToArray()
         commandBytes |> deserializeSimpleCommand
 
     let serializeDeserializePayloadCommand ((cmd, _): SendTask) =
         let stream = new MemoryStream()
-        (cmd stream).Wait()
+        let writer = PipeWriter.Create(stream, StreamPipeWriterOptions(leaveOpen = true))
+        (cmd writer).Wait()
+        writer.Complete()
         let commandBytes = stream.ToArray()
         commandBytes |> deserializePayloadCommand
 
@@ -97,7 +102,7 @@ module CommandsTests =
                 commandSize |> Expect.equal "" 28
                 command.``type``  |> Expect.equal "" CommandType.Connect
                 command.Connect.ClientVersion |> Expect.equal "" clientVersion
-                command.Connect.ProtocolVersion |> Expect.equal "" ((int) protocolVersion)
+                command.Connect.ProtocolVersion |> Expect.equal "" (int protocolVersion)
             }
 
             test "newMessage should return correct frame" {
@@ -185,9 +190,9 @@ module CommandsTests =
                 totalSize |> Expect.equal "" 18
                 commandSize |> Expect.equal "" 14
                 command.Ack.ConsumerId |> Expect.equal "" %consumerId
-                command.Ack.MessageIds.[0].entryId |> Expect.equal "" (uint64 %messageId.EntryId)
-                command.Ack.MessageIds.[0].ledgerId |> Expect.equal "" (uint64 %messageId.LedgerId)
-                command.Ack.MessageIds.[0].Partition |> Expect.equal "" %messageId.Partition
+                command.Ack.MessageIds[0].entryId |> Expect.equal "" (uint64 %messageId.EntryId)
+                command.Ack.MessageIds[0].ledgerId |> Expect.equal "" (uint64 %messageId.LedgerId)
+                command.Ack.MessageIds[0].Partition |> Expect.equal "" %messageId.Partition
             }
 
             test "newLookup should return correct frame" {

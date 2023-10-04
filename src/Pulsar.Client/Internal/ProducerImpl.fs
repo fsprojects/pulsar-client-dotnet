@@ -1,6 +1,7 @@
 ﻿namespace Pulsar.Client.Api
 
 open System.Diagnostics
+open System.IO.Pipelines
 open System.Threading
 
 open System.Threading.Tasks
@@ -222,7 +223,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             use stream = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
             use reader = new BinaryReader(stream)
             let send, _ = msg.Payload
-            do! send stream // materialize stream
+            let writer = PipeWriter.Create(stream, StreamPipeWriterOptions(leaveOpen = true))
+            do! send writer // materialize stream
+            do! writer.CompleteAsync()
             let streamSize = stream.Length
             stream.Seek(4L, SeekOrigin.Begin) |> ignore
             let cmdSize = reader.ReadInt32() |> int32FromBigEndian
