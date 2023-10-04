@@ -338,24 +338,32 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogInformation("{0} sendMb mailbox has stopped normally", prefix))
     |> ignore
 
-    let readMessage (reader: BinaryReader) (stream: MemoryStream) frameLength =
-        reader.ReadInt16() |> int16FromBigEndian |> invalidArgIf ((<>) MagicNumber) "Invalid magicNumber" |> ignore
-        let messageCheckSum  = reader.ReadInt32() |> int32FromBigEndian
-        let metadataPointer = stream.Position
-        let metadata = Serializer.DeserializeWithLengthPrefix<MessageMetadata>(stream, PrefixStyle.Fixed32BigEndian)
-        let payloadPointer = stream.Position
-        let metadataLength = payloadPointer - metadataPointer |> int
-        let payloadLength = frameLength - (int payloadPointer)
+    let readMessage (reader: byref<SequenceReader<byte>>) frameLength =
+        let stream = reader.Sequence
+        let mutable magicNumber = -1s
+        if (SequenceReaderExtensions.TryReadBigEndian(&reader, &magicNumber) |> not)
+           || magicNumber <> MagicNumber then
+            raise <| ArgumentException("Invalid magicNumber")
+        let mutable messageCheckSum = -1
+        SequenceReaderExtensions.TryReadBigEndian(&reader, &messageCheckSum) |> ignore
+        let metadataPointer = int reader.Consumed
+        let mutable metadataLength = -1
+        SequenceReaderExtensions.TryReadBigEndian(&reader, &metadataLength) |> ignore
+        let metadata = Serializer.Deserialize<MessageMetadata>(reader.Sequence.Slice(reader.Consumed, metadataLength))
+        reader.Advance(metadataLength)
+        let payloadPointer = int reader.Consumed
+        let payloadLength = frameLength - payloadPointer
         let payload = MemoryStreamManager.GetStream("payload", payloadLength)
-        let payloadBytes = stream.GetBuffer().AsSpan().Slice(int payloadPointer, payloadLength)
-        payload.Write(payloadBytes)
-        stream.Seek(metadataPointer, SeekOrigin.Begin) |> ignore
-        let calculatedCheckSum = CRC32C.GetForMS(stream, metadataLength + payloadLength) |> int32
+        let payloadBytes = reader.Sequence.Slice(payloadPointer, payloadLength)
+        for segment in payloadBytes do
+            payload.Write(segment.Span)
+        let size = frameLength-metadataPointer
+        let calculatedCheckSum = CRC32C.GetForROS(stream.Slice(metadataPointer, size)) |> int32
         if (messageCheckSum <> calculatedCheckSum) then
             Log.Logger.LogError("{0} Invalid checksum. Received: {1} Calculated: {2}", prefix, messageCheckSum, calculatedCheckSum)
         (metadata, payload, messageCheckSum = calculatedCheckSum)
 
-    let readCommand (command: BaseCommand) reader stream frameLength =
+    let readCommand (command: BaseCommand) (reader: byref<SequenceReader<byte>>) frameLength =
         match command.``type`` with
         | BaseCommand.Type.Connected ->
             Ok (XCommandConnected command.Connected)
@@ -364,7 +372,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | BaseCommand.Type.SendReceipt ->
             Ok (XCommandSendReceipt command.SendReceipt)
         | BaseCommand.Type.Message ->
-            let metadata,payload,checksumValid = readMessage reader stream frameLength
+            let metadata,payload,checksumValid = readMessage &reader frameLength
             Ok (XCommandMessage (command.Message, metadata, payload, checksumValid))
         | BaseCommand.Type.LookupResponse ->
             Ok (XCommandLookupResponse command.lookupTopicResponse)
@@ -408,29 +416,24 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             Result.Error (UnknownCommandType unknownType)
 
     let tryParse (buffer: ReadOnlySequence<byte>) =
-        let length = int buffer.Length
-        if (length >= 8) then
-            let array = ArrayPool.Shared.Rent length
+        let length = int buffer.Length // at least 8
+        let mutable reader = SequenceReader<byte>(buffer)
+        let mutable totalLength = -1
+        SequenceReaderExtensions.TryReadBigEndian(&reader, &totalLength) |> ignore
+        let frameLength = totalLength + 4
+        if (length >= frameLength) then
+            let mutable baseCommandLength = -1
+            SequenceReaderExtensions.TryReadBigEndian(&reader, &baseCommandLength) |> ignore
+            let command = Serializer.Deserialize<BaseCommand>(buffer.Slice(reader.Consumed, baseCommandLength))
+            reader.Advance baseCommandLength
+            if Log.Logger.IsEnabled LogLevel.Debug then
+                Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
+            let consumed = int64 frameLength |> buffer.GetPosition
             try
-                buffer.CopyTo(Span(array))
-                use stream =  new MemoryStream(array, 0, array.Length, true, true)
-                use reader = new BinaryReader(stream)
-                let totalength = reader.ReadInt32() |> int32FromBigEndian
-                let frameLength = totalength + 4
-                if (length >= frameLength) then
-                    let command = Serializer.DeserializeWithLengthPrefix<BaseCommand>(stream, PrefixStyle.Fixed32BigEndian)
-                    if Log.Logger.IsEnabled LogLevel.Debug then
-                        Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
-                    let consumed = int64 frameLength |> buffer.GetPosition
-                    try
-                        let wrappedCommand = readCommand command reader stream frameLength
-                        wrappedCommand, consumed
-                    with ex ->
-                        Result.Error (CorruptedCommand ex), consumed
-                else
-                    Result.Error IncompleteCommand, SequencePosition()
-            finally
-                ArrayPool.Shared.Return array
+                let wrappedCommand = readCommand command &reader frameLength
+                wrappedCommand, consumed
+            with ex ->
+                Result.Error (CorruptedCommand ex), consumed
         else
             Result.Error IncompleteCommand, SequencePosition()
 
@@ -795,8 +798,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
             try
                 while continueLooping do
-                    let! result = reader.ReadAsync()
-                    let buffer = result.Buffer
+                    let! result = reader.ReadAtLeastAsync(8)
                     if result.IsCompleted then
                         if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
                             Log.Logger.LogWarning("{0} New connection was aborted", prefix)
@@ -804,6 +806,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                         post operationsMb ChannelInactive
                         continueLooping <- false
                     else
+                        let buffer = result.Buffer
                         match tryParse buffer with
                         | Result.Ok xcmd, consumed ->
                             handleCommand xcmd

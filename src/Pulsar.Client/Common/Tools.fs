@@ -166,8 +166,8 @@ let postAndAsyncReply (channel: Channel<'T>) f =
     (f tcs) |> channel.Writer.TryWrite |> ignore
     tcs.Task
 
-let post (channel: Channel<'T>) =
-    channel.Writer.TryWrite >> ignore
+let post (channel: Channel<'T>) msg =
+    channel.Writer.TryWrite msg |> ignore
 
 let getSpan (stream: MemoryStream) =
     stream.GetBuffer().AsSpan(0, int stream.Length)

@@ -92,7 +92,7 @@ let private serializePayloadCommand (command : BaseCommand) (metadata: MessageMe
 
         // write CRC
         temp.Seek(int64 crcPayloadStart, SeekOrigin.Begin) |> ignore
-        let crc = int32 <| CRC32C.GetForRMS(temp, totalMetadataSize + payloadSize)
+        let crc = int32 <| CRC32C.GetForROS(temp.GetReadOnlySequence().Slice(temp.Position, totalMetadataSize + payloadSize))
         temp.Seek(int64 crcStart, SeekOrigin.Begin) |> ignore
         binaryWriter.Write(int32ToBigEndian crc)
 
