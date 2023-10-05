@@ -23,4 +23,7 @@
     <ProjectReference Include="..\..\src\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" />
     <ProjectReference Include="..\..\src\Pulsar.Client\Pulsar.Client.fsproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="runtimeconfig.template.json" />
+  </ItemGroup>
 </Project>
