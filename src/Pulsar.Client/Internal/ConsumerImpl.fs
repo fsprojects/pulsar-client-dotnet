@@ -99,7 +99,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mutable duringSeek = None
     let initialStartMessageId = startMessageId
     let mutable incomingMessagesSize = 0L
-    let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
     let deadLettersProcessor = consumerConfig.DeadLetterProcessor topicName
     let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable
     let stats =
@@ -155,7 +154,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let increaseAvailablePermits delta =
         avalablePermits <- avalablePermits + delta
-        if avalablePermits >= receiverQueueRefillThreshold then
+        if avalablePermits >= incomingMessages.Count / 2 then
             this.SendFlowPermits avalablePermits
             avalablePermits <- 0
 
