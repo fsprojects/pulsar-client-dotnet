@@ -20,7 +20,8 @@ open System.Runtime.InteropServices
 open Pulsar.Client.Transaction
 open System.Threading.Channels
 
-type SendMessageRequest<'T> = MessageBuilder<'T> * TaskCompletionSource<MessageId> * bool
+type SendMessageRequest<'T> =
+    (struct(MessageBuilder<'T> * TaskCompletionSource<MessageId> * bool))
 
 type internal ProducerTickType =
     | SendBatchTick
@@ -110,7 +111,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 failMessage message tcs ex
         | BatchCallbacks tcss ->
             tcss
-            |> Seq.iter (fun (_, message, tcs) ->
+            |> Array.iter (fun ((_, message, tcs)) ->
                 failMessage message tcs ex)
 
     let failPendingBatchMessages (ex: exn) =
@@ -122,7 +123,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             let msg = pendingMessages.Dequeue()
             failPendingMessage msg ex
         while blockedRequests.Count > 0 do
-            let _, channel, _ = blockedRequests.Dequeue()
+            let struct(_, channel, _) = blockedRequests.Dequeue()
             channel.SetException ex
         if producerConfig.BatchingEnabled then
             failPendingBatchMessages ex
@@ -222,7 +223,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         backgroundTask {
             use stream = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
             use reader = new BinaryReader(stream)
-            let send, _ = msg.Payload
+            let struct(send, _) = msg.Payload
             let writer = PipeWriter.Create(stream, StreamPipeWriterOptions(leaveOpen = true))
             do! send writer // materialize stream
             do! writer.CompleteAsync()
@@ -312,7 +313,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         let compressedBatchPayload = compressionCodec.Encode stream
         if (compressedBatchPayload.Length > maxMessageSize) then
             batchCallbacks
-            |> Seq.iter (fun (_, message, tcs) ->
+            |> Array.iter (fun ((_, message, tcs)) ->
                 let ex = InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes"
                 failMessage message tcs ex)
         else
@@ -333,7 +334,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
             | Error ex ->
                 batchCallbacks
-                |> Seq.iter (fun (_, message, tcs) ->
+                |> Array.iter (fun ((_, message, tcs)) ->
                     failMessage message tcs ex)
 
     let canAddToCurrentBatch (msg: MessageBuilder<'T>) =
@@ -373,7 +374,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             true
 
     let beginSendMessage (sendRequest: SendMessageRequest<'T>) =
-        let message, channel, isFireAndForget = sendRequest
+        let struct(message, channel, isFireAndForget) = sendRequest
         if canEnqueueRequest channel sendRequest 1 then
             if isFireAndForget then
                 channel.SetResult <| Unchecked.defaultof<MessageId>
@@ -640,7 +641,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                             | BatchCallbacks tcss ->
                                 tcss
-                                |> Array.iter (fun (msgId, msg, tcs) ->
+                                |> Array.iter (fun ((msgId, msg, tcs)) ->
                                     let msgId = { LedgerId = receipt.LedgerId; EntryId = receipt.EntryId; Partition = partitionIndex;
                                                     Type = Batch msgId; TopicName = %""; ChunkMessageIds = None }
                                     interceptors.OnSendAcknowledgement(this, msg, msgId, null)

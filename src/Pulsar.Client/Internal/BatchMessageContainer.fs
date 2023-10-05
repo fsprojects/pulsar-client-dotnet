@@ -15,40 +15,41 @@ module internal BatchHelpers =
     [<Literal>]
     let INITIAL_BATCH_BUFFER_SIZE = 1024
 
-    let makeBatch<'T> (messageStream: MemoryStream) (batchItems: BatchItem<'T> seq) =
+    let makeBatch<'T> (messageStream: MemoryStream) (batchItems: ResizeArray<BatchItem<'T>>) =
         let messageWriter = new BinaryWriter(messageStream)
         let batchCallbacks =
-            batchItems
-            |> Seq.mapi (fun index batchItem ->
-                let message = batchItem.Message
-                let smm =
-                    SingleMessageMetadata(
-                       PayloadSize = message.Payload.Length,
-                       SequenceId = (batchItem.SequenceId |> uint64)
-                   )
-                match message.Key with
-                | Some key ->
-                    smm.PartitionKey <- %key.PartitionKey
-                    smm.PartitionKeyB64Encoded <- key.IsBase64Encoded
-                | _ ->
-                    ()
-                match message.OrderingKey with
-                | Some orderingKey ->
-                    smm.OrderingKey <- orderingKey
-                | _ ->
-                    ()
-                match message.EventTime with
-                | Some eventTime ->
-                    smm.EventTime <- eventTime |> uint64
-                | _ ->
-                    ()
-                if message.Properties.Count > 0 then
-                    for property in message.Properties do
-                        smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
-                Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
-                messageWriter.Write(message.Payload)
-                (BatchDetails(%index, BatchMessageAcker.NullAcker), message, batchItem.Tcs))
-            |> Seq.toArray
+            [|
+                for index in 0 .. batchItems.Count - 1 do
+                    let batchItem = batchItems[index]
+                    let message = batchItem.Message
+                    let smm =
+                        SingleMessageMetadata(
+                           PayloadSize = message.Payload.Length,
+                           SequenceId = (batchItem.SequenceId |> uint64)
+                       )
+                    match message.Key with
+                    | Some key ->
+                        smm.PartitionKey <- %key.PartitionKey
+                        smm.PartitionKeyB64Encoded <- key.IsBase64Encoded
+                    | _ ->
+                        ()
+                    match message.OrderingKey with
+                    | Some orderingKey ->
+                        smm.OrderingKey <- orderingKey
+                    | _ ->
+                        ()
+                    match message.EventTime with
+                    | Some eventTime ->
+                        smm.EventTime <- eventTime |> uint64
+                    | _ ->
+                        ()
+                    if message.Properties.Count > 0 then
+                        for property in message.Properties do
+                            smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
+                    Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
+                    messageWriter.Write(message.Payload)
+                    struct(BatchDetails(%index, BatchMessageAcker.NullAcker), message, batchItem.Tcs)
+            |]
         batchCallbacks
 
 type internal OpSendMsg<'T> = BatchCallback<'T>[]
@@ -119,16 +120,16 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
         batchItems.Add(batchItem)
         this.IsBatchFull()
     override this.CreateOpSendMsg (stream: MemoryStream) =
-        let lowestSequenceId = batchItems.[0].SequenceId
-        let highestSequenceId = batchItems.[batchItems.Count - 1].SequenceId
+        let lowestSequenceId = batchItems[0].SequenceId
+        let highestSequenceId = batchItems[batchItems.Count - 1].SequenceId
         {
             OpSendMsg = makeBatch stream batchItems
             LowestSequenceId = lowestSequenceId
             HighestSequenceId = highestSequenceId
-            PartitionKey = batchItems.[0].Message.Key
-            OrderingKey = batchItems.[0].Message.OrderingKey
+            PartitionKey = batchItems[0].Message.Key
+            OrderingKey = batchItems[0].Message.OrderingKey
             TxnId = this.CurrentTxnId
-            ReplicationClusters = batchItems.[0].Message.ReplicationClusters
+            ReplicationClusters = batchItems[0].Message.ReplicationClusters
             Stream = stream
         }
     override this.CreateOpSendMsgs _ =
@@ -182,16 +183,16 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
     override this.CreateOpSendMsgs (stream: MemoryStream) =
         keyBatchItems
         |> Seq.map (fun (KeyValue(_, batchItems)) ->
-            let lowestSequenceId = batchItems.[0].SequenceId
-            let highestSequenceId = batchItems.[batchItems.Count - 1].SequenceId
+            let lowestSequenceId = batchItems[0].SequenceId
+            let highestSequenceId = batchItems[batchItems.Count - 1].SequenceId
             {
                 OpSendMsg = makeBatch stream batchItems
                 LowestSequenceId = lowestSequenceId
                 HighestSequenceId = highestSequenceId
-                PartitionKey = batchItems.[0].Message.Key
-                OrderingKey = batchItems.[0].Message.OrderingKey
+                PartitionKey = batchItems[0].Message.Key
+                OrderingKey = batchItems[0].Message.OrderingKey
                 TxnId = this.CurrentTxnId
-                ReplicationClusters = batchItems.[0].Message.ReplicationClusters
+                ReplicationClusters = batchItems[0].Message.ReplicationClusters
                 Stream = stream
             })
     override this.Clear() =

@@ -299,7 +299,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogInformation("{0} operationsMb mailbox has stopped normally", prefix))
     |> ignore
 
-    let sendSerializedPayload (writePayload: PipeWriter -> Task, commandType: BaseCommand.Type) =
+    let sendSerializedPayload (struct(writePayload: PipeWriter -> Task, commandType: BaseCommand.Type)) =
         if Log.Logger.IsEnabled LogLevel.Debug then
             Log.Logger.LogDebug("{0} Sending message of type {1}", prefix, commandType)
         backgroundTask {
@@ -324,7 +324,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 let! _ = sendSerializedPayload payload
                 ()
             | SocketRequestMessageWithReply (reqId, payload, channel) ->
-                post requestsMb (AddRequest(reqId, snd payload, channel))
+                let struct(_, commandType) = payload
+                post requestsMb (AddRequest(reqId, commandType, channel))
                 let! _ = sendSerializedPayload payload
                 ()
             | SocketMessage.Stop ->
@@ -341,14 +342,14 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     let readMessage (reader: byref<SequenceReader<byte>>) frameLength =
         let stream = reader.Sequence
         let mutable magicNumber = -1s
-        if (SequenceReaderExtensions.TryReadBigEndian(&reader, &magicNumber) |> not)
+        if (reader.TryReadBigEndian(&magicNumber) |> not)
            || magicNumber <> MagicNumber then
             raise <| ArgumentException("Invalid magicNumber")
         let mutable messageCheckSum = -1
-        SequenceReaderExtensions.TryReadBigEndian(&reader, &messageCheckSum) |> ignore
+        reader.TryReadBigEndian(&messageCheckSum) |> ignore
         let metadataPointer = int reader.Consumed
         let mutable metadataLength = -1
-        SequenceReaderExtensions.TryReadBigEndian(&reader, &metadataLength) |> ignore
+        reader.TryReadBigEndian(&metadataLength) |> ignore
         let metadata = Serializer.Deserialize<MessageMetadata>(reader.Sequence.Slice(reader.Consumed, metadataLength))
         reader.Advance(metadataLength)
         let payloadPointer = int reader.Consumed
@@ -419,11 +420,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         let length = int buffer.Length // at least 8
         let mutable reader = SequenceReader<byte>(buffer)
         let mutable totalLength = -1
-        SequenceReaderExtensions.TryReadBigEndian(&reader, &totalLength) |> ignore
+        reader.TryReadBigEndian(&totalLength) |> ignore
         let frameLength = totalLength + 4
         if (length >= frameLength) then
             let mutable baseCommandLength = -1
-            SequenceReaderExtensions.TryReadBigEndian(&reader, &baseCommandLength) |> ignore
+            reader.TryReadBigEndian(&baseCommandLength) |> ignore
             let command = Serializer.Deserialize<BaseCommand>(buffer.Slice(reader.Consumed, baseCommandLength))
             reader.Advance baseCommandLength
             if Log.Logger.IsEnabled LogLevel.Debug then

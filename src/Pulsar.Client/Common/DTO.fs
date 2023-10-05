@@ -131,7 +131,7 @@ type internal AckType =
         | AckType.Cumulative -> CommandAck.AckType.Cumulative
 
 
-
+[<Struct>]
 type internal SendReceipt =
     {
         SequenceId: int64
@@ -403,7 +403,7 @@ type MessageBuilder =
         DisableReplication
 
 
-type internal SendTask = (PipeWriter -> Task) * BaseCommand.Type
+type internal SendTask = (struct((PipeWriter -> Task) * BaseCommand.Type))
 type internal Connection =
     {
         Input: PipeReader
@@ -422,11 +422,15 @@ type ChunkDetails =
         member this.IsLast =
             this.ChunkId = this.TotalChunks - 1
 
-type internal SingleCallback<'T> = ChunkDetails option * MessageBuilder<'T> * TaskCompletionSource<MessageId> option
-type internal BatchCallback<'T> = BatchDetails * MessageBuilder<'T> * TaskCompletionSource<MessageId> option
+type internal SingleCallback<'T> =
+    (struct(ChunkDetails option * MessageBuilder<'T> * TaskCompletionSource<MessageId> option))
+type internal BatchCallback<'T> =
+    (struct(BatchDetails * MessageBuilder<'T> * TaskCompletionSource<MessageId> option))
+
+[<Struct>]
 type internal PendingCallback<'T> =
-    | SingleCallback of SingleCallback<'T>
-    | BatchCallbacks of BatchCallback<'T>[]
+    | SingleCallback of single:SingleCallback<'T>
+    | BatchCallbacks of batch:BatchCallback<'T>[]
 
 type internal PendingMessage<'T> =
     {

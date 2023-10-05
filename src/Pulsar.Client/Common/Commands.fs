@@ -24,7 +24,7 @@ let DEFAULT_MAX_MESSAGE_SIZE = 5_242_880 //5 * 1024 * 1024
 
 
 let private serializeSimpleCommand (command : BaseCommand) =
-    (fun (output: PipeWriter) ->
+    struct((fun (output: PipeWriter) ->
         let temp = MemoryStreamManager.GetStream("simple")
         let binaryWriter = new BinaryWriter(temp)
 
@@ -49,11 +49,11 @@ let private serializeSimpleCommand (command : BaseCommand) =
                 temp.Dispose()
                 binaryWriter.Dispose()
         } :> Task
-    ),  command.``type``
+    ),  command.``type``)
 
 
 let private serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: MemoryStream) =
-    (fun (output: PipeWriter) ->
+    struct((fun (output: PipeWriter) ->
         let temp = MemoryStreamManager.GetStream("payload") :?> RecyclableMemoryStream
         let binaryWriter = new BinaryWriter(temp)
 
@@ -109,7 +109,7 @@ let private serializePayloadCommand (command : BaseCommand) (metadata: MessageMe
                 temp.Dispose()
                 binaryWriter.Dispose()
         } :> Task
-    ), command.``type``
+    ), command.``type``)
 
 let newPartitionMetadataRequest (topicName : CompleteTopicName) (requestId : RequestId) =
     let request = CommandPartitionedTopicMetadata(Topic = %topicName, RequestId = %requestId)
