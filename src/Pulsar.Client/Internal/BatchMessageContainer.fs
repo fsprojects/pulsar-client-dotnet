@@ -61,7 +61,7 @@ type internal OpSendMsgWrapper<'T> = {
     PartitionKey: MessageKey option
     OrderingKey: byte[] option
     TxnId: TxnId option
-    ReplicationClusters: IEnumerable<string> option
+    ReplicationClusters: seq<string> option
 }
 
 [<AbstractClass>]
@@ -97,8 +97,8 @@ type internal MessageContainer<'T>(config: ProducerConfiguration) =
             txn.Id = currentTxnId
         | _ ->
             true
-    abstract member CreateOpSendMsg: MemoryStream -> OpSendMsgWrapper<'T>
-    abstract member CreateOpSendMsgs: MemoryStream -> seq<OpSendMsgWrapper<'T>>
+    abstract member CreateOpSendMsg: unit -> OpSendMsgWrapper<'T>
+    abstract member CreateOpSendMsgs: unit -> seq<OpSendMsgWrapper<'T>>
     abstract member Clear: unit -> unit
     abstract member IsMultiBatches: bool
     abstract member Discard: exn -> unit
@@ -119,8 +119,9 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
         this.AddStart(prefix, batchItem)
         batchItems.Add(batchItem)
         this.IsBatchFull()
-    override this.CreateOpSendMsg (stream: MemoryStream) =
+    override this.CreateOpSendMsg () =
         let lowestSequenceId = batchItems[0].SequenceId
+        let stream = MemoryStreamManager.GetStream()
         let highestSequenceId = batchItems[batchItems.Count - 1].SequenceId
         {
             OpSendMsg = makeBatch stream batchItems
@@ -132,7 +133,7 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
             ReplicationClusters = batchItems[0].Message.ReplicationClusters
             Stream = stream
         }
-    override this.CreateOpSendMsgs _ =
+    override this.CreateOpSendMsgs() =
         raise <| NotSupportedException()
     override this.Clear() =
         batchItems.Clear()
@@ -178,11 +179,12 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
             arr.Add(batchItem)
             keyBatchItems.Add(key, arr)
         this.IsBatchFull()
-    override this.CreateOpSendMsg _ =
+    override this.CreateOpSendMsg() =
         raise <| NotSupportedException()
-    override this.CreateOpSendMsgs (stream: MemoryStream) =
+    override this.CreateOpSendMsgs () =
         keyBatchItems
         |> Seq.map (fun (KeyValue(_, batchItems)) ->
+            let stream = MemoryStreamManager.GetStream()
             let lowestSequenceId = batchItems[0].SequenceId
             let highestSequenceId = batchItems[batchItems.Count - 1].SequenceId
             {

@@ -35,14 +35,14 @@ let tests =
                 .ProducerName("compression-single")
                 .EnableBatching(enableBatching)
                 .CompressionType(compressionType)
-                .CreateAsync() 
+                .CreateAsync()
 
         let! consumer =
             client.NewConsumer()
                 .Topic(topicName)
                 .ConsumerName("compression-single")
                 .SubscriptionName("test-subscription")
-                .SubscribeAsync() 
+                .SubscribeAsync()
 
         let sendMessages = if enableBatching then fastProduceMessages else produceMessages
         let messagesCount = 10
@@ -59,7 +59,7 @@ let tests =
                     do! consumeMessages consumer messagesCount "compression-consumer"
                 }:> Task)
 
-        do! Task.WhenAll(producerTask, consumerTask) 
+        do! Task.WhenAll(producerTask, consumerTask)
 
         Log.Debug("Finished Send and receive {0} compressed message using '{0}'", singleOrBatched, compressionType)
     }

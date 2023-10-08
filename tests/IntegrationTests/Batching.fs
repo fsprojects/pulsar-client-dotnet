@@ -17,12 +17,11 @@ open System.Text
 [<Tests>]
 let tests =
 
-
     testList "Batching" [
 
-        testTask "Batch get sended if batch size exceeds" {
+        testTask "Batch get sent if batch size exceeds" {
 
-            Log.Debug("Started 'Batch get sended if batch size exceeds'")
+            Log.Debug("Started 'Batch get sent if batch size exceeds'")
 
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
@@ -46,13 +45,13 @@ let tests =
             do! fastProduceMessages producer messagesNumber "batch producer"
             do! consumeMessages consumer messagesNumber "batch consumer"
 
-            Log.Debug("Finished 'Batch get sended if batch size exceeds'")
+            Log.Debug("Finished 'Batch get sent if batch size exceeds'")
 
         }
 
-        testTask "Batch get sended if timeout exceeds" {
+        testTask "Batch get sent if timeout exceeds" {
 
-            Log.Debug("Started 'Batch get sended if timeout exceeds'")
+            Log.Debug("Started 'Batch get sent if timeout exceeds'")
 
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
@@ -81,7 +80,7 @@ let tests =
 
             do! consumeMessages consumer messagesNumber "batch consumer"
 
-            Log.Debug("Finished 'Batch get sended if timeout exceeds'")
+            Log.Debug("Finished 'Batch get sent if timeout exceeds'")
 
         }
 

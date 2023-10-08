@@ -344,12 +344,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         let batchSize = batchMessageContainer.NumMessagesInBatch
         Log.Logger.LogTrace("{0} Batching the messages from the batch container with {1} messages", prefix, batchSize)
         if batchSize > 0 then
-            let stream = MemoryStreamManager.GetStream()
             if batchMessageContainer.IsMultiBatches then
-                for msg in batchMessageContainer.CreateOpSendMsgs stream do
+                for msg in batchMessageContainer.CreateOpSendMsgs() do
                     processOpSendMsg msg
             else
-                let msg = batchMessageContainer.CreateOpSendMsg stream
+                let msg = batchMessageContainer.CreateOpSendMsg()
                 processOpSendMsg msg
         batchMessageContainer.Clear()
 
