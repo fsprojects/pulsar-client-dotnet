@@ -8,6 +8,9 @@
   <PropertyGroup>
     <NoWarn>3186</NoWarn>
   </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <DefineConstants>TRACE;NOTLS</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <Compile Include="Expect.fs" />
     <Compile Include="Common.fs" />
