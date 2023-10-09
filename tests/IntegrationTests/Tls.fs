@@ -19,19 +19,19 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let numberOfMessages = 10
             let messageIds = ResizeArray<MessageId>()
-            
+
             let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
-                    .CreateAsync() 
-            
+                    .CreateAsync()
+
             let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName("concurrent")
                     .SubscriptionName("test-subscription")
                     .SubscribeAsync()
-                    
+
             let producerTask =
                 Task.Run(fun () ->
                     task {
@@ -47,7 +47,7 @@ let tests =
                         do! consumer.DisposeAsync()
                     }:> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) 
+            do! Task.WhenAll(producerTask, consumerTask)
         }
 
     ]

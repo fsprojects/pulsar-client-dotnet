@@ -165,7 +165,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         match producerConfig.MessageEncryptor with
         | Some msgCrypto ->
             try
-                let encMsg = msgCrypto.Encrypt(payload.GetBuffer())
+                let encMsg = msgCrypto.Encrypt(payload.ToArray())
                 encMsg.EncryptionKeys |> Array.iter (EncryptionKey.ToProto >> msgMetadata.EncryptionKeys.Add)
                 msgMetadata.EncryptionAlgo <- encMsg.EncryptionAlgo
                 msgMetadata.EncryptionParam <- encMsg.EncryptionParam
@@ -320,7 +320,6 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             let encryptResult = encrypt metadata compressedBatchPayload
             match encryptResult with
             | Ok encryptedBatchPayload ->
-                stats.UpdateNumMsgsSent(batchSize, int compressedBatchPayload.Length)
                 let sendTask =
                     Commands.newSend producerId lowestSequenceId (Some highestSequenceId) batchSize metadata encryptedBatchPayload
                 let pendingMessage = {
@@ -330,6 +329,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     Callback = BatchCallbacks batchCallbacks
                     CreatedAt = %Stopwatch.GetTimestamp()
                 }
+                stats.UpdateNumMsgsSent(batchSize, int encryptedBatchPayload.Length)
                 sendMessage pendingMessage
                 lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
             | Error ex ->
@@ -435,6 +435,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     let uuid = if isChunked then $"{producerName}-{sequenceId}" else null
                     let messageIds = if isChunked then Array.zeroCreate totalChunks else Array.empty
                     let txnId = message.Txn |> Option.map (fun txn -> txn.Id)
+                    let payloadBuffer = if isChunked then compressedPayload.GetBuffer() else null // shouldn't be RMS stream
                     while chunkId < totalChunks && not chunkError do
                         let metadata = createMessageMetadata sequenceId txnId None
                                            message.Payload.Length message.Key message.Properties message.DeliverAt
@@ -445,7 +446,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 metadata.ChunkId <- chunkId
                                 metadata.NumChunksFromMsg <- totalChunks
                                 metadata.TotalChunkMsgSize <- payloadLength
-                                new MemoryStream(compressedPayload.GetBuffer(), readStartIndex, Math.Min(maxMessageSize, payloadLength - readStartIndex) )
+                                new MemoryStream(payloadBuffer, readStartIndex, Math.Min(maxMessageSize, payloadLength - readStartIndex) )
                             else
                                 compressedPayload
                         let encryptResult = encrypt metadata chunkPayload

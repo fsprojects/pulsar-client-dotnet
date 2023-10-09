@@ -585,7 +585,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 match consumerConfig.MessageDecryptor with
                 | Some msgCrypto ->
                     let encryptionKeys = rawMessage.Metadata.EncryptionKeys
-                    let encMsg = EncryptedMessage(rawMessage.Payload.GetBuffer(), encryptionKeys,
+                    let encMsg = EncryptedMessage(rawMessage.Payload.ToArray(), encryptionKeys,
                                                   rawMessage.Metadata.EncryptionAlgo, rawMessage.Metadata.EncryptionParam)
                     let decryptPayload = msgCrypto.Decrypt(encMsg)
                     { rawMessage with Payload = new MemoryStream(decryptPayload) } |> Ok

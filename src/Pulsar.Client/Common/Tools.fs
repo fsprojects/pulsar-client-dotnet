@@ -169,13 +169,6 @@ let postAndAsyncReply (channel: Channel<'T>) f =
 let post (channel: Channel<'T>) msg =
     channel.Writer.TryWrite msg |> ignore
 
-let getSpan (stream: MemoryStream) =
-    stream.GetBuffer().AsSpan(0, int stream.Length)
-
-let inline stackallocspan<'a when 'a: unmanaged> size =
-    let p = NativePtr.stackalloc<'a> size |> NativePtr.toVoidPtr
-    Span<'a>(p, size)
-
 let wrapException (f: unit -> 'a) =
     try
         Ok <| f()

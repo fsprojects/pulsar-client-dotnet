@@ -19,14 +19,14 @@ dZUPZFuZZIsS+IfZD2TrEHIG2ie0Mof05yDor9cJqy8TmfxMggY/KQNaCLW+Acpm
 znS+7uQ2FD9AXZ5beyv+wcGAGGFsGFDOluepoe1ljTmtb1rjxY69R+AiNAJdr0KM
 mHymC9eqBKD1t1i86wIDAQAB
 -----END PUBLIC KEY-----").
-        
+
         Add("Rsa1024key2", @"-----BEGIN PUBLIC KEY-----
 MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC59k14/QlPcOgvvl7rujdm2RFi
 Mgc1cwbZ5yUGYBrGFd6eVnvH16Q7igyde5e0WytEYpeabB1KcRVgDSkElNkgs9Ns
 7UcYaKbnRqHRgPjMdyu+X70mHOeja2iMjPxR+hrnZFrNM2x0MevHK26WORUPFHIE
 /2GVt86a3z0d8xj0qQIDAQAB
 -----END PUBLIC KEY-----").
-        
+
         Add("Rsa1024key3", @"-----BEGIN PUBLIC KEY-----
 MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC5z1YTpTdHRy0bLtaklkMiXGjk
 8BTaB644Bpqq6sA9TV/IQq29qHBmQexPK4uYbToKxmul5JkupuEQ5ACAIo2MO17y
@@ -34,7 +34,7 @@ S2xdqMyIsWeLKvbVxKcOPUiV1s5SD2FMkcZNc+iQLxZRdqs5QOBxmwKjSKBJ2owR
 JMMHhylIlH9EMaN84QIDAQAB
 -----END PUBLIC KEY-----")
 
-    
+
 let privateKeysConsumer1 =
     Map.empty.
         Add("Rsa1024key1", @"-----BEGIN RSA PRIVATE KEY-----
@@ -91,7 +91,7 @@ type Consumer2KeyReader() =
     interface ICryptoKeyReader with
         member this.GetPublicKey(_) = raise (NotImplementedException())
 
-        member this.GetPrivateKey(keyName, _) =            
+        member this.GetPrivateKey(keyName, _) =
             { Key = Encoding.UTF8.GetBytes(privateKeysConsumer2.Item keyName); Metadata = null }
 
 
@@ -110,7 +110,7 @@ let tests =
                   .Topic(topicName)
                   .MessageEncryptor(MessageEncryptor([|"Rsa1024key1"|], ProducerKeyReader()))
                   .CreateAsync()
-              
+
 
             let! consumer =
               client.NewConsumer()
@@ -118,7 +118,7 @@ let tests =
                   .MessageDecryptor(MessageDecryptor(Consumer1KeyReader()))
                   .ConsumerName(consumerName).SubscriptionName("test-subscription")
                   .SubscribeAsync()
-              
+
 
             let producerTask =
               Task.Run(fun () ->
@@ -132,10 +132,10 @@ let tests =
                       do! consumeMessages consumer numberOfMessages consumerName
                   } :> Task)
 
-            do! Task.WhenAll(producerTask, consumerTask) 
+            do! Task.WhenAll(producerTask, consumerTask)
             do! Task.Delay 100
             Log.Debug("Ended Simple encryption send message")
-        } 
+        }
 
         testTask "Encryption send message with two public key and receive two different consumer" {
             Log.Debug("Started Encryption send message with two public key and receive two different consumer")
@@ -150,7 +150,7 @@ let tests =
                     .Topic(topicName)
                     .MessageEncryptor(encryptor)
                     .CreateAsync()
-                
+
 
             let! consumer1 =
                 client.NewConsumer()
@@ -158,7 +158,7 @@ let tests =
                     .MessageDecryptor(MessageDecryptor(Consumer1KeyReader()))
                     .ConsumerName(consumerName).SubscriptionName("test-subscription")
                     .SubscribeAsync()
-                
+
 
             let producerTask =
               Task.Run(fun () ->
@@ -172,10 +172,10 @@ let tests =
                       do! consumeMessages consumer1 numberOfMessages consumerName
                   } :> Task)
 
-            do! Task.WhenAll(producerTask, consumer1Task) 
+            do! Task.WhenAll(producerTask, consumer1Task)
             do! Task.Delay 100
 
-            do! consumer1.DisposeAsync().AsTask() 
+            do! consumer1.DisposeAsync().AsTask()
 
             let! consumer2 =
                 client.NewConsumer()
@@ -183,7 +183,7 @@ let tests =
                     .MessageDecryptor(MessageDecryptor(Consumer2KeyReader()))
                     .ConsumerName(consumerName).SubscriptionName("test-subscription")
                     .SubscribeAsync()
-                
+
 
             post (producer :?> ProducerImpl<byte[]>).Mb (Tick (UpdateEncryptionKeys encryptor))
 
@@ -199,11 +199,11 @@ let tests =
                       do! consumeMessages consumer2 numberOfMessages consumerName
                   } :> Task)
 
-            do! Task.WhenAll(producerTask2, consumer2Task) 
+            do! Task.WhenAll(producerTask2, consumer2Task)
             do! Task.Delay 100
             Log.Debug("Ended Encryption send message with two public key and receive two different consumer")
         }
-        
+
         testTask "Encryption send message and consume on fail" {
             Log.Debug("Started Encryption send message and consume on fail")
             let client = getClient ()
@@ -221,7 +221,7 @@ let tests =
                     .MessageEncryptor(MessageEncryptor([|"Rsa1024key3"|], ProducerKeyReader()))
                     .CompressionType(compressionType)
                     .CreateAsync()
-                
+
 
             let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
@@ -230,11 +230,11 @@ let tests =
                     .CryptoFailureAction(ConsumerCryptoFailureAction.CONSUME)
                     .ConsumerName(consumerName).SubscriptionName("test-subscription")
                     .SubscribeAsync()
-                
 
-            do! fastProduceMessages producer numberOfMessages consumerName 
 
-            let! (message : Message<byte[]>) = consumer.ReceiveAsync() 
+            do! fastProduceMessages producer numberOfMessages consumerName
+
+            let! (message : Message<byte[]>) = consumer.ReceiveAsync()
             Expect.isTrue message.EncryptionContext.IsSome "Message must contain EncryptionContext"
             let context = message.EncryptionContext.Value
             let batchSize = context.BatchSize |> int
@@ -245,5 +245,5 @@ let tests =
 
             do! Task.Delay 100
             Log.Debug("Ended Encryption send message and consume on fail")
-        } 
+        }
     ]
