@@ -3,6 +3,7 @@ namespace Pulsar.Client.Internal
 open System.Buffers
 open System.Collections.Generic
 open System.Diagnostics
+open System.IO
 open Pulsar.Client.Common
 open FSharp.UMX
 open Microsoft.Extensions.Logging
@@ -18,6 +19,7 @@ type internal ChunkedMessageCtx(totalChunksCount: int, totalChunksSize: int) =
         member this.MessageReceived(msg: RawMessage) =
             // append the chunked payload and update lastChunkedMessage-id
             chunkedMessageIds[%msg.Metadata.ChunkId] <- msg.MessageId
+            msg.Payload.Seek(0L, SeekOrigin.Begin) |> ignore
             msg.Payload.Read(chunkedMsgBuffer, currentBufferLength, int msg.Payload.Length) |> ignore
             currentBufferLength <- currentBufferLength + int msg.Payload.Length
             lastChunkId <- msg.Metadata.ChunkId

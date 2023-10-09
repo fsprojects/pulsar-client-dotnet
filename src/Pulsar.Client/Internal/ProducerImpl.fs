@@ -446,13 +446,17 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 metadata.ChunkId <- chunkId
                                 metadata.NumChunksFromMsg <- totalChunks
                                 metadata.TotalChunkMsgSize <- payloadLength
-                                new MemoryStream(payloadBuffer, readStartIndex, Math.Min(maxMessageSize, payloadLength - readStartIndex) )
+                                let chunkStream = MemoryStreamManager.GetStream()
+                                compressedPayload.Seek(readStartIndex, SeekOrigin.Begin) |> ignore
+                                let chunkSize = Math.Min(maxMessageSize, payloadLength - readStartIndex)
+                                for i in 1..chunkSize do
+                                    chunkStream.WriteByte(compressedPayload.ReadByte() |> byte)
+                                chunkStream
                             else
                                 compressedPayload
                         let encryptResult = encrypt metadata chunkPayload
                         match encryptResult with
                         | Ok encryptedPayload ->
-                            stats.UpdateNumMsgsSent(1, int chunkPayload.Length)
                             let payload =
                                 Commands.newSend producerId sequenceId None 1 metadata encryptedPayload
                             let chunkDetails =
@@ -467,8 +471,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 Callback = SingleCallback (chunkDetails, message, channel)
                                 CreatedAt = %Stopwatch.GetTimestamp()
                             }
-                            lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
+                            stats.UpdateNumMsgsSent(1, int encryptedPayload.Length)
                             sendMessage pendingMessage
+                            lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
                             chunkId <- chunkId + 1
                             readStartIndex <- chunkId * maxMessageSize
                         | Error ex ->
