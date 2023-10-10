@@ -67,7 +67,7 @@
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
     <None Include="..\..\images\pulsar-client-dotnet.png" Pack="true" PackagePath="\" />
-    <None Include="..\..\README.md" Pack="true" PackagePath="\"/>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <Compile Include="Common\UMX.fs" />
     <Compile Include="Common\Log.fs" />
     <Compile Include="Common\Tools.fs" />
@@ -132,7 +132,7 @@
     <Compile Include="Schema\AutoConsumeSchema.fs" />
     <Compile Include="Schema\ProtobufNativeSchema.fs" />
     <Compile Include="Internal\TaskSeq.fs" />
-    <Compile Include="Internal\Compression .fs" />
+    <Compile Include="Internal\Compression.fs" />
     <Compile Include="Internal\ChunkedMessageTracker.fs" />
     <Compile Include="Internal\BatchMessageContainer.fs" />
     <Compile Include="Internal\Routing.fs" />
