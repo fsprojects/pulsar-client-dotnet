@@ -435,7 +435,6 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     let uuid = if isChunked then $"{producerName}-{sequenceId}" else null
                     let messageIds = if isChunked then Array.zeroCreate totalChunks else Array.empty
                     let txnId = message.Txn |> Option.map (fun txn -> txn.Id)
-                    let payloadBuffer = if isChunked then compressedPayload.GetBuffer() else null // shouldn't be RMS stream
                     while chunkId < totalChunks && not chunkError do
                         let metadata = createMessageMetadata sequenceId txnId None
                                            message.Payload.Length message.Key message.Properties message.DeliverAt
