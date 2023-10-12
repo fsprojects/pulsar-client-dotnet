@@ -56,7 +56,6 @@
     <PackageReference Include="PemUtils" Version="3.0.0.82" />
     <PackageReference Include="protobuf-net.Reflection" Version="3.2.12" />
     <!--Microsoft-->
-    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0-rc.1.23419.4" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.0-rc.1.23419.4" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0-rc.1.23419.4" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0-rc.1.23419.4" />

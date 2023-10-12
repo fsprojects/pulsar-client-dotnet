@@ -54,11 +54,8 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
     inherit Authentication()
 
     let mutable token : Option<TokenResult * TimeStamp> = None
-    let httpClientFactory =
-        ServiceCollection()
-            .AddHttpClient()
-            .BuildServiceProvider()
-            .GetService<IHttpClientFactory>()
+    // https://learn.microsoft.com/en-us/dotnet/fundamentals/networking/http/httpclient-guidelines
+    let httpClient = new HttpClient(new SocketsHttpHandler(PooledConnectionLifetime = TimeSpan.FromMinutes(2)))
 
     //Gets a well-known metadata URL for the given OAuth issuer URL.
     //https://tools.ietf.org/id/draft-ietf-oauth-discovery-08.html#ASConfig
@@ -73,7 +70,6 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
         }
     let getTokenClient() =
         backgroundTask {
-            let httpClient = httpClientFactory.CreateClient()
             let! metadata = getMetadata httpClient issuerUrl
             return TokenClient(Uri(metadata.TokenEndpoint), httpClient)
         }
