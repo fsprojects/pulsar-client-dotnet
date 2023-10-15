@@ -35,7 +35,7 @@
     <PackageReference Include="OpenTelemetry.Api" Version="1.6.0" />
     <PackageReference Include="AvroSchemaGenerator" Version="2.9.2" />
     <!--Microsoft-->
-    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="8.0.0-rc.1.23419.4" />
-    <PackageReference Include="System.Threading.Channels" Version="8.0.0-rc.1.23419.4" />
+    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="8.0.0-rc.2.23479.6" />
+    <PackageReference Include="System.Threading.Channels" Version="8.0.0-rc.2.23479.6" />
   </ItemGroup>
 </Project>

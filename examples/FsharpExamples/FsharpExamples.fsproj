@@ -12,16 +12,15 @@
     <Compile Include="RealWorld.fs" />
     <Compile Include="TlsAuthentication.fs" />
     <Compile Include="Oauth2.fs" />
+    <Compile Include="Telemetry.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="7.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.0-rc.2.23479.6" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.6.0" />
     <PackageReference Include="OpenTelemetry" Version="1.6.0" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\Pulsar.Client.Proto\Pulsar.Client.Proto.csproj" />
-    <ProjectReference Include="..\..\src\Pulsar.Client\Pulsar.Client.fsproj" />
+    <PackageReference Include="Pulsar.Client" Version="3.0.0-beta.1" />
+    <PackageReference Include="Pulsar.Client.Otel" Version="0.1.2" />
   </ItemGroup>
   <ItemGroup>
     <None Include="runtimeconfig.template.json" />
