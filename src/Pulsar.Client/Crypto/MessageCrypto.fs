@@ -8,7 +8,6 @@ open NSec.Cryptography
 open PemUtils
 open Pulsar.Client.Api
 open Pulsar.Client.Common
-open Pulsar.Client.Internal
 open Microsoft.Extensions.Logging
 
 type MessageEncryptor(keyNames: string seq, keyReader: ICryptoKeyReader) =
@@ -16,7 +15,6 @@ type MessageEncryptor(keyNames: string seq, keyReader: ICryptoKeyReader) =
     let IV_LEN = 12
     let symmetricAlgorithmName = symmetricAlgorithm.ToString()
     let mutable symmetricKey: Key = null
-    let mutable nonce = Nonce()
     let mutable encryptionKeys: EncryptionKey [] = null
     let generator = RandomNumberGenerator.Create()
 
@@ -26,9 +24,9 @@ type MessageEncryptor(keyNames: string seq, keyReader: ICryptoKeyReader) =
         new Key(symmetricAlgorithm, &createParameters)
 
     let createNonce () =
-        Log.Logger.LogDebug("MessageEncryptor create new nonce")
-        let fixPart = ReadOnlySpan(NSec.Cryptography.RandomGenerator.Default.GenerateBytes(4))
-        Nonce(fixPart, IV_LEN - fixPart.Length)
+        let bytes = Array.zeroCreate IV_LEN
+        generator.GetBytes bytes
+        bytes
 
     let parsePublicKey (rawKey: byte []) =
         use rawStream = new MemoryStream(rawKey, writable = false)
@@ -51,7 +49,6 @@ type MessageEncryptor(keyNames: string seq, keyReader: ICryptoKeyReader) =
 
     let init () =
         symmetricKey <- createKey ()
-        nonce <- createNonce ()
         encryptionKeys <- createEncryptionKeys ()
 
     do init ()
@@ -60,9 +57,9 @@ type MessageEncryptor(keyNames: string seq, keyReader: ICryptoKeyReader) =
 
         member this.Encrypt(payload: byte []) =
             Log.Logger.LogDebug("MessageEncryptor encrypt payload")
-            let encryptPayload =
-                symmetricAlgorithm.Encrypt(symmetricKey, &nonce, ReadOnlySpan.Empty, ReadOnlySpan payload)
-            EncryptedMessage(encryptPayload, encryptionKeys, symmetricAlgorithmName, nonce.ToArray())
+            let nonce = createNonce()
+            let encryptPayload = symmetricAlgorithm.Encrypt(symmetricKey, nonce, ReadOnlySpan.Empty, payload)
+            EncryptedMessage(encryptPayload, encryptionKeys, symmetricAlgorithmName, nonce)
 
         member this.UpdateEncryptionKeys() =
             Log.Logger.LogDebug("MessageEncryptor update encryptionKeys")
@@ -84,7 +81,7 @@ type MessageDecryptor(keyReader: ICryptoKeyReader) =
         let encKey = encryptionKey.Value
         try
             let privateKey = keyReader.GetPrivateKey(encryptionKey.Name, encryptionKey.Metadata)
-            let rsaPrivateKey = parsePrivateKey (privateKey.Key)
+            let rsaPrivateKey = parsePrivateKey privateKey.Key
             let rsa = RSA.Create()
             rsa.ImportParameters(rsaPrivateKey)
             let keyBlob = rsa.Decrypt(encKey, RSAEncryptionPadding.OaepSHA1)
@@ -108,7 +105,7 @@ type MessageDecryptor(keyReader: ICryptoKeyReader) =
             Log.Logger.LogDebug("MessageDecryptor symmetric key found in cache")
             key
         | None ->
-            let (encKey, keyBlob) =
+            let encKey, keyBlob =
                 encryptionKeys
                 |> Array.tryPick tryDecryptSymmetricKey
                 |> Option.defaultWith(fun () ->
@@ -116,18 +113,17 @@ type MessageDecryptor(keyReader: ICryptoKeyReader) =
                     raise <| CryptoException "Failed to decrypt symmetric key"
                     )
             let cacheKey = Convert.ToBase64String(encKey)
-            let key = Key.Import(symmetricAlgorithm, ReadOnlySpan keyBlob, KeyBlobFormat.RawSymmetricKey)
+            let key = Key.Import(symmetricAlgorithm, keyBlob, KeyBlobFormat.RawSymmetricKey)
             Log.Logger.LogDebug("MessageDecryptor Symmetric key received from message and put in cache")
             symmetricKeysCache.Set<Key>(cacheKey, key)
 
     interface IMessageDecryptor with
         member this.Decrypt(encryptMessage: EncryptedMessage) =
             let symmetricKey = getSymmetricKey encryptMessage.EncryptionKeys
-            let mutable nonce = Nonce(ReadOnlySpan encryptMessage.EncryptionParam, 0)
-            match symmetricAlgorithm.Decrypt
-                      (symmetricKey, &nonce, ReadOnlySpan.Empty, ReadOnlySpan encryptMessage.EncPayload) with
-            | true, d ->
-                Log.Logger.LogDebug("MessageDecryptor Message successful decrypted")
-                d
-            | _ ->
+            let nonce = encryptMessage.EncryptionParam
+            match symmetricAlgorithm.Decrypt(symmetricKey, nonce, ReadOnlySpan.Empty, encryptMessage.EncPayload) with
+            | null ->
                 raise <| CryptoException "An error occurred while decrypting the message"
+            | decryptedMessage ->
+                Log.Logger.LogDebug("MessageDecryptor Message successful decrypted")
+                decryptedMessage
