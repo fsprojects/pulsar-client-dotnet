@@ -445,12 +445,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 metadata.ChunkId <- chunkId
                                 metadata.NumChunksFromMsg <- totalChunks
                                 metadata.TotalChunkMsgSize <- payloadLength
-                                let chunkStream = MemoryStreamManager.GetStream()
+                                let chunkStream = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
                                 compressedPayload.Seek(readStartIndex, SeekOrigin.Begin) |> ignore
                                 let chunkSize = Math.Min(maxMessageSize, payloadLength - readStartIndex)
-                                for i in 1..chunkSize do
-                                    chunkStream.WriteByte(compressedPayload.ReadByte() |> byte)
-                                chunkStream
+                                let targetSpan = chunkStream.GetSpan(chunkSize).Slice(0, chunkSize)
+                                compressedPayload.Read(targetSpan) |> ignore
+                                compressedPayload.Dispose()
+                                chunkStream :> MemoryStream
                             else
                                 compressedPayload
                         let encryptResult = encrypt metadata chunkPayload
