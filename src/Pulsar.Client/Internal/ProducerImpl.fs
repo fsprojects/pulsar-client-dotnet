@@ -445,12 +445,14 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 metadata.ChunkId <- chunkId
                                 metadata.NumChunksFromMsg <- totalChunks
                                 metadata.TotalChunkMsgSize <- payloadLength
-                                let chunkStream = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
+                                let chunkStream = MemoryStreamManager.GetStream("chunk") :?> RecyclableMemoryStream
                                 compressedPayload.Seek(readStartIndex, SeekOrigin.Begin) |> ignore
                                 let chunkSize = Math.Min(maxMessageSize, payloadLength - readStartIndex)
                                 let targetSpan = chunkStream.GetSpan(chunkSize).Slice(0, chunkSize)
-                                compressedPayload.Read(targetSpan) |> ignore
-                                compressedPayload.Dispose()
+                                let writtenBytes = compressedPayload.Read(targetSpan)
+                                chunkStream.Advance(writtenBytes)
+                                if compressedPayload.Position = compressedPayload.Length then
+                                    compressedPayload.Dispose()
                                 chunkStream :> MemoryStream
                             else
                                 compressedPayload
