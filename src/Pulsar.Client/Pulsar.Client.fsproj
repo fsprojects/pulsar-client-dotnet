@@ -56,12 +56,12 @@
     <PackageReference Include="PemUtils" Version="3.0.0.82" />
     <PackageReference Include="protobuf-net.Reflection" Version="3.2.12" />
     <!--Microsoft-->
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="8.0.0" />
-    <PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
-    <PackageReference Include="System.Threading.Channels" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.0-rc.2.23479.6" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0-rc.2.23479.6" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0-rc.2.23479.6" />
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="8.0.0-rc.2.23479.6" />
+    <PackageReference Include="System.IO.Pipelines" Version="8.0.0-rc.2.23479.6" />
+    <PackageReference Include="System.Threading.Channels" Version="8.0.0-rc.2.23479.6" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />

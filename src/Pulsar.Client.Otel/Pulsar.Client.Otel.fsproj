@@ -31,11 +31,11 @@
     <Compile Include="OtelConsumerInterceptor.fs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Pulsar.Client" Version="3.0.0-beta.2" />
+    <PackageReference Include="Pulsar.Client" Version="2.13.0" />
     <PackageReference Include="OpenTelemetry.Api" Version="1.6.0" />
     <PackageReference Include="AvroSchemaGenerator" Version="2.9.2" />
     <!--Microsoft-->
-    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="8.0.0" />
-    <PackageReference Include="System.Threading.Channels" Version="8.0.0" />
+    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="8.0.0-rc.2.23479.6" />
+    <PackageReference Include="System.Threading.Channels" Version="8.0.0-rc.2.23479.6" />
   </ItemGroup>
 </Project>
