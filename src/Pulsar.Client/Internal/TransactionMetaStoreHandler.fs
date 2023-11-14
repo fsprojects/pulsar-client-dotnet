@@ -135,6 +135,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                             transactionCoordinatorCreatedTsc.TrySetException(ex) |> ignore
                     else
                         clientCnx.AddTransactionMetaStoreHandler(transactionCoordinatorId, transactionMetaStoreOperations)
+                        transactionCoordinatorCreatedTsc.TrySetResult() |> ignore
                 | _ ->
                     Log.Logger.LogWarning("{0} connection opened but connection is not ready, current state is ", prefix)
 
