@@ -121,6 +121,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         ProtocolVersion.GetValues(typeof<ProtocolVersion>)
         :?> ProtocolVersion[]
         |> Array.last
+    let mutable remoteEndpointProtocolVersion = protocolVersion
+
     let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
     let (LogicalAddress logicalAddress) = broker.LogicalAddress
     let proxyToBroker = if physicalAddress = logicalAddress then None else Some logicalAddress
@@ -252,7 +254,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 consumers.Add(consumerId, consumerOperation)
             | AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations) ->
                 Log.Logger.LogDebug("{0} adding transaction metastore {1}", prefix, transactionMetaStoreId)
-                transactionMetaStores.[transactionMetaStoreId] <- transactionMetaStoreOperations
+                transactionMetaStores[transactionMetaStoreId] <- transactionMetaStoreOperations
             | RemoveConsumer consumerId ->
                 Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
                 consumers.Remove(consumerId) |> ignore
@@ -564,6 +566,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             if cmd.ShouldSerializeMaxMessageSize() && maxMessageSize <> cmd.MaxMessageSize then
                 initialConnectionTsc.SetException(MaxMessageSizeChanged cmd.MaxMessageSize)
             else
+                remoteEndpointProtocolVersion <- enum cmd.ProtocolVersion
                 initialConnectionTsc.SetResult(this)
         | XCommandPartitionedTopicMetadataResponse cmd ->
             if cmd.ShouldSerializeError() then
@@ -851,7 +854,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     member this.ClientCnxId = clientCnxId
 
-    member this.RemoteEndpointProtocolVersion = protocolVersion
+    member this.RemoteEndpointProtocolVersion = remoteEndpointProtocolVersion
 
     member this.IsActive
         with get() = Volatile.Read(&isActive)
