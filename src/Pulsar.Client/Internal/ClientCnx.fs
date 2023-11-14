@@ -98,6 +98,7 @@ and internal PulsarCommand =
     | XCommandEndTxnResponse of CommandEndTxnResponse
     | XCommandAuthChallenge of CommandAuthChallenge
     | XCommandError of CommandError
+    | XCommandTcClientConnectResponse of CommandTcClientConnectResponse
 
 and internal CommandParseError =
     | IncompleteCommand
@@ -122,6 +123,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         ProtocolVersion.GetValues(typeof<ProtocolVersion>)
         :?> ProtocolVersion[]
         |> Array.last
+    let mutable remoteEndpointProtocolVersion = protocolVersion
+
     let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
     let (LogicalAddress logicalAddress) = broker.LogicalAddress
     let proxyToBroker = if physicalAddress = logicalAddress then None else Some logicalAddress
@@ -415,6 +418,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             Ok (XCommandAuthChallenge command.authChallenge)
         | BaseCommand.Type.Error ->
             Ok (XCommandError command.Error)
+        | BaseCommand.Type.TcClientConnectResponse ->
+            Ok (XCommandTcClientConnectResponse command.tcClientConnectResponse)
         | unknownType ->
             Result.Error (UnknownCommandType unknownType)
 
@@ -473,6 +478,10 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     let handleError requestId error msg commandType =
         let ex = getPulsarClientException error msg
+        post requestsMb (FailRequest(requestId, commandType, ex))
+
+    let handleTransactionError requestId error msg commandType =
+        let ex = getTransactionExceptionByServerError error msg
         post requestsMb (FailRequest(requestId, commandType, ex))
 
     let checkServerError serverError errMsg =
@@ -567,6 +576,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             if cmd.ShouldSerializeMaxMessageSize() && maxMessageSize <> cmd.MaxMessageSize then
                 initialConnectionTsc.SetException(MaxMessageSizeChanged cmd.MaxMessageSize)
             else
+                remoteEndpointProtocolVersion <- enum cmd.ProtocolVersion
                 initialConnectionTsc.SetResult(this)
         | XCommandPartitionedTopicMetadataResponse cmd ->
             if cmd.ShouldSerializeError() then
@@ -792,6 +802,14 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | XCommandError cmd ->
             Log.Logger.LogError("{0} CommandError Error: {1}. Message: {2}", prefix, cmd.Error, cmd.Message)
             handleError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.Error
+        | XCommandTcClientConnectResponse cmd ->
+            Log.Logger.LogDebug("{0} Received tc client connect response", prefix)
+            if cmd.ShouldSerializeError() then
+                handleTransactionError %cmd.RequestId cmd.Error cmd.Message BaseCommand.Type.TcClientConnectResponse
+            else
+                handleSuccess %cmd.RequestId Empty BaseCommand.Type.TcClientConnectResponse
+
+
 
     let readSocket () =
         backgroundTask {
@@ -836,15 +854,17 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     do startKeepAliveTimer()
     do readSocket() |> ignore
 
-    member private this.SendMb with get(): Channel<SocketMessage> = sendMb
+    member private this.SendMb = sendMb
 
-    member private this.RequestsMb with get(): Channel<RequestsOperation> = requestsMb
+    member private this.RequestsMb = requestsMb
 
-    member private this.OperationsMb with get(): Channel<CnxOperation> = operationsMb
+    member private this.OperationsMb = operationsMb
 
-    member this.MaxMessageSize with get() = maxMessageSize
+    member this.MaxMessageSize = maxMessageSize
 
-    member this.ClientCnxId with get() = clientCnxId
+    member this.ClientCnxId = clientCnxId
+
+    member this.RemoteEndpointProtocolVersion = remoteEndpointProtocolVersion
 
     member this.IsActive
         with get() = Volatile.Read(&isActive)

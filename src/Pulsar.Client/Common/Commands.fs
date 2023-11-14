@@ -201,10 +201,10 @@ let newLookup (topicName : CompleteTopicName) (requestId : RequestId) (authorita
     command |> serializeSimpleCommand
 
 let newProducer (topicName : CompleteTopicName) (producerName: string) (producerId : ProducerId) (requestId : RequestId)
-                (schemaInfo: SchemaInfo) (epoch: uint64) =
+                (schemaInfo: SchemaInfo) (epoch: uint64) (txnEnabled: bool) =
     let schema = getProtoSchema schemaInfo
     let request = CommandProducer(Topic = %topicName, ProducerId = %producerId, RequestId = %requestId,
-                                  Epoch = epoch)
+                                  Epoch = epoch, TxnEnabled = txnEnabled)
     if producerName |> String.IsNullOrEmpty |> not then
         request.ProducerName <- producerName
     if schema.``type`` <> Schema.Type.None then
@@ -364,4 +364,9 @@ let newAuthResponse (authMethod: string) (clientData: AuthData) (protocolVersion
     let response = pulsar.proto.AuthData(AuthMethodName = authMethod, auth_data = clientData.Bytes)
     let request = CommandAuthResponse(ClientVersion = clientVersion, Response = response, ProtocolVersion = protocolVersion)
     let command = BaseCommand(``type`` = CommandType.AuthResponse, authResponse = request)
+    command |> serializeSimpleCommand
+
+let newTcClientConnectRequest (transactionCoordinatorId: TransactionCoordinatorId) (requestId: RequestId) =
+    let request = CommandTcClientConnectRequest(TcId = %transactionCoordinatorId, RequestId = %requestId)
+    let command = BaseCommand(``type`` = CommandType.TcClientConnectRequest, tcClientConnectRequest = request)
     command |> serializeSimpleCommand

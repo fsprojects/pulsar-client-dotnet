@@ -512,9 +512,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     clientCnx.AddProducer(producerId, producerOperations)
                     let requestId = Generators.getNextRequestId()
                     try
-                        let payload =
-                            Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName
-                                producerId requestId schema.SchemaInfo epoch
+                        let payload = Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName
+                                            producerId requestId schema.SchemaInfo epoch clientConfig.EnableTransaction
                         let! response = clientCnx.SendAndWaitForReply requestId payload
                         let success = response |> PulsarResponseType.GetProducerSuccess
                         if String.IsNullOrEmpty producerName then
