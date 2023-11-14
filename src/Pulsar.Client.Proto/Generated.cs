@@ -228,10 +228,10 @@ namespace pulsar.proto
         private CompressionType? __pbn__Compression;
 
         [global::ProtoBuf.ProtoMember(9, Name = @"uncompressed_size")]
-        [global::System.ComponentModel.DefaultValue(0)]
+        [global::System.ComponentModel.DefaultValue(0u)]
         internal uint UncompressedSize
         {
-            get => __pbn__UncompressedSize ?? 0;
+            get => __pbn__UncompressedSize ?? 0u;
             set => __pbn__UncompressedSize = value;
         }
         internal bool ShouldSerializeUncompressedSize() => __pbn__UncompressedSize != null;
@@ -253,7 +253,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong EventTime
         {
-            get => __pbn__EventTime ?? 0;
+            get => __pbn__EventTime ?? 0ul;
             set => __pbn__EventTime = value;
         }
         internal bool ShouldSerializeEventTime() => __pbn__EventTime != null;
@@ -359,7 +359,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong HighestSequenceId
         {
-            get => __pbn__HighestSequenceId ?? 0;
+            get => __pbn__HighestSequenceId ?? 0ul;
             set => __pbn__HighestSequenceId = value;
         }
         internal bool ShouldSerializeHighestSequenceId() => __pbn__HighestSequenceId != null;
@@ -470,7 +470,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong EventTime
         {
-            get => __pbn__EventTime ?? 0;
+            get => __pbn__EventTime ?? 0ul;
             set => __pbn__EventTime = value;
         }
         internal bool ShouldSerializeEventTime() => __pbn__EventTime != null;
@@ -703,6 +703,17 @@ namespace pulsar.proto
         internal void ResetSupportsPartialProducer() => __pbn__SupportsPartialProducer = null;
         private bool? __pbn__SupportsPartialProducer;
 
+        [global::ProtoBuf.ProtoMember(4, Name = @"supports_topic_watchers")]
+        [global::System.ComponentModel.DefaultValue(false)]
+        internal bool SupportsTopicWatchers
+        {
+            get => __pbn__SupportsTopicWatchers ?? false;
+            set => __pbn__SupportsTopicWatchers = value;
+        }
+        internal bool ShouldSerializeSupportsTopicWatchers() => __pbn__SupportsTopicWatchers != null;
+        internal void ResetSupportsTopicWatchers() => __pbn__SupportsTopicWatchers = null;
+        private bool? __pbn__SupportsTopicWatchers;
+
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -735,6 +746,9 @@ namespace pulsar.proto
         internal bool ShouldSerializeMaxMessageSize() => __pbn__MaxMessageSize != null;
         internal void ResetMaxMessageSize() => __pbn__MaxMessageSize = null;
         private int? __pbn__MaxMessageSize;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"feature_flags")]
+        internal FeatureFlags FeatureFlags { get; set; }
 
     }
 
@@ -971,7 +985,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong StartMessageRollbackDurationSec
         {
-            get => __pbn__StartMessageRollbackDurationSec ?? 0;
+            get => __pbn__StartMessageRollbackDurationSec ?? 0ul;
             set => __pbn__StartMessageRollbackDurationSec = value;
         }
         internal bool ShouldSerializeStartMessageRollbackDurationSec() => __pbn__StartMessageRollbackDurationSec != null;
@@ -1338,7 +1352,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong Epoch
         {
-            get => __pbn__Epoch ?? 0;
+            get => __pbn__Epoch ?? 0ul;
             set => __pbn__Epoch = value;
         }
         internal bool ShouldSerializeEpoch() => __pbn__Epoch != null;
@@ -1429,7 +1443,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -1440,7 +1454,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -1451,7 +1465,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong HighestSequenceId
         {
-            get => __pbn__HighestSequenceId ?? 0;
+            get => __pbn__HighestSequenceId ?? 0ul;
             set => __pbn__HighestSequenceId = value;
         }
         internal bool ShouldSerializeHighestSequenceId() => __pbn__HighestSequenceId != null;
@@ -1502,7 +1516,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong HighestSequenceId
         {
-            get => __pbn__HighestSequenceId ?? 0;
+            get => __pbn__HighestSequenceId ?? 0ul;
             set => __pbn__HighestSequenceId = value;
         }
         internal bool ShouldSerializeHighestSequenceId() => __pbn__HighestSequenceId != null;
@@ -1546,10 +1560,10 @@ namespace pulsar.proto
         internal MessageIdData MessageId { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"redelivery_count")]
-        [global::System.ComponentModel.DefaultValue(0)]
+        [global::System.ComponentModel.DefaultValue(0u)]
         internal uint RedeliveryCount
         {
-            get => __pbn__RedeliveryCount ?? 0;
+            get => __pbn__RedeliveryCount ?? 0u;
             set => __pbn__RedeliveryCount = value;
         }
         internal bool ShouldSerializeRedeliveryCount() => __pbn__RedeliveryCount != null;
@@ -1605,7 +1619,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -1616,7 +1630,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -1666,7 +1680,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -1677,7 +1691,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -1895,10 +1909,10 @@ namespace pulsar.proto
         internal string ProducerName { get; set; }
 
         [global::ProtoBuf.ProtoMember(3, Name = @"last_sequence_id")]
-        [global::System.ComponentModel.DefaultValue(-1)]
+        [global::System.ComponentModel.DefaultValue(-1l)]
         internal long LastSequenceId
         {
-            get => __pbn__LastSequenceId ?? -1;
+            get => __pbn__LastSequenceId ?? -1l;
             set => __pbn__LastSequenceId = value;
         }
         internal bool ShouldSerializeLastSequenceId() => __pbn__LastSequenceId != null;
@@ -2145,6 +2159,16 @@ namespace pulsar.proto
         internal void ResetmsgBacklog() => __pbn__msgBacklog = null;
         private ulong? __pbn__msgBacklog;
 
+        [global::ProtoBuf.ProtoMember(16)]
+        internal double messageAckRate
+        {
+            get => __pbn__messageAckRate.GetValueOrDefault();
+            set => __pbn__messageAckRate = value;
+        }
+        internal bool ShouldSerializemessageAckRate() => __pbn__messageAckRate != null;
+        internal void ResetmessageAckRate() => __pbn__messageAckRate = null;
+        private double? __pbn__messageAckRate;
+
     }
 
     [global::ProtoBuf.ProtoContract()]
@@ -2204,6 +2228,28 @@ namespace pulsar.proto
         internal void Resetmode() => __pbn__mode = null;
         private Mode? __pbn__mode;
 
+        [global::ProtoBuf.ProtoMember(4, Name = @"topics_pattern")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string TopicsPattern
+        {
+            get => __pbn__TopicsPattern ?? "";
+            set => __pbn__TopicsPattern = value;
+        }
+        internal bool ShouldSerializeTopicsPattern() => __pbn__TopicsPattern != null;
+        internal void ResetTopicsPattern() => __pbn__TopicsPattern = null;
+        private string __pbn__TopicsPattern;
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"topics_hash")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string TopicsHash
+        {
+            get => __pbn__TopicsHash ?? "";
+            set => __pbn__TopicsHash = value;
+        }
+        internal bool ShouldSerializeTopicsHash() => __pbn__TopicsHash != null;
+        internal void ResetTopicsHash() => __pbn__TopicsHash = null;
+        private string __pbn__TopicsHash;
+
         [global::ProtoBuf.ProtoContract()]
         internal enum Mode
         {
@@ -2229,6 +2275,128 @@ namespace pulsar.proto
 
         [global::ProtoBuf.ProtoMember(2, Name = @"topics")]
         internal global::System.Collections.Generic.List<string> Topics { get; } = new global::System.Collections.Generic.List<string>();
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"filtered")]
+        [global::System.ComponentModel.DefaultValue(false)]
+        internal bool Filtered
+        {
+            get => __pbn__Filtered ?? false;
+            set => __pbn__Filtered = value;
+        }
+        internal bool ShouldSerializeFiltered() => __pbn__Filtered != null;
+        internal void ResetFiltered() => __pbn__Filtered = null;
+        private bool? __pbn__Filtered;
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"topics_hash")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string TopicsHash
+        {
+            get => __pbn__TopicsHash ?? "";
+            set => __pbn__TopicsHash = value;
+        }
+        internal bool ShouldSerializeTopicsHash() => __pbn__TopicsHash != null;
+        internal void ResetTopicsHash() => __pbn__TopicsHash = null;
+        private string __pbn__TopicsHash;
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"changed")]
+        [global::System.ComponentModel.DefaultValue(true)]
+        internal bool Changed
+        {
+            get => __pbn__Changed ?? true;
+            set => __pbn__Changed = value;
+        }
+        internal bool ShouldSerializeChanged() => __pbn__Changed != null;
+        internal void ResetChanged() => __pbn__Changed = null;
+        private bool? __pbn__Changed;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandWatchTopicList : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"watcher_id", IsRequired = true)]
+        internal ulong WatcherId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"namespace", IsRequired = true)]
+        internal string Namespace { get; set; }
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"topics_pattern", IsRequired = true)]
+        internal string TopicsPattern { get; set; }
+
+        [global::ProtoBuf.ProtoMember(5, Name = @"topics_hash")]
+        [global::System.ComponentModel.DefaultValue("")]
+        internal string TopicsHash
+        {
+            get => __pbn__TopicsHash ?? "";
+            set => __pbn__TopicsHash = value;
+        }
+        internal bool ShouldSerializeTopicsHash() => __pbn__TopicsHash != null;
+        internal void ResetTopicsHash() => __pbn__TopicsHash = null;
+        private string __pbn__TopicsHash;
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandWatchTopicListSuccess : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"watcher_id", IsRequired = true)]
+        internal ulong WatcherId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"topic")]
+        internal global::System.Collections.Generic.List<string> Topics { get; } = new global::System.Collections.Generic.List<string>();
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"topics_hash", IsRequired = true)]
+        internal string TopicsHash { get; set; }
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandWatchTopicUpdate : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"watcher_id", IsRequired = true)]
+        internal ulong WatcherId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"new_topics")]
+        internal global::System.Collections.Generic.List<string> NewTopics { get; } = new global::System.Collections.Generic.List<string>();
+
+        [global::ProtoBuf.ProtoMember(3, Name = @"deleted_topics")]
+        internal global::System.Collections.Generic.List<string> DeletedTopics { get; } = new global::System.Collections.Generic.List<string>();
+
+        [global::ProtoBuf.ProtoMember(4, Name = @"topics_hash", IsRequired = true)]
+        internal string TopicsHash { get; set; }
+
+    }
+
+    [global::ProtoBuf.ProtoContract()]
+    internal partial class CommandWatchTopicListClose : global::ProtoBuf.IExtensible
+    {
+        private global::ProtoBuf.IExtension __pbn__extensionData;
+        global::ProtoBuf.IExtension global::ProtoBuf.IExtensible.GetExtensionObject(bool createIfMissing)
+            => global::ProtoBuf.Extensible.GetExtensionObject(ref __pbn__extensionData, createIfMissing);
+
+        [global::ProtoBuf.ProtoMember(1, Name = @"request_id", IsRequired = true)]
+        internal ulong RequestId { get; set; }
+
+        [global::ProtoBuf.ProtoMember(2, Name = @"watcher_id", IsRequired = true)]
+        internal ulong WatcherId { get; set; }
 
     }
 
@@ -2429,7 +2597,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnTtlSeconds
         {
-            get => __pbn__TxnTtlSeconds ?? 0;
+            get => __pbn__TxnTtlSeconds ?? 0ul;
             set => __pbn__TxnTtlSeconds = value;
         }
         internal bool ShouldSerializeTxnTtlSeconds() => __pbn__TxnTtlSeconds != null;
@@ -2440,7 +2608,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TcId
         {
-            get => __pbn__TcId ?? 0;
+            get => __pbn__TcId ?? 0ul;
             set => __pbn__TcId = value;
         }
         internal bool ShouldSerializeTcId() => __pbn__TcId != null;
@@ -2463,7 +2631,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -2474,7 +2642,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -2519,7 +2687,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -2530,7 +2698,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -2556,7 +2724,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -2567,7 +2735,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -2627,7 +2795,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -2638,7 +2806,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -2664,7 +2832,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -2675,7 +2843,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -2720,7 +2888,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -2731,7 +2899,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -2765,7 +2933,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -2776,7 +2944,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -2821,7 +2989,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -2832,7 +3000,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -2887,7 +3055,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -2898,7 +3066,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -2943,7 +3111,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -2954,7 +3122,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -3001,7 +3169,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidLeastBits
         {
-            get => __pbn__TxnidLeastBits ?? 0;
+            get => __pbn__TxnidLeastBits ?? 0ul;
             set => __pbn__TxnidLeastBits = value;
         }
         internal bool ShouldSerializeTxnidLeastBits() => __pbn__TxnidLeastBits != null;
@@ -3012,7 +3180,7 @@ namespace pulsar.proto
         [global::System.ComponentModel.DefaultValue(typeof(ulong), "0")]
         internal ulong TxnidMostBits
         {
-            get => __pbn__TxnidMostBits ?? 0;
+            get => __pbn__TxnidMostBits ?? 0ul;
             set => __pbn__TxnidMostBits = value;
         }
         internal bool ShouldSerializeTxnidMostBits() => __pbn__TxnidMostBits != null;
@@ -3212,6 +3380,18 @@ namespace pulsar.proto
         [global::ProtoBuf.ProtoMember(63)]
         internal CommandTcClientConnectResponse tcClientConnectResponse { get; set; }
 
+        [global::ProtoBuf.ProtoMember(64)]
+        internal CommandWatchTopicList watchTopicList { get; set; }
+
+        [global::ProtoBuf.ProtoMember(65)]
+        internal CommandWatchTopicListSuccess watchTopicListSuccess { get; set; }
+
+        [global::ProtoBuf.ProtoMember(66)]
+        internal CommandWatchTopicUpdate watchTopicUpdate { get; set; }
+
+        [global::ProtoBuf.ProtoMember(67)]
+        internal CommandWatchTopicListClose watchTopicListClose { get; set; }
+
         [global::ProtoBuf.ProtoContract()]
         internal enum Type
         {
@@ -3321,6 +3501,14 @@ namespace pulsar.proto
             TcClientConnectRequest = 62,
             [global::ProtoBuf.ProtoEnum(Name = @"TC_CLIENT_CONNECT_RESPONSE")]
             TcClientConnectResponse = 63,
+            [global::ProtoBuf.ProtoEnum(Name = @"WATCH_TOPIC_LIST")]
+            WatchTopicList = 64,
+            [global::ProtoBuf.ProtoEnum(Name = @"WATCH_TOPIC_LIST_SUCCESS")]
+            WatchTopicListSuccess = 65,
+            [global::ProtoBuf.ProtoEnum(Name = @"WATCH_TOPIC_UPDATE")]
+            WatchTopicUpdate = 66,
+            [global::ProtoBuf.ProtoEnum(Name = @"WATCH_TOPIC_LIST_CLOSE")]
+            WatchTopicListClose = 67,
         }
 
     }
@@ -3346,6 +3534,7 @@ namespace pulsar.proto
         Shared = 0,
         Exclusive = 1,
         WaitForExclusive = 2,
+        ExclusiveWithFencing = 3,
     }
 
     [global::ProtoBuf.ProtoContract()]
