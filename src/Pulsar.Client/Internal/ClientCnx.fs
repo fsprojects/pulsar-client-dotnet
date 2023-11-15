@@ -239,6 +239,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     let tryStopMailboxes() =
         if consumers.Count = 0 && producers.Count = 0 && transactionMetaStores.Count = 0 then
+            Log.Logger.LogInformation("{0} Stopping mailboxes", prefix)
             post this.SendMb SocketMessage.Stop
             post this.OperationsMb CnxOperation.Stop
             post this.RequestsMb RequestsOperation.Stop

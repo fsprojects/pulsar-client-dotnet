@@ -853,7 +853,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         let initialFlowCount = consumerConfig.ReceiverQueueSize
                         subscribeTsc.TrySetResult() |> ignore
                         if initialFlowCount <> 0 then
-                            this.SendFlowPermits initialFlowCount
+                            increaseAvailablePermits initialFlowCount
                     with Flatten ex ->
                         clientCnx.RemoveConsumer consumerId
                         Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
@@ -1376,15 +1376,16 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     member internal this.SendFlowPermits numMessages =
         backgroundTask {
-            Log.Logger.LogDebug("{0} SendFlowPermits {1}", prefix, numMessages)
-            match connectionHandler.ConnectionState with
-            | Ready clientCnx ->
+            match connectionHandler.ConnectionState, numMessages with
+            | Ready clientCnx, numMessages when numMessages > 0 ->
+                Log.Logger.LogDebug("{0} SendFlowPermits {1}", prefix, numMessages)
                 let flowCommand = Commands.newFlow consumerId numMessages
                 let! success = clientCnx.Send flowCommand
                 if not success then
                     Log.Logger.LogWarning("{0} failed SendFlowPermits {1}", prefix, numMessages)
-            | _ ->
-                Log.Logger.LogWarning("{0} not connected, skipping SendFlowPermits {1}", prefix, numMessages)
+            | state, numMessages ->
+                Log.Logger.LogDebug("{0} skipping SendFlowPermits, state {1}, numMessages {2}",
+                                      prefix, state, numMessages)
         } |> ignore
 
     member internal this.Waiters with get() = waiters
