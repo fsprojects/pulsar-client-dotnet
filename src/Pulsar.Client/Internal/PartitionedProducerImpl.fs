@@ -22,6 +22,7 @@ type internal PartitionedProducerMessage =
     | TickTime
     | GetStats of TaskCompletionSource<ProducerStats>
     | LastDisconnectedTimestamp of TaskCompletionSource<TimeStamp>
+    | IsConnected of TaskCompletionSource<bool>
 
 type internal PartitionedConnectionState =
     | Uninitialized
@@ -197,6 +198,15 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                 |> Seq.max
                 |> channel.SetResult
 
+            | IsConnected channel ->
+
+                Log.Logger.LogDebug("{0} IsConnected", prefix)
+                producers
+                |> Seq.map (fun producer -> producer.IsConnected)
+                |> Seq.contains(false)
+                |> not
+                |> channel.SetResult
+                
             | Close channel ->
 
                 match this.ConnectionState with
@@ -374,6 +384,8 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         member this.GetStatsAsync() = postAndAsyncReply mb GetStats
 
         member this.LastDisconnectedTimestamp = (postAndAsyncReply mb LastDisconnectedTimestamp).Result
+            
+        member this.IsConnected = (postAndAsyncReply mb IsConnected).Result
 
 
     interface IAsyncDisposable with
