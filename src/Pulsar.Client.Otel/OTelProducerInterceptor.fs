@@ -60,7 +60,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                    //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
                    let contextToInject = activity.Context
                    Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
-                   addToCache mutableDict.[activityKey] activity
+                   addToCache mutableDict[activityKey] activity
                    message.WithProperties(mutableDict)
                 else
                    //don't handle activity
@@ -78,25 +78,25 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
         member this.Eligible _ = true
 
         member this.OnSendAcknowledgement(_, builder, messageId, exn) =
-                match builder.Properties.TryGetValue(activityKey) with
-                | true, activityId ->
-                    match cache.TryRemove(activityId) with
-                    | true, activity ->
-                        match exn with
-                        | null ->
-                             activity
-                                .SetTag("messaging.acknowledge_type", "Success")
-                                .SetTag("messaging.message_id", messageId)
-                                .Dispose()
-                        |  _ ->
-                            //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md
-                            activity
-                                .SetTag("messaging.acknowledge_type", "Error")
-                                .SetTag("exception.type", exn.GetType().FullName)
-                                .SetTag("exception.message", exn.Message)
-                                .SetTag("exception.stacktrace", exn.StackTrace)
-                                .Dispose()
-                    | _ ->
-                        log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
+            match builder.Properties.TryGetValue(activityKey) with
+            | true, activityId ->
+                match cache.TryRemove(activityId) with
+                | true, activity ->
+                    match exn with
+                    | null ->
+                         activity
+                            .SetTag("messaging.acknowledge_type", "Success")
+                            .SetTag("messaging.message_id", messageId)
+                            .Dispose()
+                    |  _ ->
+                        //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md
+                        activity
+                            .SetTag("messaging.acknowledge_type", "Error")
+                            .SetTag("exception.type", exn.GetType().FullName)
+                            .SetTag("exception.message", exn.Message)
+                            .SetTag("exception.stacktrace", exn.StackTrace)
+                            .Dispose()
                 | _ ->
-                    log.LogWarning("{0} activity id is missing for msgId={1}", prefix, messageId)
+                    log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
+            | _ ->
+                log.LogWarning("{0} activity id is missing for msgId={1}", prefix, messageId)
