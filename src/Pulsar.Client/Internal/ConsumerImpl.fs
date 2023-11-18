@@ -1664,6 +1664,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
         member this.LastDisconnectedTimestamp =
             connectionHandler.LastDisconnectedTimestamp
+            
+        member this.IsConnected =
+            match connectionHandler.ConnectionState with
+            | Ready _ -> true
+            | _ -> false
 
 
     interface IAsyncDisposable with

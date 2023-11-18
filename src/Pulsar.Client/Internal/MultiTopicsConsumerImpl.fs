@@ -62,6 +62,7 @@ type internal MultiTopicConsumerMessage<'T> =
     | CancelWaiter of Waiter<'T>
     | CancelBatchWaiter of BatchWaiter<'T>
     | LastDisconnectedTimestamp of TaskCompletionSource<TimeStamp>
+    | IsConnected of TaskCompletionSource<bool>
     | HasMessageAvailable of TaskCompletionSource<bool>
 
 type internal TopicAndConsumer<'T> =
@@ -806,6 +807,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.LastDisconnectedTimestamp)
                 |> Seq.max
                 |> channel.SetResult
+            
+            | IsConnected channel ->
+
+                Log.Logger.LogDebug("{0} IsConnected", prefix)
+                consumers
+                |> Seq.forall (fun (KeyValue(_, (consumer, _))) -> consumer.IsConnected)
+                |> channel.SetResult
 
             | Seek (seekData, channel) ->
 
@@ -1155,6 +1163,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
         member this.LastDisconnectedTimestamp =
             (postAndAsyncReply mb LastDisconnectedTimestamp).Result
+        member this.IsConnected =
+            (postAndAsyncReply mb IsConnected).Result
 
     interface IAsyncDisposable with
 
