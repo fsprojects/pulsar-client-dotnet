@@ -812,9 +812,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
                 Log.Logger.LogDebug("{0} IsConnected", prefix)
                 consumers
-                |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.IsConnected)
-                |> Seq.contains(false)
-                |> not
+                |> Seq.forall (fun (KeyValue(_, (consumer, _))) -> consumer.IsConnected)
                 |> channel.SetResult
 
             | Seek (seekData, channel) ->

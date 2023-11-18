@@ -202,9 +202,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
                 Log.Logger.LogDebug("{0} IsConnected", prefix)
                 producers
-                |> Seq.map (fun producer -> producer.IsConnected)
-                |> Seq.contains(false)
-                |> not
+                |> Seq.forall (fun producer -> producer.IsConnected)
                 |> channel.SetResult
                 
             | Close channel ->
