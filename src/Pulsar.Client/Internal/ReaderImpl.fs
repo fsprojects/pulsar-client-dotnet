@@ -93,6 +93,9 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
         member this.Topic with get() =
             castedConsumer.Topic
 
+        member this.IsConnected with get() =
+            castedConsumer.IsConnected
+
     interface IAsyncDisposable with
 
         member this.DisposeAsync() =

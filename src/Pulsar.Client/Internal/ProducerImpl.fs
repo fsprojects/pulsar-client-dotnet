@@ -928,6 +928,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
         member this.LastDisconnectedTimestamp =
             connectionHandler.LastDisconnectedTimestamp
+        member this.IsConnected =
+            match connectionHandler.ConnectionState with
+            | Ready _ -> true
+            | _ -> false
 
     interface IAsyncDisposable with
 

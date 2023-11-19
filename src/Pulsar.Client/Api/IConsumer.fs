@@ -77,3 +77,5 @@ type IConsumer<'T> =
     abstract member ReconsumeLaterCumulativeAsync: message:Message<'T> * deliverAt:TimeStamp -> Task<unit>
     /// The last disconnected timestamp of the consumer    abstract member LastDisconnected: DateTime
     abstract member LastDisconnectedTimestamp: TimeStamp
+    /// Return true if the consumer is connected to the broker
+    abstract member IsConnected: bool
