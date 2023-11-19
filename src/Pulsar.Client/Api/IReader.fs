@@ -24,3 +24,5 @@ type IReader<'T> =
     abstract member HasMessageAvailableAsync: unit -> Task<bool>
     /// Get a topic for the reader
     abstract member Topic: string
+    /// Return true if the reader is connected to the broker
+    abstract member IsConnected: bool

@@ -73,3 +73,5 @@ type IProducer<'T> =
     abstract member Name: string
     /// The last disconnected timestamp of the producer
     abstract member LastDisconnectedTimestamp: TimeStamp
+    /// Return true if the consumer is connected to the broker
+    abstract member IsConnected: bool
