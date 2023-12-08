@@ -33,7 +33,7 @@ let tests =
 
             let! producer2 =
                 client.NewProducer()
-                    .Topic(topicName1)
+                    .Topic(topicName2)
                     .ProducerName(name + "2")
                     .EnableBatching(false)
                     .CreateAsync()
@@ -93,7 +93,7 @@ let tests =
 
             let! producer2 =
                 client.NewProducer()
-                    .Topic(topicName1)
+                    .Topic(topicName2)
                     .ProducerName(name + "2")
                     .EnableBatching(false)
                     .CreateAsync()
