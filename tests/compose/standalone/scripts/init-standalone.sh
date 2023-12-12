@@ -26,4 +26,4 @@ bin/pulsar-admin topics create-partitioned-topic persistent://public/deduplicati
 echo "Initializing transaction coordinator metadata..."
 bin/pulsar initialize-transaction-coordinator-metadata -cs standalone:2181 -c standalone --initial-num-transaction-coordinators 2
 
-echo "Init Standalone TLS completed!"
+echo "Init Standalone completed!"
