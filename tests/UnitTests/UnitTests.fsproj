@@ -47,10 +47,10 @@
     <PackageReference Include="Expecto" Version="10.1.0" />
     <PackageReference Include="Expecto.FsCheck" Version="10.1.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
-    <PackageReference Include="YoloDev.Expecto.TestSdk" Version="0.14.2" />
+    <PackageReference Include="YoloDev.Expecto.TestSdk" Version="0.14.3" />
     <PackageReference Include="Serilog" Version="3.1.1" />
     <PackageReference Include="Serilog.Extensions.Logging" Version="8.0.0" />
     <PackageReference Include="Serilog.Enrichers.Thread" Version="3.1.0" />
-    <PackageReference Include="Serilog.Sinks.Console" Version="5.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="5.0.1" />
   </ItemGroup>
 </Project>

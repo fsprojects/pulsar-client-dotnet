@@ -6,7 +6,6 @@ open System.Threading
 
 open System.Threading.Tasks
 open FSharp.UMX
-open Microsoft.IO
 open pulsar.proto
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
@@ -221,7 +220,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
     let verifyIfLocalBufferIsCorrupted (msg: PendingMessage<'T>) =
         backgroundTask {
-            use stream = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
+            use stream = MemoryStreamManager.GetStream()
             use reader = new BinaryReader(stream)
             let struct(send, _) = msg.Payload
             let writer = PipeWriter.Create(stream, StreamPipeWriterOptions(leaveOpen = true))
@@ -445,7 +444,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 metadata.ChunkId <- chunkId
                                 metadata.NumChunksFromMsg <- totalChunks
                                 metadata.TotalChunkMsgSize <- payloadLength
-                                let chunkStream = MemoryStreamManager.GetStream("chunk") :?> RecyclableMemoryStream
+                                let chunkStream = MemoryStreamManager.GetStream("chunk")
                                 compressedPayload.Seek(readStartIndex, SeekOrigin.Begin) |> ignore
                                 let chunkSize = Math.Min(maxMessageSize, payloadLength - readStartIndex)
                                 let targetSpan = chunkStream.GetSpan(chunkSize).Slice(0, chunkSize)

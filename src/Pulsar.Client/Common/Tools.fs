@@ -3,11 +3,8 @@ module internal Pulsar.Client.Common.Tools
 
 open System
 open System.Collections
-open System.IO
 open System.Net
-open System.Runtime.InteropServices
 open System.Threading.Tasks
-open Microsoft.FSharp.NativeInterop
 open Microsoft.IO
 open System.Runtime.ExceptionServices
 open System.Collections.Generic
@@ -139,7 +136,7 @@ let fromLongArray (ackSets: int64[]) (numMessagesInBatch: int) =
         let stillToGo = numMessagesInBatch - index
         let currentLimit = if stillToGo > 64 then 64 else stillToGo
         for bitNumber in 1..currentLimit do
-            bitArray.[index] <- (ackSet &&& (1L <<< bitNumber-1)) <> 0L // https://stackoverflow.com/a/4854257/1780648
+            bitArray[index] <- (ackSet &&& (1L <<< bitNumber-1)) <> 0L // https://stackoverflow.com/a/4854257/1780648
             index <- index + 1
     bitArray
 

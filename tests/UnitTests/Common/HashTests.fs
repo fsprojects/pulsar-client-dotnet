@@ -3,7 +3,6 @@
 open System.IO
 open Expecto
 open Expecto.Flip
-open Microsoft.IO
 open Pulsar.Client.Common
 
 [<Tests>]
@@ -41,7 +40,7 @@ let crc32cTests =
 
         test "CRC32Hash RMS" {
             let input = "Съешь ещё этих мягких французских булок, да выпей чаю" |> System.Text.Encoding.UTF8.GetBytes
-            let recycl = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
+            let recycl = MemoryStreamManager.GetStream()
             recycl.Write(input)
             recycl.Seek(0L, SeekOrigin.Begin) |> ignore
             let hash = CRC32C.GetForROS(recycl.GetReadOnlySequence().Slice(0,input.Length))
@@ -50,7 +49,7 @@ let crc32cTests =
 
         test "CRC32Hash long RMS" {
             let input: byte[] = Array.create 750000 1uy
-            let recycl = MemoryStreamManager.GetStream() :?> RecyclableMemoryStream
+            let recycl = MemoryStreamManager.GetStream()
             recycl.Write(input)
             recycl.Seek(0L, SeekOrigin.Begin) |> ignore
             let hash = CRC32C.GetForROS(recycl.GetReadOnlySequence().Slice(0,input.Length))

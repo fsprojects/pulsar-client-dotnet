@@ -4,7 +4,6 @@ open System.Collections
 open System.Collections.Generic
 open System.IO.Pipelines
 open System.Threading.Tasks
-open Microsoft.IO
 open Pulsar.Client.Transaction
 open pulsar.proto
 open FSharp.UMX
@@ -54,7 +53,7 @@ let private serializeSimpleCommand (command : BaseCommand) =
 
 let private serializePayloadCommand (command : BaseCommand) (metadata: MessageMetadata) (payload: MemoryStream) =
     struct((fun (output: PipeWriter) ->
-        let temp = MemoryStreamManager.GetStream("payload") :?> RecyclableMemoryStream
+        let temp = MemoryStreamManager.GetStream("payload")
         let binaryWriter = new BinaryWriter(temp)
 
         // write fake totalLength
