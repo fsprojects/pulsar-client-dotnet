@@ -117,9 +117,9 @@ let tests =
             Log.Debug("Finished 'Batch get created from several tasks'")
         }
 
-        testTask "Keys and properties are propertly passed with default batching" {
+        testTask "Keys and properties are properly passed with default batching" {
 
-            Log.Debug("Started Keys and properties are propertly passed with default batching")
+            Log.Debug("Started Keys and properties are properly passed with default batching")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let producerName = "propsTestProducer"
@@ -153,12 +153,12 @@ let tests =
 
             do! Task.WhenAll(producerTask, consumerTask)
 
-            Log.Debug("Finished Keys and properties are propertly passed with default batching")
+            Log.Debug("Finished Keys and properties are properly passed with default batching")
         }
 
-        testTask "Keys and properties are propertly passed with key-based batching" {
+        testTask "Keys and properties are properly passed with key-based batching" {
 
-            Log.Debug("Started Keys and properties are propertly passed with key-based batching")
+            Log.Debug("Started Keys and properties are properly passed with key-based batching")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let producerName = "propsTestProducer"
@@ -201,15 +201,15 @@ let tests =
                     }:> Task)
 
             do! Task.WhenAll(producer1Task, producer2Task, consumerTask)
-            Log.Debug("Finished Keys and properties are propertly passed with key-based batching")
+            Log.Debug("Finished Keys and properties are properly passed with key-based batching")
         }
 
-        testTask "Batch recieve works with regular consumer"{
-            Log.Debug("Started Batch recieve works with regular consumer")
+        testTask "Batch receive works with regular consumer"{
+            Log.Debug("Started Batch receive works with regular consumer")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            let producerName = "batchRecieveProducer"
-            let consumerName = "batchRecieveConsumer"
+            let producerName = "batchReceiveProducer"
+            let consumerName = "batchReceiveConsumer"
             let numberOfMessages = 10
             let batchTimeout = TimeSpan.FromSeconds(2.0)
 
@@ -272,7 +272,7 @@ let tests =
 
             do! Task.WhenAll(producerTask, consumerTask)
 
-            Log.Debug("Finished Batch recieve works with regular consumer")
+            Log.Debug("Finished Batch receive works with regular consumer")
         }
 
         testTask "Second batch is formed well after the first one" {

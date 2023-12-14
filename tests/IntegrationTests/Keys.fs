@@ -17,9 +17,9 @@ let tests =
 
     testList "Keys" [
 
-        testTask "Keys and properties are propertly passed" {
+        testTask "Keys and properties are properly passed" {
 
-            Log.Debug("Started Keys and properties are propertly passed")
+            Log.Debug("Started Keys and properties are properly passed")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let producerName = "propsTestProducer"
@@ -54,7 +54,7 @@ let tests =
 
             do! Task.WhenAll(producerTask, consumerTask) 
 
-            Log.Debug("Finished Keys and properties are propertly passed")
+            Log.Debug("Finished Keys and properties are properly passed")
         }
 
         testTask "Messages with same key always go to the same consumer" {
@@ -349,7 +349,7 @@ let tests =
         // Should be run manually, first with commented consumer, then trigger compaction, then with commented producer
         ptestTask "Compacting works as expected" {
 
-            Log.Debug("Started Keys and properties are propertly passed")
+            Log.Debug("Started Keys and properties are properly passed")
             let client = getClient()
             let topicName = "public/retention/topic-compacted" // + Guid.NewGuid().ToString("N")
             let producerName = "propsTestProducer"
@@ -393,6 +393,6 @@ let tests =
 
             do! Task.WhenAll(producerTask, consumerTask) 
 
-            Log.Debug("Finished Keys and properties are propertly passed")
+            Log.Debug("Finished Keys and properties are properly passed")
         }
     ]
