@@ -117,9 +117,9 @@ let tests =
             Log.Debug("Finished 'Batch get created from several tasks'")
         }
 
-        testTask "Keys and properties are propertly passed with default batching" {
+        testTask "Keys and properties are properly passed with default batching" {
 
-            Log.Debug("Started Keys and properties are propertly passed with default batching")
+            Log.Debug("Started Keys and properties are properly passed with default batching")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let producerName = "propsTestProducer"
@@ -153,12 +153,12 @@ let tests =
 
             do! Task.WhenAll(producerTask, consumerTask)
 
-            Log.Debug("Finished Keys and properties are propertly passed with default batching")
+            Log.Debug("Finished Keys and properties are properly passed with default batching")
         }
 
-        testTask "Keys and properties are propertly passed with key-based batching" {
+        testTask "Keys and properties are properly passed with key-based batching" {
 
-            Log.Debug("Started Keys and properties are propertly passed with key-based batching")
+            Log.Debug("Started Keys and properties are properly passed with key-based batching")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let producerName = "propsTestProducer"
@@ -201,7 +201,7 @@ let tests =
                     }:> Task)
 
             do! Task.WhenAll(producer1Task, producer2Task, consumerTask)
-            Log.Debug("Finished Keys and properties are propertly passed with key-based batching")
+            Log.Debug("Finished Keys and properties are properly passed with key-based batching")
         }
 
         testTask "Batch receive works with regular consumer"{
