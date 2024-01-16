@@ -1481,8 +1481,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 raise exn
 
             // no need to IncrementNumAcksFailed, since ack can't fail
-            post mb (Acknowledge(msgId, Individual, None))
-            unitTask
+            backgroundTask {
+                post mb (Acknowledge(msgId, Individual, None))
+            }
 
         member this.AcknowledgeAsync (msgId: MessageId, txn: Transaction) =
             let exn = connectionHandler.CheckIfActive()
@@ -1508,9 +1509,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     interceptors.OnAcknowledge(this, msg.MessageId, exn)
                 raise exn
 
-            for msg in msgs do
-                post mb (Acknowledge(msg.MessageId, Individual, None))
-            unitTask
+            backgroundTask {
+                for msg in msgs do
+                    post mb (Acknowledge(msg.MessageId, Individual, None))
+            }
 
         member this.AcknowledgeAsync (msgIds: MessageId seq) =
             let exn = connectionHandler.CheckIfActive()
@@ -1519,10 +1521,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     stats.IncrementNumAcksFailed()
                     interceptors.OnAcknowledge(this, msgId, exn)
                 raise exn
-
-            for msgId in msgIds do
-                post mb (Acknowledge(msgId, AckType.Individual, None))
-            unitTask
+            backgroundTask {
+                for msgId in msgIds do
+                    post mb (Acknowledge(msgId, AckType.Individual, None))
+            }
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId) =
             let exn = connectionHandler.CheckIfActive()
@@ -1532,8 +1534,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 raise exn
 
             // no need to IncrementNumAcksFailed, since ack can't fail
-            post mb (Acknowledge(msgId, AckType.Cumulative, None))
-            unitTask
+            backgroundTask {
+                post mb (Acknowledge(msgId, AckType.Cumulative, None))
+            }
 
         member this.AcknowledgeCumulativeAsync (msgId: MessageId, txn: Transaction) =
             let exn = connectionHandler.CheckIfActive()
@@ -1583,14 +1586,16 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
         member this.NegativeAcknowledge msgId =
             connectionHandler.CheckIfActive() |> throwIfNotNull
-            post mb (NegativeAcknowledge(msgId))
-            unitTask
+            backgroundTask {
+                post mb (NegativeAcknowledge(msgId))
+            }
 
         member this.NegativeAcknowledge (msgs: Messages<'T>)  =
             connectionHandler.CheckIfActive() |> throwIfNotNull
-            for msg in msgs do
-                post mb (NegativeAcknowledge(msg.MessageId))
-            unitTask
+            backgroundTask {
+                for msg in msgs do
+                    post mb (NegativeAcknowledge(msg.MessageId))
+            }
 
         member this.ConsumerId = consumerId
 
@@ -1647,7 +1652,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
         member this.LastDisconnectedTimestamp =
             connectionHandler.LastDisconnectedTimestamp
-            
+
         member this.IsConnected =
             match connectionHandler.ConnectionState with
             | Ready _ -> true
