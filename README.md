@@ -11,7 +11,7 @@
 
 Supported pulsar cluster versions: **2.4+**
 
-Find examples of usage in [/examples](https://github.com/fsharplang-ru/pulsar-client-dotnet/tree/develop/examples) folder. We are trying to keep api similar to the Java client, so please take a look at [it's documentation](https://pulsar.apache.org/docs/en/client-libraries-java/#connection-urls) to understand possible options available. You can also join telegram chat https://t.me/pro_pulsar for further discussions.
+Find examples of usage in [/examples](https://github.com/fsharplang-ru/pulsar-client-dotnet/tree/develop/examples) folder. We are trying to keep api similar to the Java client, so please take a look at [it's documentation](https://pulsar.apache.org/docs/client-libraries-java/) to understand possible options available. You can also join telegram chat https://t.me/pro_pulsar for further discussions.
 
 Features list (based on [Client Feature Matrix](https://github.com/apache/pulsar/wiki/PIP-108%3A-Pulsar-Feature-Matrix-%28Client-and-Function%29)):
 
