@@ -178,7 +178,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         let consumerImp = consumer :> IConsumer<'T>
         fun () ->
             backgroundTask {
-                if consumerImp.HasReachedEndOfTopic then
+                let! hasReachedEndOfTopic = consumerImp.HasReachedEndOfTopic()
+                if hasReachedEndOfTopic then
                     Log.Logger.LogWarning("{0} topic was terminated", topic)
                     do! Task.Delay(Timeout.Infinite) // infinite delay for terminated topic
                 let! message = consumer.ReceiveWrappedAsync(CancellationToken.None)
@@ -797,22 +798,22 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
                 Log.Logger.LogDebug("{0} HasReachedEndOfTheTopic", prefix)
                 consumers
-                |> Seq.forall (fun (KeyValue(_, (consumer, _))) -> consumer.HasReachedEndOfTopic)
+                |> Seq.forall (fun (KeyValue(_, (consumer, _))) -> consumer.HasReachedEndOfTopic().Result)
                 |> channel.SetResult
 
             | LastDisconnectedTimestamp channel ->
 
                 Log.Logger.LogDebug("{0} LastDisconnectedTimestamp", prefix)
                 consumers
-                |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.LastDisconnectedTimestamp)
+                |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.LastDisconnectedTimestamp().Result)
                 |> Seq.max
                 |> channel.SetResult
-            
+
             | IsConnected channel ->
 
                 Log.Logger.LogDebug("{0} IsConnected", prefix)
                 consumers
-                |> Seq.forall (fun (KeyValue(_, (consumer, _))) -> consumer.IsConnected)
+                |> Seq.forall (fun (KeyValue(_, (consumer, _))) -> consumer.IsConnected().Result)
                 |> channel.SetResult
 
             | Seek (seekData, channel) ->
@@ -892,7 +893,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     try
                         let! statsTask =
                             consumers
-                            |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.GetStatsAsync())
+                            |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.GetStats())
                             |> Task.WhenAll
                         channel.SetResult(statsTask)
                     with Flatten ex ->
@@ -1119,8 +1120,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         member this.UnsubscribeAsync() =
             postAndAsyncReply mb Unsubscribe
 
-        member this.HasReachedEndOfTopic =
-            (postAndAsyncReply mb HasReachedEndOfTheTopic).Result
+        member this.HasReachedEndOfTopic() =
+            postAndAsyncReply mb HasReachedEndOfTheTopic
 
         member this.NegativeAcknowledge msgId =
             postAndAsyncReply mb (fun channel -> NegativeAcknowledge(channel, msgId))
@@ -1137,7 +1138,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
         member this.Name = consumerName
 
-        member this.GetStatsAsync() =
+        member this.GetStats() =
             backgroundTask {
                 let! allStats = postAndAsyncReply mb GetStats
                 return allStats |> statsReduce
@@ -1161,10 +1162,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     do! postAndAsyncReply mb (fun channel -> ReconsumeLater(msg, deliverAt, channel))
             }
 
-        member this.LastDisconnectedTimestamp =
-            (postAndAsyncReply mb LastDisconnectedTimestamp).Result
-        member this.IsConnected =
-            (postAndAsyncReply mb IsConnected).Result
+        member this.LastDisconnectedTimestamp() =
+            postAndAsyncReply mb LastDisconnectedTimestamp
+        member this.IsConnected() =
+            postAndAsyncReply mb IsConnected
 
     interface IAsyncDisposable with
 

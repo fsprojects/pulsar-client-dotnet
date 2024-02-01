@@ -84,17 +84,17 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
         member this.SeekAsync (resolver: Func<string, SeekType>) : Task<Unit>  =
             castedConsumer.SeekAsync(resolver)
 
-        member this.HasReachedEndOfTopic with get() =
-            castedConsumer.HasReachedEndOfTopic
+        member this.HasReachedEndOfTopic() =
+            castedConsumer.HasReachedEndOfTopic()
 
         member this.HasMessageAvailableAsync() =
             consumer.HasMessageAvailableAsync()
 
-        member this.Topic with get() =
+        member this.Topic =
             castedConsumer.Topic
 
-        member this.IsConnected with get() =
-            castedConsumer.IsConnected
+        member this.IsConnected() =
+            castedConsumer.IsConnected()
 
     interface IAsyncDisposable with
 

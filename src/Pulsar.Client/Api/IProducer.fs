@@ -21,9 +21,9 @@ type IProducer<'T> =
     /// Internal client producer id
     abstract member ProducerId: ProducerId
     /// Get the topic which producer is publishing to
-    abstract member Topic: string    
+    abstract member Topic: string
     /// Get statistics for the producer.
-    abstract member GetStatsAsync: unit -> Task<ProducerStats>
+    abstract member GetStats: unit -> Task<ProducerStats>
     /// <summary>
     ///     Constructs <see cref="Pulsar.Client.Common.MessageBuilder" />
     /// </summary>
@@ -68,10 +68,10 @@ type IProducer<'T> =
     /// or custom sequence id that was published and acknowledged by the broker.
     /// After recreating a producer with the same producer name, this will return the last message that was
     /// published in the previous producer session, or -1 if there no message was ever published.
-    abstract member LastSequenceId : SequenceId
+    abstract member LastSequenceId: unit -> Task<SequenceId>
     /// Get the producer name
     abstract member Name: string
     /// The last disconnected timestamp of the producer
-    abstract member LastDisconnectedTimestamp: TimeStamp
+    abstract member LastDisconnectedTimestamp: unit -> Task<TimeStamp>
     /// Return true if the consumer is connected to the broker
-    abstract member IsConnected: bool
+    abstract member IsConnected: unit -> Task<bool>

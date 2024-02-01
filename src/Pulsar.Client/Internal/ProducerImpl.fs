@@ -918,19 +918,19 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
         member this.Topic = %producerConfig.Topic.CompleteTopicName
 
-        member this.LastSequenceId = %Interlocked.Read(&lastSequenceIdPublished)
+        member this.LastSequenceId() = %Interlocked.Read(&lastSequenceIdPublished) |> Task.FromResult
 
         member this.Name = producerName
 
-        member this.GetStatsAsync() =
+        member this.GetStats() =
             postAndAsyncReply mb ProducerMessage.GetStats
 
-        member this.LastDisconnectedTimestamp =
-            connectionHandler.LastDisconnectedTimestamp
-        member this.IsConnected =
+        member this.LastDisconnectedTimestamp() =
+            connectionHandler.LastDisconnectedTimestamp |> Task.FromResult
+        member this.IsConnected() =
             match connectionHandler.ConnectionState with
-            | Ready _ -> true
-            | _ -> false
+            | Ready _ -> trueTask
+            | _ -> falseTask
 
     interface IAsyncDisposable with
 

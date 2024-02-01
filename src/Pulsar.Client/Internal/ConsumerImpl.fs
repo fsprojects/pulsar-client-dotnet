@@ -1582,7 +1582,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             connectionHandler.CheckIfActive() |> throwIfNotNull
             postAndAsyncReply mb ConsumerMessage.Unsubscribe
 
-        member this.HasReachedEndOfTopic = hasReachedEndOfTopic
+        member this.HasReachedEndOfTopic() = hasReachedEndOfTopic |> Task.FromResult
 
         member this.NegativeAcknowledge msgId =
             connectionHandler.CheckIfActive() |> throwIfNotNull
@@ -1603,7 +1603,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
         member this.Name = consumerName
 
-        member this.GetStatsAsync() =
+        member this.GetStats() =
             backgroundTask {
                 return!
                     match connectionHandler.ConnectionState with
@@ -1650,13 +1650,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             }
 
 
-        member this.LastDisconnectedTimestamp =
-            connectionHandler.LastDisconnectedTimestamp
+        member this.LastDisconnectedTimestamp() =
+            connectionHandler.LastDisconnectedTimestamp |> Task.FromResult
 
-        member this.IsConnected =
+        member this.IsConnected() =
             match connectionHandler.ConnectionState with
-            | Ready _ -> true
-            | _ -> false
+            | Ready _ -> trueTask
+            | _ -> falseTask
 
 
     interface IAsyncDisposable with

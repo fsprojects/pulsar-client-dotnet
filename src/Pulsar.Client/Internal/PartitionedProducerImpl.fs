@@ -186,7 +186,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
                 Log.Logger.LogDebug("{0} LastSequenceId", prefix)
                 producers
-                |> Seq.map (fun producer -> producer.LastSequenceId)
+                |> Seq.map (fun producer -> producer.LastSequenceId().Result)
                 |> Seq.max
                 |> channel.SetResult
 
@@ -194,7 +194,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
                 Log.Logger.LogDebug("{0} LastDisconnectedTimestamp", prefix)
                 producers
-                |> Seq.map (fun producer -> producer.LastDisconnectedTimestamp)
+                |> Seq.map (fun producer -> producer.LastDisconnectedTimestamp().Result)
                 |> Seq.max
                 |> channel.SetResult
 
@@ -202,9 +202,9 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
                 Log.Logger.LogDebug("{0} IsConnected", prefix)
                 producers
-                |> Seq.forall (fun producer -> producer.IsConnected)
+                |> Seq.forall (fun producer -> producer.IsConnected().Result)
                 |> channel.SetResult
-                
+
             | Close channel ->
 
                 match this.ConnectionState with
@@ -280,7 +280,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
                 let! stats =
                     producers
-                    |> Seq.map(fun p -> p.GetStatsAsync())
+                    |> Seq.map(fun p -> p.GetStats())
                     |> Task.WhenAll
                 channel.SetResult(statsReduce stats)
         }:> Task).ContinueWith(fun t ->
@@ -375,15 +375,15 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
         member this.Topic = %producerConfig.Topic.CompleteTopicName
 
-        member this.LastSequenceId = (postAndAsyncReply mb LastSequenceId).Result
+        member this.LastSequenceId() = postAndAsyncReply mb LastSequenceId
 
         member this.Name = producerConfig.ProducerName
 
-        member this.GetStatsAsync() = postAndAsyncReply mb GetStats
+        member this.GetStats() = postAndAsyncReply mb GetStats
 
-        member this.LastDisconnectedTimestamp = (postAndAsyncReply mb LastDisconnectedTimestamp).Result
-            
-        member this.IsConnected = (postAndAsyncReply mb IsConnected).Result
+        member this.LastDisconnectedTimestamp() = postAndAsyncReply mb LastDisconnectedTimestamp
+
+        member this.IsConnected() = postAndAsyncReply mb IsConnected
 
 
     interface IAsyncDisposable with

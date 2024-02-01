@@ -19,7 +19,7 @@ type IConsumer<'T> =
     abstract member BatchReceiveAsync: CancellationToken -> Task<Messages<'T>>
     /// Asynchronously acknowledge the consumption of a single message
     abstract member AcknowledgeAsync: messageId:MessageId -> Task<unit>
-    /// Asynchronously acknowledge the consumption of a single message, it will store in pending ack. 
+    /// Asynchronously acknowledge the consumption of a single message, it will store in pending ack.
     /// After the transaction commit, the message will actually ack.
     /// After the transaction abort, the message will be redelivered.
     abstract member AcknowledgeAsync: messageId:MessageId * txn:Transaction -> Task<unit>
@@ -48,7 +48,7 @@ type IConsumer<'T> =
     /// Unsubscribes consumer
     abstract member UnsubscribeAsync: unit -> Task<unit>
     /// Return true if the topic was terminated and this consumer has already consumed all the messages in the topic.
-    abstract member HasReachedEndOfTopic: bool
+    abstract member HasReachedEndOfTopic: unit -> Task<bool>
     /// Reset the subscription associated with this consumer to a specific message id.
     abstract member SeekAsync: messageId:MessageId -> Task<unit>
     /// Reset the subscription associated with this consumer to a specific message publish time (unix timestamp).
@@ -68,14 +68,14 @@ type IConsumer<'T> =
     /// Get the consumer name
     abstract member Name: string
     /// Get statistics for the consumer.
-    abstract member GetStatsAsync: unit -> Task<ConsumerStats>
+    abstract member GetStats: unit -> Task<ConsumerStats>
     /// ReconsumeLater the consumption of Message
     abstract member ReconsumeLaterAsync: message:Message<'T> * deliverAt:TimeStamp -> Task<unit>
     /// ReconsumeLater the consumption of Messages
     abstract member ReconsumeLaterAsync: messages:Messages<'T> * deliverAt:TimeStamp -> Task<unit>
     /// ReconsumeLater the reception of all the messages in the stream up to (and including) the provided message.
     abstract member ReconsumeLaterCumulativeAsync: message:Message<'T> * deliverAt:TimeStamp -> Task<unit>
-    /// The last disconnected timestamp of the consumer    abstract member LastDisconnected: DateTime
-    abstract member LastDisconnectedTimestamp: TimeStamp
+    /// The last disconnected timestamp of the consumer
+    abstract member LastDisconnectedTimestamp: unit -> Task<TimeStamp>
     /// Return true if the consumer is connected to the broker
-    abstract member IsConnected: bool
+    abstract member IsConnected: unit -> Task<bool>
