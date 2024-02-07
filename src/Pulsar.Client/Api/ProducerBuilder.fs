@@ -156,6 +156,11 @@ type ProducerBuilder<'T> private (сreateProducerAsync, config: ProducerConfigur
             MessageEncryptor = Some messageEncryptor }
         |> this.With
     
+    member internal this.InitialSubscriptionName initialSubscriptionName =
+        { config with
+            InitialSubscriptionName = initialSubscriptionName }
+        |> this.With
+    
     member this.CreateAsync(): Task<IProducer<'T>> =
         сreateProducerAsync(verify config, schema, producerInterceptors)
 
