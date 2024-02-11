@@ -832,14 +832,15 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                         | Result.Error (UnknownCommandType unknownType), consumed ->
                             Log.Logger.LogError("{0} UnknownCommandType {1}, ignoring message", prefix, unknownType)
                             reader.AdvanceTo consumed
-            with
-            | ?: OperationCancelException ->
-                Log.Logger.LogInformation("{0} Socket read was cancelled", prefix)
-            | Flatten ex ->
-                if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
-                    Log.Logger.LogWarning("{0} New connection was aborted", prefix)
-                Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally while reading", prefix)
-                post operationsMb ChannelInactive
+            with Flatten ex ->
+                match ex with
+                | ?: OperationCancelException ->
+                    Log.Logger.LogInformation("{0} Socket read was cancelled", prefix)
+                | _ ->
+                    if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
+                        Log.Logger.LogWarning("{0} New connection was aborted", prefix)
+                    Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally while reading", prefix)
+                    post operationsMb ChannelInactive
 
             Log.Logger.LogDebug("{0} readSocket stopped", prefix)
         } :> Task
