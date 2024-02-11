@@ -834,7 +834,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                             reader.AdvanceTo consumed
             with Flatten ex ->
                 match ex with
-                | ?: OperationCancelException ->
+                | :? OperationCancelException ->
                     Log.Logger.LogInformation("{0} Socket read was cancelled", prefix)
                 | _ ->
                     if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
