@@ -4,11 +4,14 @@ open System
 open Pulsar.Client.Auth
 open Pulsar.Client.Auth.OAuth2
 
+let newAuthenticationTokenSupplier (supplier: unit -> string) =
+    new AuthenticationToken(supplier)
+
 let newAuthenticationToken (token: string) =
-    new AuthenticationToken (token)
+    new AuthenticationToken(token)
 
 let newAuthenticationTls (certFilePath: string) =
-    new AuthenticationTls (certFilePath)
-    
+    new AuthenticationTls(certFilePath)
+
 let newAuthenticationOauth2 (issuerUrl : Uri, audience: string, privateKey: Uri, scope: string) =
-    new AuthenticationOauth2 (issuerUrl, audience, privateKey, scope)
+    new AuthenticationOauth2(issuerUrl, audience, privateKey, scope)
