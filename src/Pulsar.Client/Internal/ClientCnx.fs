@@ -809,40 +809,41 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             let reader = connection.Input
 
             try
-                while continueLooping do
-                    let! result = reader.ReadAsync(socketReadCancellationTokenSource.Token)
-                    let buffer = result.Buffer
-                    if result.IsCompleted then
+                try
+                    while continueLooping do
+                        let! result = reader.ReadAsync(socketReadCancellationTokenSource.Token)
+                        let buffer = result.Buffer
+                        if result.IsCompleted then
+                            if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
+                                Log.Logger.LogWarning("{0} New connection was aborted", prefix)
+                            Log.Logger.LogWarning("{0} Socket was disconnected normally while reading", prefix)
+                            post operationsMb ChannelInactive
+                            continueLooping <- false
+                        else
+                            match tryParse buffer with
+                            | Result.Ok xcmd, consumed ->
+                                handleCommand xcmd
+                                reader.AdvanceTo consumed
+                            | Result.Error IncompleteCommand, _ ->
+                                Log.Logger.LogDebug("{0} IncompleteCommand received", prefix)
+                                reader.AdvanceTo(buffer.Start, buffer.End)
+                            | Result.Error (CorruptedCommand ex), consumed ->
+                                Log.Logger.LogError(ex, "{0} Ignoring corrupted command.", prefix)
+                                reader.AdvanceTo consumed
+                            | Result.Error (UnknownCommandType unknownType), consumed ->
+                                Log.Logger.LogError("{0} UnknownCommandType {1}, ignoring message", prefix, unknownType)
+                                reader.AdvanceTo consumed
+                with Flatten ex ->
+                    match ex with
+                    | :? OperationCanceledException ->
+                        Log.Logger.LogInformation("{0} Socket read was cancelled", prefix)
+                    | _ ->
                         if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
                             Log.Logger.LogWarning("{0} New connection was aborted", prefix)
-                        Log.Logger.LogWarning("{0} Socket was disconnected normally while reading", prefix)
-                        post operationsMb ChannelInactive
-                        continueLooping <- false
-                    else
-                        match tryParse buffer with
-                        | Result.Ok xcmd, consumed ->
-                            handleCommand xcmd
-                            reader.AdvanceTo consumed
-                        | Result.Error IncompleteCommand, _ ->
-                            Log.Logger.LogDebug("{0} IncompleteCommand received", prefix)
-                            reader.AdvanceTo(buffer.Start, buffer.End)
-                        | Result.Error (CorruptedCommand ex), consumed ->
-                            Log.Logger.LogError(ex, "{0} Ignoring corrupted command.", prefix)
-                            reader.AdvanceTo consumed
-                        | Result.Error (UnknownCommandType unknownType), consumed ->
-                            Log.Logger.LogError("{0} UnknownCommandType {1}, ignoring message", prefix, unknownType)
-                            reader.AdvanceTo consumed
-            with Flatten ex ->
-                match ex with
-                | :? OperationCanceledException ->
-                    Log.Logger.LogInformation("{0} Socket read was cancelled", prefix)
-                | _ ->
-                    if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
-                        Log.Logger.LogWarning("{0} New connection was aborted", prefix)
-                    Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally while reading", prefix)
-                    post operationsMb ChannelInactive
-
-            Log.Logger.LogDebug("{0} readSocket stopped", prefix)
+                        Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally while reading", prefix)
+            finally
+                post operationsMb ChannelInactive
+                Log.Logger.LogDebug("{0} readSocket stopped", prefix)
         } :> Task
 
     do startRequestTimeoutTimer()
