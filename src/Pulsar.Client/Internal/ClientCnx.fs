@@ -840,8 +840,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
                         Log.Logger.LogWarning("{0} New connection was aborted", prefix)
                     Log.Logger.LogWarning(ex, "{0} Socket was disconnected exceptionally while reading", prefix)
-            
-            post operationsMb ChannelInactive
+                post operationsMb ChannelInactive
             Log.Logger.LogDebug("{0} readSocket stopped", prefix)
         } :> Task
 
