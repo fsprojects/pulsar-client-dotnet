@@ -88,4 +88,4 @@ Features list (based on [Client Feature Matrix](https://github.com/apache/pulsar
 
 #### Maintaners
 
-  * @Lanayx
+  * @Lanayx (only maintaining). If you want me to **implement new features**, this can be arranged on a paid basis, please PM [in Telegram](https://t.me/Lanayx)
