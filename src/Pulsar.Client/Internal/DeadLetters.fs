@@ -13,7 +13,7 @@ type internal DeadLetterProcessor<'T>
     (policy: DeadLetterPolicy,
      getTopicName: unit -> string,
      subscriptionName: SubscriptionName,
-     createProducer: string -> Task<IProducer<'T>>) =
+     createProducer: string -> string -> Task<IProducer<'T>>) =
 
     let topicName = getTopicName()
     let store = Dictionary<MessageId, Message<'T>>()
@@ -24,11 +24,11 @@ type internal DeadLetterProcessor<'T>
             $"{topicName}-{subscriptionName}{RetryMessageUtil.DLQ_GROUP_TOPIC_SUFFIX}"
 
     let dlProducer = lazy (
-        createProducer dlTopicName
+        createProducer dlTopicName policy.InitialSubscriptionName
     )
 
     let rlProducer = lazy (
-        createProducer policy.RetryLetterTopic
+        createProducer policy.RetryLetterTopic ""
     )
 
     let getOptionalKey (message: Message<'T>) =

@@ -8,10 +8,12 @@ open System.Threading.Tasks
 type DeadLetterPolicy(maxRedeliveryCount: int
                        , [<Optional; DefaultParameterValue(null:string)>] deadLetterTopic: string
                        , [<Optional; DefaultParameterValue(null:string)>] retryLetterTopic: string
+                       , [<Optional; DefaultParameterValue(null:string)>] initialSubscriptionName: string
                        ) =
     member __.MaxRedeliveryCount = maxRedeliveryCount
     member __.DeadLetterTopic = deadLetterTopic
     member __.RetryLetterTopic = retryLetterTopic
+    member __.InitialSubscriptionName = initialSubscriptionName
 
 type IDeadLetterProcessor<'T> =
     abstract member ClearMessages: unit -> unit
