@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Internal
+namespace Pulsar.Client.Internal
 
 open System
 open System.Buffers
@@ -127,7 +127,7 @@ module internal CompressionCodec =
                 let zstdDecompressor = new Decompressor()
                 try
                     let sourceSpan = payload.ToArray().AsSpan()
-                    zstdDecompressor.Unwrap(sourceSpan, target) |> ignore
+                    zstdDecompressor.Unwrap(sourceSpan, target, false) |> ignore
                     let ms = MemoryStreamManager.GetStream(null, uncompressedSize)
                     ms.Write(target, 0, uncompressedSize)
                     ms
