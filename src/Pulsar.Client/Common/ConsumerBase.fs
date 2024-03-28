@@ -38,13 +38,13 @@ let hasEnoughMessagesForBatchReceive (batchReceivePolicy: BatchReceivePolicy) in
 let dequeueWaiter (waiters: LinkedList<Waiter<'T>>) =
     let struct(ctrOpt, ch) = waiters.First.Value
     waiters.RemoveFirst()
-    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+    ctrOpt |> Option.iter _.Dispose()
     ch
 
 let dequeueBatchWaiter (batchWaiters: LinkedList<BatchWaiter<'T>>) =
     let struct(cts, ctrOpt, ch) = batchWaiters.First.Value
     batchWaiters.RemoveFirst()
-    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+    ctrOpt |> Option.iter _.Dispose()
     cts.Cancel()
     cts.Dispose()
     ch

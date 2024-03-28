@@ -80,7 +80,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
                 ListenerName =
                     name
                     |> invalidArgIfBlankString "Param listenerName must not be blank."
-                    |> (fun name -> name.Trim()) }
+                    |> _.Trim() }
 
     member this.MaxLookupRedirects maxLookupRedirects =
         PulsarClientBuilder

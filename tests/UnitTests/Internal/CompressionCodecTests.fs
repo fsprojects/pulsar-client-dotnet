@@ -29,14 +29,14 @@ let tests =
     let testEncode compressionType expectedBytes =
         let codec = compressionType |> createCodec
         let ms = new MemoryStream(helloNone, 0, helloNone.Length, true, true)
-        let encoded = ms |> codec.Encode |> (fun ms -> ms.ToArray())
+        let encoded = ms |> codec.Encode |> _.ToArray()
         encoded |> Expect.sequenceEqual "" expectedBytes
 
     let testDecode compressionType encodedBytes =
         let uncompressedSize = helloNone.Length
         let codec = compressionType |> createCodec
         let ms = new MemoryStream(encodedBytes, 0, encodedBytes.Length, true, true)
-        let decoded = codec.Decode(uncompressedSize, ms) |> (fun ms -> ms.ToArray())|>  getString
+        let decoded = codec.Decode(uncompressedSize, ms) |> _.ToArray() |> getString
         decoded |> Expect.equal "" hello
 
     testList "CompressionCodec" [
@@ -91,10 +91,10 @@ let tests =
           // while (str.length < bytes)
           //   str += "hello world lorem ipsum"
 
-          let uncompressedSize = (1024 * 1024 * 2 + 1000)
+          let uncompressedSize = 1024 * 1024 * 2 + 1000
           let codec = CompressionType.ZStd |> createCodec
           let ms = new MemoryStream(helloWorldZstdWithoutDecompressedContentSizeInPayload, 0, helloWorldZstdWithoutDecompressedContentSizeInPayload.Length, true, true)
-          let decoded = codec.Decode(uncompressedSize, ms) |> (fun ms -> ms.ToArray())|>  getString
+          let decoded = codec.Decode(uncompressedSize, ms) |> _.ToArray() |> getString
           decoded |> Expect.stringStarts "" "hello world lorem ipsum"
         }
     ]

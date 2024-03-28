@@ -118,7 +118,7 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
             | Stop ->
                 this.ClientState <- Closed
                 do! connectionPool.CloseAsync()
-                transactionClient |> Option.iter (fun tc -> tc.Close())
+                transactionClient |> Option.iter _.Close()
                 Log.Logger.LogInformation("Pulsar client stopped")
                 continueLoop <- false
         } :> Task).ContinueWith(fun t ->

@@ -186,7 +186,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
                 Log.Logger.LogDebug("{0} LastSequenceId", prefix)
                 producers
-                |> Seq.map (fun producer -> producer.LastSequenceId().Result)
+                |> Seq.map _.LastSequenceId().Result
                 |> Seq.max
                 |> channel.SetResult
 
@@ -194,7 +194,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
                 Log.Logger.LogDebug("{0} LastDisconnectedTimestamp", prefix)
                 producers
-                |> Seq.map (fun producer -> producer.LastDisconnectedTimestamp().Result)
+                |> Seq.map _.LastDisconnectedTimestamp().Result
                 |> Seq.max
                 |> channel.SetResult
 
@@ -202,7 +202,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
                 Log.Logger.LogDebug("{0} IsConnected", prefix)
                 producers
-                |> Seq.forall (fun producer -> producer.IsConnected().Result)
+                |> Seq.forall _.IsConnected().Result
                 |> channel.SetResult
 
             | Close channel ->
@@ -280,7 +280,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
                 let! stats =
                     producers
-                    |> Seq.map(fun p -> p.GetStats())
+                    |> Seq.map _.GetStats()
                     |> Task.WhenAll
                 channel.SetResult(statsReduce stats)
         }:> Task).ContinueWith(fun t ->
@@ -310,7 +310,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         | Uninitialized | Failed ->
             raise (NotConnectedException(prefix + " Invalid connection state: " + this.ConnectionState.ToString()))
         | Ready ->
-            let keyString = message.Key |> Option.map(fun k -> k.PartitionKey) |> Option.defaultValue %""
+            let keyString = message.Key |> Option.map _.PartitionKey |> Option.defaultValue %""
             let partition = router.ChoosePartition(keyString, numPartitions)
             if partition < 0 || partition >= numPartitions
             then

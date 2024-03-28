@@ -25,7 +25,7 @@ type GenericRecord (schemaVersion: byte[], fields: Field[]) =
     member this.TryGetField(name) =
         fields
         |> Array.tryFind (fun field -> field.Name = name)
-        |> Option.map(fun field -> field.Value)
+        |> Option.map _.Value
         |> Option.toObj
 and Field =
     {
@@ -46,7 +46,7 @@ module SchemaUtils =
     let getDomainSchemaType (protoSchemaType: Schema.Type) =
         let schemaNumber = int protoSchemaType
         enum<SchemaType> schemaNumber
-    
+
     let getProtoSchema (schemaInfo: SchemaInfo) =
         let schema =
             Schema (
@@ -68,4 +68,3 @@ module SchemaUtils =
                 |> Seq.map (fun kv -> kv.Key, kv.Value)
                 |> readOnlyDict
         }
-    

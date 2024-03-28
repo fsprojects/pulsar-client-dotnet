@@ -440,7 +440,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let getSchemaVersionBytes (schemaVersion: SchemaVersion option) =
         schemaVersion
-        |> Option.map (fun sv -> sv.Bytes)
+        |> Option.map _.Bytes
         |> Option.defaultValue null
 
     let clearDeadLetters() = deadLettersProcessor.ClearMessages()
@@ -969,7 +969,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogDebug("{0} CancelWaiter, removed waiter", prefix)
                     let struct(ctrOpt, channel) = waiter
                     channel.SetCanceled()
-                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+                    ctrOpt |> Option.iter _.Dispose()
                 else
                     Log.Logger.LogDebug("{0} CancelWaiter, no waiter found", prefix)
 
@@ -981,7 +981,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     batchCts.Cancel()
                     batchCts.Dispose()
                     channel.SetCanceled()
-                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+                    ctrOpt |> Option.iter _.Dispose()
                 else
                     Log.Logger.LogDebug("{0} CancelBatchWaiter, no waiter found", prefix)
 
@@ -1055,7 +1055,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         Log.Logger.LogWarning("{0} RedeliverAllUnacknowledged was not complete", prefix)
                 | _ ->
                     Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
-                channel |> Option.map (fun ch -> ch.SetResult()) |> ignore
+                channel |> Option.map _.SetResult() |> ignore
 
             | ConsumerMessage.SeekAsync (seekData, channel) ->
 

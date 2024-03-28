@@ -358,7 +358,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 Log.Logger.LogError(ex, "{0} could not processRemovedTopics fully", prefix)
                 return consumersTasks
                     |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
-                    |> Seq.map (fun t -> t.Result)
+                    |> Seq.map _.Result
                     |> Seq.map (fun (removedTopic, removedTopicPartition, stream) ->
                         consumers.Remove(removedTopicPartition) |> ignore
                         allTopics.Remove(removedTopic) |> ignore
@@ -741,7 +741,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         incomingMessages.Clear()
                         currentStream.RestartCompletedTasks()
                         incomingMessagesSize <- 0L
-                        channel |> Option.map (fun ch -> ch.SetResult()) |> ignore
+                        channel |> Option.map _.SetResult() |> ignore
                     with ex ->
                         Log.Logger.LogError(ex, "{0} RedeliverUnacknowledgedMessages failed", prefix)
                         channel |> Option.map (fun ch -> ch.SetException ex) |> ignore
@@ -759,7 +759,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     | Ready ->
                         try
                             messageIds
-                                |> Seq.groupBy (fun msgId -> msgId.TopicName)
+                                |> Seq.groupBy _.TopicName
                                 |> Seq.iter(fun (topicName, msgIds) ->
                                     let consumer, _ = consumers[topicName]
                                     msgIds |> RedeliverSet |> (consumer :?> ConsumerImpl<'T>).RedeliverUnacknowledged
@@ -778,7 +778,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     Log.Logger.LogDebug("{0} CancelWaiter, removed waiter", prefix)
                     let struct(ctrOpt, channel) = waiter
                     channel.SetCanceled()
-                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+                    ctrOpt |> Option.iter _.Dispose()
                 else
                     Log.Logger.LogDebug("{0} CancelWaiter, no waiter found", prefix)
 
@@ -790,7 +790,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     batchCts.Cancel()
                     batchCts.Dispose()
                     channel.SetCanceled()
-                    ctrOpt |> Option.iter (fun ctr -> ctr.Dispose())
+                    ctrOpt |> Option.iter _.Dispose()
                 else
                     Log.Logger.LogDebug("{0} CancelBatchWaiter, no waiter found", prefix)
 

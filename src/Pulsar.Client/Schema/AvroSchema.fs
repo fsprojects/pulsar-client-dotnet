@@ -15,7 +15,7 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
     let defaultValue = Unchecked.defaultof<'T>
-    
+
     new () =
          let tpe = typeof<'T>
          if typeof<ISpecificRecord>.IsAssignableFrom(tpe) then
@@ -32,7 +32,7 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
         let avroWriter = ReflectWriter<'T>(avroSchema)
         let avroReader = ReflectReader<'T>(avroSchema, avroSchema)
         AvroSchema(avroSchema, avroReader, avroWriter)
-        
+
     override this.SchemaInfo = {
         Name = ""
         Type = SchemaType.AVRO
@@ -62,15 +62,15 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
                 AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema, cache), avroWriter) :> ISchema<'T>
             else
                 AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema), avroWriter) :> ISchema<'T>
-        
+
 type internal GenericAvroSchema(schemaInfo: SchemaInfo, schemaVersion: SchemaVersion option) =
     inherit ISchema<GenericRecord>()
     let stringSchema = schemaInfo.Schema |> Encoding.UTF8.GetString
     let avroSchema = Schema.Parse(stringSchema) :?> RecordSchema
     let avroReader = GenericDatumReader<Avro.Generic.GenericRecord>(avroSchema, avroSchema)
     let schemaFields = avroSchema.Fields
-    
-    new(topicSchema) = 
+
+    new(topicSchema) =
         GenericAvroSchema(topicSchema.SchemaInfo, topicSchema.SchemaVersion)
 
     override this.SchemaInfo = {
@@ -82,16 +82,16 @@ type internal GenericAvroSchema(schemaInfo: SchemaInfo, schemaVersion: SchemaVer
     override this.Encode _ = raise <| SchemaSerializationException "GenericAvroSchema is for consuming only!"
     override this.Decode bytes =
         use stream = new MemoryStream(bytes)
-        let record = avroReader.Read(null, BinaryDecoder(stream))        
+        let record = avroReader.Read(null, BinaryDecoder(stream))
         let fields =
             schemaFields
             |> Seq.map (fun sf -> { Name = sf.Name; Value = record.[sf.Name]; Index = sf.Pos })
             |> Seq.toArray
         let schemaVersionBytes =
             schemaVersion
-            |> Option.map (fun sv -> sv.Bytes)
+            |> Option.map _.Bytes
             |> Option.toObj
         GenericRecord(schemaVersionBytes, fields)
-        
+
     override this.GetSpecificSchema (schemaInfo, schemaVersion) =
         GenericAvroSchema(schemaInfo,schemaVersion) :> ISchema<_>

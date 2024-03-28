@@ -19,10 +19,10 @@ type internal JsonSchema<'T> () =
     override this.Encode value =
         if parameterIsClass && (isNull <| box value) then
             raise <| SchemaSerializationException "Need Non-Null content value"
-        JsonSerializer.SerializeToUtf8Bytes(value, options)            
+        JsonSerializer.SerializeToUtf8Bytes(value, options)
     override this.Decode bytes =
         JsonSerializer.Deserialize<'T>(ReadOnlySpan bytes, options)
-    
+
 type internal GenericJsonSchema (topicSchema: TopicSchema) =
     inherit ISchema<GenericRecord>()
     let dynamicSerializerOptions = JsonSerializerOptions(IgnoreNullValues = true)
@@ -45,6 +45,6 @@ type internal GenericJsonSchema (topicSchema: TopicSchema) =
             |> Seq.toArray
         let scemaVersionBytes =
             topicSchema.SchemaVersion
-            |> Option.map (fun sv -> sv.Bytes)
+            |> Option.map _.Bytes
             |> Option.toObj
         GenericRecord(scemaVersionBytes, fields)

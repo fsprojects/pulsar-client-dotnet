@@ -5,7 +5,7 @@ type NamespaceName(name : string) =
     let tenant, localName =
         name
         |> invalidArgIfBlankString "Namespace name must not be blank."
-        |> fun text -> text.Split('/')
+        |> _.Split('/')
         |> invalidArgIf
             (fun ar -> ar.Length <> 2)
             "Invalid namespace name format. Namespace name must be specified as '<tenant>/<namespace>'."

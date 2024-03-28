@@ -34,10 +34,10 @@ module internal ServiceUri =
     let private regex = Regex(pattern, RegexOptions.Compiled)
 
     let private getGroupValue (name : string) (m : Match) =
-        m.Groups.[name].Value
+        m.Groups[name].Value
 
     let private getGroupCaptureValues (name : string) (m : Match) =
-        m.Groups.[name].Captures |> Seq.cast<Capture> |> Seq.map (fun c -> c.Value)
+        m.Groups[name].Captures |> Seq.cast<Capture> |> Seq.map _.Value
 
     let parse str =
 

@@ -101,7 +101,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let failMessage (message: MessageBuilder<'T>) (tcs: TaskCompletionSource<MessageId> option) (ex: exn) =
         interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
         stats.IncrementSendFailed()
-        tcs |> Option.iter (fun tcs -> tcs.SetException(ex))
+        tcs |> Option.iter _.SetException(ex)
 
     let failPendingMessage msg (ex: exn) =
         match msg.Callback with
@@ -433,7 +433,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     let isChunked = totalChunks > 1
                     let uuid = if isChunked then $"{producerName}-{sequenceId}" else null
                     let messageIds = if isChunked then Array.zeroCreate totalChunks else Array.empty
-                    let txnId = message.Txn |> Option.map (fun txn -> txn.Id)
+                    let txnId = message.Txn |> Option.map _.Id
                     while chunkId < totalChunks && not chunkError do
                         let metadata = createMessageMetadata sequenceId txnId None
                                            message.Payload.Length message.Key message.Properties message.DeliverAt
@@ -635,7 +635,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                             currentMessageId
                                     interceptors.OnSendAcknowledgement(this, msg, msgId, null)
                                     stats.IncrementNumAcksReceived(Stopwatch.GetElapsedTime(%pendingMessage.CreatedAt))
-                                    tcs |> Option.iter (fun tcs -> tcs.SetResult(msgId))
+                                    tcs |> Option.iter _.SetResult(msgId)
                                 else
                                     // updating messageIds array
                                     let chunkDetails = chunkDetailsOption.Value
@@ -651,7 +651,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                                     Type = Batch msgId; TopicName = %""; ChunkMessageIds = None }
                                     interceptors.OnSendAcknowledgement(this, msg, msgId, null)
                                     stats.IncrementNumAcksReceived(Stopwatch.GetElapsedTime(%pendingMessage.CreatedAt))
-                                    tcs |> Option.iter (fun tcs -> tcs.SetResult(msgId)))
+                                    tcs |> Option.iter _.SetResult(msgId))
                         else
                             Log.Logger.LogWarning("{0} Got ack for batch msg error. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
                                                     prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
@@ -879,7 +879,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 let (Flatten ex) = sendTask.Exception
                 Task.FromException<Unit> ex
             else
-                message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
+                message.Txn |> Option.iter _.RegisterSendOp(sendTask)
                 backgroundTask {
                     let! _ =  sendTask
                     return ()
@@ -894,7 +894,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             connectionHandler.CheckIfActive() |> throwIfNotNull
             let sendTask = this.SendMessage(message, false)
             if not sendTask.IsFaulted then
-                message.Txn |> Option.iter (fun txn -> txn.RegisterSendOp(sendTask))
+                message.Txn |> Option.iter _.RegisterSendOp(sendTask)
             sendTask
 
         member this.NewMessage (value:'T,
