@@ -83,7 +83,7 @@ let tests =
 
         test "Zstd should decode content with non specififed size in the compressed payload" {
           //The compressed string  above has been compressed with zstd using https://www.npmjs.com/package/zstd-codec
-          //It seems this does not specify the the decompressed size inthe payload
+          //It seems this does not specify the the decompressed size in the payload
           //The raw string has been built in JS like so and then compressed afterwards.
           //const bytes = 1024 * 1024 * 2 + 1000
           //let str = "";
