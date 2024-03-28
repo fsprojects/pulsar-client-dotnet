@@ -82,15 +82,15 @@ let tests =
         }
 
         test "Zstd should decode content with non specififed size in the compressed payload" {
-          //The compressed string  above has been compressed with zstd using https://www.npmjs.com/package/zstd-codec
-          //It seems this does not specify the the decompressed size in the payload
-          //The raw string has been built in JS like so and then compressed afterwards.
-          //const bytes = 1024 * 1024 * 2 + 1000
-          //let str = "";
-          //while (str.length < bytes) {
-          //   str += "hello world lorem ipsum"
-          //}
+          // The compressed string above has been compressed with zstd using this library: https://www.npmjs.com/package/zstd-codec@0.1.4
+          // It seems this library does not specify the decompressed size in the payload.
           //
+          // The raw string has been built in JS with the snippet below and then compressed afterwards.
+          // const bytes = 1024 * 1024 * 2 + 1000
+          // let str = "";
+          // while (str.length < bytes)
+          //   str += "hello world lorem ipsum"
+
           let uncompressedSize = (1024 * 1024 * 2 + 1000)
           let codec = CompressionType.ZStd |> createCodec
           let ms = new MemoryStream(helloWorldZstdWithoutDecompressedContentSizeInPayload, 0, helloWorldZstdWithoutDecompressedContentSizeInPayload.Length, true, true)
