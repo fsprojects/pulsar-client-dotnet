@@ -24,6 +24,7 @@ let tests =
     let helloLZ4 = System.Convert.FromBase64String "UEhlbGxv"
     let helloSnappy = System.Convert.FromBase64String "BRBIZWxsbw=="
     let helloZStd = System.Convert.FromBase64String "KLUv/SAFKQAASGVsbG8="
+    let helloWorldZstdWithoutDecompressedContentSizeInPayload = System.Convert.FromBase64String "KLUv/QBQ/AAAuGhlbGxvIHdvcmxkIGxvcmVtIGlwc3VtAQDN/zWfTUwAAAhpAQD8/zkQAkwAAAhvAQD8/zkQAkwAAAhyAQD8/zkQAkwAAAhsAQD8/zkQAkwAAAh1AQD8/zkQAkwAAAhtAQD8/zkQAkwAAAggAQD8/zkQAkwAAAh3AQD8/zkQAkwAAAhlAQD8/zkQAkwAAAhwAQD8/zkQAkwAAAhyAQD8/zkQAkwAAAhsAQD8/zkQAkwAAAhvAQD8/zkQAkwAAAhtAQD8/zkQAkwAAAggAQD8/zkQAkUAAAhsAQDkKyAE"
 
     let testEncode compressionType expectedBytes =
         let codec = compressionType |> createCodec
@@ -78,5 +79,22 @@ let tests =
 
         test "Codec should make ZStd decoding" {
             helloZStd |> testDecode CompressionType.ZStd
+        }
+
+        test "Zstd should decode content with non specififed size in the compressed payload" {
+          //The compressed string  above has been compressed with zstd using https://www.npmjs.com/package/zstd-codec
+          //It seems this does not specify the the decompressed size inthe payload
+          //The raw string has been built in JS like so and then compressed afterwards.
+          //const bytes = 1024 * 1024 * 2 + 1000
+          //let str = "";
+          //while (str.length < bytes) {
+          //   str += "hello world lorem ipsum"
+          //}
+          //
+          let uncompressedSize = (1024 * 1024 * 2 + 1000)
+          let codec = CompressionType.ZStd |> createCodec
+          let ms = new MemoryStream(helloWorldZstdWithoutDecompressedContentSizeInPayload, 0, helloWorldZstdWithoutDecompressedContentSizeInPayload.Length, true, true)
+          let decoded = codec.Decode(uncompressedSize, ms) |> (fun ms -> ms.ToArray())|>  getString
+          decoded |> Expect.stringStarts "" "hello world lorem ipsum"
         }
     ]
