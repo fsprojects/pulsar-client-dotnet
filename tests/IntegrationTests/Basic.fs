@@ -1,14 +1,12 @@
 module Pulsar.Client.IntegrationTests.Basic
 
 open System
-open System.Net.Http
 open System.Text.Json
 open System.Threading
 open System.Diagnostics
 
 open Expecto
 open Expecto.Flip
-open Expecto.Logging
 
 open System.Text
 open System.Threading.Tasks
@@ -281,11 +279,11 @@ let tests =
             do! consumer1.DisposeAsync().AsTask()
             Expect.throwsT2<AlreadyClosedException> (fun () -> consumer1.ReceiveAsync().Result |> ignore) |> ignore
             do! producer1.DisposeAsync().AsTask()
-            Expect.throwsT2<AlreadyClosedException> (fun () -> producer1.SendAndForgetAsync([||]).Result |> ignore) |> ignore
+            Expect.throwsT2<AlreadyClosedException> (fun () -> producer1.SendAndForgetAsync([||]).Result) |> ignore
             do! client.CloseAsync()
-            Expect.throwsT2<AlreadyClosedException> (fun () -> consumer2.UnsubscribeAsync().Result |> ignore) |> ignore
-            Expect.throwsT2<AlreadyClosedException> (fun () -> producer2.SendAndForgetAsync([||]).Result |> ignore) |> ignore
-            Expect.throwsT2<AlreadyClosedException> (fun () -> client.CloseAsync().Result |> ignore) |> ignore
+            Expect.throwsT2<AlreadyClosedException> (fun () -> consumer2.UnsubscribeAsync().Result) |> ignore
+            Expect.throwsT2<AlreadyClosedException> (fun () -> producer2.SendAndForgetAsync([||]).Result) |> ignore
+            Expect.throwsT2<AlreadyClosedException> (fun () -> client.CloseAsync().Result) |> ignore
 
             Log.Debug("Finished 'Client, producer and consumer can't be accessed after close'")
         }
@@ -351,7 +349,7 @@ let tests =
 
             Log.Debug("Finished 'Scheduled message should be delivered at requested time'")
         }
-        
+
         testTask "Create the replicated subscription should be successful" {
             Log.Debug("Started 'Create the replicated subscription should be successful'")
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
@@ -365,17 +363,12 @@ let tests =
                     .SubscriptionType(SubscriptionType.Shared)
                     .ReplicateSubscriptionState(true)
                     .SubscribeAsync()
-                    
-            do! Task.Delay 1000
-            let getJsonAsync (url: string) =
-                async {
-                    use httpClient = new HttpClient()
-                    let! response = httpClient.GetStringAsync(url) |> Async.AwaitTask
-                    return JsonDocument.Parse(response)
-                }
 
-            let url = "http://localhost:8080/admin/v2/persistent/" + topicName + "/stats"
-            let json = Async.RunSynchronously (getJsonAsync url)
+            do! Task.Delay 1000
+
+            let url = $"{pulsarHttpAddress}/admin/v2/persistent/" + topicName + "/stats"
+            let! (response: string) = commonHttpClient.GetStringAsync(url)
+            let json = JsonDocument.Parse(response)
             let isReplicated = json.RootElement.GetProperty("subscriptions").GetProperty("replicate").GetProperty("isReplicated").GetBoolean()
             Expect.isTrue "" isReplicated
             Log.Debug("Finished 'Create the replicated subscription should be successful'")

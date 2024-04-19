@@ -1,6 +1,7 @@
 module Pulsar.Client.IntegrationTests.Common
 
 open System
+open System.Net.Http
 open Pulsar.Client.Api
 
 open System.Text
@@ -20,6 +21,9 @@ let pulsarAddress = "pulsar://127.0.0.1:6650"
 #if !NOTLS
 [<Literal>]
 let pulsarSslAddress = "pulsar+ssl://127.0.0.1:6651"
+
+[<Literal>]
+let pulsarHttpAddress = "http://127.0.0.1:8080"
 
 // ssl folder copied by from https://github.com/apache/pulsar/tree/master/tests/docker-images/latest-version-image/ssl
 // generate pfx file from pem, leave the password blank
@@ -49,6 +53,8 @@ let commonClient =
     PulsarClientBuilder()
         .ServiceUrl(pulsarAddress)
         .BuildAsync().Result
+
+let commonHttpClient = new HttpClient()
 
 let getClient() = commonClient
 
