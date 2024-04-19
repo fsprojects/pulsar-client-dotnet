@@ -78,6 +78,7 @@ type ConsumerConfiguration<'T> =
         MaxPendingChunkedMessage: int
         AutoAckOldestChunkedMessageOnQueueFull: bool
         ExpireTimeOfIncompleteChunkedMessage: TimeSpan
+        ReplicateSubscriptionState: bool
     }
     member this.SingleTopic with get() = this.Topics |> Seq.head
     static member Default =
@@ -112,6 +113,7 @@ type ConsumerConfiguration<'T> =
             MaxPendingChunkedMessage = 10
             AutoAckOldestChunkedMessageOnQueueFull = false
             ExpireTimeOfIncompleteChunkedMessage = TimeSpan.FromSeconds(60.0)
+            ReplicateSubscriptionState = false 
         }
 
 type ProducerConfiguration =

@@ -261,6 +261,11 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
         { config with
             ConsumerCryptoFailureAction = action }
         |> this.With
+        
+    member this.ReplicateSubscriptionState replicateSubscriptionState =
+        { config with
+            ReplicateSubscriptionState = replicateSubscriptionState }
+        |> this.With        
     
     member this.SubscribeAsync(): Task<IConsumer<'T>> =
         createConsumerAsync(verify config, schema, consumerInterceptors)
