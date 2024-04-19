@@ -1,6 +1,8 @@
 module Pulsar.Client.IntegrationTests.Basic
 
 open System
+open System.Net.Http
+open System.Text.Json
 open System.Threading
 open System.Diagnostics
 
@@ -348,6 +350,35 @@ let tests =
             |> Expect.isTrue (sprintf "Message delivered in unexpected interval %i while should be %i" elapsed interval)
 
             Log.Debug("Finished 'Scheduled message should be delivered at requested time'")
+        }
+        
+        testTask "Create the replicated subscription should be successful" {
+            Log.Debug("Started 'Create the replicated subscription should be successful'")
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let consumerName = "replicated-consumer"
+            let client = getClient()
+            let! (_ : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("replicate")
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .ReplicateSubscriptionState(true)
+                    .SubscribeAsync()
+                    
+            do! Task.Delay 1000
+            let getJsonAsync (url: string) =
+                async {
+                    use httpClient = new HttpClient()
+                    let! response = httpClient.GetStringAsync(url) |> Async.AwaitTask
+                    return JsonDocument.Parse(response)
+                }
+
+            let url = "http://localhost:8080/admin/v2/persistent/" + topicName + "/stats"
+            let json = Async.RunSynchronously (getJsonAsync url)
+            let isReplicated = json.RootElement.GetProperty("subscriptions").GetProperty("replicate").GetProperty("isReplicated").GetBoolean()
+            Expect.isTrue "" isReplicated
+            Log.Debug("Finished 'Create the replicated subscription should be successful'")
         }
 
 #if !NOTLS
