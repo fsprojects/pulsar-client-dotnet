@@ -148,15 +148,16 @@ module CommandsTests =
                 let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand
                         (newSubscribe topicName %"test-subscription" consumerId requestId consumerName
-                            SubscriptionType.Exclusive SubscriptionInitialPosition.Earliest false null true TimeSpan.Zero true None (Schema.BYTES().SchemaInfo) priorityLevel)
+                            SubscriptionType.Exclusive SubscriptionInitialPosition.Earliest false null true TimeSpan.Zero true None (Schema.BYTES().SchemaInfo) priorityLevel false)
 
-                totalSize |> Expect.equal "" 70
-                commandSize |> Expect.equal "" 66
+                totalSize |> Expect.equal "" 72
+                commandSize |> Expect.equal "" 68
                 command.``type``  |> Expect.equal "" CommandType.Subscribe
                 command.Subscribe.Topic |> Expect.equal "" %topicName
                 command.Subscribe.RequestId |> Expect.equal "" %requestId
                 command.Subscribe.ConsumerId |> Expect.equal "" %consumerId
                 command.Subscribe.ConsumerName |> Expect.equal "" %consumerName
+                command.Subscribe.ReplicateSubscriptionState |> Expect.equal "" %false
             }
 
             test "newFlow should return correct frame" {

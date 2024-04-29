@@ -10,6 +10,7 @@ services:
     ports:
       - "6650:6650"
       - "2181:2181"
+      - "8080:8080"
     command: >
       bash -c "bin/apply-config-from-env.py conf/standalone.conf &&
                bin/pulsar standalone"
