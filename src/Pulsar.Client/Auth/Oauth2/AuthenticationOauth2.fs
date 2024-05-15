@@ -6,7 +6,6 @@ open System.IO
 open System.Text.Json
 open System.Net.Http
 open System.Text.Json.Serialization
-open Microsoft.Extensions.DependencyInjection
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open FSharp.UMX
@@ -81,6 +80,33 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
             return temp
         }
 
+    let base64DeserializeCreds data =
+        data
+        |> Convert.FromBase64String
+        |> System.Text.Encoding.UTF8.GetString
+        |> JsonSerializer.Deserialize<Credentials>
+
+    let decodeAndDeserializeCreds (privateKey: Uri) =
+        let parts = privateKey.LocalPath.Split(',', 2)
+        match parts with
+        | [| contentType; data |] when contentType = "application/json;base64" ->
+            base64DeserializeCreds data
+        | [| contentType; _ |] ->
+            raise <| NotSupportedException $"Content type '{contentType}' is not supported."
+        | _ ->
+            raise <| FormatException "The private key is not in the expected format."
+
+    let deserializeCreds (privateKey: Uri) =
+        backgroundTask {
+            match privateKey.Scheme.ToLowerInvariant() with
+            | "file" ->
+                return! openAndDeserializeCreds(privateKey.LocalPath)
+            | "data" ->
+                return decodeAndDeserializeCreds(privateKey)
+            | _ ->
+                return NotSupportedException($"Scheme '{privateKey.Scheme}' is not supported.") |> raise
+        }
+
     //https://datatracker.ietf.org/doc/html/rfc6749#section-4.2.2
     let tryGetToken()  =
         token
@@ -101,7 +127,7 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
         | None ->
             let newToken =
                 (backgroundTask {
-                    let! credentials = openAndDeserializeCreds(privateKey.LocalPath)
+                    let! credentials = deserializeCreds(privateKey)
                     let! tokenClient = getTokenClient()
                     return!
                         tokenClient.ExchangeClientCredentials(
