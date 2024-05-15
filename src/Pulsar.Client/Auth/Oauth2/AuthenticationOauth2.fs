@@ -6,6 +6,7 @@ open System.IO
 open System.Text.Json
 open System.Net.Http
 open System.Text.Json.Serialization
+open System.Threading.Tasks
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open FSharp.UMX
@@ -49,7 +50,7 @@ type Credentials =
         IssuerUrl : string
     }
 
-type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey: Uri, scope: string) =
+type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, credentialsUrl: Uri, scope: string) =
     inherit Authentication()
 
     let mutable token : Option<TokenResult * TimeStamp> = None
@@ -73,39 +74,31 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
             return TokenClient(Uri(metadata.TokenEndpoint), httpClient)
         }
 
-    let openAndDeserializeCreds uri =
+    let getCredsFromFile (credentialsUrl: Uri) =
         backgroundTask {
-            use fs = new FileStream(uri, FileMode.Open, FileAccess.Read)
-            let! temp = JsonSerializer.DeserializeAsync<Credentials>(fs)
-            return temp
+            use fs = new FileStream(credentialsUrl.LocalPath, FileMode.Open, FileAccess.Read)
+            return! JsonSerializer.DeserializeAsync<Credentials>(fs)
         }
 
-    let base64DeserializeCreds data =
-        data
-        |> Convert.FromBase64String
-        |> System.Text.Encoding.UTF8.GetString
-        |> JsonSerializer.Deserialize<Credentials>
-
-    let decodeAndDeserializeCreds (privateKey: Uri) =
-        let parts = privateKey.LocalPath.Split(',', 2)
-        match parts with
+    let getCredsFromDataEncodedUri (credentialsUrl: Uri) =
+        match credentialsUrl.LocalPath.Split(',', 2) with
         | [| contentType; data |] when contentType = "application/json;base64" ->
-            base64DeserializeCreds data
+            data
+            |> Convert.FromBase64String
+            |> JsonSerializer.Deserialize<Credentials>
         | [| contentType; _ |] ->
             raise <| NotSupportedException $"Content type '{contentType}' is not supported."
         | _ ->
-            raise <| FormatException "The private key is not in the expected format."
+            raise <| FormatException "The credentials are not in the expected format."
 
-    let deserializeCreds (privateKey: Uri) =
-        backgroundTask {
-            match privateKey.Scheme.ToLowerInvariant() with
-            | "file" ->
-                return! openAndDeserializeCreds(privateKey.LocalPath)
-            | "data" ->
-                return decodeAndDeserializeCreds(privateKey)
-            | _ ->
-                return NotSupportedException($"Scheme '{privateKey.Scheme}' is not supported.") |> raise
-        }
+    let deserializeCreds (credentialsUrl: Uri) =
+        match credentialsUrl.Scheme with
+        | "file" ->
+            getCredsFromFile credentialsUrl
+        | "data" ->
+            getCredsFromDataEncodedUri credentialsUrl |> Task.FromResult
+        | _ ->
+            raise <| NotSupportedException($"Scheme '{credentialsUrl.Scheme}' is not supported.")
 
     //https://datatracker.ietf.org/doc/html/rfc6749#section-4.2.2
     let tryGetToken()  =
@@ -127,7 +120,7 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, privateKey:
         | None ->
             let newToken =
                 (backgroundTask {
-                    let! credentials = deserializeCreds(privateKey)
+                    let! credentials = deserializeCreds credentialsUrl
                     let! tokenClient = getTokenClient()
                     return!
                         tokenClient.ExchangeClientCredentials(
