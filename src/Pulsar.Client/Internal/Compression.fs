@@ -7,7 +7,7 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 open ComponentAce.Compression.Libs.zlib
 open K4os.Compression.LZ4
-open Snappy
+open Snappier
 open ZstdNet
 
 type ICompressionCodec =
@@ -79,23 +79,21 @@ module internal CompressionCodec =
         interface ICompressionCodec with
             member this.Encode payload =
                 let length = (int payload.Length)
-                let source: byte[] = length |> ArrayPool.Shared.Rent
-                let target: byte[] = SnappyCodec.GetMaxCompressedLength length |> ArrayPool.Shared.Rent
+                let target: byte[] = Snappy.GetMaxCompressedLength length |> ArrayPool.Shared.Rent
                 try
-                    let sourceSpan = payload.ToArray().AsSpan()
-                    sourceSpan.CopyTo(source)
-                    let count = SnappyCodec.Compress(source, 0, length, target, 0)
+                    let sourceArray = payload.ToArray()
+                    let targetSpan = target.AsSpan()
+                    let count = Snappy.Compress(sourceArray, targetSpan)
                     let ms = MemoryStreamManager.GetStream()
-                    ms.Write(target.AsSpan(0, count))
+                    ms.Write(targetSpan.Slice(0, count))
                     ms
                 finally
                     payload.Dispose()
-                    source |> ArrayPool.Shared.Return
                     target |> ArrayPool.Shared.Return
             member this.Decode (uncompressedSize, payload) =
                 let target: byte[] = uncompressedSize |> ArrayPool.Shared.Rent
                 try
-                    SnappyCodec.Uncompress(payload.ToArray(), 0, int payload.Length, target, 0) |> ignore
+                    Snappy.Decompress(payload.ToArray(), target) |> ignore
                     let ms = MemoryStreamManager.GetStream(null, uncompressedSize)
                     ms.Write(target, 0, uncompressedSize)
                     ms
@@ -104,7 +102,7 @@ module internal CompressionCodec =
                     target |> ArrayPool.Shared.Return
             member this.Decode (uncompressedSize, bytes, payloadLength) =
                 let target = Array.zeroCreate uncompressedSize
-                SnappyCodec.Uncompress(bytes, 0, payloadLength, target, 0) |> ignore
+                Snappy.Decompress(bytes.AsSpan().Slice(0, payloadLength), target.AsSpan()) |> ignore
                 target
 
     type ZstdCompression() =
