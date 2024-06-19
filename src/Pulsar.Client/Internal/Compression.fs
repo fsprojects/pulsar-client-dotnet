@@ -78,24 +78,32 @@ module internal CompressionCodec =
     type SnappyCompression() =
         interface ICompressionCodec with
             member this.Encode payload =
+                let length = (int payload.Length)
+                let target: byte[] = Snappy.GetMaxCompressedLength length |> ArrayPool.Shared.Rent
                 try
                     let sourceArray = payload.ToArray()
-                    let target = Snappy.CompressToArray(sourceArray)
+                    let targetSpan = target.AsSpan()
+                    let count = Snappy.Compress(sourceArray, targetSpan)
                     let ms = MemoryStreamManager.GetStream()
-                    ms.Write(target)
+                    ms.Write(targetSpan.Slice(0, count))
                     ms
                 finally
                     payload.Dispose()
+                    target |> ArrayPool.Shared.Return
             member this.Decode (uncompressedSize, payload) =
+                let target: byte[] = uncompressedSize |> ArrayPool.Shared.Rent
                 try
-                    let target = Snappy.DecompressToArray(payload.ToArray())
+                    Snappy.Decompress(payload.ToArray(), target) |> ignore
                     let ms = MemoryStreamManager.GetStream(null, uncompressedSize)
                     ms.Write(target, 0, uncompressedSize)
                     ms
                 finally
                     payload.Dispose()
+                    target |> ArrayPool.Shared.Return
             member this.Decode (uncompressedSize, bytes, payloadLength) =
-                Snappy.DecompressToArray(bytes)
+                let target = Array.zeroCreate uncompressedSize
+                Snappy.Decompress(bytes.AsSpan().Slice(0, payloadLength), target.AsSpan()) |> ignore
+                target
 
     type ZstdCompression() =
         interface ICompressionCodec with
