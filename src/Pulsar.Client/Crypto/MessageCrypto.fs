@@ -36,8 +36,7 @@ type MessageEncryptor(keyNames: string seq, keyReader: ICryptoKeyReader) =
     let loadPublicKey keyName =
         let publicKeyInfo = keyReader.GetPublicKey keyName
         let rsaPublicKey = parsePublicKey publicKeyInfo.Key
-        let rsa = RSA.Create()
-        rsa.ImportParameters rsaPublicKey
+        use rsa = RSA.Create(rsaPublicKey)
         let encKey = rsa.Encrypt(symmetricKey.Export(KeyBlobFormat.RawSymmetricKey), RSAEncryptionPadding.OaepSHA1)
         let encryptionKeys = EncryptionKey(keyName, encKey, publicKeyInfo.Metadata)
         encryptionKeys
@@ -82,8 +81,7 @@ type MessageDecryptor(keyReader: ICryptoKeyReader) =
         try
             let privateKey = keyReader.GetPrivateKey(encryptionKey.Name, encryptionKey.Metadata)
             let rsaPrivateKey = parsePrivateKey privateKey.Key
-            let rsa = RSA.Create()
-            rsa.ImportParameters(rsaPrivateKey)
+            use rsa = RSA.Create(rsaPrivateKey)
             let keyBlob = rsa.Decrypt(encKey, RSAEncryptionPadding.OaepSHA1)
             Some(encKey, keyBlob)
         with ex ->
