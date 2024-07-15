@@ -33,16 +33,16 @@ type internal DeadLetterProcessor<'T>
 
     let getOptionalKey (message: Message<'T>) =
             if String.IsNullOrEmpty(%message.Key) then
-                Some { PartitionKey = message.Key; IsBase64Encoded =  message.HasBase64EncodedKey  }
-            else
                 None
+            else
+                Some { PartitionKey = message.Key; IsBase64Encoded = message.HasBase64EncodedKey }
 
     interface IDeadLetterProcessor<'T> with
         member this.ClearMessages() =
             store.Clear()
 
         member this.AddMessage (messageId, message) =
-            store.[messageId] <- message
+            store[messageId] <- message
 
         member this.RemoveMessage messageId =
             store.Remove(messageId) |> ignore
@@ -69,16 +69,16 @@ type internal DeadLetterProcessor<'T>
         member this.ReconsumeLater (message, deliverAt, acknowledge) =
             let propertiesMap = Dictionary<string, string>()
             for KeyValue(k, v) in message.Properties do
-                propertiesMap.[k] <- v
+                propertiesMap[k] <- v
             let mutable reconsumetimes = 1
             match propertiesMap.TryGetValue(RetryMessageUtil.SYSTEM_PROPERTY_RECONSUMETIMES) with
             | true, v ->
                 reconsumetimes <- v |> int |> (+) 1
             | _ ->
-                propertiesMap.[RetryMessageUtil.SYSTEM_PROPERTY_REAL_TOPIC] <- topicName
-                propertiesMap.[RetryMessageUtil.SYSTEM_PROPERTY_ORIGIN_MESSAGE_ID] <- message.MessageId.ToString()
-            propertiesMap.[RetryMessageUtil.SYSTEM_PROPERTY_RECONSUMETIMES] <- string reconsumetimes
-            propertiesMap.[RetryMessageUtil.SYSTEM_PROPERTY_DELIVER_AT] <- deliverAt |> string
+                propertiesMap[RetryMessageUtil.SYSTEM_PROPERTY_REAL_TOPIC] <- topicName
+                propertiesMap[RetryMessageUtil.SYSTEM_PROPERTY_ORIGIN_MESSAGE_ID] <- message.MessageId.ToString()
+            propertiesMap[RetryMessageUtil.SYSTEM_PROPERTY_RECONSUMETIMES] <- string reconsumetimes
+            propertiesMap[RetryMessageUtil.SYSTEM_PROPERTY_DELIVER_AT] <- deliverAt |> string
             backgroundTask {
                 if reconsumetimes > policy.MaxRedeliveryCount then
                     let dlp = this :> IDeadLetterProcessor<'T>
