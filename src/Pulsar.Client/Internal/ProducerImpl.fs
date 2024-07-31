@@ -580,11 +580,14 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 connectionHandler.ConnectionClosed clientCnx
                 clientCnx.RemoveProducer(producerId)
 
-            | ProducerMessage.ConnectionFailed _ ->
+            | ProducerMessage.ConnectionFailed ex ->
 
                 Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
-                if Stopwatch.GetElapsedTime(createProducerStartTime) > clientConfig.OperationTimeout then
-                    Log.Logger.LogInformation("{0} creation failed", prefix)
+                let nonRetriableError = ex |> PulsarClientException.isRetriableError |> not
+                let timeout = Stopwatch.GetElapsedTime(createProducerStartTime) > clientConfig.OperationTimeout
+                if ((nonRetriableError || timeout) && producerCreatedTsc.TrySetException(ex)) then
+                    Log.Logger.LogInformation("{0} creation failed {1}", prefix,
+                                                if nonRetriableError then "with unretriableError" else "after timeout")
                     connectionHandler.Failed()
                     stopProducer()
                     continueLoop <- false
