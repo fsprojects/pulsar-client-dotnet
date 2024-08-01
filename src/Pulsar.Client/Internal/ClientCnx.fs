@@ -199,6 +199,24 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             rspTask.SetException(ConnectException "Disconnected.")
         requests.Clear()
 
+    let deactivateChannel() =
+        this.IsActive <- false
+        unregisterClientCnx(broker)
+        this.Dispose()
+        for KeyValue(_,consumerOperation) in consumers do
+            consumerOperation.ConnectionClosed(this)
+        for KeyValue(_,producerOperation) in producers do
+            producerOperation.ConnectionClosed(this)
+        for KeyValue(_,transactionMetaStoreOperation) in transactionMetaStores do
+            transactionMetaStoreOperation.ConnectionClosed(this)
+        consumers.Clear()
+        producers.Clear()
+        transactionMetaStores.Clear()
+        post this.RequestsMb FailAllRequests
+        post this.SendMb SocketMessage.Stop
+        post this.OperationsMb CnxOperation.Stop
+        post this.RequestsMb RequestsOperation.Stop
+
     let requestsMb = Channel.CreateUnbounded<RequestsOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (backgroundTask {
         let mutable continueLoop = true
@@ -237,13 +255,6 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogInformation("{0} requestsMb mailbox has stopped normally", prefix))
         |> ignore
 
-    let tryStopMailboxes() =
-        if consumers.Count = 0 && producers.Count = 0 && transactionMetaStores.Count = 0 then
-            Log.Logger.LogInformation("{0} Stopping mailboxes", prefix)
-            post this.SendMb SocketMessage.Stop
-            post this.OperationsMb CnxOperation.Stop
-            post this.RequestsMb RequestsOperation.Stop
-
     let operationsMb = Channel.CreateUnbounded<CnxOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (backgroundTask {
         let mutable continueLoop = true
@@ -261,33 +272,16 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | RemoveConsumer consumerId ->
                 Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
                 consumers.Remove(consumerId) |> ignore
-                if this.IsActive |> not then
-                    tryStopMailboxes()
             | RemoveProducer producerId ->
                 Log.Logger.LogDebug("{0} removing producer {1}", prefix, producerId)
                 producers.Remove(producerId) |> ignore
-                if this.IsActive |> not then
-                    tryStopMailboxes()
             | RemoveTransactionMetaStoreHandler transactionMetaStoreId ->
                 Log.Logger.LogDebug("{0} removing transactionMetaStore {1}", prefix, transactionMetaStoreId)
                 transactionMetaStores.Remove(transactionMetaStoreId) |> ignore
-                if this.IsActive |> not then
-                    tryStopMailboxes()
             | ChannelInactive ->
+                Log.Logger.LogDebug("{0} ChannelInactive, currently IsActive={1}", prefix, this.IsActive)
                 if this.IsActive then
-                    this.IsActive <- false
-                    Log.Logger.LogDebug("{0} ChannelInactive", prefix)
-                    unregisterClientCnx(broker)
-                    this.Dispose()
-                    consumers |> Seq.iter(fun (KeyValue(_,consumerOperation)) ->
-                        consumerOperation.ConnectionClosed(this))
-                    producers |> Seq.iter(fun (KeyValue(_,producerOperation)) ->
-                        producerOperation.ConnectionClosed(this))
-                    transactionMetaStores |> Seq.iter(fun (KeyValue(_,transactionMetaStoreOperation)) ->
-                        transactionMetaStoreOperation.ConnectionClosed(this))
-                    post requestsMb FailAllRequests
-                tryStopMailboxes()
-
+                    deactivateChannel()
             | CnxOperation.Stop ->
                 Log.Logger.LogDebug("{0} operationsMb stopped", prefix)
                 keepAliveTimer.Stop()
@@ -659,12 +653,14 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | XCommandCloseProducer cmd ->
             match producers.TryGetValue %cmd.ProducerId with
             | true, producerOperations ->
+                post operationsMb (RemoveProducer %cmd.ProducerId)
                 producerOperations.ConnectionClosed(this)
             | _ ->
                 Log.Logger.LogWarning("{0} producer {1} wasn't found on CommandCloseProducer", prefix, %cmd.ProducerId)
         | XCommandCloseConsumer cmd ->
             match consumers.TryGetValue %cmd.ConsumerId with
             | true, consumerOperations ->
+                post operationsMb (RemoveConsumer %cmd.ConsumerId)
                 consumerOperations.ConnectionClosed(this)
             | _ ->
                 Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandCloseConsumer", prefix, %cmd.ConsumerId)

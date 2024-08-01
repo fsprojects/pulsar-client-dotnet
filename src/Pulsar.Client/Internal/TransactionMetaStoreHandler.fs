@@ -151,7 +151,6 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
 
                 Log.Logger.LogDebug("{0} connection closed", prefix)
                 connectionHandler.ConnectionClosed clientCnx
-                clientCnx.RemoveTransactionMetaStoreHandler(transactionCoordinatorId)
 
             | TransactionMetaStoreMessage.NewTransaction (ttl, channel) ->
 

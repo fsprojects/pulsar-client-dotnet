@@ -578,7 +578,6 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                 Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
                 connectionHandler.ConnectionClosed clientCnx
-                clientCnx.RemoveProducer(producerId)
 
             | ProducerMessage.ConnectionFailed ex ->
 

@@ -1208,7 +1208,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                 Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
                 connectionHandler.ConnectionClosed clientCnx
-                clientCnx.RemoveConsumer(consumerId)
 
             | ConsumerMessage.ConnectionFailed ex ->
 
