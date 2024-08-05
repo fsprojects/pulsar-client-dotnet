@@ -200,12 +200,14 @@ let newLookup (topicName : CompleteTopicName) (requestId : RequestId) (authorita
     command |> serializeSimpleCommand
 
 let newProducer (topicName : CompleteTopicName) (producerName: string) (producerId : ProducerId) (requestId : RequestId)
-                (schemaInfo: SchemaInfo) (epoch: uint64) (txnEnabled: bool) =
+                (schemaInfo: SchemaInfo) (epoch: uint64) (txnEnabled: bool) (initialSubscriptionName: string) =
     let schema = getProtoSchema schemaInfo
     let request = CommandProducer(Topic = %topicName, ProducerId = %producerId, RequestId = %requestId,
                                   Epoch = epoch, TxnEnabled = txnEnabled)
     if producerName |> String.IsNullOrEmpty |> not then
         request.ProducerName <- producerName
+    if initialSubscriptionName |> String.IsNullOrEmpty |> not then
+        request.InitialSubscriptionName <- initialSubscriptionName
     if schema.``type`` <> Schema.Type.None then
         request.Schema <- schema
     let command = BaseCommand(``type`` = CommandType.Producer, Producer = request)

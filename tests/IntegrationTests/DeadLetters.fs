@@ -1,6 +1,7 @@
 module Pulsar.Client.IntegrationTests.DeadLetters
 
 open System
+open System.Text.Json
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Api
@@ -36,6 +37,16 @@ let tests =
             DeadLettersPolicy = DeadLetterPolicy(0, sprintf "%s-DLQ" topic)
             SubscriptionName = "test-subscription"
             NumberOfMessages = 10
+        |}
+        
+    let getTestConfigForInitialSubscription() =
+        let newGuid = Guid.NewGuid().ToString("N")
+        let topic = sprintf "public/default/initial-subscription-dl-%s-test" newGuid
+        {|
+            TopicName = topic
+            DeadLettersPolicy = DeadLetterPolicy(0, sprintf "%s-DLQ" topic, null, "testInitialSub")
+            SubscriptionName = "test-subscription"
+            NumberOfMessages = 1
         |}
 
     let receiveAndAckNegative (consumer: IConsumer<'T>) number =
@@ -436,6 +447,64 @@ let tests =
             Expect.equal "" msgId msg1.MessageId
             Expect.equal "" (msg1.GetValue() |> Array.toList) (msg2.GetValue() |> Array.toList)
 
+            description |> logTestEnd
+        }
+        
+        testTask "Dead-letter initial subscription is created" {
+
+            let description = "When the dead-letter policy has an initial subscription name, the subscription is created"
+
+            description |> logTestStart
+
+            let config = getTestConfigForInitialSubscription()
+            let producerName = "dlqInitialSubscriptionProducer"
+            let consumerName = "dlqInitialSubscriptionConsumer"
+
+            let! producer =
+                createProducer()
+                    .ProducerName(producerName)
+                    .Topic(config.TopicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+
+            let! consumer =
+                createConsumer()
+                    .ConsumerName(consumerName)
+                    .Topic(config.TopicName)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromSeconds(0.5))
+                    .EnableRetry(true)
+                    .DeadLetterPolicy(config.DeadLettersPolicy)
+                    .SubscribeAsync()
+            
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! produceMessages producer config.NumberOfMessages producerName
+                    }:> Task)
+            
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! receiveAndAckNegative consumer config.NumberOfMessages
+                    }:> Task)
+            
+            let tasks =
+                [|
+                    producerTask
+                    consumerTask
+                |]
+            
+            do! Task.WhenAll(tasks)
+            do! Task.Delay(1000)
+
+            let url = $"{pulsarHttpAddress}/admin/v2/persistent/" + config.DeadLettersPolicy.DeadLetterTopic + "/stats"
+            let! (response: string) = commonHttpClient.GetStringAsync(url)
+            let json = JsonDocument.Parse(response)
+            let hasInitialSubscription, _ = json.RootElement.GetProperty("subscriptions").TryGetProperty("testInitialSub")
+            Expect.isTrue "" hasInitialSubscription
+            
             description |> logTestEnd
         }
     ]
