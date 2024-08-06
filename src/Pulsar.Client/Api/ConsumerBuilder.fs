@@ -63,21 +63,19 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
                     let prefixPart = c.SingleTopic.ToString() + "-" + %c.SubscriptionName
                     let defaultRetryLetterTopic = prefixPart + RetryMessageUtil.RETRY_GROUP_TOPIC_SUFFIX
                     let defaultDeadLetterTopic = prefixPart + RetryMessageUtil.DLQ_GROUP_TOPIC_SUFFIX
-                    let defaultInitialSubscriptionName = ""
                     let newPolicy =
                         match c.DeadLetterPolicy with
                         | None ->
-                            DeadLetterPolicy(RetryMessageUtil.MAX_RECONSUMETIMES, defaultDeadLetterTopic, defaultRetryLetterTopic, defaultInitialSubscriptionName)
+                            DeadLetterPolicy(RetryMessageUtil.MAX_RECONSUMETIMES, defaultDeadLetterTopic, defaultRetryLetterTopic)
                         | Some policy ->
                             let isEmptyDL = String.IsNullOrEmpty policy.DeadLetterTopic
                             let isEmptyRL = String.IsNullOrEmpty policy.RetryLetterTopic
-                            let initialSubscriptionName = if String.IsNullOrEmpty policy.InitialSubscriptionName then defaultInitialSubscriptionName else policy.InitialSubscriptionName 
                             if isEmptyDL && isEmptyRL then
-                                DeadLetterPolicy(policy.MaxRedeliveryCount, defaultDeadLetterTopic, defaultRetryLetterTopic, initialSubscriptionName)
+                                DeadLetterPolicy(policy.MaxRedeliveryCount, defaultDeadLetterTopic, defaultRetryLetterTopic, policy.InitialSubscriptionName)
                             elif isEmptyDL then
-                                DeadLetterPolicy(policy.MaxRedeliveryCount, defaultDeadLetterTopic, policy.RetryLetterTopic, initialSubscriptionName)
+                                DeadLetterPolicy(policy.MaxRedeliveryCount, defaultDeadLetterTopic, policy.RetryLetterTopic, policy.InitialSubscriptionName)
                             elif isEmptyRL then
-                                DeadLetterPolicy(policy.MaxRedeliveryCount, policy.DeadLetterTopic, defaultRetryLetterTopic, initialSubscriptionName)
+                                DeadLetterPolicy(policy.MaxRedeliveryCount, policy.DeadLetterTopic, defaultRetryLetterTopic, policy.InitialSubscriptionName)
                             else
                                 policy
                     { c with

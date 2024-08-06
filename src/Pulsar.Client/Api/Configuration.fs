@@ -140,7 +140,7 @@ type ProducerConfiguration =
         BlockIfQueueFull: bool
         MessageEncryptor: IMessageEncryptor option
         ProducerCryptoFailureAction: ProducerCryptoFailureAction
-        InitialSubscriptionName: string
+        InitialSubscriptionName: SubscriptionName
     }
     member this.BatchingPartitionSwitchFrequencyIntervalMs =
         this.BatchingPartitionSwitchFrequencyByPublishDelay * (int this.BatchingMaxPublishDelay.TotalMilliseconds)
@@ -168,7 +168,7 @@ type ProducerConfiguration =
             BlockIfQueueFull = false
             MessageEncryptor = None
             ProducerCryptoFailureAction = ProducerCryptoFailureAction.FAIL
-            InitialSubscriptionName = "" 
+            InitialSubscriptionName = %"" 
         }
 
 type ReaderConfiguration =
