@@ -43,8 +43,8 @@ jobs:
     - name: docker-compose status
       run: |
         cd tests/compose/standalone
-        docker-compose ps
-        docker-compose logs init
+        docker compose ps
+        docker compose logs init
 
     - name: Run Integration Tests
       timeout-minutes: 3
