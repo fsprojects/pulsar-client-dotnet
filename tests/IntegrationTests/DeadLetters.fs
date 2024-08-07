@@ -1,7 +1,6 @@
 module Pulsar.Client.IntegrationTests.DeadLetters
 
 open System
-open System.Text.Json
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Api
@@ -44,9 +43,9 @@ let tests =
         let topic = sprintf "public/default/initial-subscription-dl-%s-test" newGuid
         {|
             TopicName = topic
-            DeadLettersPolicy = DeadLetterPolicy(0, sprintf "%s-DLQ" topic, null, "testInitialSub")
+            DeadLettersPolicy = DeadLetterPolicy(0, sprintf "%s-DLQ" topic, null, "init-sub")
             SubscriptionName = "test-subscription"
-            NumberOfMessages = 1
+            NumberOfMessages = 10
         |}
 
     let receiveAndAckNegative (consumer: IConsumer<'T>) number =
@@ -457,8 +456,10 @@ let tests =
             description |> logTestStart
 
             let config = getTestConfigForInitialSubscription()
-            let producerName = "dlqInitialSubscriptionProducer"
-            let consumerName = "dlqInitialSubscriptionConsumer"
+            let producerName = "initialSubscriptionProducer"
+            let consumerName = "initialSubscriptionConsumer"
+            let dlqConsumerName = "initialSubscriptionDlqConsumer"
+            let dlqInitialSubscriptionConsumerName = "initialSubscriptionDlqInitSubConsumer"
 
             let! producer =
                 createProducer()
@@ -477,6 +478,15 @@ let tests =
                     .DeadLetterPolicy(config.DeadLettersPolicy)
                     .SubscribeAsync()
             
+            let! dlqConsumer =
+                createConsumer()
+                    .ConsumerName(dlqConsumerName)
+                    .Topic(config.DeadLettersPolicy.DeadLetterTopic)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscriptionInitialPosition(SubscriptionInitialPosition.Latest)
+                    .SubscribeAsync()
+            
             let producerTask =
                 Task.Run(fun () ->
                     task {
@@ -488,21 +498,40 @@ let tests =
                     task {
                         do! receiveAndAckNegative consumer config.NumberOfMessages
                     }:> Task)
+                
+            
+            let dlqConsumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! consumeMessages dlqConsumer config.NumberOfMessages dlqConsumerName
+                    }:> Task)
             
             let tasks =
                 [|
                     producerTask
                     consumerTask
+                    dlqConsumerTask
                 |]
             
+            // wait till all messages are confirmed in the dlq
             do! Task.WhenAll(tasks)
-            do! Task.Delay(1000)
-
-            let url = $"{pulsarHttpAddress}/admin/v2/persistent/" + config.DeadLettersPolicy.DeadLetterTopic + "/stats"
-            let! (response: string) = commonHttpClient.GetStringAsync(url)
-            let json = JsonDocument.Parse(response)
-            let hasInitialSubscription, _ = json.RootElement.GetProperty("subscriptions").TryGetProperty("testInitialSub")
-            Expect.isTrue "" hasInitialSubscription
+            
+            let! dlqInitialSubscriptionConsumer =
+                createConsumer()
+                    .ConsumerName(dlqInitialSubscriptionConsumerName)
+                    .Topic(config.DeadLettersPolicy.DeadLetterTopic)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscriptionName("init-sub")
+                    .SubscriptionInitialPosition(SubscriptionInitialPosition.Latest) // there would be no messages if the initial subscription did not exist
+                    .SubscribeAsync()
+                
+            let dlqInitialSubscriptionConsumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! consumeMessages dlqInitialSubscriptionConsumer config.NumberOfMessages dlqInitialSubscriptionConsumerName
+                    }:> Task)
+            
+            do! dlqInitialSubscriptionConsumerTask
             
             description |> logTestEnd
         }
