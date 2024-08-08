@@ -43,7 +43,7 @@ let tests =
         let topic = sprintf "public/default/initial-subscription-dl-%s-test" newGuid
         {|
             TopicName = topic
-            DeadLettersPolicy = DeadLetterPolicy(0, sprintf "%s-DLQ" topic, null, "init-sub")
+            DeadLettersPolicy = DeadLetterPolicy(0, sprintf "%s-DLQ" topic, null, "test-initial-subscription")
             SubscriptionName = "test-subscription"
             NumberOfMessages = 10
         |}
@@ -451,7 +451,7 @@ let tests =
         
         testTask "Dead-letter initial subscription is created" {
 
-            let description = "When the dead-letter policy has an initial subscription name, the subscription is created"
+            let description = "When the dead-letter policy has an initial subscription, dlq messages are not dropped"
 
             description |> logTestStart
 
@@ -459,7 +459,6 @@ let tests =
             let producerName = "initialSubscriptionProducer"
             let consumerName = "initialSubscriptionConsumer"
             let dlqConsumerName = "initialSubscriptionDlqConsumer"
-            let dlqInitialSubscriptionConsumerName = "initialSubscriptionDlqInitSubConsumer"
 
             let! producer =
                 createProducer()
@@ -478,15 +477,6 @@ let tests =
                     .DeadLetterPolicy(config.DeadLettersPolicy)
                     .SubscribeAsync()
             
-            let! dlqConsumer =
-                createConsumer()
-                    .ConsumerName(dlqConsumerName)
-                    .Topic(config.DeadLettersPolicy.DeadLetterTopic)
-                    .SubscriptionName(config.SubscriptionName)
-                    .SubscriptionType(SubscriptionType.Shared)
-                    .SubscriptionInitialPosition(SubscriptionInitialPosition.Latest)
-                    .SubscribeAsync()
-            
             let producerTask =
                 Task.Run(fun () ->
                     task {
@@ -500,38 +490,30 @@ let tests =
                     }:> Task)
                 
             
+            let tasks =
+                [|
+                    producerTask
+                    consumerTask
+                |]
+                
+            do! Task.WhenAll(tasks)
+            do! Task.Delay(1000)
+            
+            let! dlqConsumer =
+                createConsumer()
+                    .ConsumerName(dlqConsumerName)
+                    .Topic(config.DeadLettersPolicy.DeadLetterTopic)
+                    .SubscriptionName(config.DeadLettersPolicy.InitialSubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscribeAsync()
+            
             let dlqConsumerTask =
                 Task.Run(fun () ->
                     task {
                         do! consumeMessages dlqConsumer config.NumberOfMessages dlqConsumerName
                     }:> Task)
             
-            let tasks =
-                [|
-                    producerTask
-                    consumerTask
-                    dlqConsumerTask
-                |]
-            
-            // wait till all messages are confirmed in the dlq
-            do! Task.WhenAll(tasks)
-            
-            let! dlqInitialSubscriptionConsumer =
-                createConsumer()
-                    .ConsumerName(dlqInitialSubscriptionConsumerName)
-                    .Topic(config.DeadLettersPolicy.DeadLetterTopic)
-                    .SubscriptionType(SubscriptionType.Shared)
-                    .SubscriptionName("init-sub")
-                    .SubscriptionInitialPosition(SubscriptionInitialPosition.Latest) // there would be no messages if the initial subscription did not exist
-                    .SubscribeAsync()
-                
-            let dlqInitialSubscriptionConsumerTask =
-                Task.Run(fun () ->
-                    task {
-                        do! consumeMessages dlqInitialSubscriptionConsumer config.NumberOfMessages dlqInitialSubscriptionConsumerName
-                    }:> Task)
-            
-            do! dlqInitialSubscriptionConsumerTask
+            do! dlqConsumerTask
             
             description |> logTestEnd
         }
