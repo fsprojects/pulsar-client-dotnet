@@ -18,9 +18,10 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
     let deadLettersProcessor (c: ConsumerConfiguration<'T>) (deadLettersPolicy: DeadLetterPolicy) (topic: TopicName)  =
         let getTopicName () =
             topic.ToString()
-        let createProducer deadLetterTopic =
+        let createProducer deadLetterTopic initialSubscriptionName =
             ProducerBuilder(createProducerAsync, schema)
                 .Topic(deadLetterTopic)
+                .InitialSubscriptionName(initialSubscriptionName)
                 .BlockIfQueueFull(false)
                 .CreateAsync()
         DeadLetterProcessor(deadLettersPolicy, getTopicName, c.SubscriptionName, createProducer) :> IDeadLetterProcessor<'T>
@@ -70,11 +71,11 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
                             let isEmptyDL = String.IsNullOrEmpty policy.DeadLetterTopic
                             let isEmptyRL = String.IsNullOrEmpty policy.RetryLetterTopic
                             if isEmptyDL && isEmptyRL then
-                                DeadLetterPolicy(policy.MaxRedeliveryCount, defaultDeadLetterTopic, defaultRetryLetterTopic)
+                                DeadLetterPolicy(policy.MaxRedeliveryCount, defaultDeadLetterTopic, defaultRetryLetterTopic, policy.InitialSubscriptionName)
                             elif isEmptyDL then
-                                DeadLetterPolicy(policy.MaxRedeliveryCount, defaultDeadLetterTopic, policy.RetryLetterTopic)
+                                DeadLetterPolicy(policy.MaxRedeliveryCount, defaultDeadLetterTopic, policy.RetryLetterTopic, policy.InitialSubscriptionName)
                             elif isEmptyRL then
-                                DeadLetterPolicy(policy.MaxRedeliveryCount, policy.DeadLetterTopic, defaultRetryLetterTopic)
+                                DeadLetterPolicy(policy.MaxRedeliveryCount, policy.DeadLetterTopic, defaultRetryLetterTopic, policy.InitialSubscriptionName)
                             else
                                 policy
                     { c with

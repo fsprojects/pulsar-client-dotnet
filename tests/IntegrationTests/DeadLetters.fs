@@ -38,6 +38,16 @@ let tests =
             NumberOfMessages = 10
         |}
 
+    let getTestConfigForInitialSubscription() =
+        let newGuid = Guid.NewGuid().ToString("N")
+        let topic = sprintf "public/default/initial-subscription-dl-%s-test" newGuid
+        {|
+            TopicName = topic
+            DeadLettersPolicy = DeadLetterPolicy(0, sprintf "%s-DLQ" topic, null, "test-initial-subscription")
+            SubscriptionName = "test-subscription"
+            NumberOfMessages = 10
+        |}
+
     let receiveAndAckNegative (consumer: IConsumer<'T>) number =
         task {
             for _ in 1..number do
@@ -81,7 +91,7 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
                     .SubscribeAsync()
-                    
+
             let producerTask =
                 Task.Run(fun () ->
                     task {
@@ -107,11 +117,11 @@ let tests =
                     dlqConsumerTask
                 |]
 
-            do! Task.WhenAll(tasks) 
+            do! Task.WhenAll(tasks)
 
             description |> logTestEnd
         }
-        
+
         testTask "Partitioned topic failed messages stored in a configured dead letter topic" {
 
             let description = "Failed messages in a partitioned topic are stored in a configured dead letter topic"
@@ -151,7 +161,7 @@ let tests =
                     .SubscribeAsync()
 
             let messages = generateMessages config.NumberOfMessages producerName
-            
+
             let producerTask =
                 Task.Run(fun () ->
                     task {
@@ -177,7 +187,7 @@ let tests =
                     dlqConsumerTask
                 |]
 
-            do! Task.WhenAll(tasks) 
+            do! Task.WhenAll(tasks)
             do! Task.Delay(110) // wait for acks
 
             description |> logTestEnd
@@ -244,7 +254,7 @@ let tests =
                     dlqConsumerTask
                 |]
 
-            do! Task.WhenAll(tasks) 
+            do! Task.WhenAll(tasks)
 
             description |> logTestEnd
         }
@@ -310,7 +320,7 @@ let tests =
                     dlqConsumerTask
                 |]
 
-            do! Task.WhenAll(tasks) 
+            do! Task.WhenAll(tasks)
 
             description |> logTestEnd
         }
@@ -398,11 +408,11 @@ let tests =
                     dlqConsumerTask
                 |]
 
-            do! Task.WhenAll(tasks) 
+            do! Task.WhenAll(tasks)
 
             description |> logTestEnd
         }
-        
+
         testTask "Reconsume later works properly" {
 
             let description = "Reconsume later works properly"
@@ -427,14 +437,84 @@ let tests =
                     .SubscriptionName(config.SubscriptionName)
                     .EnableRetry(true)
                     .SubscribeAsync()
-         
-            let! msgId = producer.SendAsync([| 0uy; 1uy; 0uy |]) 
-            let! (msg1 : Message<byte[]>) = consumer.ReceiveAsync() 
-            do! consumer.ReconsumeLaterAsync(msg1, %(DateTime.UtcNow.AddSeconds(1.0) |> convertToMsTimestamp)) 
-            let! (msg2 : Message<byte[]>) = consumer.ReceiveAsync() 
+
+            let! msgId = producer.SendAsync([| 0uy; 1uy; 0uy |])
+            let! (msg1 : Message<byte[]>) = consumer.ReceiveAsync()
+            do! consumer.ReconsumeLaterAsync(msg1, %(DateTime.UtcNow.AddSeconds(1.0) |> convertToMsTimestamp))
+            let! (msg2 : Message<byte[]>) = consumer.ReceiveAsync()
 
             Expect.equal "" msgId msg1.MessageId
             Expect.equal "" (msg1.GetValue() |> Array.toList) (msg2.GetValue() |> Array.toList)
+
+            description |> logTestEnd
+        }
+
+        // TODO make active if server updated to 2.10.0 or newer
+        ptestTask "Dead-letter initial subscription is created" {
+
+            let description = "When the dead-letter policy has an initial subscription, dlq messages are not dropped"
+
+            description |> logTestStart
+
+            let config = getTestConfigForInitialSubscription()
+            let producerName = "initialSubscriptionProducer"
+            let consumerName = "initialSubscriptionConsumer"
+            let dlqConsumerName = "initialSubscriptionDlqConsumer"
+
+            let! producer =
+                createProducer()
+                    .ProducerName(producerName)
+                    .Topic(config.TopicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+
+            let! consumer =
+                createConsumer()
+                    .ConsumerName(consumerName)
+                    .Topic(config.TopicName)
+                    .SubscriptionName(config.SubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(100))
+                    .DeadLetterPolicy(config.DeadLettersPolicy)
+                    .SubscribeAsync()
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! produceMessages producer config.NumberOfMessages producerName
+                    }:> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! receiveAndAckNegative consumer config.NumberOfMessages
+                    }:> Task)
+
+
+            let tasks =
+                [|
+                    producerTask
+                    consumerTask
+                |]
+
+            do! Task.WhenAll(tasks)
+            do! Task.Delay(1000)
+
+            let! dlqConsumer =
+                createConsumer()
+                    .ConsumerName(dlqConsumerName)
+                    .Topic(config.DeadLettersPolicy.DeadLetterTopic)
+                    .SubscriptionName(config.DeadLettersPolicy.InitialSubscriptionName)
+                    .SubscriptionType(SubscriptionType.Shared)
+                    .SubscribeAsync()
+
+            let dlqConsumerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! consumeMessages dlqConsumer config.NumberOfMessages dlqConsumerName
+                    }:> Task)
+
+            do! dlqConsumerTask
 
             description |> logTestEnd
         }
