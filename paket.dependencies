@@ -50,18 +50,18 @@ group Examples
   source https://api.nuget.org/v3/index.json
   storage: none
 
-  nuget Pulsar.Client
+  nuget Pulsar.Client < 3.0
   nuget Pulsar.Client.Otel
   nuget Microsoft.Extensions.Logging.Console
-  nuget OpenTelemetry rc
-  nuget OpenTelemetry.Exporter.Console rc
+  nuget OpenTelemetry
+  nuget OpenTelemetry.Exporter.Console
 
 group OTel
   framework: netstandard2.0
   source https://api.nuget.org/v3/index.json
   storage: none
 
-  nuget Pulsar.Client
+  nuget Pulsar.Client < 3.0
   nuget NSec.Cryptography 20.2.0
   nuget Microsoft.Extensions.Logging.Console
   nuget System.Diagnostics.DiagnosticSource

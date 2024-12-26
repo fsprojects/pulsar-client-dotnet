@@ -10,10 +10,10 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Up standalone docker-composer
+    - name: Up standalone docker composer
       run: |
         cd tests/compose/standalone
-        docker-compose up -d
+        docker compose up -d
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v1
@@ -43,11 +43,11 @@ jobs:
         cd tests/UnitTests
         dotnet run -c Release --no-build
 
-    - name: docker-compose status
+    - name: docker compose status
       run: |
         cd tests/compose/standalone
-        docker-compose ps
-        docker-compose logs init
+        docker compose ps
+        docker compose logs init
 
     - name: Run Integration Tests
       timeout-minutes: 3

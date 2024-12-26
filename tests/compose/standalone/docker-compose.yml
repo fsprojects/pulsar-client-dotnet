@@ -25,8 +25,8 @@ services:
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone.sh:/pulsar/bin/init-standalone.sh
     command: >
-      bash -c "tr -d '\r' < bin/init-standalone.sh > bin/init-standalone-fixed.sh &&
-               tr -d '\r' < bin/wait-for-it.sh > bin/wait-for-it-fixed.sh &&
+      bash -c "tr -d '\\r' < bin/init-standalone.sh > bin/init-standalone-fixed.sh &&
+               tr -d '\\r' < bin/wait-for-it.sh > bin/wait-for-it-fixed.sh &&
                chmod u+x bin/wait-for-it-fixed.sh &&
                chmod u+x bin/init-standalone-fixed.sh &&
                bin/wait-for-it-fixed.sh standalone:8080 -t 120 &&
@@ -68,8 +68,8 @@ services:
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone-tls.sh:/pulsar/bin/init-standalone-tls.sh
     command: >
-      bash -c "tr -d '\r' < bin/init-standalone-tls.sh > bin/init-standalone-tls-fixed.sh &&
-               tr -d '\r' < bin/wait-for-it.sh > bin/wait-for-it-fixed.sh &&
+      bash -c "tr -d '\\r' < bin/init-standalone-tls.sh > bin/init-standalone-tls-fixed.sh &&
+               tr -d '\\r' < bin/wait-for-it.sh > bin/wait-for-it-fixed.sh &&
                chmod u+x bin/wait-for-it-fixed.sh &&
                chmod u+x bin/init-standalone-tls-fixed.sh &&
                bin/wait-for-it-fixed.sh standaloneTls:8443 -t 120 &&
