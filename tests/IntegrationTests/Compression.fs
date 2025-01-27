@@ -24,7 +24,7 @@ let tests =
 
         let singleOrBatched = if enableBatching then "batched" else "single"
 
-        Log.Debug("Started Send and receive {0} compressed message using '{1}'", singleOrBatched, compressionType)
+        Log.Debug("Started Send and receive {0} compressed message using {1}", singleOrBatched, compressionType)
 
         let client = getClient()
         let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
@@ -61,23 +61,26 @@ let tests =
 
         do! Task.WhenAll(producerTask, consumerTask)
 
-        Log.Debug("Finished Send and receive {0} compressed message using '{0}'", singleOrBatched, compressionType)
+        Log.Debug("Finished Send and receive {0} compressed message using {1}", singleOrBatched, compressionType)
     }
 
     let sendMessages enableBatching =
         codecs
-        |> Seq.map (sendReceive enableBatching)
-        |> Task.FromResult
+        |> Array.map (sendReceive enableBatching)
+        |> Task.WhenAll
+
 
     let sendNonBatchedMessages() = sendMessages false
     let sendBatchedMessages() = sendMessages true
 
     testList "Compression" [
         testTask "Send and receive single compressed message using all implemented compression codecs" {
-            do! sendNonBatchedMessages()
+            let! _ = sendNonBatchedMessages()
+            return ()
         }
 
         testTask "Send and receive batched compressed message using all implemented compression codecs" {
-            do! sendBatchedMessages()
+            let! _ = sendBatchedMessages()
+            return ()
         }
     ]
