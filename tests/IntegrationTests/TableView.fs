@@ -2,6 +2,7 @@ module Pulsar.Client.IntegrationTests.TableView
 
 open System
 open System.Linq
+open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Api
@@ -55,6 +56,14 @@ let tests =
             let value3 = tableView["key2"]
             Expect.sequenceEqual "" [| 2uy |] value2
             Expect.sequenceEqual "" [| 3uy |] value3
+            
+            do! producer.SendAsync(producer.NewMessage(null, "key1"))
+            
+            do! Task.Delay 2000
+   
+            Expect.equal "" 1 tableView.Count
+            let key1NotFound = tableView.ContainsKey("key1")
+            Expect.equal "" false key1NotFound
 
             Log.Debug("Finished testTableView")
         }
