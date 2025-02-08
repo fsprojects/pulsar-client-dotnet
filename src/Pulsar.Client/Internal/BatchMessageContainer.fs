@@ -46,6 +46,7 @@ module internal BatchHelpers =
                     if message.Properties.Count > 0 then
                         for property in message.Properties do
                             smm.Properties.Add(KeyValue(Key = property.Key, Value = property.Value))
+                    smm.NullValue <- box message.Value |> isNull
                     Serializer.SerializeWithLengthPrefix(messageStream, smm, PrefixStyle.Fixed32BigEndian)
                     messageWriter.Write(message.Payload)
                     struct(BatchDetails(%index, BatchMessageAcker.NullAcker), message, batchItem.Tcs)

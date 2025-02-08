@@ -857,7 +857,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         Some { PartitionKey = %key; IsBase64Encoded = false }
                     else
                         Some { PartitionKey = %Convert.ToBase64String(keyBytes); IsBase64Encoded = true }
-                MessageBuilder(value, schema.Encode(value), keyObj,
+                let payloay = if box value |> isNull then Array.empty<byte> else schema.Encode(value)
+                MessageBuilder(value, payloay, keyObj,
                     ?properties0 = (properties |> Option.ofObj),
                     ?deliverAt = (deliverAt |> Option.ofNullable),
                     ?sequenceId = (sequenceId |> Option.ofNullable),

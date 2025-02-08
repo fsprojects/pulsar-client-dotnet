@@ -317,4 +317,45 @@ let tests =
             Log.Debug("Finished 'Second batch is formed well after the first one'")
 
         }
+        
+        testTask "Null message with batch get sent if batch size exceeds" {
+
+            Log.Debug("Started 'Null message with batch get sent if batch size exceeds'")
+
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let messagesNumber = 5
+
+            let! (consumer: IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("batch consumer")
+                    .SubscriptionName("batch-subscription")
+                    .SubscribeAsync()
+
+            let! (producer: IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName("batch producer")
+                    .EnableBatching(true)
+                    .BatchingMaxMessages(messagesNumber / 2)
+                    .BatchingMaxBytes(100)
+                    .MaxPendingMessages(1)
+                    .BlockIfQueueFull(true)
+                    .CreateAsync()
+
+            for i in 0 .. messagesNumber-1 do
+                producer.SendAsync(producer.NewMessage(null)) |> ignore
+
+            for i in 0 .. messagesNumber-1 do
+                let! (message: Message<byte[]>) = consumer.ReceiveAsync()
+                match message.MessageId.Type with
+                | Batch (index, _) ->
+                    Expect.equal $"Run {i} failed" (i % 2) %index
+                | _ ->
+                    failwith "Expected batch message"
+
+            Log.Debug("Finished 'Null message with batch get sent if batch size exceeds'")
+
+        }
     ]

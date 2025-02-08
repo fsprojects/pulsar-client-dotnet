@@ -13,7 +13,11 @@ type internal TableViewImpl<'T> private (reader: IReader<'T>) =
 
     member private this.HandleMessage(msg: Message<'T>) =
         if not (String.IsNullOrEmpty(%msg.Key)) then
-            data.AddOrUpdate(%msg.Key, msg.GetValue(), (fun _ _ -> msg.GetValue())) |> ignore
+            let value = msg.GetValue()
+            if box value |> isNull then
+                data.TryRemove(%msg.Key) |> ignore
+            else
+                data.AddOrUpdate(%msg.Key, value, (fun _ _ -> value)) |> ignore
 
     member private this.ReadTailMessages(reader: IReader<'T>) =
         backgroundTask {
