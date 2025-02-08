@@ -668,9 +668,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         else
             let msgKey = rawMessage.MessageKey
             let getValue () =
-                keyValueProcessor
-                |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, payload) :?> 'T)
-                |> Option.defaultWith (fun () -> schemaDecodeFunction payload)
+                if rawMessage.Metadata.NullValue then
+                    Unchecked.defaultof<'T>
+                else
+                    keyValueProcessor
+                        |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, payload) :?> 'T)
+                        |> Option.defaultWith (fun () -> schemaDecodeFunction payload)
             let message = Message(
                             msgId,
                             payload,
@@ -1330,9 +1333,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 }
                 let msgKey = singleMessageMetadata.PartitionKey
                 let getValue () =
-                    keyValueProcessor
-                    |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, singleMessagePayload) :?> 'T)
-                    |> Option.defaultWith (fun() -> schemaDecodeFunction singleMessagePayload)
+                    if singleMessageMetadata.NullValue then
+                        Unchecked.defaultof<'T>
+                    else
+                        keyValueProcessor
+                            |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, singleMessagePayload) :?> 'T)
+                            |> Option.defaultWith (fun () -> schemaDecodeFunction singleMessagePayload)
                 let properties =
                     if singleMessageMetadata.Properties.Count > 0 then
                         singleMessageMetadata.Properties

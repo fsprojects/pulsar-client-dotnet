@@ -213,6 +213,7 @@ type internal Metadata =
         EncryptionAlgo: string
         OrderingKey: byte[]
         ReplicatedFrom: string
+        NullValue: bool
     }
 
 type MessageKey =
