@@ -27,7 +27,7 @@ type internal ConnectionState =
 
 type internal ConnectionHandler( parentPrefix: string,
                         connectionPool: ConnectionPool,
-                        lookup: BinaryLookupService,
+                        lookup: ILookupService,
                         topic: CompleteTopicName,
                         connectionOpened: uint64 -> unit,
                         connectionFailed: exn -> unit,

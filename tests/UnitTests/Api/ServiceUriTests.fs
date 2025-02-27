@@ -25,6 +25,9 @@ module ServiceUriTests =
         let getOriginalString result =
             (result |> unwrap |> Option.get).OriginalString
 
+        let getScheme result =
+            (result |> unwrap |> Option.get).Scheme
+
         testList "ServiceUriTests" [
 
             test "Parse returns Error for null input" {
@@ -58,6 +61,16 @@ module ServiceUriTests =
                 Expect.equal actual expected "Parse should now pulsar scheme"
             }
 
+            test "Parse nows http scheme" {
+                let address = "http://host:8080"
+                let expectedAddress = Uri("http://host:8080")
+                let expectedScheme = "http"
+                let actualAddress = address |> ServiceUri.parse |> getAddresses |> List.head
+                let actualScheme = address |> ServiceUri.parse |> getScheme
+                Expect.equal actualAddress expectedAddress "Parse should now http address"
+                Expect.equal actualScheme expectedScheme "Parse should now http scheme"
+            }
+
             test "Parse nows secure pulsar scheme" {
                 let address = "pulsar+ssl://host:6650"
                 let expected = Uri("pulsar://host:6650")
@@ -77,6 +90,13 @@ module ServiceUriTests =
                 let expected = Uri("pulsar://host:6651")
                 let actual = address |> ServiceUri.parse |> getAddresses |> List.head
                 Expect.equal actual expected "Parse should set default port for secure pulsar scheme"
+            }
+
+            test "Parse sets default port for http scheme" {
+                let address = "http://host"
+                let expected = Uri("http://host:80")
+                let actual = address |> ServiceUri.parse |> getAddresses |> List.head
+                Expect.equal actual expected "Parse should set default port for http scheme"
             }
 
             test "Parse nows multiple hosts" {
