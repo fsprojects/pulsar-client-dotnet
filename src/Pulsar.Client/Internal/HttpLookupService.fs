@@ -91,9 +91,10 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
                 let randomServiceUri = config.ServiceAddresses[RandomGenerator.Next(0, config.ServiceAddresses.Length)]
                 let topic: string = %topicName
                 let topicRestPath = topic.Replace("persistent://","persistent/").Replace("non-persistent://","non-persistent/")
-                let! response = randomServiceUri.AbsoluteUri + $"admin/v2/%s{topicRestPath}/partitions?checkAllowAutoCreation=true"
-                                |> httpClient.GetStreamAsync
-                                |> Async.AwaitTask
+                let! response =
+                    randomServiceUri.AbsoluteUri + $"admin/v2/%s{topicRestPath}/partitions?checkAllowAutoCreation=true"
+                    |> httpClient.GetStreamAsync
+                    |> Async.AwaitTask
                 let brokerResponse = JsonSerializer.Deserialize<{| Partitions: int |}>(response, jsonOptions)
                 return { Partitions = brokerResponse.Partitions }
 
@@ -113,16 +114,18 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
             let topic: string = %topicName
             let topicRestPath = topic.Replace("persistent://","persistent/").Replace("non-persistent://","non-persistent/")
             let! response = httpClient.GetStreamAsync (randomServiceUri.AbsoluteUri + $"lookup/v2/topic/%s{topicRestPath}")
-            let brokerResponse = JsonSerializer.Deserialize<
-                                {|
-                                  brokerUrl : string
-                                  brokerUrlTls: string
-                                  httpUrl: string
-                                  httpUrlTls: string
-                                |}>(response, jsonOptions)
-            let uri = if config.UseTls
-                      then Uri(brokerResponse.brokerUrlTls)
-                      else Uri(brokerResponse.brokerUrl)
+            let brokerResponse =
+                JsonSerializer.Deserialize<{|
+                    BrokerUrl : string
+                    BrokerUrlTls: string
+                    HttpUrl: string
+                    HttpUrlTls: string
+                |}>(response, jsonOptions)
+            let uri =
+                if config.UseTls then
+                    Uri(brokerResponse.BrokerUrlTls)
+                else
+                    Uri(brokerResponse.BrokerUrl)
             let resultEndpoint = DnsEndPoint(uri.Host, uri.Port)
             return { LogicalAddress = LogicalAddress resultEndpoint; PhysicalAddress = PhysicalAddress resultEndpoint }
         }
@@ -133,12 +136,14 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
         async {
             try
                 let randomServiceUri = config.ServiceAddresses[RandomGenerator.Next(0, config.ServiceAddresses.Length)]
-                let mode = match isPersistent with
-                            | true -> "PERSISTENT"
-                            | false -> "NON_PERSISTENT"
-                let! response = randomServiceUri.AbsoluteUri + $"admin/v2/namespaces/%s{ns.ToString()}/topics?mode=%s{mode}"
-                                |> httpClient.GetStreamAsync
-                                |> Async.AwaitTask
+                let mode =
+                    match isPersistent with
+                    | true -> "PERSISTENT"
+                    | false -> "NON_PERSISTENT"
+                let! response =
+                    randomServiceUri.AbsoluteUri + $"admin/v2/namespaces/%s{ns.ToString()}/topics?mode=%s{mode}"
+                    |> httpClient.GetStreamAsync
+                    |> Async.AwaitTask
                 let brokerResponse = JsonSerializer.Deserialize<string seq>(response, jsonOptions)
                 return brokerResponse
 
@@ -155,34 +160,36 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
     //  GET /admin/v2/schemas/{tenant}/{namespace}/{topic}/schema/{version}
     member private this.GetSchemaInner(topicName: CompleteTopicName, schemaVersion: SchemaVersion option,
                               backoff: Backoff, remainingTimeMs: int) =
-         async {
+        async {
             try
                 let randomServiceUri = config.ServiceAddresses[RandomGenerator.Next(0, config.ServiceAddresses.Length)]
                 let topic: string = %topicName
                 let topicRestPath = topic.Replace("persistent://","").Replace("non-persistent://","")
-                let path = match schemaVersion with
-                            | Some sv ->
-                                //  read 8 bytes from big endian
-                                let binaryWriter = new BinaryReader(new MemoryStream(sv.Bytes))
-                                let schemaVersionInt = binaryWriter.ReadInt64() |> int64FromBigEndian
-                                $"admin/v2/schemas/%s{topicRestPath}/schema/%d{schemaVersionInt}"
-                            | None ->
-                                $"admin/v2/schemas/%s{topicRestPath}/schema"
-                let! response = randomServiceUri.AbsoluteUri + path
-                                |> httpClient.GetStreamAsync
-                                |> Async.AwaitTask
-                let schemaResponse = JsonSerializer.Deserialize<
-                                    {|
-                                      Version : Int64
-                                      Type: SchemaType
-                                      Timestamp: Int64
-                                      Data: string
-                                      Properties: Dictionary<string, string>
-                                    |}>(response, jsonOptions)
-
-                let schemaData = match schemaResponse.Type with
-                                 | SchemaType.KEY_VALUE -> schemaResponse.Data |> this.getKeyValueSchemaBytes
-                                 | _ -> schemaResponse.Data |> System.Text.Encoding.UTF8.GetBytes
+                let path =
+                    match schemaVersion with
+                    | Some sv ->
+                        //  read 8 bytes from big endian
+                        let binaryWriter = new BinaryReader(new MemoryStream(sv.Bytes))
+                        let schemaVersionInt = binaryWriter.ReadInt64() |> int64FromBigEndian
+                        $"admin/v2/schemas/%s{topicRestPath}/schema/%d{schemaVersionInt}"
+                    | None ->
+                        $"admin/v2/schemas/%s{topicRestPath}/schema"
+                let! response =
+                    randomServiceUri.AbsoluteUri + path
+                    |> httpClient.GetStreamAsync
+                    |> Async.AwaitTask
+                let schemaResponse =
+                    JsonSerializer.Deserialize<{|
+                        Version : Int64
+                        Type: SchemaType
+                        Timestamp: Int64
+                        Data: string
+                        Properties: Dictionary<string, string>
+                    |}>(response, jsonOptions)
+                let schemaData =
+                    match schemaResponse.Type with
+                    | SchemaType.KEY_VALUE -> schemaResponse.Data |> this.GetKeyValueSchemaBytes
+                    | _ -> schemaResponse.Data |> System.Text.Encoding.UTF8.GetBytes
                 let schemaVersion: SchemaVersion = {
                     Bytes = schemaResponse.Version |> BitConverter.GetBytes |> Array.rev
                 }
@@ -198,25 +205,24 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
                 }
                 return Some topicSchema
 
-            with
-                | Flatten ex ->
-                    match ex with
-                    //  When there is no topic related schema, pulsar http rest api will return a 404 exception
-                    //  In this case the request it's success, and we can return a None schema
-                    | :? HttpRequestException as ex when ex.StatusCode = Nullable HttpStatusCode.NotFound ->
-                        Log.Logger.LogWarning(ex, "No schema found for topic {0} version {1}", topicName, schemaVersion)
-                        return None
-                    | _ ->
-                        let delay = Math.Min(backoff.Next(), remainingTimeMs)
-                        if delay <= 0 then
-                            raise (TimeoutException "Could not GetSchema within configured timeout.")
-                        Log.Logger.LogWarning(ex, "GetSchema failed will retry in {0} ms", delay)
-                        do! Async.Sleep delay
-                        return! this.GetSchemaInner(topicName, schemaVersion, backoff, remainingTimeMs - delay)
+            with Flatten ex ->
+                match ex with
+                //  When there is no topic related schema, pulsar http rest api will return a 404 exception
+                //  In this case the request it's success, and we can return a None schema
+                | :? HttpRequestException as ex when ex.StatusCode = Nullable HttpStatusCode.NotFound ->
+                    Log.Logger.LogWarning(ex, "No schema found for topic {0} version {1}", topicName, schemaVersion)
+                    return None
+                | _ ->
+                    let delay = Math.Min(backoff.Next(), remainingTimeMs)
+                    if delay <= 0 then
+                        raise (TimeoutException "Could not GetSchema within configured timeout.")
+                    Log.Logger.LogWarning(ex, "GetSchema failed will retry in {0} ms", delay)
+                    do! Async.Sleep delay
+                    return! this.GetSchemaInner(topicName, schemaVersion, backoff, remainingTimeMs - delay)
         }
 
     //  Convert key/value schema json string to schema bytes[]
-    member private this.getKeyValueSchemaBytes(keyValueDataString: string) =
+    member private this.GetKeyValueSchemaBytes(keyValueDataString: string) =
         //  Key-value type schema `Data` field is a complicated embedded json string
         //  so that it's difficult to deserialize the field by orm method.
         //  Instead, we only need to extract 'key' and 'value' field and call `KeyValueSchema.GetKeyValueBytes` method.
