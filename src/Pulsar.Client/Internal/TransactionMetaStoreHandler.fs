@@ -46,7 +46,7 @@ type internal TxnRequest =
 type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguration,
                                     transactionCoordinatorId: TransactionCoordinatorId,
                                     completeTopicName: CompleteTopicName, connectionPool: ConnectionPool,
-                                    lookup: BinaryLookupService, transactionCoordinatorCreatedTsc: TaskCompletionSource<unit>) as this =
+                                    lookup: ILookupService, transactionCoordinatorCreatedTsc: TaskCompletionSource<unit>) as this =
     let prefix = $"tmsHandler-{transactionCoordinatorId}"
     let mutable operationsLeft = 1000
     let blockIfReachMaxPendingOps = true

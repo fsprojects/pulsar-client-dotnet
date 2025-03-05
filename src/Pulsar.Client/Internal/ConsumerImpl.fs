@@ -66,7 +66,7 @@ type internal ConsumerInitInfo<'T> =
 type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                            topicName: TopicName, connectionPool: ConnectionPool,
                            partitionIndex: int, hasParentConsumer: bool, startMessageId: MessageId option,
-                           startMessageRollbackDuration: TimeSpan, lookup: BinaryLookupService,
+                           startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
                            createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
                            schemaProvider: MultiVersionSchemaInfoProvider option,
                            interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) as this =
@@ -1435,7 +1435,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                        topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
-                       hasParent: bool, startMessageId: MessageId option, startMessageRollbackDuration: TimeSpan, lookup: BinaryLookupService,
+                       hasParent: bool, startMessageId: MessageId option, startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
                        createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
                        interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
         backgroundTask {
@@ -1695,7 +1695,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                            topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
                            hasParent: bool, startMessageId: MessageId option,
-                           lookup: BinaryLookupService,
+                           lookup: ILookupService,
                            createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
                            schemaProvider: MultiVersionSchemaInfoProvider option,
                            interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) as this =

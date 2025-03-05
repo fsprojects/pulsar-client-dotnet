@@ -74,7 +74,7 @@ type internal TopicAndConsumer<'T> =
 
 type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                                       multiConsumerType: MultiConsumerType<'T>, startMessageId: MessageId option,
-                                      startMessageRollbackDuration: TimeSpan, lookup: BinaryLookupService,
+                                      startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
                                       interceptors: ConsumerInterceptors<'T>, cleanup: MultiTopicsConsumerImpl<'T> -> unit) as this =
 
     let _this = this :> IConsumer<'T>
@@ -1028,7 +1028,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         postAndAsyncReply mb HasMessageAvailable
 
     static member InitPartitioned(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                            consumerInitInfo: ConsumerInitInfo<'T>, lookup: BinaryLookupService,
+                                            consumerInitInfo: ConsumerInitInfo<'T>, lookup: ILookupService,
                                             interceptors: ConsumerInterceptors<'T>, cleanup: MultiTopicsConsumerImpl<'T> -> unit) =
         backgroundTask {
             let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool, MultiConsumerType.Partitioned consumerInitInfo,
@@ -1038,7 +1038,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         }
 
     static member InitMultiTopic(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                            consumerInitInfos: ConsumerInitInfo<'T>[], lookup: BinaryLookupService,
+                                            consumerInitInfos: ConsumerInitInfo<'T>[], lookup: ILookupService,
                                             interceptors: ConsumerInterceptors<'T>, cleanup: MultiTopicsConsumerImpl<'T> -> unit) =
         backgroundTask {
             let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool, MultiConsumerType.MultiTopic consumerInitInfos,
@@ -1048,7 +1048,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         }
 
     static member InitPattern(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                            patternInfo: PatternInfo<'T>, lookup: BinaryLookupService,
+                                            patternInfo: PatternInfo<'T>, lookup: ILookupService,
                                             interceptors: ConsumerInterceptors<'T>, cleanup: MultiTopicsConsumerImpl<'T> -> unit) =
         backgroundTask {
             let consumer = MultiTopicsConsumerImpl(consumerConfig, clientConfig, connectionPool,

@@ -25,7 +25,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
     member this.ServiceUrl (url: string) =
         match url |> ServiceUri.parse with
         | (Result.Ok serviceUri) ->
-            PulsarClientBuilder { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls }
+            PulsarClientBuilder { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls ; Scheme = serviceUri.Scheme }
         | (Result.Error message) -> invalidArg null message
 
     member this.OperationTimeout operationTimeout =

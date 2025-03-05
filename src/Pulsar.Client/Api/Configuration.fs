@@ -14,6 +14,7 @@ type PulsarClientConfiguration =
         StatsInterval: TimeSpan
         MaxNumberOfRejectedRequestPerConnection: int
         UseTls: bool
+        Scheme: string
         TlsHostnameVerificationEnable: bool
         TlsAllowInsecureConnection: bool
         TlsTrustCertificate: X509Certificate2
@@ -34,6 +35,7 @@ type PulsarClientConfiguration =
             StatsInterval = TimeSpan.Zero
             MaxNumberOfRejectedRequestPerConnection = 50
             UseTls = false
+            Scheme = "pulsar"
             TlsHostnameVerificationEnable = false
             TlsAllowInsecureConnection = false
             TlsTrustCertificate = null

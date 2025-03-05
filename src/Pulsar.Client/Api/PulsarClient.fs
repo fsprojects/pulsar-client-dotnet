@@ -31,13 +31,18 @@ type internal PulsarClientMessage =
 type PulsarClient internal (config: PulsarClientConfiguration) as this =
 
     let connectionPool = ConnectionPool(config)
-    let lookupService = BinaryLookupService(config, connectionPool)
     let producers = HashSet<IAsyncDisposable>()
     let consumers = HashSet<IAsyncDisposable>()
     let schemaProviders = Dictionary<CompleteTopicName, MultiVersionSchemaInfoProvider>()
     let mutable clientState = Active
     let autoProduceStubType =  typeof<AutoProduceBytesSchemaStub>
     let autoConsumeStubType =  typeof<AutoConsumeSchemaStub>
+    let lookupService =
+        if config.Scheme = ServiceUri.HTTP_SERVICE then
+            HttpLookupService(config,connectionPool) :> ILookupService
+        else
+            BinaryLookupService(config,connectionPool) :> ILookupService
+
     let transactionClient =
         if config.EnableTransaction then
             TransactionCoordinatorClient(config, connectionPool, lookupService) |> Some

@@ -32,7 +32,7 @@ type internal PartitionedConnectionState =
     | Closed
 
 type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                      numPartitions: int, lookup: BinaryLookupService, schema: ISchema<'T>,
+                                      numPartitions: int, lookup: ILookupService, schema: ISchema<'T>,
                                       interceptors: ProducerInterceptors<'T>, cleanup: PartitionedProducerImpl<'T> -> unit) as this =
     let _this = this :> IProducer<'T>
     let producerId = Generators.getNextProducerId()
@@ -327,7 +327,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
        producerCreatedTsc.Task
 
     static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                        partitions: int, lookup: BinaryLookupService, schema: ISchema<'T>,
+                        partitions: int, lookup: ILookupService, schema: ISchema<'T>,
                         interceptors:ProducerInterceptors<'T>, cleanup: PartitionedProducerImpl<'T> -> unit) =
         backgroundTask {
             let producer = PartitionedProducerImpl(producerConfig, clientConfig, connectionPool, partitions, lookup,

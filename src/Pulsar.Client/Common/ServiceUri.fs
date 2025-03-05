@@ -7,16 +7,20 @@ type internal ServiceUri = {
     OriginalString : string
     Addresses : Uri list
     UseTls : bool
+    Scheme : string
 }
 
 [<RequireQualifiedAccess>]
 module internal ServiceUri =
 
-    let private BINARY_SERVICE = "pulsar"
+    let BINARY_SERVICE = "pulsar"
+    let HTTP_SERVICE = "http"
     let private SSL_SERVICE = "ssl"
 
     let private BINARY_PORT = 6650
     let private BINARY_TLS_PORT = 6651
+    let private HTTP_PORT = 8080
+    let private HTTP_TLS_PORT = 8443
 
     let private schemeGroup = "scheme"
     let private servicesGroup = "services"
@@ -25,7 +29,7 @@ module internal ServiceUri =
 
     let private pattern =
         sprintf
-            "^(?<%s>pulsar)(?:\+(?<%s>ssl))*://(?:(?<%s>[^\s/;,]+)[;,]?)+(?<%s>/.+)?$"
+            "^(?<%s>pulsar|http)(?:\+(?<%s>ssl))*://(?:(?<%s>[^\s/;,]+)[;,]?)+(?<%s>/.+)?$"
             schemeGroup
             servicesGroup
             hostsGroup
@@ -53,12 +57,14 @@ module internal ServiceUri =
                 let services = m |> getGroupCaptureValues servicesGroup
                 let hosts = m |> getGroupCaptureValues hostsGroup
                 let path = m |> getGroupValue pathGroup
-                let useTls = services |> Seq.contains SSL_SERVICE && scheme = BINARY_SERVICE
+                let useTls = services |> Seq.contains SSL_SERVICE
 
                 let createBuilder host = UriBuilder(sprintf "%s://%s%s" scheme host path)
 
                 let rewritePort (builder : UriBuilder) =
-                    if builder.Port = -1 then
+                    // UriBuilder will automatically set an 80 port when it recognizes http scheme,
+                    // so that we can only add default port when using pulsar binary protocol
+                    if scheme = BINARY_SERVICE && builder.Port = -1 then
                         if services |> Seq.contains SSL_SERVICE then
                             builder.Port <- BINARY_TLS_PORT
                         else
@@ -74,4 +80,4 @@ module internal ServiceUri =
 
                 let addresses = hosts |> Seq.map (createBuilder >> rewritePort >> dropUserInfo >> getUri) |> List.ofSeq
 
-                Ok { OriginalString = str; Addresses = addresses; UseTls = useTls }
+                Ok { OriginalString = str; Addresses = addresses; UseTls = useTls; Scheme = scheme }
