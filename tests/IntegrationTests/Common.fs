@@ -54,9 +54,16 @@ let commonClient =
         .ServiceUrl(pulsarAddress)
         .BuildAsync().Result
 
+let commonHttpLookupClient =
+    PulsarClientBuilder()
+        .ServiceUrl(pulsarHttpAddress)
+        .BuildAsync().Result
+
 let commonHttpClient = new HttpClient()
 
 let getClient() = commonClient
+
+let getHttpLookupClient() = commonHttpLookupClient
 
 let extractTimeStamp (date: DateTime) : TimeStamp =
     let mss = (date - DateTime.UnixEpoch).TotalMilliseconds |> int64

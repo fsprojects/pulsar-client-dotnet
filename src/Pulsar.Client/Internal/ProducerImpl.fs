@@ -42,7 +42,7 @@ type internal ProducerMessage<'T> =
     | GetStats of TaskCompletionSource<ProducerStats>
 
 type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                           partitionIndex: int, lookup: BinaryLookupService, schema: ISchema<'T>,
+                           partitionIndex: int, lookup: ILookupService, schema: ISchema<'T>,
                            interceptors: ProducerInterceptors<'T>, cleanup: ProducerImpl<'T> -> unit) as this =
     let _this = this :> IProducer<'T>
     let producerId = Generators.getNextProducerId()
@@ -818,7 +818,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
        }
 
     static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                       partitionIndex: int, lookup: BinaryLookupService, schema: ISchema<'T>,
+                       partitionIndex: int, lookup: ILookupService, schema: ISchema<'T>,
                        interceptors: ProducerInterceptors<'T>, cleanup: ProducerImpl<'T> -> unit) =
         backgroundTask {
             let producer = ProducerImpl(producerConfig, clientConfig, connectionPool, partitionIndex, lookup, schema,
