@@ -16,7 +16,7 @@
     <PackageProjectUrl>https://github.com/fsprojects/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
-    <Authors>F# community</Authors>
+    <Authors>Vladimir Shchur and contributors</Authors>
     <PackageVersion>3.8.0</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
