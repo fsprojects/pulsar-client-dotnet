@@ -39,4 +39,17 @@ module PulsarClientBuilderTests =
                     "Service Url needs to be specified on the PulsarClientBuilder object."
             }
 
+            test "Http lookup authentication authDataProvider" {
+                AuthenticationFactory.Token("test").GetAuthData().HasDataForHttp()
+                |> Expect.equal "AuthenticationToken HasDataForHttp should be true" true
+
+                AuthenticationFactoryOAuth2.ClientCredentials(
+                    Uri("https://test.com"),
+                    "test",
+                    Uri("https://test.com")
+                ).GetAuthMethodName()
+                |> Expect.equal "AuthenticationFactoryOAuth2 authData should be token" "token"
+            }
+
+
         ]

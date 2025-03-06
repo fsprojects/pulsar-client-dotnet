@@ -139,6 +139,7 @@
     <Compile Include="Internal\EndPointResolver.fs" />
     <Compile Include="Internal\ILookupService.fs" />
     <Compile Include="Internal\BinaryLookupService.fs" />
+    <Compile Include="Internal\PulsarHttpClient.fs" />
     <Compile Include="Internal\HttpLookupService.fs" />
     <Compile Include="Internal\ConnectionHandler.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTracker.fs" />
