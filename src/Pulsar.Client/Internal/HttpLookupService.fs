@@ -61,10 +61,11 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
                                                BrokerUrlTls: string;
                                                HttpUrl: string;
                                                HttpUrlTls: string |}>
-                let uri = if config.UseTls then
-                            Uri(brokerResponse.BrokerUrlTls)
-                          else
-                            Uri(brokerResponse.BrokerUrl)
+                let uri =
+                    if config.UseTls then
+                        Uri(brokerResponse.BrokerUrlTls)
+                    else
+                        Uri(brokerResponse.BrokerUrl)
                 let resultEndpoint = DnsEndPoint(uri.Host, uri.Port)
                 return { LogicalAddress = LogicalAddress resultEndpoint; PhysicalAddress = PhysicalAddress resultEndpoint }
             }

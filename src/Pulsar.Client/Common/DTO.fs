@@ -454,7 +454,7 @@ type internal PulsarResponseType =
     | PartitionedTopicMetadata of PartitionedTopicMetadata
     | LookupTopicResult of LookupTopicResult
     | ProducerSuccess of ProducerSuccess
-    | TopicsOfNamespace of string seq
+    | TopicsOfNamespace of string[]
     | LastMessageId of LastMessageIdResult
     | TopicSchema of TopicSchema option
     | PulsarError

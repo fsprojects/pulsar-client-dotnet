@@ -32,7 +32,6 @@ type internal PulsarHttpClient (config: PulsarClientConfiguration) =
                 let! response = httpClient.SendAsync(request)
                 response.EnsureSuccessStatusCode() |> ignore
                 return! response.Content.ReadFromJsonAsync<'T>(jsonOptions)
-
             else
                 return! httpClient.GetFromJsonAsync<'T>(requestUri, jsonOptions)
         }

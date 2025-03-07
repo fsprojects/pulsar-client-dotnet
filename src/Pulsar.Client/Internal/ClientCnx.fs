@@ -672,7 +672,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | _ ->
                 Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandReachedEndOfTopic", prefix, %cmd.ConsumerId)
         | XCommandGetTopicsOfNamespaceResponse cmd ->
-            let result = TopicsOfNamespace cmd.Topics
+            let result = TopicsOfNamespace <| cmd.Topics.ToArray()
             handleSuccess %cmd.RequestId result BaseCommand.Type.GetTopicsOfNamespaceResponse
         | XCommandGetLastMessageIdResponse cmd ->
             let lastMessageId = {

@@ -137,7 +137,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 let requestId = Generators.getNextRequestId()
                 let payload = Commands.newGetTopicsOfNamespaceRequest ns requestId isPersistent
                 let! response = clientCnx.SendAndWaitForReply requestId payload |> Async.AwaitTask
-                let result = PulsarResponseType.GetTopicsOfNamespace response |> Seq.toArray
+                let result = PulsarResponseType.GetTopicsOfNamespace response
                 return result
             with Flatten ex ->
                 let delay = Math.Min(backoff.Next(), remainingTimeMs)
