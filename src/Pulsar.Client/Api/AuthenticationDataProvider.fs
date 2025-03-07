@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Api
 
+open System.Collections.Generic
 open Pulsar.Client.Common
 open System.Text
 open System.Security.Cryptography.X509Certificates
@@ -25,6 +26,18 @@ type AuthenticationDataProvider() =
     abstract member GetCommandData: unit -> string
     default this.GetCommandData() =
         ""
+
+    //Http
+
+    abstract member HasDataForHttp: unit -> bool
+    default this.HasDataForHttp() =
+        false
+
+    abstract member GetHttpHeaders: unit -> IReadOnlyDictionary<string, string>
+    default this.GetHttpHeaders() =
+        Dictionary<string, string>()
+
+    //AuthDataProvider
 
     abstract member Authenticate: AuthData -> AuthData
     default this.Authenticate authData =
