@@ -57,6 +57,11 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
         PulsarClientBuilder
             { config with
                 TlsTrustCertificate = tlsTrustCertificate }
+            
+    member this.TlsCertificate tlsCertificate =
+        PulsarClientBuilder
+            { config with
+                TlsCertificate = tlsCertificate }
 
     member this.Authentication authentication =
         PulsarClientBuilder

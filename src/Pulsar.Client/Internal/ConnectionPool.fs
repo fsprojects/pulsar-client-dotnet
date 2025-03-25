@@ -143,7 +143,18 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                         if config.UseTls then
                             Log.Logger.LogDebug("Configuring ssl for {0}", physicalAddress)
                             let sslStream = new SslStream(new NetworkStream(socket), false, RemoteCertificateValidationCallback(remoteCertificateValidationCallback))
-                            let clientCertificates = config.Authentication.GetAuthData(physicalAddress.Host).GetTlsCertificates()
+                            let authData = config.Authentication.GetAuthData(physicalAddress.Host)
+                            let clientCertificates =
+                                if authData.HasDataForTls() then
+                                    config.Authentication.GetAuthData(physicalAddress.Host).GetTlsCertificates()
+                                else
+                                    let clientCert = config.TlsCertificate
+                                    if clientCert = null then
+                                        X509Certificate2Collection([||])
+                                    elif not clientCert.HasPrivateKey then
+                                        failwith "TlsCertificate doesn't contain a private key"
+                                    else
+                                        X509Certificate2Collection([| clientCert |])
                             do! sslStream.AuthenticateAsClientAsync(physicalAddress.Host, clientCertificates, config.TlsProtocols, false)
 
                             let pipeConnection = StreamConnection.GetDuplex(sslStream, pipeOptions)

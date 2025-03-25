@@ -29,6 +29,7 @@ let pulsarSslAddress = "pulsar+ssl://127.0.0.1:6651"
 // generate pfx file from pem, leave the password blank
 // openssl pkcs12 -in admin.cert.pem -inkey admin.key-pk8.pem -export -out admin.pfx
 let ca = new Security.Cryptography.X509Certificates.X509Certificate2(@"../ssl/ca.cert.pem")
+let clientCert = new Security.Cryptography.X509Certificates.X509Certificate2(@"../ssl/admin.pfx")
 let sslAdmin = AuthenticationFactory.Tls(@"../ssl/admin.pfx")
 let sslUser1 = AuthenticationFactory.Tls(@"../ssl/user1.pfx")
 #endif
@@ -78,6 +79,14 @@ let sslAdminClient =
         .Authentication(sslAdmin)
         .BuildAsync().Result
 
+let sslMTlsEncryptionClient =
+    PulsarClientBuilder()
+        .ServiceUrl(pulsarSslAddress)
+        .EnableTls(true)
+        .TlsTrustCertificate(ca)
+        .TlsCertificate(clientCert)
+        .BuildAsync().Result
+
 let sslUser1Client =
     PulsarClientBuilder()
         .ServiceUrl(pulsarSslAddress)
@@ -89,6 +98,8 @@ let sslUser1Client =
 let getSslClient() = sslClient
 
 let getSslAdminClient() = sslAdminClient
+
+let getSslMTlsEncryptionClient() = sslMTlsEncryptionClient
 
 let getSslUser1Client() = sslUser1Client
 #endif
