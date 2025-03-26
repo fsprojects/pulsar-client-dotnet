@@ -4,6 +4,7 @@
 
 open System
 open Expecto
+open Serilog
 
 open System.Threading.Tasks
 open Pulsar.Client.Api
@@ -11,9 +12,9 @@ open Pulsar.Client.Common
 open Pulsar.Client.IntegrationTests.Common
 
 
-let tlsTransport client testName =
+let tlsTransport (client:PulsarClient) testName =
     testTask testName {
-        let client = getSslAdminClient()
+        Log.Debug("Started test: " + testName)
         let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
         let numberOfMessages = 10
         let messageIds = ResizeArray<MessageId>()

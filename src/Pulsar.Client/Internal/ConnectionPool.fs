@@ -150,7 +150,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                                 else
                                     let clientCert = config.TlsCertificate
                                     if clientCert = null then
-                                        X509Certificate2Collection([||])
+                                        X509Certificate2Collection()
                                     elif not clientCert.HasPrivateKey then
                                         failwith "TlsCertificate doesn't contain a private key"
                                     else
