@@ -42,7 +42,8 @@ services:
     ports:
       - "6651:6651"
     command: >
-      bash -c "bin/set_python_version.sh &&
+      bash -c "echo 'nSt7+qKTfU1kY6S8Dryrf+tGlMSDKH8od+JzW3sb41s=' > /pulsar/secret.key &&
+               bin/set_python_version.sh &&
                bin/apply-config-from-env.py conf/standalone.conf &&
                bin/pulsar standalone -nfw"
     environment:
