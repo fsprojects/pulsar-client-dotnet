@@ -103,7 +103,7 @@ let getSslClient() = sslClient
 
 let getSslAdminClient() = sslAdminClient
 
-let getSSLTokenClient() = sslTokenClient
+let getSslTokenClient() = sslTokenClient
 
 let getSslUser1Client() = sslUser1Client
 #endif

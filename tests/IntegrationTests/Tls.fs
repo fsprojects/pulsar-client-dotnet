@@ -14,7 +14,7 @@ open Pulsar.Client.IntegrationTests.Common
 
 let tlsTransport (client:PulsarClient) testName =
     testTask testName {
-        Log.Debug("Started test: " + testName)
+        Log.Debug("Started " + testName)
         let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
         let numberOfMessages = 10
         let messageIds = ResizeArray<MessageId>()
@@ -47,12 +47,13 @@ let tlsTransport (client:PulsarClient) testName =
                 }:> Task)
 
         do! Task.WhenAll(producerTask, consumerTask)
+        Log.Debug("Finished " + testName)
     }
 
 [<Tests>]
 let tests =
     testList "Tls" [
         tlsTransport (getSslAdminClient()) "Tls transport with mTls Authentication"
-        tlsTransport (getSSLTokenClient()) "Tls transport with token Authentication"
+        tlsTransport (getSslTokenClient()) "Tls transport with token Authentication"
     ]
 #endif
