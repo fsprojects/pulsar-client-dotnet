@@ -42,8 +42,7 @@ services:
     ports:
       - "6651:6651"
     command: >
-      bash -c "echo 'nSt7+qKTfU1kY6S8Dryrf+tGlMSDKH8od+JzW3sb41s=' > /pulsar/secret.key &&
-               bin/set_python_version.sh &&
+      bash -c "bin/set_python_version.sh &&
                bin/apply-config-from-env.py conf/standalone.conf &&
                bin/pulsar standalone -nfw"
     environment:
@@ -55,7 +54,7 @@ services:
       PULSAR_PREFIX_maxMessageSize: 10500000
       PULSAR_PREFIX_nettyMaxFrameSizeBytes: 10500000
       PULSAR_PREFIX_tlsRequireTrustedClientCertOnConnect: true
-      PULSAR_PREFIX_tokenSecretKey: file:///pulsar/secret.key
+      PULSAR_PREFIX_tokenSecretKey: data:;base64,QVRnNCsyZkkvNnZyanVJQk1lcHFTTVBaZ1dsVlpjWXJJWFZ4RTRBWmExaz0=
       superUserRoles: admin
       brokerClientAuthenticationPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
       brokerClientAuthenticationParameters: tlsCertFile:/pulsar/ssl/admin.cert.pem,tlsKeyFile:/pulsar/ssl/admin.key-pk8.pem

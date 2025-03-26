@@ -88,7 +88,7 @@ let sslTokenClient =
         .EnableTls(true)
         .TlsTrustCertificate(ca)
         .TlsCertificate(clientCert)
-        .Authentication(AuthenticationFactory.Token("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.aTnuZmrnskICGSoveSUtZt4RBVTOfiQM03nvBNuQU_o"))
+        .Authentication(AuthenticationFactory.Token("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.hkExtZmCXOi1byo_sVzZrxZcwN88tvVVMlNcxQEs3TY"))
         .BuildAsync().Result
 
 let sslUser1Client =
