@@ -55,7 +55,7 @@ services:
       PULSAR_PREFIX_maxMessageSize: 10500000
       PULSAR_PREFIX_nettyMaxFrameSizeBytes: 10500000
       PULSAR_PREFIX_tlsRequireTrustedClientCertOnConnect: true
-      PULSAR_PREFIX_tokenSecretKey: /pulsar/secret.key
+      PULSAR_PREFIX_tokenSecretKey: file:///pulsar/secret.key
       superUserRoles: admin
       brokerClientAuthenticationPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
       brokerClientAuthenticationParameters: tlsCertFile:/pulsar/ssl/admin.cert.pem,tlsKeyFile:/pulsar/ssl/admin.key-pk8.pem
