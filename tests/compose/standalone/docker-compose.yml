@@ -53,11 +53,13 @@ services:
       PULSAR_PREFIX_tlsTrustCertsFilePath: /pulsar/ssl/ca.cert.pem
       PULSAR_PREFIX_maxMessageSize: 10500000
       PULSAR_PREFIX_nettyMaxFrameSizeBytes: 10500000
+      PULSAR_PREFIX_tlsRequireTrustedClientCertOnConnect: true
+      PULSAR_PREFIX_tokenSecretKey: /pulsar/secret.key
       superUserRoles: admin
       brokerClientAuthenticationPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
       brokerClientAuthenticationParameters: tlsCertFile:/pulsar/ssl/admin.cert.pem,tlsKeyFile:/pulsar/ssl/admin.key-pk8.pem
       authenticationEnabled: "true"
-      authenticationProviders: org.apache.pulsar.broker.authentication.AuthenticationProviderTls
+      authenticationProviders: org.apache.pulsar.broker.authentication.AuthenticationProviderTls,org.apache.pulsar.broker.authentication.AuthenticationProviderToken
       authorizationEnabled: "true"
       authorizationProvider: org.apache.pulsar.broker.authorization.PulsarAuthorizationProvider
       clientAuthenticationPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls

@@ -13,4 +13,6 @@ bin/pulsar-admin tenants create public
 echo "Creating 'default' namespace..."
 bin/pulsar-admin namespaces create public/default
 
+echo "nSt7+qKTfU1kY6S8Dryrf+tGlMSDKH8od+JzW3sb41s=" > /pulsar/secret.key
+
 echo "Init Standalone TLS completed!"

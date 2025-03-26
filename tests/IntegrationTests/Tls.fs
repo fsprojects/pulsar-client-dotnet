@@ -53,6 +53,6 @@ let tlsTransport (client:PulsarClient) testName =
 let tests =
     testList "Tls" [
         tlsTransport (getSslAdminClient()) "Tls transport with mTls Authentication"
-        tlsTransport (getSslMTlsEncryptionClient()) "Tls transport with mTls Encryption"
+        tlsTransport (getSSLTokenClient()) "Tls transport with token Authentication"
     ]
 #endif

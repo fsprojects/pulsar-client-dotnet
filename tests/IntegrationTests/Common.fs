@@ -82,12 +82,13 @@ let sslAdminClient =
         .Authentication(sslAdmin)
         .BuildAsync().Result
 
-let sslMTlsEncryptionClient =
+let sslTokenClient =
     PulsarClientBuilder()
         .ServiceUrl(pulsarSslAddress)
         .EnableTls(true)
         .TlsTrustCertificate(ca)
         .TlsCertificate(clientCert)
+        .Authentication(AuthenticationFactory.Token("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0LXVzZXIifQ.laYPAui-4eGFYxL4zcqYxLjV604wMDzAVe8PRww6NEI"))
         .BuildAsync().Result
 
 let sslUser1Client =
@@ -102,7 +103,7 @@ let getSslClient() = sslClient
 
 let getSslAdminClient() = sslAdminClient
 
-let getSslMTlsEncryptionClient() = sslMTlsEncryptionClient
+let getSSLTokenClient() = sslTokenClient
 
 let getSslUser1Client() = sslUser1Client
 #endif
