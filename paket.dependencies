@@ -35,7 +35,7 @@ group Tests
   nuget Expecto.FsCheck
   nuget Expecto
   nuget Microsoft.NET.Test.Sdk
-  nuget YoloDev.Expecto.TestSdk
+  nuget YoloDev.Expecto.TestSdk 0.14.3
   nuget Serilog
   nuget Serilog.Extensions.Logging
   nuget Serilog.Sinks.Console
