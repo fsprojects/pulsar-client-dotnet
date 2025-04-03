@@ -134,7 +134,11 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                                   broker, maxMessageSize)
         backgroundTask {
             let (PhysicalAddress physicalAddress) = broker.PhysicalAddress
-            let pipeOptions = PipeOptions(pauseWriterThreshold = int64 maxMessageSize )
+            // We should use PipeOptions.Default.PauseWriterThreshold as the minimum value for pauseWriterThreshold. A value that's too small isn't practical and will affect performance.
+            let pauseWriterThreshold = max (int64 maxMessageSize) PipeOptions.Default.PauseWriterThreshold
+            // Make sure the resumeWriterThreshold is half of the pauseWriterThreshold for better performance: https://github.com/dotnet/runtime/blob/970070e3b78b8cf604dabfe114e1f609c38c555d/src/libraries/System.IO.Pipelines/src/System/IO/Pipelines/PipeOptions.cs#L50-L51
+            let resumeWriterThreshold = int64 (pauseWriterThreshold / 2L)
+            let pipeOptions = PipeOptions(pauseWriterThreshold = pauseWriterThreshold, resumeWriterThreshold = resumeWriterThreshold )
             let! socket = getSocket physicalAddress
 
             try
