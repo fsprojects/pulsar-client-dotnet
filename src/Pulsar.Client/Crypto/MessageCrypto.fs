@@ -11,7 +11,7 @@ open Pulsar.Client.Common
 open Microsoft.Extensions.Logging
 
 type MessageEncryptor(keyNames: string seq, keyReader: ICryptoKeyReader) =
-    let symmetricAlgorithm = AeadAlgorithm.Aes256Gcm
+    let symmetricAlgorithm = AeadAlgorithm.Aegis256
     let IV_LEN = 12
     let symmetricAlgorithmName = symmetricAlgorithm.ToString()
     let mutable symmetricKey: Key = null

@@ -51,7 +51,7 @@
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.0" />
     <PackageReference Include="AvroSchemaGenerator" Version="2.9.2" />
     <PackageReference Include="Apache.Avro" Version="1.11.3" />
-    <PackageReference Include="NSec.Cryptography" Version="22.4.0" />
+    <PackageReference Include="NSec.Cryptography" Version="24.4.0" />
     <PackageReference Include="PemUtils" Version="3.0.0.82" />
     <PackageReference Include="protobuf-net.Reflection" Version="3.2.12" />
     <!--Microsoft-->
