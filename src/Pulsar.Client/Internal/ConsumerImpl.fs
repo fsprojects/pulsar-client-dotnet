@@ -1678,7 +1678,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             | Closing | Closed ->
                 ValueTask()
             | _ ->
-                postAndAsyncReply mb ConsumerMessage.Close |> ValueTask
+                backgroundTask {
+                    do! postAndAsyncReply mb ConsumerMessage.Close
+                } |> ValueTask
 
 
 and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
