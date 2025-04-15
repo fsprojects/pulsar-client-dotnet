@@ -37,7 +37,7 @@ services:
 
   standaloneTls:
     hostname: standaloneTls
-    image: apachepulsar/pulsar-test-latest-version:latest
+    image: lanayx/pulsar-test-latest-version:latest
     ports:
       - "6651:6651"
     command: >
@@ -65,7 +65,7 @@ services:
       clientAuthenticationParameters: tlsCertFile:/pulsar/ssl/admin.cert.pem,tlsKeyFile:/pulsar/ssl/admin.key-pk8.pem
 
   initTls:
-    image: apachepulsar/pulsar-test-latest-version:latest
+    image: lanayx/pulsar-test-latest-version:latest
     volumes:
       - ./scripts/wait-for-it.sh:/pulsar/bin/wait-for-it.sh
       - ./scripts/init-standalone-tls.sh:/pulsar/bin/init-standalone-tls.sh
