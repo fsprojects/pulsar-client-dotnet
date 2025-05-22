@@ -89,7 +89,8 @@ type internal DeadLetterProcessor<'T>
                     let! rlProducer = rlProducer.Value
                     let key = getOptionalKey message
                     let eventTime = message.EventTime |> Option.ofNullable
-                    let msg = MessageBuilder(message.GetValue(), message.Data, key, propertiesMap, deliverAt, ?eventTime = eventTime)
+                    let orderingKey = message.OrderingKey |> Option.ofObj
+                    let msg = MessageBuilder(message.GetValue(), message.Data, key, propertiesMap, deliverAt, ?orderingKey = orderingKey, ?eventTime = eventTime)
                     let! _ = rlProducer.SendAsync(msg)
                     acknowledge message.MessageId
             }
