@@ -475,14 +475,14 @@ let tests =
                     .EnableRetry(true)
                     .SubscribeAsync()
 
-            let! _ = producer.NewMessage([| 0uy; 1uy; 0uy |], orderingKey = [| 1uy; 0uy; 1uy |]) |> producer.SendAsync
+            let orderingKey = [| 1uy; 0uy; 1uy |]
+            let! _ = producer.NewMessage([| 0uy; 1uy; 0uy |], orderingKey = orderingKey) |> producer.SendAsync
             let! (msg1 : Message<byte[]>) = consumer.ReceiveAsync()
             do! consumer.ReconsumeLaterAsync(msg1, %(DateTime.UtcNow.AddSeconds(1.0) |> convertToMsTimestamp))
             let! (msg2 : Message<byte[]>) = consumer.ReceiveAsync()
 
-            Expect.isNotNull "" msg1.OrderingKey
-            Expect.isNotNull "" msg2.OrderingKey
-            Expect.sequenceEqual "" msg1.OrderingKey msg2.OrderingKey
+            Expect.equal "" orderingKey msg1.OrderingKey
+            Expect.equal "" orderingKey msg2.OrderingKey
 
             description |> logTestEnd
         }
