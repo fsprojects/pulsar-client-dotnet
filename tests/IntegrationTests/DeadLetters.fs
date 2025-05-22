@@ -438,49 +438,17 @@ let tests =
                     .EnableRetry(true)
                     .SubscribeAsync()
 
-            let! msgId = producer.SendAsync([| 0uy; 1uy; 0uy |])
+            let data = [| 0uy; 1uy; 0uy |]
+            let orderingKey = [| 1uy; 0uy; 1uy |]
+            let message = producer.NewMessage(data, orderingKey = orderingKey)
+            let! msgId = producer.SendAsync message
             let! (msg1 : Message<byte[]>) = consumer.ReceiveAsync()
             do! consumer.ReconsumeLaterAsync(msg1, %(DateTime.UtcNow.AddSeconds(1.0) |> convertToMsTimestamp))
             let! (msg2 : Message<byte[]>) = consumer.ReceiveAsync()
 
             Expect.equal "" msgId msg1.MessageId
-            Expect.equal "" (msg1.GetValue() |> Array.toList) (msg2.GetValue() |> Array.toList)
-
-            description |> logTestEnd
-        }
-        
-        
-        testTask "Reconsume later retains ordering key" {
-
-            let description = "Reconsume later retains ordering key"
-
-            description |> logTestStart
-
-            let config = getTestConfig()
-            let producerName = "reconsumeProducer"
-            let consumerName = "reconsumeConsumer"
-
-            let! (producer : IProducer<byte[]>) =
-                createProducer()
-                    .ProducerName(producerName)
-                    .Topic(config.TopicName)
-                    .EnableBatching(false)
-                    .CreateAsync()
-
-            let! (consumer : IConsumer<byte[]>) =
-                createConsumer()
-                    .ConsumerName(consumerName)
-                    .Topic(config.TopicName)
-                    .SubscriptionName(config.SubscriptionName)
-                    .EnableRetry(true)
-                    .SubscribeAsync()
-
-            let orderingKey = [| 1uy; 0uy; 1uy |]
-            let! _ = producer.NewMessage([| 0uy; 1uy; 0uy |], orderingKey = orderingKey) |> producer.SendAsync
-            let! (msg1 : Message<byte[]>) = consumer.ReceiveAsync()
-            do! consumer.ReconsumeLaterAsync(msg1, %(DateTime.UtcNow.AddSeconds(1.0) |> convertToMsTimestamp))
-            let! (msg2 : Message<byte[]>) = consumer.ReceiveAsync()
-
+            Expect.equal "" data (msg1.GetValue())
+            Expect.equal "" data (msg2.GetValue())
             Expect.equal "" orderingKey msg1.OrderingKey
             Expect.equal "" orderingKey msg2.OrderingKey
 
