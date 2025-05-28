@@ -770,6 +770,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         None
                 if synchronouslyCanceled then
                     channel.SetCanceled()
+                    tokenRegistration |> Option.iter _.Dispose()
                 else
                     waiters.AddLast(struct(tokenRegistration, channel)) |> ignore
                     Log.Logger.LogDebug("{0} Receive waiting", prefix)
@@ -801,6 +802,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         None
                 if synchronouslyCanceled then
                     channel.SetCanceled()
+                    tokenRegistration |> Option.iter _.Dispose()
                 else
                     batchWaiters.AddLast(struct(batchCts, tokenRegistration, channel)) |> ignore
                     asyncDelay

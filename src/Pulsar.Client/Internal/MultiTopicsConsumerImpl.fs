@@ -555,6 +555,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         None
                 if synchronouslyCanceled then
                     channel.SetCanceled()
+                    tokenRegistration |> Option.iter _.Dispose()
                 else
                     waiters.AddLast(struct(tokenRegistration, channel)) |> ignore
                     Log.Logger.LogDebug("{0} Receive waiting", prefix)
@@ -571,7 +572,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             else
                 let batchCts = new CancellationTokenSource()
                 let mutable synchronouslyCanceled = false
-                let registration =
+                let tokenRegistration =
                     if cancellationToken.CanBeCanceled then
                         let mutable cancellationTokenRegistration = None
                         cancellationTokenRegistration <-
@@ -587,8 +588,9 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         None
                 if synchronouslyCanceled then
                     channel.SetCanceled()
+                    tokenRegistration |> Option.iter _.Dispose()
                 else
-                    batchWaiters.AddLast(struct(batchCts, registration, channel)) |> ignore
+                    batchWaiters.AddLast(struct(batchCts, tokenRegistration, channel)) |> ignore
                     asyncDelay
                         consumerConfig.BatchReceivePolicy.Timeout
                         (fun () ->
