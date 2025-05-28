@@ -539,18 +539,26 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             if incomingMessages.Count > 0 then
                 replyWithMessage channel <| dequeueMessage()
             else
+                let mutable synchronouslyCanceled = false
                 let tokenRegistration =
                     if cancellationToken.CanBeCanceled then
-                        let rec cancellationTokenRegistration =
+                        let mutable cancellationTokenRegistration = None
+                        cancellationTokenRegistration <-
                             cancellationToken.Register((fun () ->
                                 Log.Logger.LogDebug("{0} receive cancelled", prefix)
-                                post this.Mb (CancelWaiter(cancellationTokenRegistration, channel))
+                                match cancellationTokenRegistration with
+                                | None -> synchronouslyCanceled <- true
+                                | Some _ ->  post this.Mb (CancelWaiter(cancellationTokenRegistration, channel))
                             ), false) |> Some
                         cancellationTokenRegistration
                     else
                         None
-                waiters.AddLast(struct(tokenRegistration, channel)) |> ignore
-                Log.Logger.LogDebug("{0} Receive waiting", prefix)
+                if synchronouslyCanceled then
+                    channel.SetCanceled()
+                    tokenRegistration |> Option.iter _.Dispose()
+                else
+                    waiters.AddLast(struct(tokenRegistration, channel)) |> ignore
+                    Log.Logger.LogDebug("{0} Receive waiting", prefix)
 
     let batchReceive (receiveCallbacks: ReceiveCallbacks<'T>) =
         Log.Logger.LogDebug("{0} BatchReceive", prefix)
@@ -563,26 +571,34 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 replyWithBatch channel
             else
                 let batchCts = new CancellationTokenSource()
-                let registration =
+                let mutable synchronouslyCanceled = false
+                let tokenRegistration =
                     if cancellationToken.CanBeCanceled then
-                        let rec cancellationTokenRegistration =
+                        let mutable cancellationTokenRegistration = None
+                        cancellationTokenRegistration <-
                             cancellationToken.Register((fun () ->
                                 Log.Logger.LogDebug("{0} batch receive cancelled", prefix)
-                                post this.Mb (CancelBatchWaiter(batchCts, cancellationTokenRegistration, channel))
+                                match cancellationTokenRegistration with
+                                | None -> synchronouslyCanceled <- true
+                                | Some _ -> post this.Mb (CancelBatchWaiter(batchCts, cancellationTokenRegistration, channel))
                             ), false)
                             |> Some
                         cancellationTokenRegistration
                     else
                         None
-                batchWaiters.AddLast(struct(batchCts, registration, channel)) |> ignore
-                asyncDelay
-                    consumerConfig.BatchReceivePolicy.Timeout
-                    (fun () ->
-                        if not batchCts.IsCancellationRequested then
-                            post this.Mb SendBatchByTimeout
-                        else
-                            batchCts.Dispose())
-                Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
+                if synchronouslyCanceled then
+                    channel.SetCanceled()
+                    tokenRegistration |> Option.iter _.Dispose()
+                else
+                    batchWaiters.AddLast(struct(batchCts, tokenRegistration, channel)) |> ignore
+                    asyncDelay
+                        consumerConfig.BatchReceivePolicy.Timeout
+                        (fun () ->
+                            if not batchCts.IsCancellationRequested then
+                                post this.Mb SendBatchByTimeout
+                            else
+                                batchCts.Dispose())
+                    Log.Logger.LogDebug("{0} BatchReceive waiting", prefix)
 
     let runPoller (ct: CancellationToken) =
         (Task.Run<unit>(fun () ->

@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>3.9.3</Version>
+    <Version>3.9.4</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsprojects/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Ordering key is now retained at redelivery</PackageReleaseNotes>
+    <PackageReleaseNotes>Fixed cancellation token handling at receive and batch receive</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsprojects/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>pulsar</PackageTags>
     <Authors>Vladimir Shchur and contributors</Authors>
-    <PackageVersion>3.9.3</PackageVersion>
+    <PackageVersion>3.9.4</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -33,7 +33,7 @@
     <WarningLevel>3</WarningLevel>
     <WarningsAsErrors>3239;0025</WarningsAsErrors>
     <DebugType>portable</DebugType>
-    <NoWarn>3186;40</NoWarn>
+    <NoWarn>3186</NoWarn>
     <PackageIcon>pulsar-client-dotnet.png</PackageIcon>
     <PackageIconUrl />
   </PropertyGroup>
