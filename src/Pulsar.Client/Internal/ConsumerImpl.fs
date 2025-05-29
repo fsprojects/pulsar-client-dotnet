@@ -803,6 +803,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 if synchronouslyCanceled then
                     channel.SetCanceled()
                     tokenRegistration |> Option.iter _.Dispose()
+                    batchCts.Dispose()
                 else
                     batchWaiters.AddLast(struct(batchCts, tokenRegistration, channel)) |> ignore
                     asyncDelay
