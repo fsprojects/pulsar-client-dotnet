@@ -563,7 +563,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
             batchWaitingChannel.TrySetException ex |> ignore
 
-    let stopConsumer () =
+    let closeConsumerTasks() =
         unAckedMessageTracker.Close()
         acksGroupingTracker.Close()
         clearDeadLetters()
@@ -574,6 +574,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         statTimer.Stop()
         chunkTimer.Stop()
         cleanup(this)
+
+    let stopConsumer () =
+        closeConsumerTasks()
         failWaiters <| AlreadyClosedException "Consumer is already closed"
         Log.Logger.LogInformation("{0} stopped", prefix)
 
@@ -878,7 +881,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             //    auto-topic-creation set to false
                             // No more retries are needed in this case.
                             connectionHandler.Failed()
-                            stopConsumer()
+                            closeConsumerTasks()
                             Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
                             continueLoop <- false
                         | _ ->
