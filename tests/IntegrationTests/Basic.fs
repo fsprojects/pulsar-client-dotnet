@@ -435,10 +435,10 @@ let tests =
                     
             do! producer.SendAsync([| 1uy |])
             
-            do! task
             let! (msg : Message<byte[]>) = task
             
             Expect.equal "" [| 1uy |] <| msg.GetValue()
+            Log.Debug("Finished 'Delete topic subscribed by the pattern consumer should not throw error or recreate topic'")
         }
 
 #if !NOTLS
