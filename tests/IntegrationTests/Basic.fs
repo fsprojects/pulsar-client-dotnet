@@ -377,6 +377,7 @@ let tests =
         }
         
         testTask "Delete topic subscribed by the pattern consumer should not throw error or recreate topic" {
+            Log.Debug("Started 'Delete topic subscribed by the pattern consumer should not throw error or recreate topic'")
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let client = getClient()
 
@@ -417,7 +418,7 @@ let tests =
             let! (response: HttpResponseMessage) = commonHttpClient.DeleteAsync(deleteUrl)
             response.EnsureSuccessStatusCode() |> ignore
             
-            Thread.Sleep 1000 // This make sure that the topic won't be recreated
+            do! Task.Delay(1000) // This make sure that the topic won't be recreated
             
             // Verify topic is deleted by trying to get stats (should return NotFound)
             let statsUrl = $"{pulsarHttpAddress}/admin/v2/persistent/{topicName}-1/stats"
@@ -435,9 +436,9 @@ let tests =
             do! producer.SendAsync([| 1uy |])
             
             do! task
-            let (msg1 : Message<byte[]>) = task.Result
+            let! (msg : Message<byte[]>) = task
             
-            Expect.equal "" [| 1uy |] <| msg1.GetValue()
+            Expect.equal "" [| 1uy |] <| msg.GetValue()
         }
 
 #if !NOTLS
