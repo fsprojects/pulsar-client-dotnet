@@ -4,12 +4,14 @@ open System
 open System.Text.Json
 open System.Threading
 open System.Diagnostics
+open System.Net.Http
 
 open Expecto
 open Expecto.Flip
 
 open System.Text
 open System.Threading.Tasks
+open Microsoft.Extensions.Logging
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Serilog
@@ -372,6 +374,71 @@ let tests =
             let isReplicated = json.RootElement.GetProperty("subscriptions").GetProperty("replicate").GetProperty("isReplicated").GetBoolean()
             Expect.isTrue "" isReplicated
             Log.Debug("Finished 'Create the replicated subscription should be successful'")
+        }
+        
+        testTask "Delete topic subscribed by the pattern consumer should not throw error or recreate topic" {
+            Log.Debug("Started 'Delete topic subscribed by the pattern consumer should not throw error or recreate topic'")
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let client = getClient()
+
+            let pattern = topicName + "-.*"
+            let! (producer1 : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName + "-1")
+                    .CreateAsync()
+            let! (producer2 : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName + "-2")
+                    .CreateAsync()
+            
+            do! producer1.SendAsync([| 0uy |])
+            do! producer2.SendAsync([| 0uy |])
+                    
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .TopicsPattern(pattern)
+                    .ConsumerName("test")
+                    .SubscriptionName("test")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscriptionInitialPosition(SubscriptionInitialPosition.Latest)
+                    .ReplicateSubscriptionState(true)
+                    .SubscribeAsync()
+            
+            do! producer1.DisposeAsync().AsTask()
+            do! producer2.DisposeAsync().AsTask()
+            
+            let task = consumer.ReceiveAsync()
+            
+            // Check that the task doesn't fail immediately
+            Expect.isFalse "" task.IsFaulted
+            Expect.isFalse "" task.IsCanceled
+            
+            // Delete topic using HTTP request
+            let deleteUrl = $"{pulsarHttpAddress}/admin/v2/persistent/{topicName}-1?force=true"
+            let! (response: HttpResponseMessage) = commonHttpClient.DeleteAsync(deleteUrl)
+            response.EnsureSuccessStatusCode() |> ignore
+            
+            do! Task.Delay(1000) // This make sure that the topic won't be recreated
+            
+            // Verify topic is deleted by trying to get stats (should return NotFound)
+            let statsUrl = $"{pulsarHttpAddress}/admin/v2/persistent/{topicName}-1/stats"
+            let! (statsResponse: HttpResponseMessage) = commonHttpClient.GetAsync(statsUrl)
+            Expect.equal "" System.Net.HttpStatusCode.NotFound statsResponse.StatusCode
+            
+            // Check that the task is running
+            Expect.isFalse "" task.IsCompleted
+                
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName + "-2")
+                    .CreateAsync()
+                    
+            do! producer.SendAsync([| 1uy |])
+            
+            let! (msg : Message<byte[]>) = task
+            
+            Expect.equal "" [| 1uy |] <| msg.GetValue()
+            Log.Debug("Finished 'Delete topic subscribed by the pattern consumer should not throw error or recreate topic'")
         }
 
 #if !NOTLS
