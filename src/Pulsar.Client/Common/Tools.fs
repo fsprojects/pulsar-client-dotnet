@@ -12,7 +12,7 @@ open Microsoft.Extensions.Logging
 open System.Threading.Channels
 
 
-let MemoryStreamManager = RecyclableMemoryStreamManager()
+let mutable MemoryStreamManager = RecyclableMemoryStreamManager()
 let MagicNumber = int16 0x0e01
 let RandomGenerator = Random()
 let EmptyProps: IReadOnlyDictionary<string, string> = readOnlyDict []

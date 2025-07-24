@@ -2,7 +2,7 @@
 
 open System
 open Pulsar.Client.Common
-
+open Microsoft.IO
 
 type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 
@@ -21,6 +21,8 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
                 |> invalidArgIf (fun addresses -> addresses |> List.isEmpty) "Service Url needs to be specified on the PulsarClientBuilder object.")
 
     new() = PulsarClientBuilder(PulsarClientConfiguration.Default)
+
+    static member SetRecyclableMemoryStreamManager(memoryStreamManager: RecyclableMemoryStreamManager) = MemoryStreamManager <- memoryStreamManager
 
     member this.ServiceUrl (url: string) =
         match url |> ServiceUri.parse with
