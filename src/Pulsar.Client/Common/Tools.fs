@@ -11,8 +11,9 @@ open System.Collections.Generic
 open Microsoft.Extensions.Logging
 open System.Threading.Channels
 
-
-let MemoryStreamManager = RecyclableMemoryStreamManager()
+// MemoryStreamManager is mutable so that external programs may (unofficially) set their own RecyclableMemoryStreamManager via reflection (https://github.com/fsprojects/pulsar-client-dotnet/issues/320)
+// This is not part of the public API and may be changed anytime!
+let mutable MemoryStreamManager = RecyclableMemoryStreamManager()
 let MagicNumber = int16 0x0e01
 let RandomGenerator = Random()
 let EmptyProps: IReadOnlyDictionary<string, string> = readOnlyDict []
