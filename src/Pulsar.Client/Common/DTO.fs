@@ -243,9 +243,11 @@ type EncryptionContext =
         CompressionType: CompressionType
         UncompressedMessageSize: int
         BatchSize: Nullable<int>
+        // Indicates whether the message payload remains encrypted (true) or has been successfully decrypted (false)
+        IsEncrypted: bool
     }
     with
-        static member internal FromMetadata(metadata: Metadata) =
+        static member internal FromMetadata(metadata: Metadata, isEncrypted: bool) =
             if metadata.EncryptionKeys.Length > 0 then
                 {
                     Keys = metadata.EncryptionKeys
@@ -254,6 +256,7 @@ type EncryptionContext =
                     CompressionType = metadata.CompressionType
                     UncompressedMessageSize = metadata.UncompressedMessageSize
                     BatchSize = if metadata.HasNumMessagesInBatch then Nullable(metadata.NumMessages) else Nullable()
+                    IsEncrypted = isEncrypted
                 } |> Some
             else
                 None

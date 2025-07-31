@@ -664,7 +664,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 trackMessage rawMessage.MessageId
             None
 
-    let handleSingleMessagePayload (rawMessage: RawMessage) msgId payload hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction =
+    let handleSingleMessagePayload (rawMessage: RawMessage) msgId payload hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction =
         if duringSeek.IsSome || (isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId)) then
             // We need to discard entries that were prior to startMessageId
             Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
@@ -683,7 +683,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             %msgKey,
                             rawMessage.IsKeyBase64Encoded,
                             rawMessage.Properties,
-                            EncryptionContext.FromMetadata rawMessage.Metadata,
+                            EncryptionContext.FromMetadata(rawMessage.Metadata, isEncrypted = isMessageUndecryptable),
                             getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
                             rawMessage.Metadata.SequenceId,
                             rawMessage.Metadata.OrderingKey,
@@ -721,17 +721,17 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     if isChunkedMessage then
                         match processMessageChunk rawMessage msgId with
                         | Some (chunkedPayload, msgIdWithChunk) ->
-                            handleSingleMessagePayload rawMessage msgIdWithChunk chunkedPayload hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
+                            handleSingleMessagePayload rawMessage msgIdWithChunk chunkedPayload hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction
                         | None ->
                             rawMessage.Payload.Dispose()
                     else
                         let bytes = rawMessage.Payload.ToArray()
                         rawMessage.Payload.Dispose()
-                        handleSingleMessagePayload rawMessage msgId bytes hasWaitingChannel hasWaitingBatchChannel schemaDecodeFunction
+                        handleSingleMessagePayload rawMessage msgId bytes hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction
                 elif rawMessage.Metadata.NumMessages > 0 then
                     // handle batch message enqueuing; uncompressed payload has all messages in batch
                     match wrapException (fun () ->
-                        this.ReceiveIndividualMessagesFromBatch rawMessage schemaDecodeFunction) with
+                        this.ReceiveIndividualMessagesFromBatch rawMessage schemaDecodeFunction isMessageUndecryptable) with
                     | Ok () ->
                         // try respond to channel
                         if hasWaitingChannel && incomingMessages.Count > 0 then
@@ -1324,8 +1324,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     do startStatTimer()
     do startChunkTimer()
 
-    abstract member ReceiveIndividualMessagesFromBatch: RawMessage -> (byte [] -> 'T) -> unit
-    default this.ReceiveIndividualMessagesFromBatch (rawMessage: RawMessage) schemaDecodeFunction =
+    abstract member ReceiveIndividualMessagesFromBatch: RawMessage -> (byte [] -> 'T) -> bool -> unit
+    default this.ReceiveIndividualMessagesFromBatch (rawMessage: RawMessage) schemaDecodeFunction isMessageUndecryptable =
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
         let mutable skippedMessages = 0
@@ -1379,7 +1379,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     %msgKey,
                     singleMessageMetadata.PartitionKeyB64Encoded,
                     properties,
-                    EncryptionContext.FromMetadata rawMessage.Metadata,
+                    EncryptionContext.FromMetadata(rawMessage.Metadata, isEncrypted = isMessageUndecryptable),
                     getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
                     %(int64 singleMessageMetadata.SequenceId),
                     singleMessageMetadata.OrderingKey,
@@ -1719,7 +1719,7 @@ and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T
         if this.Waiters.Count > 0 then
             this.SendFlowPermits this.Waiters.Count
 
-    override this.ReceiveIndividualMessagesFromBatch (_: RawMessage) _ =
+    override this.ReceiveIndividualMessagesFromBatch (_: RawMessage) _ _ =
         Log.Logger.LogError("{0} Closing consumer due to unsupported received batch-message with zero receiver queue size", prefix)
         let _ = postAndAsyncReply this.Mb ConsumerMessage.Close
         let exn =
