@@ -95,6 +95,32 @@ type Consumer2KeyReader() =
             { Key = Encoding.UTF8.GetBytes(privateKeysConsumer2.Item keyName); Metadata = null }
 
 
+let consumeMessagesAndCheckEncryption (consumer: IConsumer<byte[]>) number consumerName =
+    task {
+        for i in 1..number do
+            let! message = consumer.ReceiveAsync()
+            let received = Encoding.UTF8.GetString(message.Data)
+            Log.Debug("{0} received {1}", consumerName, received)
+            
+            // Check EncryptionContext
+            match message.EncryptionContext with
+            | Some context ->
+                Log.Debug("{0} message {1} EncryptionContext.IsEncrypted = {2}", consumerName, i, context.IsEncrypted)
+                if context.IsEncrypted then
+                    failwith $"Message {i} should not be encrypted, but IsEncrypted = true"
+            | None ->
+                failwith $"Message {i} should have EncryptionContext but it is None"
+            
+            do! consumer.AcknowledgeAsync(message.MessageId)
+            Log.Debug("{0} acknowledged {1}", consumerName, received)
+            let expected = "Message #" + string i
+            if received.StartsWith(expected) |> not then
+                failwith $"Incorrect message expected {expected} received {received} consumer {consumerName}"
+        
+        Log.Debug("{0} consumed {1} messages, all EncryptionContext.IsEncrypted = false", consumerName, number)
+    }
+
+
 [<Tests>]
 let tests =
     testList "MessageCrypto" [
@@ -129,7 +155,7 @@ let tests =
             let consumerTask =
               Task.Run(fun () ->
                   task {
-                      do! consumeMessages consumer numberOfMessages consumerName
+                      do! consumeMessagesAndCheckEncryption consumer numberOfMessages consumerName
                   } :> Task)
 
             do! Task.WhenAll(producerTask, consumerTask) 
@@ -169,7 +195,7 @@ let tests =
             let consumer1Task =
               Task.Run(fun () ->
                   task {
-                      do! consumeMessages consumer1 numberOfMessages consumerName
+                      do! consumeMessagesAndCheckEncryption consumer1 numberOfMessages consumerName
                   } :> Task)
 
             do! Task.WhenAll(producerTask, consumer1Task) 
@@ -196,7 +222,7 @@ let tests =
             let consumer2Task =
               Task.Run(fun () ->
                   task {
-                      do! consumeMessages consumer2 numberOfMessages consumerName
+                      do! consumeMessagesAndCheckEncryption consumer2 numberOfMessages consumerName
                   } :> Task)
 
             do! Task.WhenAll(producerTask2, consumer2Task) 
@@ -242,7 +268,7 @@ let tests =
             Expect.isNonEmpty context.Param ""
             Expect.isNonEmpty context.Keys ""
             Expect.equal context.CompressionType compressionType ""
-
+            Expect.equal context.IsEncrypted true "Message should remain encrypted when decryption fails"
             do! Task.Delay 100
             Log.Debug("Ended Encryption send message and consume on fail")
         } 
