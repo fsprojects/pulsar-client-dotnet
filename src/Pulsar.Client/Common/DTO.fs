@@ -243,6 +243,7 @@ type EncryptionContext =
         CompressionType: CompressionType
         UncompressedMessageSize: int
         BatchSize: Nullable<int>
+        // Indicates whether the message payload remains encrypted (true) or has been successfully decrypted (false)
         IsEncrypted: bool
     }
     with
