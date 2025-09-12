@@ -42,6 +42,9 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
 
             if isNull activity then
                 message  //If there are no listeners interested in this activity, the activity above will be null.
+            elif not (mutableDict.ContainsKey activityKey) then
+                log.LogDebug("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
+                message //If listeners are not configured correctly, the attempt to find activityKey in dictionary would fail.
             else
                 activity
                     .SetTag("messaging.system", "pulsar")
@@ -99,4 +102,4 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                 | _ ->
                     log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
             | _ ->
-                log.LogWarning("{0} activity id is missing for msgId={1}", prefix, messageId)
+                log.LogDebug("{0} activity id is missing for msgId={1}", prefix, messageId)
