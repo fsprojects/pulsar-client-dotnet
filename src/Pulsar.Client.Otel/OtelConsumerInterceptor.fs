@@ -46,7 +46,7 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     .Dispose()
             cache.Remove messageId |> ignore
         | _ ->
-            log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
+            log.LogDebug("{0} Can't find start of activity for msgId={1}", prefix, messageId)
 
     let endPreviousActivities msgId (ackResult: AckResult) =
         cache.Keys
