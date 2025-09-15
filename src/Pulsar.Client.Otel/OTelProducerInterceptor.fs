@@ -42,9 +42,6 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
 
             if isNull activity then
                 message  //If there are no listeners interested in this activity, the activity above will be null.
-            elif not (mutableDict.ContainsKey activityKey) then
-                log.LogWarning("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
-                message //If the otel listeners are not configured correctly, avoid warning and log debug
             else
                 activity
                     .SetTag("messaging.system", "pulsar")
@@ -63,6 +60,12 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                    //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
                    let contextToInject = activity.Context
                    Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
+                   if not (mutableDict.ContainsKey activityKey) then
+                       log.LogWarning("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
+                       message //OTEL listeners are not configured correctly
+                   else
+                       addToCache mutableDict.[activityKey] activity
+                       message.WithProperties(mutableDict)
                    addToCache mutableDict.[activityKey] activity
                    message.WithProperties(mutableDict)
                 else
