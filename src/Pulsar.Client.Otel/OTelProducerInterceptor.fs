@@ -43,7 +43,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
             if isNull activity then
                 message  //If there are no listeners interested in this activity, the activity above will be null.
             elif not (mutableDict.ContainsKey activityKey) then
-                log.LogDebug("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
+                log.LogWarning("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
                 message //If the otel listeners are not configured correctly, avoid warning and log debug
             else
                 activity
