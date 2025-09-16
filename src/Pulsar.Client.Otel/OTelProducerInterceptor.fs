@@ -60,6 +60,12 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                    //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
                    let contextToInject = activity.Context
                    Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
+                   if not (mutableDict.ContainsKey activityKey) then
+                       log.LogWarning("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
+                       message // OTEL listeners are not configured correctly, so return message as is
+                   else
+                       addToCache mutableDict.[activityKey] activity
+                       message.WithProperties(mutableDict)
                    addToCache mutableDict.[activityKey] activity
                    message.WithProperties(mutableDict)
                 else
@@ -99,4 +105,4 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                     | _ ->
                         log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
                 | _ ->
-                    log.LogWarning("{0} activity id is missing for msgId={1}", prefix, messageId)
+                    log.LogDebug("{0} activity id is missing for msgId={1}", prefix, messageId)
