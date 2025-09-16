@@ -66,8 +66,6 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                    else
                        addToCache mutableDict.[activityKey] activity
                        message.WithProperties(mutableDict)
-                   addToCache mutableDict.[activityKey] activity
-                   message.WithProperties(mutableDict)
                 else
                    //don't handle activity
                    message
