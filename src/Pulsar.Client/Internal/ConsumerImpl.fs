@@ -452,7 +452,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         ackRequests.Clear()
 
     let getNewIndividualMsgIdWithPartition messageId =
-        { messageId with Type = MessageIdType.Single; Partition = partitionIndex; TopicName = %"" }
+        { messageId with Type = MessageIdType.Single; Partition = partitionIndex; TopicName = topicName.CompleteTopicName }
 
     let processPossibleToDLQ (messageId : MessageId) =
         let acknowledge = trySendAcknowledge Individual EmptyProperties None
@@ -1351,7 +1351,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     rawMessage.MessageId with
                         Partition = partitionIndex
                         Type = Batch(%i, acker)
-                        TopicName = %""
+                        TopicName = topicName.CompleteTopicName
                 }
                 let msgKey = singleMessageMetadata.PartitionKey
                 let getValue () =
