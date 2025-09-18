@@ -28,7 +28,7 @@ let tests =
 
             Log.Debug("Started Sent messageId should be equal to received messageId")
             let client = getClient()
-            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName = "persistent://public/default/topic-" + Guid.NewGuid().ToString("N")
 
             let! (producer1 : IProducer<byte[]>) =
                 client.NewProducer()
@@ -54,9 +54,11 @@ let tests =
 
             Expect.isTrue "" (msg1Id = msg1.MessageId)
             Expect.equal "" [| 0uy |] <| msg1.GetValue()
+            Expect.equal "Message ID topic name should match" topicName (string msg1.MessageId.TopicName)
 
             Expect.isTrue "" (msg2Id = msg2.MessageId)
             Expect.equal "" [| 1uy |] <| msg2.GetValue()
+            Expect.equal "Message ID topic name should match" topicName (string msg2.MessageId.TopicName)
 
             Log.Debug("Finished Sent messageId should be equal to received messageId")
         }
