@@ -452,7 +452,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         ackRequests.Clear()
 
     let getNewIndividualMsgIdWithPartition messageId =
-        { messageId with Type = MessageIdType.Single; Partition = partitionIndex; TopicName = %"" }
+        { messageId with Type = MessageIdType.Single; Partition = partitionIndex; TopicName = topicName.CompleteTopicName }
 
     let processPossibleToDLQ (messageId : MessageId) =
         let acknowledge = trySendAcknowledge Individual EmptyProperties None
@@ -1336,13 +1336,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             elif rawMessage.AckSet.Count > 0 && not rawMessage.AckSet[i] then
                 skippedMessages <- skippedMessages + 1
             else
-                let messageId =
-                    {
-                        rawMessage.MessageId with
-                            Partition = partitionIndex
-                            Type = Batch(%i, acker)
-                            TopicName = %""
-                    }
+                let messageId = {
+                    rawMessage.MessageId with
+                        Partition = partitionIndex
+                        Type = Batch(%i, acker)
+                        TopicName = topicName.CompleteTopicName
+                }
                 let msgKey = singleMessageMetadata.PartitionKey
                 let getValue () =
                     keyValueProcessor
