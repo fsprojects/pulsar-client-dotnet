@@ -31,6 +31,7 @@ let tests =
             EventTime = Nullable()
             OrderingKey = [||]
             ReplicatedFrom = ""
+            ProducerName = ""
             NullValue = false
         }
 

@@ -24,7 +24,7 @@ let tests =
 
     testList "Basic" [
 
-        testTask "Sent messageId should be equal to received messageId" {
+        testTask "Sent message/messageId should be equal to received message/messageId" {
 
             Log.Debug("Started Sent messageId should be equal to received messageId")
             let client = getClient()
@@ -33,11 +33,13 @@ let tests =
             let! (producer1 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
+                    .ProducerName("producer1")
                     .CreateAsync()
 
             let! (producer2 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
+                    .ProducerName("producer2")
                     .EnableBatching(false)
                     .CreateAsync()
 
@@ -55,10 +57,12 @@ let tests =
             Expect.isTrue "" (msg1Id = msg1.MessageId)
             Expect.equal "" [| 0uy |] <| msg1.GetValue()
             Expect.equal "Message ID topic name should match" topicName (string msg1.MessageId.TopicName)
+            Expect.equal "Message producer name should match" "producer1" (string msg1.ProducerName)
 
             Expect.isTrue "" (msg2Id = msg2.MessageId)
             Expect.equal "" [| 1uy |] <| msg2.GetValue()
             Expect.equal "Message ID topic name should match" topicName (string msg2.MessageId.TopicName)
+            Expect.equal "Message producer name should match" "producer2" (string msg2.ProducerName)
 
             Log.Debug("Finished Sent messageId should be equal to received messageId")
         }
