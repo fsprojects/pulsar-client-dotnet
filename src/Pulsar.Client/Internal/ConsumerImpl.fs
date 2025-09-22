@@ -685,6 +685,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             rawMessage.Metadata.EventTime,
                             rawMessage.RedeliveryCount,
                             rawMessage.Metadata.ReplicatedFrom,
+                            rawMessage.Metadata.ProducerName,
                             getValue
                         )
             if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
@@ -1360,21 +1361,22 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     else
                         Nullable()
                 let message = Message (
-                                messageId,
-                                singleMessagePayload,
-                                %msgKey,
-                                singleMessageMetadata.PartitionKeyB64Encoded,
-                                properties,
-                                EncryptionContext.FromMetadata(rawMessage.Metadata, isEncrypted = isMessageUndecryptable),
-                                getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                                %(int64 singleMessageMetadata.SequenceId),
-                                singleMessageMetadata.OrderingKey,
-                                rawMessage.Metadata.PublishTime,
-                                eventTime,
-                                rawMessage.RedeliveryCount,
-                                rawMessage.Metadata.ReplicatedFrom,
-                                getValue
-                            )
+                    messageId,
+                    singleMessagePayload,
+                    %msgKey,
+                    singleMessageMetadata.PartitionKeyB64Encoded,
+                    properties,
+                    EncryptionContext.FromMetadata(rawMessage.Metadata, isEncrypted = isMessageUndecryptable),
+                    getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+                    %(int64 singleMessageMetadata.SequenceId),
+                    singleMessageMetadata.OrderingKey,
+                    rawMessage.Metadata.PublishTime,
+                    eventTime,
+                    rawMessage.RedeliveryCount,
+                    rawMessage.Metadata.ReplicatedFrom,
+                    rawMessage.Metadata.ProducerName,
+                    getValue
+                )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                     deadLettersProcessor.AddMessage(messageId, message)
                 enqueueMessage message
