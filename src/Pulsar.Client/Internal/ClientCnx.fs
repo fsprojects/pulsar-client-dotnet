@@ -527,7 +527,6 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             OrderingKey = messageMetadata.OrderingKey
             ReplicatedFrom = messageMetadata.ReplicatedFrom
             ProducerName = messageMetadata.ProducerName
-            NullValue = messageMetadata.NullValue
         }
 
         {

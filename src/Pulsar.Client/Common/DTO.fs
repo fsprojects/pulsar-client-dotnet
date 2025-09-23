@@ -214,7 +214,6 @@ type internal Metadata =
         OrderingKey: byte[]
         ReplicatedFrom: string
         ProducerName: string
-        NullValue: bool
     }
 
 type MessageKey =
