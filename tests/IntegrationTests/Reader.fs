@@ -272,6 +272,85 @@ let tests =
 
     
 
+    let checkHasMessageAvailableAfterSeekTimestamp (initializeLastMessageIdInBroker: bool) =
+        task {
+            Log.Debug("Started HasMessageAvailableAfterSeekTimestamp initializeLastMessageIdInBroker: {0}", initializeLastMessageIdInBroker)
+            let client = getClient()
+            let topicName = "public/default/test-has-message-available-after-seek-timestamp-" + Guid.NewGuid().ToString("N")
+            
+            let! (producer : IProducer<string>) =
+                client.NewProducer(Schema.STRING())
+                    .Topic(topicName)
+                    .CreateAsync()
+            
+            let timestampBeforeSend = %(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+            let! sentMsgId = producer.SendAsync("msg")
+            do! producer.DisposeAsync()
+            
+            let messageIds = [
+                MessageId.Earliest
+                sentMsgId
+                MessageId.Latest
+            ]
+            
+            // Test 1: Seek to future timestamp
+            for messageId in messageIds do
+                let! (reader : IReader<string>) =
+                    client.NewReader(Schema.STRING())
+                        .Topic(topicName)
+                        .ReceiverQueueSize(1)
+                        .StartMessageId(messageId)
+                        .CreateAsync()
+                
+                if initializeLastMessageIdInBroker then
+                    if messageId = MessageId.Earliest then
+                        let! hasMessage = reader.HasMessageAvailableAsync()
+                        Expect.isTrue "should have message" hasMessage
+                    else
+                        let! hasMessage = reader.HasMessageAvailableAsync()
+                        Expect.isFalse "should not have message" hasMessage
+                
+                let futureTimestamp = %(DateTimeOffset.UtcNow.AddMinutes(1.0).ToUnixTimeMilliseconds())
+                
+                // The Seek operation does not implement a backoff mechanism. It will fail if the connection is not
+                // ready, so wait for a short period until the connection becomes available.
+                do! Async.Sleep(1000)
+                do! reader.SeekAsync(futureTimestamp)
+                // HasMessageAvailableAsync does not implement a backoff mechanism. The operation may fail dut to the
+                // broker cannot find the consumer during the seek operation. So wait for a short period here.
+                do! Async.Sleep(1000)
+                let! hasMessage = reader.HasMessageAvailableAsync()
+                Expect.isFalse "after seek to future should not have message" hasMessage
+                do! reader.DisposeAsync()
+            
+            // Test 2: Seek to timestamp before send
+            for messageId in messageIds do
+                let! (reader : IReader<string>) =
+                    client.NewReader(Schema.STRING())
+                        .Topic(topicName)
+                        .ReceiverQueueSize(1)
+                        .StartMessageId(messageId)
+                        .CreateAsync()
+                
+                
+                if initializeLastMessageIdInBroker then
+                    if messageId = MessageId.Earliest then
+                        let! hasMessage = reader.HasMessageAvailableAsync()
+                        Expect.isTrue "should have message" hasMessage
+                    else
+                        let! hasMessage = reader.HasMessageAvailableAsync()
+                        Expect.isFalse "should not have message" hasMessage
+                
+                do! Async.Sleep(1000)
+                do! reader.SeekAsync(timestampBeforeSend)
+                do! Async.Sleep(1000)
+                let! hasMessage = reader.HasMessageAvailableAsync()
+                Expect.isTrue "after seek to before send should have message" hasMessage
+                do! reader.DisposeAsync()
+            
+            Log.Debug("Finished HasMessageAvailableAfterSeekTimestamp initializeLastMessageIdInBroker: {0}", initializeLastMessageIdInBroker)
+        }
+    
     testList "Reader" [
 
         testTask "Reader non-batching configuration works fine" {
@@ -314,13 +393,19 @@ let tests =
             do! checkReadingFromRollback true 
         }
         
-        // uncomment when https://github.com/apache/pulsar/issues/10515 is ready
-        ptestTask "Check StartMessageFromFuturePoint without batching" {
+        testTask "Check StartMessageFromFuturePoint without batching" {
             do! checkReadingFromFuture false 
         }
         
-        // uncomment when https://github.com/apache/pulsar/issues/10515 is ready
-        ptestTask "Check StartMessageFromFuturePoint with batching" {
+        testTask "Check StartMessageFromFuturePoint with batching" {
             do! checkReadingFromFuture true 
+        }
+        
+        testTask "HasMessageAvailable after SeekTimestamp without initializeLastMessageIdInBroker" {
+            do! checkHasMessageAvailableAfterSeekTimestamp false 
+        }
+        
+        testTask "HasMessageAvailable after SeekTimestamp with initializeLastMessageIdInBroker" {
+            do! checkHasMessageAvailableAfterSeekTimestamp true 
         }
     ]
