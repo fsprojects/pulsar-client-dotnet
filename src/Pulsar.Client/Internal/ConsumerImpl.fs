@@ -96,6 +96,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mutable lastMessageIdInBroker = MessageId.Earliest
     let mutable lastDequeuedMessageId = MessageId.Earliest
     let mutable duringSeek = None
+    let mutable hasSoughtByTimestamp = false
     let initialStartMessageId = startMessageId
     let mutable incomingMessagesSize = 0L
     let receiverQueueRefillThreshold = consumerConfig.ReceiverQueueSize / 2
@@ -1082,7 +1083,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData)
                     let payload, seekMessageId =
                         match seekData with
-                        | SeekType.Timestamp timestamp -> Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
+                        | SeekType.Timestamp timestamp ->
+                            hasSoughtByTimestamp <- true
+                            Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
                         | SeekType.MessageId messageId ->
                             match messageId.ChunkMessageIds with
                             | Some chunkMessageIds when chunkMessageIds.Length >0 ->
@@ -1122,9 +1125,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                 // we haven't read yet. use startMessageId for comparison
                 if lastDequeuedMessageId = MessageId.Earliest then
+                    // If the last seek is called with timestamp, startMessageId cannot represent the position to start, so we
+                    // have to get the mark-delete position from the GetLastMessageId response to compare as well.
                     // if we are starting from latest, we should seek to the actual last message first.
                     // allow the last one to be read when read head inclusively.
-                    if startMessageId = MessageId.Latest then
+                    if startMessageId = MessageId.Latest || hasSoughtByTimestamp then
                         backgroundTask {
                             try
                                 let! lastMessageIdResult = getLastMessageIdAsync()
@@ -1415,6 +1420,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     member this.LastMessageIdInBroker
         with get() = Volatile.Read(&lastMessageIdInBroker)
         and private set value = Volatile.Write(&lastMessageIdInBroker, value)
+
 
     override this.Equals consumer =
         consumerId = (consumer :?> IConsumer<'T>).ConsumerId
