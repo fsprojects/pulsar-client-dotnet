@@ -314,11 +314,11 @@ let tests =
                 
                 // The Seek operation does not implement a backoff mechanism. It will fail if the connection is not
                 // ready, so wait for a short period until the connection becomes available.
-                do! Async.Sleep(1000)
+                do! Task.Delay(1000)
                 do! reader.SeekAsync(futureTimestamp)
-                // HasMessageAvailableAsync does not implement a backoff mechanism. The operation may fail dut to the
-                // broker cannot find the consumer during the seek operation. So wait for a short period here.
-                do! Async.Sleep(1000)
+                // HasMessageAvailableAsync does not implement a backoff mechanism. The operation may fail due to the
+                // broker not finding the consumer during the seek operation. So wait for a short period here.
+                do! Task.Delay(1000)
                 let! hasMessage = reader.HasMessageAvailableAsync()
                 Expect.isFalse "after seek to future should not have message" hasMessage
                 do! reader.DisposeAsync()
@@ -341,9 +341,9 @@ let tests =
                         let! hasMessage = reader.HasMessageAvailableAsync()
                         Expect.isFalse "should not have message" hasMessage
                 
-                do! Async.Sleep(1000)
+                do! Task.Delay(1000)
                 do! reader.SeekAsync(timestampBeforeSend)
-                do! Async.Sleep(1000)
+                do! Task.Delay(1000)
                 let! hasMessage = reader.HasMessageAvailableAsync()
                 Expect.isTrue "after seek to before send should have message" hasMessage
                 do! reader.DisposeAsync()

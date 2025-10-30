@@ -1094,7 +1094,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let payload, seekMessageId =
                         match seekData with
                         | SeekType.Timestamp timestamp ->
-                            this.HasSoughtByTimestamp <- true
+                            hasSoughtByTimestamp <- true
                             Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
                         | SeekType.MessageId messageId ->
                             match messageId.ChunkMessageIds with
@@ -1436,9 +1436,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         with get() = Volatile.Read(&lastMessageIdInBroker)
         and private set value = Volatile.Write(&lastMessageIdInBroker, value)
 
-    member this.HasSoughtByTimestamp
-        with get() = Volatile.Read(&hasSoughtByTimestamp)
-        and private set value = Volatile.Write(&hasSoughtByTimestamp, value)
 
     override this.Equals consumer =
         consumerId = (consumer :?> IConsumer<'T>).ConsumerId
