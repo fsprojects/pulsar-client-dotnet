@@ -9,15 +9,14 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Serilog
 open Pulsar.Client.IntegrationTests.Common
-open Microsoft.Extensions.Logging
 
 
 let testMessageOrderAndDuplicates (messageSet: HashSet<string>) (receivedMessage: string) (expectedMessage: string) =
     if messageSet.Contains(receivedMessage) then
-        failwith <| sprintf "Duplicate message received: %s" receivedMessage
+        failwith $"Duplicate message received: {receivedMessage}"
     messageSet.Add(receivedMessage) |> ignore
     if receivedMessage <> expectedMessage then
-        failwith <| sprintf "Incorrect message order. Expected: %s, Received: %s" expectedMessage receivedMessage
+        failwith $"Incorrect message order. Expected: {expectedMessage}, Received: {receivedMessage}"
 
 [<Tests>]
 let tests =
@@ -25,14 +24,7 @@ let tests =
     testList "Flush" [
 
         testTask "Flush with batch enabled" {
-            let loggerFactory =
-                LoggerFactory.Create(fun builder ->
-                    builder
-                        .SetMinimumLevel(LogLevel.Debug)
-                        .AddConsole() |> ignore
-                )
-            PulsarClient.Logger <- loggerFactory.CreateLogger("PulsarLogger")
-            Log.Debug("-- Starting testFlushBatchEnabled test --")
+            Log.Debug("Started Flush with batch enabled")
             let client = getClient()
             let topicName = "persistent://public/default/test-flush-batch-enabled-" + Guid.NewGuid().ToString("N")
         
@@ -52,7 +44,7 @@ let tests =
         
             // Send 10 messages asynchronously without waiting
             for i in 0..9 do
-                let message = sprintf "my-message-%i" i
+                let message = $"my-message-{i}"
                 producer.SendAsync(Encoding.UTF8.GetBytes(message)) |> ignore
         
             // Flush to ensure all messages are sent and acknowledged
@@ -69,16 +61,16 @@ let tests =
                 let! (msg : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
                 let receivedMessage = Encoding.UTF8.GetString(msg.GetValue())
                 Log.Debug("Received message: [{0}]", receivedMessage)
-                let expectedMessage = sprintf "my-message-%i" i
+                let expectedMessage = $"my-message-{i}"
                 testMessageOrderAndDuplicates messageSet receivedMessage expectedMessage
         
             do! (consumer :> IAsyncDisposable).DisposeAsync().AsTask()
         
-            Log.Debug("-- Exiting testFlushBatchEnabled test --")
+            Log.Debug("Finished Started Flush with batch enabled")
         }
 
         testTask "Flush with batch disabled" {
-            Log.Debug("-- Starting testFlushBatchDisabled test --")
+            Log.Debug("Started Flush with batch disabled")
             let client = getClient()
             let topicName = "persistent://public/default/test-flush-batch-disabled-" + Guid.NewGuid().ToString("N")
 
@@ -96,7 +88,7 @@ let tests =
 
             // Send 10 messages asynchronously without waiting
             for i in 0..9 do
-                let message = sprintf "my-message-%i" i
+                let message = $"my-message-{i}"
                 producer.SendAsync(Encoding.UTF8.GetBytes(message)) |> ignore
 
             // Flush to ensure all messages are sent and acknowledged
@@ -113,12 +105,12 @@ let tests =
                 let! (msg : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
                 let receivedMessage = Encoding.UTF8.GetString(msg.GetValue())
                 Log.Debug("Received message: [{0}]", receivedMessage)
-                let expectedMessage = sprintf "my-message-%i" i
+                let expectedMessage = $"my-message-{i}"
                 testMessageOrderAndDuplicates messageSet receivedMessage expectedMessage
 
             do! (consumer :> IAsyncDisposable).DisposeAsync().AsTask()
 
-            Log.Debug("-- Exiting testFlushBatchDisabled test --")
+            Log.Debug("Finished Flush with batch disabled")
         }
     ]
 
