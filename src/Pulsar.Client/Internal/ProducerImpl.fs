@@ -40,6 +40,7 @@ type internal ProducerMessage<'T> =
     | Close of TaskCompletionSource<ResultOrException<unit>>
     | Tick of ProducerTickType
     | GetStats of TaskCompletionSource<ProducerStats>
+    | Flush of TaskCompletionSource<unit>
 
 type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                            partitionIndex: int, lookup: ILookupService, schema: ISchema<'T>,
@@ -754,6 +755,42 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             | ProducerMessage.GetStats channel ->
                 channel.SetResult <| stats.GetStats()
 
+            | ProducerMessage.Flush channel ->
+                Log.Logger.LogDebug("{0} Flush requested, pendingMessages count: {1}", prefix, pendingMessages.Count)
+                // First, send all batched messages
+                batchMessageAndSend()
+                
+                // If pendingMessages queue is empty, return immediately
+                if pendingMessages.Count = 0 then
+                    Log.Logger.LogDebug("{0} Flush completed immediately, no pending messages", prefix)
+                    channel.SetResult()
+                else
+                    // Get the last element from the queue by iterating through it
+                    let mutable lastMessage = Unchecked.defaultof<PendingMessage<'T>>
+                    for msg in pendingMessages do
+                        lastMessage <- msg
+                    
+                    Log.Logger.LogDebug("{0} Flush waiting for last message callback, sequenceId: {1}", prefix, %lastMessage.SequenceId)
+                    // Wait for the last message's callback to complete asynchronously
+                    backgroundTask {
+                        match lastMessage.Callback with
+                        | SingleCallback (_, _, tcsOption) ->
+                            match tcsOption with
+                            | Some tcs -> 
+                                let! _ = tcs.Task
+                                ()
+                            | None -> ()
+                        | BatchCallbacks batchCallbacks ->
+                            // Wait for all TaskCompletionSource in the batch
+                            let tasks =
+                                batchCallbacks
+                                |> Array.choose (fun struct(_, _, tcsOption) ->
+                                    tcsOption |> Option.map (fun tcs -> tcs.Task :> Task))
+                            if tasks.Length > 0 then
+                                do! Task.WhenAll(tasks)
+                        channel.SetResult()
+                    } |> ignore
+
             | ProducerMessage.Close channel ->
 
                 match connectionHandler.ConnectionState with
@@ -940,6 +977,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             match connectionHandler.ConnectionState with
             | Ready _ -> trueTask
             | _ -> falseTask
+
+        member this.FlushAsync() =
+            connectionHandler.CheckIfActive() |> throwIfNotNull
+            postAndAsyncReply mb (fun channel -> ProducerMessage.Flush channel)
 
     interface IAsyncDisposable with
 
