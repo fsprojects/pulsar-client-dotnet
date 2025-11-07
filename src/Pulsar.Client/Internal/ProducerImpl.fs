@@ -765,30 +765,35 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     Log.Logger.LogDebug("{0} Flush completed immediately, no pending messages", prefix)
                     channel.SetResult()
                 else
-                    // Get the last element from the queue by iterating through it
-                    let mutable lastMessage = Unchecked.defaultof<PendingMessage<'T>>
+                    // Get the last message from the queue
+                    let mutable lastMessage = pendingMessages |> Seq.last
                     for msg in pendingMessages do
                         lastMessage <- msg
                     
-                    Log.Logger.LogDebug("{0} Flush waiting for last message callback, sequenceId: {1}", prefix, %lastMessage.SequenceId)
+                    Log.Logger.LogDebug("{0} Flush waiting for last message callback, last sequenceId: {1}", prefix, %lastMessage.SequenceId)
                     // Wait for the last message's callback to complete asynchronously
                     backgroundTask {
-                        match lastMessage.Callback with
-                        | SingleCallback (_, _, tcsOption) ->
-                            match tcsOption with
-                            | Some tcs -> 
-                                let! _ = tcs.Task
-                                ()
-                            | None -> ()
-                        | BatchCallbacks batchCallbacks ->
-                            // Wait for all TaskCompletionSource in the batch
-                            let tasks =
-                                batchCallbacks
-                                |> Array.choose (fun struct(_, _, tcsOption) ->
-                                    tcsOption |> Option.map (fun tcs -> tcs.Task :> Task))
-                            if tasks.Length > 0 then
-                                do! Task.WhenAll(tasks)
-                        channel.SetResult()
+                        try
+                            match lastMessage.Callback with
+                            | SingleCallback (_, _, tcsOption) ->
+                                match tcsOption with
+                                | Some tcs -> 
+                                    let! _ = tcs.Task
+                                    ()
+                                | None -> ()
+                            | BatchCallbacks batchCallbacks ->
+                                // Wait for all TaskCompletionSource in the batch
+                                let tasks =
+                                    batchCallbacks
+                                    |> Array.choose (fun struct(_, _, tcsOption) ->
+                                        tcsOption |> Option.map (fun tcs -> tcs.Task :> Task))
+                                if tasks.Length > 0 then
+                                    do! Task.WhenAll(tasks)
+                            Log.Logger.LogDebug("{0} Flush completed, last sequenceId: {1}", prefix, %lastMessage.SequenceId)
+                            channel.SetResult()
+                        with Flatten ex ->
+                            Log.Logger.LogError(ex, "{0} Flush failed, last sequenceId: {1}", prefix, %lastMessage.SequenceId)
+                            channel.SetException ex
                     } |> ignore
 
             | ProducerMessage.Close channel ->
@@ -980,7 +985,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
         member this.FlushAsync() =
             connectionHandler.CheckIfActive() |> throwIfNotNull
-            postAndAsyncReply mb (fun channel -> ProducerMessage.Flush channel)
+            postAndAsyncReply mb ProducerMessage.Flush
 
     interface IAsyncDisposable with
 
