@@ -368,7 +368,7 @@ let tests =
             let backlogMessagesCount = 2000
             let maxBatchSize = 8
             let batchTimeout = TimeSpan.FromSeconds(5.0)
-            let topicName = "public/ods_test/test-topic"
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
             let! producer =
                 client.NewProducer()
@@ -437,7 +437,7 @@ let tests =
     let totalExpectedMessages = initialBacklogCount + additionalMessagesCount
     let maxBatchSize = 8
     let batchTimeout = TimeSpan.FromSeconds(5.0)
-    let topicName = "public/ods_test/test-topic"
+    let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
     let workSimulationDelay = TimeSpan.FromMilliseconds(500.0) // Simulate processing time
 
     let! producer =
