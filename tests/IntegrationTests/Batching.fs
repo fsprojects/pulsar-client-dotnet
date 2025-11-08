@@ -274,7 +274,7 @@ let tests =
 
             Log.Debug("Finished Batch receive works with regular consumer")
         }
-
+  
         testTask "Second batch is formed well after the first one" {
 
             Log.Debug("Started 'Second batch is formed well after the first one'")
@@ -358,4 +358,160 @@ let tests =
             Log.Debug("Finished 'Null message with batch get sent if batch size exceeds'")
 
         }
+
+        testTask "Batch receive respects max size with large backlog"{
+            Log.Debug("Started 'Batch receive respects max size with large backlog'")
+
+            let client = getSslTokenClient()
+            let producerName = "backlogProducer"
+            let consumerName = "backlogConsumer"
+            let backlogMessagesCount = 2000
+            let maxBatchSize = 8
+            let batchTimeout = TimeSpan.FromSeconds(5.0)
+            let topicName = "public/ods_test/test-topic"
+
+            let! producer =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+
+            // Step 1: Produce all messages BEFORE creating consumer
+            do! produceMessages producer backlogMessagesCount producerName
+
+            // Step 2: Create consumer with batch receive policy
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("backlog-test-subscription")
+                    .BatchReceivePolicy(BatchReceivePolicy(maxBatchSize, -1L, batchTimeout))
+
+                    .SubscribeAsync()
+
+
+            // Step 3: Consume messages and verify batch sizes
+            let mutable totalConsumed = 0
+            let mutable batchCount = 0
+            let batchSizes = ResizeArray<int>()
+
+            while totalConsumed < backlogMessagesCount do
+              
+                let! (messagesBatch : Messages<byte[]>) = consumer.BatchReceiveAsync()
+                
+                batchCount <- batchCount + 1
+
+                let currentBatchSize = messagesBatch.Count
+                batchSizes.Add(currentBatchSize)
+                
+                
+                // Critical check: Batch size must never exceed configured maximum
+                if currentBatchSize > maxBatchSize then
+                    failwith <| sprintf "CRITICAL: Batch %i violated limit! Received %i messages (max: %i)" 
+                                       batchCount currentBatchSize maxBatchSize
+                
+                    do! Task.Delay(500)
+
+                    do! consumer.AcknowledgeAsync(messagesBatch)
+                
+                totalConsumed <- totalConsumed + currentBatchSize
+
+            let maxObservedBatch = batchSizes |> Seq.max
+                     
+            // Assertions
+            Expect.equal "Should consume all messages" totalConsumed backlogMessagesCount
+            Expect.isTrue "Max batch size never exceeded" (maxObservedBatch <= maxBatchSize)
+            
+            Log.Debug("Finished 'Batch receive respects max size with large backlog'")
+        }
+
+        testTask "Batch receive respects max size with large backlog and concurrent production"{
+
+    Log.Debug("Started 'Batch receive respects max size with large backlog and concurrent production'")
+    let client = getSslTokenClient()
+    let producerName = "backlogProducer"
+    let consumerName = "backlogConsumer"
+    let initialBacklogCount = 2000
+    let additionalMessagesCount = 1000
+    let totalExpectedMessages = initialBacklogCount + additionalMessagesCount
+    let maxBatchSize = 8
+    let batchTimeout = TimeSpan.FromSeconds(5.0)
+    let topicName = "public/ods_test/test-topic"
+    let workSimulationDelay = TimeSpan.FromMilliseconds(500.0) // Simulate processing time
+
+    let! producer =
+        client.NewProducer()
+            .Topic(topicName)
+            .ProducerName(producerName)
+            .EnableBatching(false)
+            .CreateAsync()
+
+    // Step 1: Produce initial backlog BEFORE creating consumer
+    do! produceMessages producer initialBacklogCount producerName
+
+    // Step 2: Create consumer with batch receive policy
+    let! (consumer : IConsumer<byte[]>) =
+        client.NewConsumer()
+            .Topic(topicName)
+            .ConsumerName(consumerName)
+            .SubscriptionName("backlog-test-subscription")
+            .BatchReceivePolicy(BatchReceivePolicy(maxBatchSize, -1L, batchTimeout))
+            .ReceiverQueueSize(maxBatchSize*2)
+            .SubscribeAsync()
+
+    // Step 3: Consume messages and verify batch sizes
+    let mutable totalConsumed = 0
+    let mutable batchCount = 0
+    let batchSizes = ResizeArray<int>()
+    let mutable additionalMessagesProduced = false
+
+    // Create a task to produce additional messages while consuming
+    let continuousProducerTask =
+        Task.Run(fun () ->
+            task {
+                // Wait a bit for consumer to start processing
+                do! Task.Delay(500)
+                
+                do! produceMessages producer additionalMessagesCount (producerName + "-continuous")
+                additionalMessagesProduced <- true
+            }:> Task)
+
+    // Consumer loop - process all messages
+    let consumerTask =
+        Task.Run(fun () ->
+            task {
+                while totalConsumed < totalExpectedMessages do
+                
+                    let! (messagesBatch : Messages<byte[]>) = consumer.BatchReceiveAsync()
+                    
+                    batchCount <- batchCount + 1
+                    let currentBatchSize = messagesBatch.Count
+                    batchSizes.Add(currentBatchSize)
+                                       
+                    // Critical check: Batch size must never exceed configured maximum
+                    if currentBatchSize > maxBatchSize then
+                        failwith <| sprintf "CRITICAL: Batch %i violated limit! Received %i messages (max: %i)" 
+                                           batchCount currentBatchSize maxBatchSize
+                    
+                    // Simulate processing work (e.g., database writes, business logic)
+                    do! Task.Delay(workSimulationDelay)
+                    
+                    do! consumer.AcknowledgeAsync(messagesBatch)
+                    
+                    totalConsumed <- totalConsumed + currentBatchSize
+                    
+            }:> Task)
+
+    do! Task.WhenAll(continuousProducerTask, consumerTask)
+
+    let maxObservedBatch = batchSizes |> Seq.max
+    
+    // Assertions
+    Expect.equal "Should consume all messages" totalConsumed totalExpectedMessages
+    Expect.isTrue "Max batch size never exceeded" (maxObservedBatch <= maxBatchSize)
+    Expect.isTrue "Additional messages were produced" additionalMessagesProduced
+    
+}
+
     ]
