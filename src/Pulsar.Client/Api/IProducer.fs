@@ -75,3 +75,5 @@ type IProducer<'T> =
     abstract member LastDisconnectedTimestamp: unit -> Task<TimeStamp>
     /// Return true if the consumer is connected to the broker
     abstract member IsConnected: unit -> Task<bool>
+    /// Flush all pending messages and wait for their acknowledgements
+    abstract member FlushAsync: unit -> Task<unit>

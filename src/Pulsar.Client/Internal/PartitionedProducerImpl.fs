@@ -385,6 +385,18 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
         member this.IsConnected() = postAndAsyncReply mb IsConnected
 
+        member this.FlushAsync() =
+            backgroundTask {
+                // Flush all partition producers
+                let flushTasks = 
+                    producers
+                    |> Seq.map (fun producer -> producer.FlushAsync())
+                    |> Seq.toArray
+                if flushTasks.Length > 0 then
+                    let! _ = Task.WhenAll(flushTasks)
+                    ()
+            }
+
 
     interface IAsyncDisposable with
         member this.DisposeAsync() =
