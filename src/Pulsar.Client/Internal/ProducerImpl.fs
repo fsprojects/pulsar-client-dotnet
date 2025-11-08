@@ -766,9 +766,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     channel.SetResult()
                 else
                     // Get the last message from the queue
-                    let mutable lastMessage = pendingMessages |> Seq.last
-                    for msg in pendingMessages do
-                        lastMessage <- msg
+                    let lastMessage = pendingMessages |> Seq.last
                     
                     Log.Logger.LogDebug("{0} Flush waiting for last message callback, last sequenceId: {1}", prefix, %lastMessage.SequenceId)
                     // Wait for the last message's callback to complete asynchronously
