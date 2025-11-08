@@ -325,18 +325,16 @@ type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 
     let messageList = if maxNumberOfMessages > 0 then ResizeArray<Message<'T>>(maxNumberOfMessages) else ResizeArray<Message<'T>>()
 
-    member this.Count with get() =
-        currentNumberOfMessages
-    member this.Size with get() =
-        currentSizeOfMessages
+    member this.Count = currentNumberOfMessages
+    member this.Size = currentSizeOfMessages
 
-    member internal this.IsFull with get() =
+    member internal this.IsFull =
         currentNumberOfMessages = maxNumberOfMessages
         || currentSizeOfMessages = maxSizeOfMessages
 
     member internal this.CanAdd(message: Message<'T>) =
-        (maxNumberOfMessages > 0 && currentNumberOfMessages + 1 > maxNumberOfMessages)
-            || (maxSizeOfMessages > 0L && currentSizeOfMessages + (int64 message.Data.Length) > maxSizeOfMessages)
+        ((maxNumberOfMessages > 0 && currentNumberOfMessages + 1 > maxNumberOfMessages)
+            || (maxSizeOfMessages > 0L && currentSizeOfMessages + (int64 message.Data.Length) > maxSizeOfMessages))
         |> not
 
     member internal this.Add(message: Message<'T>) =

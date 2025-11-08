@@ -1,5 +1,6 @@
 module Pulsar.Client.UnitTests.Common.MessageTests
 
+open System
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Common
@@ -63,5 +64,25 @@ let tests =
             let msgIdData = msgId.ToByteArray()
             let deserialized = MessageId.FromByteArray msgIdData
             Expect.equal "" msgId deserialized
+        }
+
+        test "Message batching by count works correctly" {
+            let messages = Messages(2, -1)
+            let message = Message(MessageId.Earliest, [||], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", fun () -> failwith "not implemented")
+            messages.CanAdd(message) |> Expect.isTrue ""
+            messages.Add(message)
+            messages.CanAdd(message) |> Expect.isTrue ""
+            messages.Add(message)
+            messages.CanAdd(message) |> Expect.isFalse ""
+        }
+
+        test "Message batching by size works correctly" {
+            let messages = Messages(-1, 2)
+            let message = Message(MessageId.Earliest, [| 0uy |], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", fun () -> failwith "not implemented")
+            messages.CanAdd(message) |> Expect.isTrue ""
+            messages.Add(message)
+            messages.CanAdd(message) |> Expect.isTrue ""
+            messages.Add(message)
+            messages.CanAdd(message) |> Expect.isFalse ""
         }
     ]

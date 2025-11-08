@@ -528,7 +528,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 messages.Add(interceptors.BeforeConsume(this, msg))
             else
                 shouldContinue <- false
-        Log.Logger.LogDebug("{0} BatchFormed with size {1}", prefix, messages.Size)
+        Log.Logger.LogDebug("{0} BatchFormed with size {1} and count {2}", prefix, messages.Size, messages.Count)
         channel.SetResult messages
 
     let removeExpiredMessagesFromQueue (msgIds: RedeliverSet) =
