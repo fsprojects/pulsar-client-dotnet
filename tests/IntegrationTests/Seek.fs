@@ -305,25 +305,28 @@ let tests =
             let cts = new CancellationTokenSource(TimeSpan.FromSeconds(30.0))
             
             try
-                try
-                    for _ in 1..numberOfMessages do
-                        let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
-                        let received = Encoding.UTF8.GetString(message.Data)
-                        Log.Debug("{0} received {1}", consumerName, received)
-                        receivedMessages.Add(received) |> ignore
-                        do! consumer.AcknowledgeAsync(message.MessageId)
-                    
-                    Expect.equal "" numberOfMessages receivedMessages.Count
-                    for expectedMsg in expectedMessages do
-                        Expect.isTrue "" (receivedMessages.Contains(expectedMsg))
-                with
-                | :? OperationCanceledException
-                | :? TaskCanceledException ->
-                    let errorMsg = $"Test timeout: Only received {receivedMessages.Count} out of {numberOfMessages} messages within 30 seconds"
-                    Log.Error(errorMsg)
-                    failwith errorMsg
-            finally
+                for _ in 1..numberOfMessages do
+                    let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
+                    let received = Encoding.UTF8.GetString(message.Data)
+                    Log.Debug("{0} received {1}", consumerName, received)
+                    receivedMessages.Add(received) |> ignore
+                    do! consumer.AcknowledgeAsync(message.MessageId)
+                
+                Expect.equal "" numberOfMessages receivedMessages.Count
+                for expectedMsg in expectedMessages do
+                    Expect.isTrue "" (receivedMessages.Contains(expectedMsg))
+                
                 cts.Dispose()
+            with
+            | :? OperationCanceledException
+            | :? TaskCanceledException ->
+                cts.Dispose()
+                let errorMsg = $"Test timeout: Only received {receivedMessages.Count} out of {numberOfMessages} messages within 30 seconds"
+                Log.Error(errorMsg)
+                failwith errorMsg
+            | ex ->
+                cts.Dispose()
+                raise ex
             
             Log.Debug("Finished Seek won't stuck the receive")
         }
