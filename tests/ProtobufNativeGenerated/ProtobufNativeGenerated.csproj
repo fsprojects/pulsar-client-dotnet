@@ -5,6 +5,6 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="protobuf-net.Reflection" Version="3.2.12" />
+    <PackageReference Include="protobuf-net.Reflection" Version="3.2.52" />
   </ItemGroup>
 </Project>
