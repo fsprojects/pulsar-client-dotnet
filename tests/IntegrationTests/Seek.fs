@@ -3,6 +3,7 @@ module Pulsar.Client.IntegrationTests.Seek
 open System
 open System.Threading
 open System.Diagnostics
+open System.Collections.Generic
 
 open Expecto
 open Expecto.Flip
@@ -239,6 +240,95 @@ let tests =
         
         testTask "Seek randomly works without batching " {
             do! testRandomSeek true 
+        }
+        
+        
+        testTask "Seek won't get stuck at the receive in MultiTopicsConsumer" {
+            Log.Debug("Started Seek won't get stuck at the receive in MultiTopicsConsumer")
+            let client = getClient()
+            let topicName = "persistent://public/default/multi-topic-seek"
+            let producerName = "seekStuckProducer"
+            let consumerName = "seekStuckConsumer"
+            let numberOfMessages = 30
+            let subscriptionName = "test-seek-stuck-" + Guid.NewGuid().ToString("N")
+            
+            let seekWithRetry (consumer: IConsumer<byte[]>) (targetTimestamp: TimeStamp) (maxRetries: int) =
+                task {
+                    let mutable retryCount = 0
+                    let mutable success = false
+                    while retryCount < maxRetries && not success do
+                        try
+                            do! consumer.SeekAsync(targetTimestamp)
+                            success <- true
+                        with Flatten ex ->
+                            match ex with
+                            | :? NotConnectedException as notConnectedEx ->
+                                retryCount <- retryCount + 1
+                                if retryCount >= maxRetries then
+                                    Log.Error("SeekAsync failed after {0} retries: {1}", maxRetries, notConnectedEx.Message)
+                                    raise notConnectedEx
+                                else
+                                    Log.Debug("SeekAsync failed (attempt {0}/{1}): {2}. Retrying in 1 second...", retryCount, maxRetries, notConnectedEx.Message)
+                                    do! Task.Delay(1000)
+                            | _ ->
+                                raise ex
+                }
+            
+            let! consumer =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName(subscriptionName)
+                    .ReceiverQueueSize(10)
+                    .SubscribeAsync()
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            
+            let expectedMessages = HashSet<string>()
+            for i in 1..numberOfMessages do
+                let messageContent = sprintf "Message-%i-%s" i (Guid.NewGuid().ToString("N"))
+                expectedMessages.Add(messageContent) |> ignore
+                let messageBytes = Encoding.UTF8.GetBytes(messageContent)
+                let! (_ : MessageId) = producer.SendAsync(messageBytes)
+                ()
+            do! Task.Delay(1000)
+            
+            let targetTimestamp = %(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 1000L * 3600L * 24L)
+            Log.Debug("Seeking to timestamp: {0}", targetTimestamp)
+            do! seekWithRetry consumer targetTimestamp 10
+            
+            let receivedMessages = HashSet<string>()
+            let cts = new CancellationTokenSource(TimeSpan.FromSeconds(30.0))
+            
+            try
+                for _ in 1..numberOfMessages do
+                    let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
+                    let received = Encoding.UTF8.GetString(message.Data)
+                    Log.Debug("{0} received {1}", consumerName, received)
+                    receivedMessages.Add(received) |> ignore
+                    do! consumer.AcknowledgeAsync(message.MessageId)
+                
+                Expect.equal "" numberOfMessages receivedMessages.Count
+                for expectedMsg in expectedMessages do
+                    Expect.isTrue "" (receivedMessages.Contains(expectedMsg))
+                
+                cts.Dispose()
+            with
+            | :? OperationCanceledException
+            | :? TaskCanceledException ->
+                cts.Dispose()
+                let errorMsg = $"Test timeout: Only received {receivedMessages.Count} out of {numberOfMessages} messages within 30 seconds"
+                Log.Error(errorMsg)
+                failwith errorMsg
+            | ex ->
+                cts.Dispose()
+                raise ex
+            
+            Log.Debug("Finished Seek won't get stuck at the receive in MultiTopicsConsumer")
         }
        
     ]

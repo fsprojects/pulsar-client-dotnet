@@ -375,15 +375,24 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         | Ok msg -> incomingMessagesSize <- incomingMessagesSize + msg.Data.LongLength
         | _ -> ()
         incomingMessages.Enqueue(m)
+        
+    let tryResumePoller() =
+        if isPollingAllowed() && (waitingPoller <> defaultWaitingPoller) then
+            Log.Logger.LogDebug("{0} resume poller", prefix)
+            waitingPoller.SetResult()
+            waitingPoller <- defaultWaitingPoller
+    
+    let clearIncomingMessages() =
+        incomingMessages.Clear()
+        incomingMessagesSize <- 0L
+        tryResumePoller()
 
     let dequeueMessage() =
         let m = incomingMessages.Dequeue()
         match m with
         | Ok msg -> incomingMessagesSize <- incomingMessagesSize - msg.Data.LongLength
         | _ -> ()
-        if isPollingAllowed() && (waitingPoller <> defaultWaitingPoller) then
-            waitingPoller.SetResult()
-            waitingPoller <- defaultWaitingPoller
+        tryResumePoller()
         m
 
     let hasEnoughMessagesForBatchReceive() =
@@ -678,6 +687,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         replyWithBatch ch
                 // check if should reply to poller immediately
                 if isPollingAllowed() |> not then
+                    Log.Logger.LogDebug("{0} paused poller, incomingMessages={1}, sharedQueueResumeThreshold={2}", prefix, incomingMessages.Count, sharedQueueResumeThreshold)
                     waitingPoller <- pollerChannel
                 else
                     pollerChannel.SetResult()
@@ -755,9 +765,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.RedeliverUnacknowledgedMessagesAsync())
                             |> Task.WhenAll
                         unAckedMessageTracker.Clear()
-                        incomingMessages.Clear()
+                        clearIncomingMessages()
                         currentStream.RestartCompletedTasks()
-                        incomingMessagesSize <- 0L
                         channel |> Option.map _.SetResult() |> ignore
                     with ex ->
                         Log.Logger.LogError(ex, "{0} RedeliverUnacknowledgedMessages failed", prefix)
@@ -838,6 +847,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     Log.Logger.LogDebug("{0} Seek {1}", prefix, seekData)
                     backgroundTask {
                         try
+                            unAckedMessageTracker.Clear()
+                            clearIncomingMessages()
                             let! _ =
                                 consumers
                                 |> Seq.map (fun (KeyValue(_, (consumer, _))) ->
@@ -845,9 +856,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                     | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
                                     | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
                                 |> Task.WhenAll
-                            unAckedMessageTracker.Clear()
-                            incomingMessages.Clear()
-                            incomingMessagesSize <- 0L
+                            currentStream.RestartCompletedTasks()
                             channel.SetResult()
                         with Flatten ex ->
                             channel.SetException ex
@@ -856,13 +865,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             | SeekWithResolver (resolver, channel) ->
                 backgroundTask {
                     try
+                        unAckedMessageTracker.Clear()
+                        clearIncomingMessages()
                         let! _ =
                             consumers
                             |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))
                             |> Task.WhenAll
-                        unAckedMessageTracker.Clear()
-                        incomingMessages.Clear()
-                        incomingMessagesSize <- 0L
+                        currentStream.RestartCompletedTasks()
                         channel.SetResult()
                     with Flatten ex ->
                         channel.SetException ex
