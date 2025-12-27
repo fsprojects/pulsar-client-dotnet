@@ -479,7 +479,7 @@ let tests =
                     .Topic(config.TopicName)
                     .SubscriptionName(config.SubscriptionName)
                     .SubscriptionType(SubscriptionType.Shared)
-                    .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(100))
+                    .NegativeAckRedeliveryDelay(TimeSpan.FromMilliseconds(100.))
                     .DeadLetterPolicy(config.DeadLettersPolicy)
                     .SubscribeAsync()
 
