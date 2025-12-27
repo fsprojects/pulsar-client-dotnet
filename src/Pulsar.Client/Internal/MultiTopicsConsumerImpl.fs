@@ -384,6 +384,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     
     let clearIncomingMessages() =
         incomingMessages.Clear()
+        incomingMessagesSize <- 0L
         tryResumePoller()
 
     let dequeueMessage() =
@@ -766,7 +767,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         unAckedMessageTracker.Clear()
                         clearIncomingMessages()
                         currentStream.RestartCompletedTasks()
-                        incomingMessagesSize <- 0L
                         channel |> Option.map _.SetResult() |> ignore
                     with ex ->
                         Log.Logger.LogError(ex, "{0} RedeliverUnacknowledgedMessages failed", prefix)
@@ -849,7 +849,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         try
                             unAckedMessageTracker.Clear()
                             clearIncomingMessages()
-                            incomingMessagesSize <- 0L
                             let! _ =
                                 consumers
                                 |> Seq.map (fun (KeyValue(_, (consumer, _))) ->
@@ -868,7 +867,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     try
                         unAckedMessageTracker.Clear()
                         clearIncomingMessages()
-                        incomingMessagesSize <- 0L
                         let! _ =
                             consumers
                             |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))

@@ -243,8 +243,8 @@ let tests =
         }
         
         
-        testTask "Seek wont stuck the receive" {
-            Log.Debug("Started Seek wont stuck the receive")
+        testTask "Seek won't get stuck at the receive in MultiTopicsConsumer" {
+            Log.Debug("Started Seek won't get stuck at the receive in MultiTopicsConsumer")
             let client = getClient()
             let topicName = "persistent://public/default/multi-topic-seek"
             let producerName = "seekStuckProducer"
@@ -328,7 +328,7 @@ let tests =
                 cts.Dispose()
                 raise ex
             
-            Log.Debug("Finished Seek won't stuck the receive")
+            Log.Debug("Finished Seek won't get stuck at the receive in MultiTopicsConsumer")
         }
        
     ]
