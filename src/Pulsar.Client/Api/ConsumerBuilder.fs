@@ -85,6 +85,14 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
                 else
                     c
             )
+        |> (fun c ->
+                // Update DeadLetterProcessor with the final subscription name if DeadLetterPolicy is set
+                match c.DeadLetterPolicy with
+                | Some policy when not c.RetryEnable ->
+                    { c with DeadLetterProcessor = deadLettersProcessor c policy }
+                | _ ->
+                    c
+            )
 
     internal new(createConsumerAsync, сreateProducerAsync, schema) = ConsumerBuilder(createConsumerAsync, сreateProducerAsync, ConsumerConfiguration.Default, ConsumerInterceptors.Empty, schema)
 
