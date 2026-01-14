@@ -21,7 +21,7 @@ type internal DeadLetterProcessor<'T>
         if String.IsNullOrEmpty(policy.DeadLetterTopic) |> not then
             policy.DeadLetterTopic
         else
-            $"{topicName}-{subscriptionName}{RetryMessageUtil.DLQ_GROUP_TOPIC_SUFFIX}"
+            $"{topicName}-{%subscriptionName}{RetryMessageUtil.DLQ_GROUP_TOPIC_SUFFIX}"
 
     let dlProducer = lazy (
         createProducer dlTopicName %policy.InitialSubscriptionName
