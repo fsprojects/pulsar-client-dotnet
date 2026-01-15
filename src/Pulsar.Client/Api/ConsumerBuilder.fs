@@ -16,15 +16,13 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
     let DEFAULT_ACK_TIMEOUT_MILLIS_FOR_DEAD_LETTER = 30000.0
 
     let deadLettersProcessor (c: ConsumerConfiguration<'T>) (deadLettersPolicy: DeadLetterPolicy) (topic: TopicName)  =
-        let getTopicName () =
-            topic.ToString()
         let createProducer deadLetterTopic initialSubscriptionName =
             ProducerBuilder(createProducerAsync, schema)
                 .Topic(deadLetterTopic)
                 .InitialSubscriptionName(initialSubscriptionName)
                 .BlockIfQueueFull(false)
                 .CreateAsync()
-        DeadLetterProcessor(deadLettersPolicy, getTopicName, c.SubscriptionName, createProducer) :> IDeadLetterProcessor<'T>
+        DeadLetterProcessor(deadLettersPolicy, topic.ToString(), c.SubscriptionName, createProducer) :> IDeadLetterProcessor<'T>
     
     let verify(config : ConsumerConfiguration<'T>) =
         config
@@ -83,15 +81,11 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
                         DeadLetterPolicy = Some newPolicy
                         Topics = seq { yield! c.Topics; yield TopicName(newPolicy.RetryLetterTopic) } |> Seq.cache }
                 else
-                    c
-            )
-        |> (fun c ->
-                // Update DeadLetterProcessor with the final subscription name if DeadLetterPolicy is set
-                match c.DeadLetterPolicy with
-                | Some policy when not c.RetryEnable ->
-                    { c with DeadLetterProcessor = deadLettersProcessor c policy }
-                | _ ->
-                    c
+                    match c.DeadLetterPolicy with
+                    | Some policy when not c.RetryEnable ->
+                        { c with DeadLetterProcessor = deadLettersProcessor c policy }
+                    | _ ->
+                        c
             )
 
     internal new(createConsumerAsync, сreateProducerAsync, schema) = ConsumerBuilder(createConsumerAsync, сreateProducerAsync, ConsumerConfiguration.Default, ConsumerInterceptors.Empty, schema)
@@ -185,7 +179,6 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
 
     member this.DeadLetterPolicy (deadLetterPolicy: DeadLetterPolicy) =
         { config with
-            DeadLetterProcessor = deadLettersProcessor config deadLetterPolicy
             DeadLetterPolicy = Some deadLetterPolicy  }
         |> this.With
 
