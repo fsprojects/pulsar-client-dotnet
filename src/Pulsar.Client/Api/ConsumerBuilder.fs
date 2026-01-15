@@ -82,9 +82,9 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
                         Topics = seq { yield! c.Topics; yield TopicName(newPolicy.RetryLetterTopic) } |> Seq.cache }
                 else
                     match c.DeadLetterPolicy with
-                    | Some policy when not c.RetryEnable ->
+                    | Some policy ->
                         { c with DeadLetterProcessor = deadLettersProcessor c policy }
-                    | _ ->
+                    | None ->
                         c
             )
 
