@@ -203,14 +203,21 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         }
 
     member this.GetConnection (broker: Broker, maxMessageSize: int) =
-        let t = connections.GetOrAdd(broker.LogicalAddress, fun _ ->
+        let key = broker.LogicalAddress
+        let t = connections.GetOrAdd(key, fun _ ->
                 lazy connect(broker, maxMessageSize)).Value
         if t.IsFaulted then
-            let key = broker.LogicalAddress
             match connections.TryRemove(key) with
             | true, _ -> Log.Logger.LogInformation("Removed faulted connection task to {0}", key)
             | false, _ -> Log.Logger.LogDebug("Faulted connection task to {0} wasn't removed", key)
-        t
+            t
+        elif t.IsCompletedSuccessfully && not t.Result.IsActive then
+            match connections.TryRemove(key) with
+            | true, _ -> Log.Logger.LogInformation("Removed inactive connection to {0}", key)
+            | false, _ -> Log.Logger.LogDebug("Inactive connection to {0} wasn't removed", key)
+            this.GetConnection(broker, maxMessageSize)
+        else
+            t
 
     member this.GetBasicConnection (address: DnsEndPoint) =
         this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address },
