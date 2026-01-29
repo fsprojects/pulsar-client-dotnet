@@ -350,6 +350,53 @@ let tests =
             
             Log.Debug("Finished HasMessageAvailableAfterSeekTimestamp initializeLastMessageIdInBroker: {0}", initializeLastMessageIdInBroker)
         }
+
+    let checkReaderLoopWhileHasMessageAvailableAfterSeekTimestamp () =
+        task {
+            Log.Debug("Started Reader loop while HasMessageAvailable after SeekTimestamp")
+            let client = getClient()
+            let topicName = "public/default/test-reader-loop-has-message-available-after-seek-timestamp-" + Guid.NewGuid().ToString("N")
+
+            let! (producer : IProducer<string>) =
+                client.NewProducer(Schema.STRING())
+                    .Topic(topicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+
+            let timestampBeforeSend = %(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+            let! _ = producer.SendAsync("m1")
+            let! _ = producer.SendAsync("m2")
+            let! _ = producer.SendAsync("m3")
+            do! producer.DisposeAsync()
+
+            let! (reader : IReader<string>) =
+                client.NewReader(Schema.STRING())
+                    .Topic(topicName)
+                    .ReceiverQueueSize(1)
+                    .StartMessageId(MessageId.Latest)
+                    .CreateAsync()
+
+            do! Task.Delay(1000)
+            do! reader.SeekAsync(timestampBeforeSend)
+            do! Task.Delay(1000)
+
+            use cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10.0))
+            let received = ResizeArray<string>()
+
+            let mutable continueLooping = true
+            while continueLooping do
+                let! hasMessage = reader.HasMessageAvailableAsync()
+                if hasMessage then
+                    let! msg = reader.ReadNextAsync(cts.Token)
+                    received.Add(msg.GetValue())
+                else
+                    continueLooping <- false
+
+            Expect.sequenceEqual "" [ "m1"; "m2"; "m3" ] received
+            do! reader.DisposeAsync()
+
+            Log.Debug("Finished Reader loop while HasMessageAvailable after SeekTimestamp")
+        }
     
     testList "Reader" [
 
@@ -407,5 +454,9 @@ let tests =
         
         testTask "HasMessageAvailable after SeekTimestamp with initializeLastMessageIdInBroker" {
             do! checkHasMessageAvailableAfterSeekTimestamp true 
+        }
+
+        testTask "Check HasMessageAvailable works after SeekTimestamp" {
+            do! checkReaderLoopWhileHasMessageAvailableAfterSeekTimestamp()
         }
     ]
