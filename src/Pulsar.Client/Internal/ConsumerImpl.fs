@@ -1145,10 +1145,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             try
                                 let! lastMessageIdResult = getLastMessageIdAsync()
                                 let lastMessageId = lastMessageIdResult.LastMessageId
-                                // Only seek to the last message when the consumer starts from Latest AND is configured
-                                // to include the head. For timestamp-based seek, seeking again here would incorrectly
-                                // move the cursor to the end of the topic.
-                                if startMessageId = MessageId.Latest && consumerConfig.ResetIncludeHead && not hasSoughtByTimestamp then
+                                // if the consumer is configured to read inclusive then we need to seek to the last message
+                                if consumerConfig.ResetIncludeHead && not hasSoughtByTimestamp then
                                     do! postAndAsyncReply this.Mb (fun channel ->
                                                     SeekAsync (SeekType.MessageId lastMessageId, channel))
                                 match lastMessageIdResult.MarkDeletePosition with
