@@ -16,7 +16,8 @@ open System.Security.Cryptography.X509Certificates
 
 type internal ConnectionPool (config: PulsarClientConfiguration) =
 
-
+    // Maximum number of retry attempts when a faulted connection is detected
+    let maxConnectionRetries = 3
     let connections = ConcurrentDictionary<LogicalAddress, Lazy<Task<ClientCnx>>>()
 
     // from https://github.com/mgravell/Pipelines.Sockets.Unofficial/blob/master/src/Pipelines.Sockets.Unofficial/SocketConnection.Connect.cs
@@ -203,28 +204,30 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         }
 
     member this.GetConnection (broker: Broker, maxMessageSize: int) =
-        let rec getConnectionInternal retryCount =
+        let rec getConnectionInternal attemptNumber =
             let t = connections.GetOrAdd(broker.LogicalAddress, fun _ ->
                     lazy connect(broker, maxMessageSize)).Value
             if t.IsFaulted then
                 let key = broker.LogicalAddress
                 match connections.TryRemove(key) with
                 | true, _ -> 
-                    Log.Logger.LogInformation("Removed faulted connection task to {0}, attempting retry {1}", key, retryCount + 1)
-                    // Retry getting connection after removing faulted task, but limit retries to prevent infinite loop
-                    if retryCount < 3 then
-                        getConnectionInternal (retryCount + 1)
+                    Log.Logger.LogInformation("Removed faulted connection task to {0}, attempt {1} of {2}", key, attemptNumber, maxConnectionRetries)
+                    // Retry getting connection after removing faulted task
+                    // Each retry will create a new connection with fresh DNS resolution
+                    // No explicit delay is needed as GetOrAdd will trigger async DNS resolution and connection establishment
+                    if attemptNumber < maxConnectionRetries then
+                        getConnectionInternal (attemptNumber + 1)
                     else
-                        Log.Logger.LogError("Failed to get connection to {0} after {1} retries, returning faulted task", key, retryCount + 1)
+                        Log.Logger.LogError("Failed to get connection to {0} after {1} attempts, returning faulted task", key, attemptNumber)
                         t
                 | false, _ -> 
                     Log.Logger.LogDebug("Faulted connection task to {0} wasn't removed", key)
                     t
             else
-                if retryCount > 0 then
-                    Log.Logger.LogInformation("Successfully obtained connection to {0} after {1} retries", broker.LogicalAddress, retryCount)
+                if attemptNumber > 1 then
+                    Log.Logger.LogInformation("Successfully obtained connection to {0} on attempt {1}", broker.LogicalAddress, attemptNumber)
                 t
-        getConnectionInternal 0
+        getConnectionInternal 1
 
     member this.GetBasicConnection (address: DnsEndPoint) =
         this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address },
