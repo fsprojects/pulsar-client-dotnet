@@ -204,30 +204,46 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         }
 
     member this.GetConnection (broker: Broker, maxMessageSize: int) =
-        let rec getConnectionInternal attemptNumber =
+        let mutable attemptNumber = 1
+        let mutable result = None
+        
+        while result.IsNone && attemptNumber <= maxConnectionRetries do
             let t = connections.GetOrAdd(broker.LogicalAddress, fun _ ->
                     lazy connect(broker, maxMessageSize)).Value
             if t.IsFaulted then
                 let key = broker.LogicalAddress
+                // Try to remove the faulted connection and check if we actually removed it
                 match connections.TryRemove(key) with
-                | true, _ -> 
+                | true, removedLazy when obj.ReferenceEquals(removedLazy.Value, t) ->
                     Log.Logger.LogInformation("Removed faulted connection task to {0}, attempt {1} of {2}", key, attemptNumber, maxConnectionRetries)
                     // Retry getting connection after removing faulted task
                     // Each retry will create a new connection with fresh DNS resolution
                     // No explicit delay is needed as GetOrAdd will trigger async DNS resolution and connection establishment
                     if attemptNumber < maxConnectionRetries then
-                        getConnectionInternal (attemptNumber + 1)
+                        attemptNumber <- attemptNumber + 1
                     else
                         Log.Logger.LogError("Failed to get connection to {0} after {1} attempts, returning faulted task", key, attemptNumber)
-                        t
+                        result <- Some t
+                | true, _ ->
+                    Log.Logger.LogDebug("Removed a connection to {0} but it was not the expected faulted task (race condition), retrying", key)
+                    // Another thread replaced the connection, try again
+                    attemptNumber <- attemptNumber + 1
                 | false, _ -> 
-                    Log.Logger.LogDebug("Faulted connection task to {0} wasn't removed", key)
-                    t
+                    Log.Logger.LogDebug("Faulted connection task to {0} wasn't removed (possibly already replaced)", key)
+                    // Try again - another thread may have already fixed the connection
+                    attemptNumber <- attemptNumber + 1
             else
                 if attemptNumber > 1 then
                     Log.Logger.LogInformation("Successfully obtained connection to {0} on attempt {1}", broker.LogicalAddress, attemptNumber)
-                t
-        getConnectionInternal 1
+                result <- Some t
+        
+        // This should always be Some at this point, but handle the edge case
+        match result with
+        | Some t -> t
+        | None -> 
+            // Fallback: get whatever is in the cache or create new
+            connections.GetOrAdd(broker.LogicalAddress, fun _ ->
+                lazy connect(broker, maxMessageSize)).Value
 
     member this.GetBasicConnection (address: DnsEndPoint) =
         this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address },
