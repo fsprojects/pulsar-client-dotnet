@@ -203,14 +203,26 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         }
 
     member this.GetConnection (broker: Broker, maxMessageSize: int) =
-        let t = connections.GetOrAdd(broker.LogicalAddress, fun _ ->
-                lazy connect(broker, maxMessageSize)).Value
-        if t.IsFaulted then
-            let key = broker.LogicalAddress
-            match connections.TryRemove(key) with
-            | true, _ -> Log.Logger.LogInformation("Removed faulted connection task to {0}", key)
-            | false, _ -> Log.Logger.LogDebug("Faulted connection task to {0} wasn't removed", key)
-        t
+        let rec getConnectionInternal retryCount =
+            let t = connections.GetOrAdd(broker.LogicalAddress, fun _ ->
+                    lazy connect(broker, maxMessageSize)).Value
+            if t.IsFaulted then
+                let key = broker.LogicalAddress
+                match connections.TryRemove(key) with
+                | true, _ -> 
+                    Log.Logger.LogInformation("Removed faulted connection task to {0}, retry {1}", key, retryCount)
+                    // Retry getting connection after removing faulted task, but limit retries to prevent infinite loop
+                    if retryCount < 3 then
+                        getConnectionInternal (retryCount + 1)
+                    else
+                        Log.Logger.LogError("Failed to get connection to {0} after {1} retries, returning faulted task", key, retryCount)
+                        t
+                | false, _ -> 
+                    Log.Logger.LogDebug("Faulted connection task to {0} wasn't removed", key)
+                    t
+            else
+                t
+        getConnectionInternal 0
 
     member this.GetBasicConnection (address: DnsEndPoint) =
         this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address },
