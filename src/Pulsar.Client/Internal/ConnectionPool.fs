@@ -210,17 +210,19 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                 let key = broker.LogicalAddress
                 match connections.TryRemove(key) with
                 | true, _ -> 
-                    Log.Logger.LogInformation("Removed faulted connection task to {0}, retry {1}", key, retryCount)
+                    Log.Logger.LogInformation("Removed faulted connection task to {0}, attempting retry {1}", key, retryCount + 1)
                     // Retry getting connection after removing faulted task, but limit retries to prevent infinite loop
                     if retryCount < 3 then
                         getConnectionInternal (retryCount + 1)
                     else
-                        Log.Logger.LogError("Failed to get connection to {0} after {1} retries, returning faulted task", key, retryCount)
+                        Log.Logger.LogError("Failed to get connection to {0} after {1} retries, returning faulted task", key, retryCount + 1)
                         t
                 | false, _ -> 
                     Log.Logger.LogDebug("Faulted connection task to {0} wasn't removed", key)
                     t
             else
+                if retryCount > 0 then
+                    Log.Logger.LogInformation("Successfully obtained connection to {0} after {1} retries", broker.LogicalAddress, retryCount)
                 t
         getConnectionInternal 0
 
