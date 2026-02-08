@@ -237,11 +237,13 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                     Log.Logger.LogInformation("Successfully obtained connection to {0} on attempt {1}", broker.LogicalAddress, attemptNumber)
                 result <- Some t
         
-        // This should always be Some at this point, but handle the edge case
+        // This should always be Some at this point, but handle the edge case where
+        // all attempts encountered race conditions without getting a definitive result
         match result with
         | Some t -> t
         | None -> 
-            // Fallback: get whatever is in the cache or create new
+            // Fallback: this can happen if we exhausted retries due to race conditions
+            Log.Logger.LogInformation("All {0} attempts encountered race conditions for {1}, making final attempt", maxConnectionRetries, broker.LogicalAddress)
             connections.GetOrAdd(broker.LogicalAddress, fun _ ->
                 lazy connect(broker, maxMessageSize)).Value
 
