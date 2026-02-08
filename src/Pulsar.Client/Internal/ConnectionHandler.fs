@@ -52,16 +52,17 @@ type internal ConnectionHandler( parentPrefix: string,
             | GrabCnx ->
 
                 match this.ConnectionState with
-                | Ready _ ->
-                    Log.Logger.LogWarning("{0} Client cnx already set for topic {1}, ignoring reconnection request", prefix, topic);
+                | Ready cnx ->
+                    Log.Logger.LogWarning("{0} Client cnx {1} already set for topic {2}, ignoring reconnection request",
+                        prefix, cnx.ClientCnxId, topic);
                 | _ ->
                     if isValidStateForReconnection() then
                         try
-                            Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic)
+                            Log.Logger.LogInformation("{0} Starting reconnect to {1} (current state: {2})", prefix, topic, this.ConnectionState)
                             let! broker = lookup.GetBroker(topic)
                             let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize)
                             this.ConnectionState <- Ready clientCnx
-                            Log.Logger.LogDebug("{0} Successfuly reconnected to {1}, {2}", prefix, topic, clientCnx)
+                            Log.Logger.LogInformation("{0} Successfully reconnected to {1}, connection {2}", prefix, topic, clientCnx.ClientCnxId)
                             connectionOpened epoch
                         with Flatten ex ->
                             Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
@@ -69,7 +70,8 @@ type internal ConnectionHandler( parentPrefix: string,
                             if isValidStateForReconnection() then
                                 post this.Mb (ReconnectLater ex)
                     else
-                        Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                        Log.Logger.LogWarning("{0} Ignoring GrabCnx to {1} because state {2} is not valid for reconnection",
+                            prefix, topic, this.ConnectionState)
 
             | ReconnectLater ex ->
 
@@ -88,7 +90,8 @@ type internal ConnectionHandler( parentPrefix: string,
                 this.LastDisconnectedTimestamp <- %DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 match this.ConnectionState with
                 | Ready cnx when cnx <> clientCnx ->
-                    Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
+                    Log.Logger.LogWarning("{0} Ignoring ConnectionClosed for {1} because connection {2} is already active",
+                        prefix, clientCnx.ClientCnxId, cnx.ClientCnxId)
                 | _ ->
                     if isValidStateForReconnection() then
                         let delay = backoff.Next()
@@ -98,7 +101,8 @@ type internal ConnectionHandler( parentPrefix: string,
                         epoch <- epoch + 1UL
                         asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
                     else
-                        Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                        Log.Logger.LogWarning("{0} Ignoring ConnectionClosed to {1} because state {2} is not valid for reconnection",
+                            prefix, topic, this.ConnectionState)
 
             | Close ->
                 continueLoop <- false
