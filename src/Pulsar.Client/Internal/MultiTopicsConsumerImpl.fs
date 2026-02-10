@@ -512,6 +512,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                 let stream = getStream topic.CompleteTopicName consumer
                                 consumers.Add(topic.CompleteTopicName, (consumer :> IConsumer<'T>, stream))
                                 stream)
+                            |> Seq.cache
                         currentStream.AddGenerators(newStreams)
                         Log.Logger.LogDebug("{0} success create consumers for extended partitions. old: {1}, new: {2}",
                             prefix, oldConsumersCount, totalConsumersCount )
