@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Api
+namespace Pulsar.Client.Api
 
 open System
 open Pulsar.Client.Common
@@ -17,8 +17,8 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
         config
         |> checkValue
             (fun c ->
-                c.ServiceAddresses
-                |> invalidArgIf (fun addresses -> addresses |> List.isEmpty) "Service Url needs to be specified on the PulsarClientBuilder object.")
+                if c.ServiceAddresses.IsEmpty && c.ServiceUrlProvider.IsNone then
+                    invalidArg "ServiceUrl" "Service Url or ServiceUrlProvider needs to be specified on the PulsarClientBuilder object.")
 
     new() = PulsarClientBuilder(PulsarClientConfiguration.Default)
 
@@ -27,6 +27,10 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
         | (Result.Ok serviceUri) ->
             PulsarClientBuilder { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls ; Scheme = serviceUri.Scheme }
         | (Result.Error message) -> invalidArg null message
+
+    member this.ServiceUrlProvider (provider: IServiceUrlProvider) =
+        PulsarClientBuilder
+            { config with ServiceUrlProvider = Some provider }
 
     member this.OperationTimeout operationTimeout =
         PulsarClientBuilder
@@ -103,8 +107,18 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
                 KeepAliveInterval = keepAliveInterval }
 
     member this.BuildAsync() =
+        let finalConfig =
+            match config.ServiceUrlProvider with
+            | Some provider ->
+                match ServiceUri.parse provider.ServiceUrl with
+                | Result.Ok serviceUri ->
+                    { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls ; Scheme = serviceUri.Scheme }
+                | Result.Error message ->
+                    invalidArg "ServiceUrlProvider" message
+            | None -> config
+        
         let client =
-            config
+            finalConfig
             |> verify
             |> PulsarClient
         backgroundTask {

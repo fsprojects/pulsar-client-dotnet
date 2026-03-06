@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Internal
+namespace Pulsar.Client.Internal
 
 open Pulsar.Client.Common
 
@@ -14,9 +14,9 @@ open System.Net.Sockets
 open System.Net.Security
 open System.Security.Cryptography.X509Certificates
 
-type internal ConnectionPool (config: PulsarClientConfiguration) =
+type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
 
-
+    let mutable config = initialConfig
     let connections = ConcurrentDictionary<LogicalAddress, Lazy<Task<ClientCnx>>>()
 
     // from https://github.com/mgravell/Pipelines.Sockets.Unofficial/blob/master/src/Pipelines.Sockets.Unofficial/SocketConnection.Connect.cs
@@ -225,4 +225,21 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
                 with ex ->
                     Log.Logger.LogError(ex, "Couldn't get connection on close")
                     ()
+            connections.Clear()
         }
+
+    member this.CloseAllConnections() =
+        backgroundTask {
+            Log.Logger.LogInformation("Closing all connections.")
+            for KeyValue(_, connectionTask) in connections do
+                try
+                    let! cnx = connectionTask.Value
+                    cnx.Dispose()
+                with ex ->
+                    Log.Logger.LogWarning(ex, "Couldn't get connection on closeAllConnections")
+                    ()
+            connections.Clear()
+        }
+
+    member this.UpdateConfig(newConfig: PulsarClientConfiguration) =
+        config <- newConfig

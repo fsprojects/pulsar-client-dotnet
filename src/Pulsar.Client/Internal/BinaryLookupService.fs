@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Internal
+namespace Pulsar.Client.Internal
 
 open Pulsar.Client.Api
 
@@ -72,6 +72,12 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 let! result = this.GetSchemaInner(topicName, schemaVersion, backoff, int config.OperationTimeout.TotalMilliseconds)
                 return result
             }
+
+        member this.UpdateServiceUrl(serviceUrl: string) =
+            match ServiceUri.parse serviceUrl with
+            | Result.Ok parsedServiceUri ->
+                endPointResolver.UpdateAddresses(parsedServiceUri.Addresses)
+            | _ -> ()
 
     member private this.GetPartitionedTopicMetadataInner (topicName, backoff: Backoff, remainingTimeMs) =
          async {

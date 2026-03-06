@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Internal
+namespace Pulsar.Client.Internal
 
 open Pulsar.Client.Common
 open System.Threading.Tasks
@@ -20,3 +20,6 @@ type internal ILookupService =
 
     //  Returns current SchemaInfo for a given topic.
     abstract member GetSchema: CompleteTopicName * ?schema: SchemaVersion -> Task<TopicSchema option>
+
+    //  Updates the service url.
+    abstract member UpdateServiceUrl: string -> unit

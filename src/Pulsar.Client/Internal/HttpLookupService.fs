@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Internal
+namespace Pulsar.Client.Internal
 
 open System.Collections.Generic
 open System.IO
@@ -15,6 +15,7 @@ open Pulsar.Client.Schema
 type internal HttpLookupService (config: PulsarClientConfiguration, _connectionPool: ConnectionPool) =
 
     let pulsarHttpClient = PulsarHttpClient(config)
+    let mutable serviceAddresses = config.ServiceAddresses
 
     interface ILookupService with
 
@@ -52,7 +53,7 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
         //  GET /lookup/v2/topic/{topic-domain}/{tenant}/{namespace}/{topic}
         member this.GetBroker(topicName : CompleteTopicName) =
             backgroundTask {
-                let randomServiceUri = config.ServiceAddresses[RandomGenerator.Next(0, config.ServiceAddresses.Length)]
+                let randomServiceUri = serviceAddresses.[RandomGenerator.Next(0, serviceAddresses.Length)]
                 let topic: string = %topicName
                 let topicRestPath = topic.Replace("persistent://","persistent/").Replace("non-persistent://","non-persistent/")
                 let! brokerResponse =
@@ -94,11 +95,17 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
                 return result
             }
 
+        member this.UpdateServiceUrl(serviceUrl: string) =
+            match ServiceUri.parse serviceUrl with
+            | Result.Ok parsedServiceUri ->
+                serviceAddresses <- parsedServiceUri.Addresses
+            | _ -> ()
+
     //  GET /admin/v2/{topic-domain}/{tenant}/{namespace}/{topic}/partitions?checkAllowAutoCreation=true
     member private this.GetPartitionedTopicMetadataInner (topicName: CompleteTopicName, backoff: Backoff, remainingTimeMs) =
          async {
             try
-                let randomServiceUri = config.ServiceAddresses[RandomGenerator.Next(0, config.ServiceAddresses.Length)]
+                let randomServiceUri = serviceAddresses.[RandomGenerator.Next(0, serviceAddresses.Length)]
                 let topic: string = %topicName
                 let topicRestPath = topic.Replace("persistent://","persistent/").Replace("non-persistent://","non-persistent/")
                 let! brokerResponse =
@@ -121,7 +128,7 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
     member private this.GetTopicsUnderNamespaceInner (ns: NamespaceName, backoff: Backoff, remainingTimeMs: int, isPersistent: bool) =
         async {
             try
-                let randomServiceUri = config.ServiceAddresses[RandomGenerator.Next(0, config.ServiceAddresses.Length)]
+                let randomServiceUri = serviceAddresses.[RandomGenerator.Next(0, serviceAddresses.Length)]
                 let mode =
                     match isPersistent with
                     | true -> "PERSISTENT"
@@ -147,7 +154,7 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
                               backoff: Backoff, remainingTimeMs: int) =
         async {
             try
-                let randomServiceUri = config.ServiceAddresses[RandomGenerator.Next(0, config.ServiceAddresses.Length)]
+                let randomServiceUri = serviceAddresses.[RandomGenerator.Next(0, serviceAddresses.Length)]
                 let topic: string = %topicName
                 let topicRestPath = topic.Replace("persistent://","").Replace("non-persistent://","")
                 let path =
