@@ -86,6 +86,7 @@
     <Compile Include="Api\AuthenticationDataProvider.fs" />
     <Compile Include="Api\Authentication.fs" />
     <Compile Include="Api\IMessageRouter.fs" />
+    <Compile Include="Api\IServiceUrlProvider.fs" />
     <Compile Include="Api\IConsumer.fs" />
     <Compile Include="Api\IReader.fs" />
     <Compile Include="Api\IProducer.fs" />
@@ -99,7 +100,6 @@
     <Compile Include="Internal\ProducerInterceptors.fs" />
     <Compile Include="Internal\ProducerStatsImpl.fs" />
     <Compile Include="Internal\ConsumerStatsImpl.fs" />
-    <Compile Include="Api\IServiceUrlProvider.fs" />
     <Compile Include="Api\Configuration.fs" />
     <Compile Include="Auth\AuthenticationDataTls.fs" />
     <Compile Include="Auth\AuthenticationDataToken.fs" />

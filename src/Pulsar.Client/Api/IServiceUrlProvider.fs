@@ -11,4 +11,4 @@ type IServiceUrlProviderContext =
 type IServiceUrlProvider =
     inherit IDisposable
     abstract member Initialize: IServiceUrlProviderContext -> unit
-    abstract member ServiceUrl: string
+    abstract member GetServiceUrl: unit -> string

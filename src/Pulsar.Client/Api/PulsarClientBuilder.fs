@@ -10,23 +10,34 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
     let MIN_STATS_INTERVAL_SECONDS = 1
 
     let verify(config : PulsarClientConfiguration) =
-        let checkValue check config =
-            check config |> ignore
-            config
-
         config
-        |> checkValue
-            (fun c ->
-                if c.ServiceAddresses.IsEmpty && c.ServiceUrlProvider.IsNone then
-                    invalidArg "ServiceUrl" "Service Url or ServiceUrlProvider needs to be specified on the PulsarClientBuilder object.")
+        |> invalidArgIf (fun c ->
+                c.ServiceAddresses.IsEmpty && c.ServiceUrlProvider.IsNone
+            ) "ServiceUrl or ServiceUrlProvider needs to be specified on the PulsarClientBuilder object."
+        |> invalidArgIf (fun c ->
+                (not c.ServiceAddresses.IsEmpty) && c.ServiceUrlProvider.IsSome
+            ) "Can only chose one way ServiceUrl or ServiceUrlProvider."
+        |> (fun c ->
+                c.ServiceUrlProvider
+                |> Option.map _.GetServiceUrl()
+                |> Option.map (invalidArgIfBlankString "Cannot get service url from service url provider.")
+                |> Option.map (fun url ->
+                    match ServiceUri.parse url with
+                    | Result.Ok serviceUri ->
+                        { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls; Scheme = serviceUri.Scheme }
+                    | Result.Error message -> invalidArg null message
+                    )
+                |> Option.defaultValue c
+            )
+
 
     new() = PulsarClientBuilder(PulsarClientConfiguration.Default)
 
     member this.ServiceUrl (url: string) =
         match url |> ServiceUri.parse with
-        | (Result.Ok serviceUri) ->
+        | Result.Ok serviceUri ->
             PulsarClientBuilder { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls ; Scheme = serviceUri.Scheme }
-        | (Result.Error message) -> invalidArg null message
+        | Result.Error message -> invalidArg null message
 
     member this.ServiceUrlProvider (provider: IServiceUrlProvider) =
         PulsarClientBuilder
@@ -107,25 +118,14 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
                 KeepAliveInterval = keepAliveInterval }
 
     member this.BuildAsync() =
-        let finalConfig =
-            match config.ServiceUrlProvider with
-            | Some provider ->
-                match ServiceUri.parse provider.ServiceUrl with
-                | Result.Ok serviceUri ->
-                    { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls ; Scheme = serviceUri.Scheme }
-                | Result.Error message ->
-                    invalidArg "ServiceUrlProvider" message
-            | None -> config
-        
         let client =
-            finalConfig
+            config
             |> verify
             |> PulsarClient
         backgroundTask {
             do! client.Init()
             return client
         }
-
 
     member this.Configuration =
         config

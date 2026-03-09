@@ -113,7 +113,7 @@ type AutoClusterFailover
     interface IServiceUrlProvider with
         member this.Initialize(context: IServiceUrlProviderContext) =
             currentProviderContext <- Some context
-        member this.ServiceUrl = currentServiceUrl
+        member this.GetServiceUrl() = currentServiceUrl
         member this.Dispose() =
             cts.Cancel()
             cts.Dispose()
