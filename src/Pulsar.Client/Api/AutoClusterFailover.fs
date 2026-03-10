@@ -39,7 +39,7 @@ type AutoClusterFailover
                 use client = new TcpClient()
                 let connectTask = client.ConnectAsync(uri.Host, uri.Port)
                 let! completedTask = Task.WhenAny(connectTask, Task.Delay(1000)) |> Async.AwaitTask
-                if completedTask = (connectTask :> Task) && connectTask.Status = TaskStatus.RanToCompletion then
+                if completedTask = connectTask && connectTask.Status = TaskStatus.RanToCompletion then
                     return true
                 else
                     return false
@@ -76,9 +76,9 @@ type AutoClusterFailover
                                     | Some ctx ->
                                         ctx.UpdateServiceUrl(sec)
                                         if not (box secondaryAuthentication = null) && secondaryAuthentication.ContainsKey(sec) then
-                                            ctx.UpdateAuthentication(secondaryAuthentication.[sec])
+                                            ctx.UpdateAuthentication(secondaryAuthentication[sec])
                                         if not (box secondaryTlsTrustCertificate = null) && secondaryTlsTrustCertificate.ContainsKey(sec) then
-                                            ctx.UpdateTlsTrustCertificate(secondaryTlsTrustCertificate.[sec])
+                                            ctx.UpdateTlsTrustCertificate(secondaryTlsTrustCertificate[sec])
                                     | None -> ()
                                     failedTimestamp <- 0L
                                 | None -> ()

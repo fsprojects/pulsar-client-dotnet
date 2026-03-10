@@ -18,13 +18,13 @@ let tests =
 
         test "Resolver throws exception for empty address list" {
             Expect.throwsWithMessage<ArgumentException>
-                "Addresses list could not be empty. (Parameter 'addresses')"
-                (fun() -> EndPointResolver([]) |> ignore )
+                "Addresses list could not be empty. (Parameter 'initialAddresses')"
+                (fun() -> EndPointResolver([||]) |> ignore )
         }
 
         test "Resolver works with single address" {
             let address = Uri("pulsar://host1:6650")
-            let resolver = EndPointResolver([address])
+            let resolver = EndPointResolver([|address|])
 
             resolver.Resolve() |> checkEndPointBy address
             resolver.Resolve() |> checkEndPointBy address
@@ -34,7 +34,7 @@ let tests =
             let address1 = Uri("pulsar://host1:6650")
             let address2 = Uri("pulsar://host2:6650")
             let address3 = Uri("pulsar://host3:6650")
-            let resolver = EndPointResolver([address1; address2; address3])
+            let resolver = EndPointResolver([|address1; address2; address3|])
 
             resolver.Resolve() |> checkEndPointBy address1
             resolver.Resolve() |> checkEndPointBy address2

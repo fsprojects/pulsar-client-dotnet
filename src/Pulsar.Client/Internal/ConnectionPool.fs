@@ -216,18 +216,6 @@ type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
         this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address },
                            Commands.DEFAULT_MAX_MESSAGE_SIZE)
 
-    member this.CloseAsync() =
-        backgroundTask {
-            for KeyValue(_, connectionTask) in connections do
-                try
-                    let! cnx = connectionTask.Value
-                    cnx.Dispose()
-                with ex ->
-                    Log.Logger.LogError(ex, "Couldn't get connection on close")
-                    ()
-            connections.Clear()
-        }
-
     member this.CloseAllConnections() =
         backgroundTask {
             Log.Logger.LogInformation("Closing all connections.")

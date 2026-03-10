@@ -40,9 +40,9 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
     let autoConsumeStubType =  typeof<AutoConsumeSchemaStub>
     let lookupService =
         if currentConfig.Scheme = ServiceUri.HTTP_SERVICE then
-            HttpLookupService(currentConfig,connectionPool) :> ILookupService
+            HttpLookupService(currentConfig, connectionPool) :> ILookupService
         else
-            BinaryLookupService(currentConfig,connectionPool) :> ILookupService
+            BinaryLookupService(currentConfig, connectionPool) :> ILookupService
 
     let transactionClient =
         if currentConfig.EnableTransaction then
@@ -123,7 +123,7 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
                     channel.SetException(AlreadyClosedException("Client already closed. URL: " + currentConfig.ServiceAddresses.ToString()))
             | Stop ->
                 this.ClientState <- Closed
-                do! connectionPool.CloseAsync()
+                do! connectionPool.CloseAllConnections()
                 transactionClient |> Option.iter _.Close()
                 Log.Logger.LogInformation("Pulsar client stopped")
                 continueLoop <- false
@@ -389,12 +389,12 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
         lookupService.UpdateServiceUrl(serviceUrl)
         connectionPool.CloseAllConnections() |> ignore
 
-    member this.UpdateAuthentication(authentication: Authentication) =
+    member private this.UpdateAuthentication(authentication: Authentication) =
         Log.Logger.LogInformation("Updating authentication")
         currentConfig <- { currentConfig with Authentication = authentication }
         connectionPool.UpdateConfig(currentConfig)
 
-    member this.UpdateTlsTrustCertificate(certificate: System.Security.Cryptography.X509Certificates.X509Certificate2) =
+    member private this.UpdateTlsTrustCertificate(certificate: System.Security.Cryptography.X509Certificates.X509Certificate2) =
         Log.Logger.LogInformation("Updating tls trust certificate")
         currentConfig <- { currentConfig with TlsTrustCertificate = certificate }
         connectionPool.UpdateConfig(currentConfig)

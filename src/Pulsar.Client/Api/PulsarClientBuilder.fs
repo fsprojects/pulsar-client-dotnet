@@ -12,10 +12,10 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
     let verify(config : PulsarClientConfiguration) =
         config
         |> invalidArgIf (fun c ->
-                c.ServiceAddresses.IsEmpty && c.ServiceUrlProvider.IsNone
+                c.ServiceAddresses.Length = 0 && c.ServiceUrlProvider.IsNone
             ) "ServiceUrl or ServiceUrlProvider needs to be specified on the PulsarClientBuilder object."
         |> invalidArgIf (fun c ->
-                (not c.ServiceAddresses.IsEmpty) && c.ServiceUrlProvider.IsSome
+                c.ServiceAddresses.Length > 0 && c.ServiceUrlProvider.IsSome
             ) "Can only chose one way ServiceUrl or ServiceUrlProvider."
         |> (fun c ->
                 c.ServiceUrlProvider

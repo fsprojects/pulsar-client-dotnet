@@ -53,7 +53,7 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
         //  GET /lookup/v2/topic/{topic-domain}/{tenant}/{namespace}/{topic}
         member this.GetBroker(topicName : CompleteTopicName) =
             backgroundTask {
-                let randomServiceUri = serviceAddresses.[RandomGenerator.Next(0, serviceAddresses.Length)]
+                let randomServiceUri = serviceAddresses[RandomGenerator.Next(0, serviceAddresses.Length)]
                 let topic: string = %topicName
                 let topicRestPath = topic.Replace("persistent://","persistent/").Replace("non-persistent://","non-persistent/")
                 let! brokerResponse =
@@ -105,7 +105,7 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
     member private this.GetPartitionedTopicMetadataInner (topicName: CompleteTopicName, backoff: Backoff, remainingTimeMs) =
          async {
             try
-                let randomServiceUri = serviceAddresses.[RandomGenerator.Next(0, serviceAddresses.Length)]
+                let randomServiceUri = serviceAddresses[RandomGenerator.Next(0, serviceAddresses.Length)]
                 let topic: string = %topicName
                 let topicRestPath = topic.Replace("persistent://","persistent/").Replace("non-persistent://","non-persistent/")
                 let! brokerResponse =
@@ -128,7 +128,7 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
     member private this.GetTopicsUnderNamespaceInner (ns: NamespaceName, backoff: Backoff, remainingTimeMs: int, isPersistent: bool) =
         async {
             try
-                let randomServiceUri = serviceAddresses.[RandomGenerator.Next(0, serviceAddresses.Length)]
+                let randomServiceUri = serviceAddresses[RandomGenerator.Next(0, serviceAddresses.Length)]
                 let mode =
                     match isPersistent with
                     | true -> "PERSISTENT"
@@ -154,7 +154,7 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
                               backoff: Backoff, remainingTimeMs: int) =
         async {
             try
-                let randomServiceUri = serviceAddresses.[RandomGenerator.Next(0, serviceAddresses.Length)]
+                let randomServiceUri = serviceAddresses[RandomGenerator.Next(0, serviceAddresses.Length)]
                 let topic: string = %topicName
                 let topicRestPath = topic.Replace("persistent://","").Replace("non-persistent://","")
                 let path =
