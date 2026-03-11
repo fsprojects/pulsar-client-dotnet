@@ -6,6 +6,7 @@ open System.Net.Sockets
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
+open System.Security.Cryptography.X509Certificates
 open Pulsar.Client.Common
 
 type FailoverPolicy =
@@ -14,12 +15,12 @@ type FailoverPolicy =
 type AutoClusterFailover
     (
         primary: string,
-        secondary: string list,
+        secondary: string array,
         failoverPolicy: FailoverPolicy,
         primaryAuthentication: Authentication,
         secondaryAuthentication: IReadOnlyDictionary<string, Authentication>,
-        primaryTlsTrustCertificate: System.Security.Cryptography.X509Certificates.X509Certificate2,
-        secondaryTlsTrustCertificate: IReadOnlyDictionary<string, System.Security.Cryptography.X509Certificates.X509Certificate2>,
+        primaryTlsTrustCertificate: X509Certificate2,
+        secondaryTlsTrustCertificate: IReadOnlyDictionary<string, X509Certificate2>,
         failoverDelay: TimeSpan,
         switchBackDelay: TimeSpan,
         checkInterval: TimeSpan
@@ -33,26 +34,23 @@ type AutoClusterFailover
     let mutable failedTimestamp = 0L
 
     let probeAvailable (url: string) =
-        async {
+        backgroundTask {
             try
                 let uri = Uri(url.Replace("pulsar+ssl://", "pulsar://").Replace("http://", "pulsar://").Replace("https://", "pulsar://")) // ensure Uri parses it correctly just for host/port extraction
                 use client = new TcpClient()
-                let connectTask = client.ConnectAsync(uri.Host, uri.Port)
-                let! completedTask = Task.WhenAny(connectTask, Task.Delay(1000)) |> Async.AwaitTask
-                if completedTask = connectTask && connectTask.Status = TaskStatus.RanToCompletion then
-                    return true
-                else
-                    return false
+                use cts = new CancellationTokenSource(1000)
+                do! client.ConnectAsync(uri.Host, uri.Port, cts.Token)
+                return true
             with ex ->
                 Log.Logger.LogWarning(ex, "Failed to probe available, url: {0}", url)
                 return false
         }
 
-    let checkTask = 
-        async {
+    do
+        backgroundTask {
             while not cts.IsCancellationRequested do
                 try
-                    do! Async.Sleep (int checkInterval.TotalMilliseconds)
+                    do! Task.Delay checkInterval
                     if currentServiceUrl = primary then
                         let! available = probeAvailable primary
                         if not available then
@@ -60,7 +58,7 @@ type AutoClusterFailover
                                 failedTimestamp <- DateTime.UtcNow.Ticks
                             elif TimeSpan.FromTicks(DateTime.UtcNow.Ticks - failedTimestamp) >= failoverDelay then
                                 let! targetSecondary = 
-                                    async {
+                                    task {
                                         let mutable found = None
                                         for sec in secondary do
                                             if found.IsNone then
@@ -81,7 +79,8 @@ type AutoClusterFailover
                                             ctx.UpdateTlsTrustCertificate(secondaryTlsTrustCertificate[sec])
                                     | None -> ()
                                     failedTimestamp <- 0L
-                                | None -> ()
+                                | None ->
+                                    Log.Logger.LogWarning("Could not find any available secondary cluster")
                         else
                             failedTimestamp <- 0L
                     else
@@ -107,8 +106,8 @@ type AutoClusterFailover
                 | ex ->
                     Log.Logger.LogError(ex, "Error checking cluster")
         }
+        |> ignore
 
-    let checkTaskHandle = Async.StartAsTask(checkTask, cancellationToken = cts.Token)
 
     interface IServiceUrlProvider with
         member this.Initialize(context: IServiceUrlProviderContext) =
@@ -121,22 +120,22 @@ type AutoClusterFailover
 
 type AutoClusterFailoverBuilder() =
     let mutable primary = ""
-    let mutable secondary = []
+    let mutable secondary = [||]
     let mutable failoverDelay = TimeSpan.FromSeconds(30.0)
     let mutable switchBackDelay = TimeSpan.FromSeconds(60.0)
     let mutable checkInterval = TimeSpan.FromSeconds(30.0)
     let mutable failoverPolicy = FailoverPolicy.Order
     let mutable primaryAuthentication = Authentication.AuthenticationDisabled
     let secondaryAuthentication = Dictionary<string, Authentication>()
-    let mutable primaryTlsTrustCertificate = null : System.Security.Cryptography.X509Certificates.X509Certificate2
-    let secondaryTlsTrustCertificate = Dictionary<string, System.Security.Cryptography.X509Certificates.X509Certificate2>()
+    let mutable primaryTlsTrustCertificate = null : X509Certificate2
+    let secondaryTlsTrustCertificate = Dictionary<string, X509Certificate2>()
 
     member this.Primary(url: string) =
         primary <- url
         this
 
     member this.Secondary(urls: string seq) =
-        secondary <- urls |> Seq.toList
+        secondary <- urls |> Seq.toArray
         this
 
     member this.FailoverDelay(delay: TimeSpan) =
@@ -164,11 +163,11 @@ type AutoClusterFailoverBuilder() =
             secondaryAuthentication[kv.Key] <- kv.Value
         this
 
-    member this.PrimaryTlsTrustCertificate(certificate: System.Security.Cryptography.X509Certificates.X509Certificate2) =
+    member this.PrimaryTlsTrustCertificate(certificate: X509Certificate2) =
         primaryTlsTrustCertificate <- certificate
         this
 
-    member this.SecondaryTlsTrustCertificate(secondaryCert: IReadOnlyDictionary<string, System.Security.Cryptography.X509Certificates.X509Certificate2>) =
+    member this.SecondaryTlsTrustCertificate(secondaryCert: IReadOnlyDictionary<string, X509Certificate2>) =
         for kv in secondaryCert do
             secondaryTlsTrustCertificate[kv.Key] <- kv.Value
         this
@@ -176,7 +175,7 @@ type AutoClusterFailoverBuilder() =
     member this.Build() : IServiceUrlProvider =
         if String.IsNullOrEmpty(primary) then
             invalidArg "primary" "primary service url shouldn't be null or empty"
-        if List.isEmpty secondary then
+        if Array.isEmpty secondary then
             invalidArg "secondary" "secondary cluster service url shouldn't be null and should have at least one url"
         
         new AutoClusterFailover(

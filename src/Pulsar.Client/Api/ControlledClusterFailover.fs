@@ -1,8 +1,8 @@
 namespace Pulsar.Client.Api
 
 open System
-open System.Collections.Generic
 open System.Net.Http
+open System.Security.Cryptography.X509Certificates
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
@@ -15,22 +15,22 @@ type ControlledClusterFailover
         checkInterval: TimeSpan,
         defaultServiceUrl: string,
         defaultAuthentication: Authentication,
-        defaultTlsTrustCertificate: System.Security.Cryptography.X509Certificates.X509Certificate2
+        defaultTlsTrustCertificate: X509Certificate2
     ) =
 
     let mutable currentServiceUrl = defaultServiceUrl
     let mutable currentProviderContext = None : IServiceUrlProviderContext option
     let cts = new CancellationTokenSource()
 
-    let checkTask = 
-        async {
+    do
+        backgroundTask {
             use httpClient = new HttpClient()
             while not cts.IsCancellationRequested do
                 try
-                    do! Async.Sleep (int checkInterval.TotalMilliseconds)
-                    let! response = httpClient.GetAsync(providerUrl, cts.Token) |> Async.AwaitTask
+                    do! Task.Delay checkInterval
+                    let! response = httpClient.GetAsync(providerUrl, cts.Token)
                     if response.IsSuccessStatusCode then
-                        let! content = response.Content.ReadAsStringAsync() |> Async.AwaitTask
+                        let! content = response.Content.ReadAsStringAsync()
                         if not (String.IsNullOrEmpty(content)) then
                             // expects json: { "serviceUrl": "...", "authentication": "..." }
                             // For simplicity, we just look for serviceUrl for now. In Java, it parses Map<String,String> and uses auth plugins.
@@ -58,8 +58,7 @@ type ControlledClusterFailover
                 | ex ->
                     Log.Logger.LogError(ex, "Error checking controlled cluster failover url")
         }
-
-    let checkTaskHandle = Async.StartAsTask(checkTask, cancellationToken = cts.Token)
+        |> ignore
 
     interface IServiceUrlProvider with
         member this.Initialize(context: IServiceUrlProviderContext) =
@@ -92,7 +91,7 @@ type ControlledClusterFailoverBuilder() =
         defaultAuthentication <- authentication
         this
 
-    member this.DefaultTlsTrustCertificate(certificate: System.Security.Cryptography.X509Certificates.X509Certificate2) =
+    member this.DefaultTlsTrustCertificate(certificate: X509Certificate2) =
         defaultTlsTrustCertificate <- certificate
         this
 
