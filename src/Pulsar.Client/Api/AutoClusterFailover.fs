@@ -108,10 +108,7 @@ type AutoClusterFailover
                                 recoveredTimestamp <- 0L
                         else
                             recoveredTimestamp <- 0L
-                with
-                | :? TaskCanceledException -> ()
-                | :? OperationCanceledException -> ()
-                | ex ->
+                with Flatten ex ->
                     Log.Logger.LogError(ex, "Error checking cluster")
         }
         |> ignore

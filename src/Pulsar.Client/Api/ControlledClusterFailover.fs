@@ -2,12 +2,29 @@ namespace Pulsar.Client.Api
 
 open System
 open System.Net.Http
+open System.Net.Http.Json
 open System.Security.Cryptography.X509Certificates
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open System.Text.Json
 open Pulsar.Client.Common
+
+[<CLIMutable>]
+type ControlledFailoverResponse = {
+    ServiceUrl: string
+    TlsTrustCertsFilePath: string
+    AuthPluginClassName: string
+    AuthParamsString: string
+}
+// Example
+// {
+// "serviceUrl": "pulsar+ssl://target:6651",
+// "tlsTrustCertsFilePath": "/security/ca.cert.pem",
+// "authPluginClassName":"org.apache.pulsar.client.impl.auth.AuthenticationTls",
+// "authParamsString": " \"tlsCertFile\": \"/security/client.cert.pem\"
+//     \"tlsKeyFile\": \"/security/client-pk8.pem\" "
+// }
 
 type ControlledClusterFailover
     (
@@ -18,51 +35,37 @@ type ControlledClusterFailover
         defaultTlsTrustCertificate: X509Certificate2
     ) =
 
+    let jsonOptions = JsonSerializerOptions(JsonSerializerDefaults.Web)
     let mutable currentServiceUrl = defaultServiceUrl
-    let mutable currentProviderContext = None : IServiceUrlProviderContext option
     let cts = new CancellationTokenSource()
 
-    do
+    let run (ctx: IServiceUrlProviderContext) =
         backgroundTask {
-            use httpClient = new HttpClient()
+            // https://learn.microsoft.com/en-us/dotnet/fundamentals/networking/http/httpclient-guidelines
+            use httpClient = new HttpClient(new SocketsHttpHandler(PooledConnectionLifetime = TimeSpan.FromMinutes(2)))
             while not cts.IsCancellationRequested do
                 try
                     do! Task.Delay checkInterval
                     let! response = httpClient.GetAsync(providerUrl, cts.Token)
                     if response.IsSuccessStatusCode then
-                        let! content = response.Content.ReadAsStringAsync()
-                        if not (String.IsNullOrEmpty(content)) then
-                            // expects json: { "serviceUrl": "...", "authentication": "..." }
-                            // For simplicity, we just look for serviceUrl for now. In Java, it parses Map<String,String> and uses auth plugins.
-                            let json = JsonDocument.Parse(content)
-                            let root = json.RootElement
-                            let serviceUrlProp = 
-                                match root.TryGetProperty("serviceUrl") with
-                                | true, prop -> Some (prop.GetString())
-                                | _ -> None
+                        let! response = response.Content.ReadFromJsonAsync<ControlledFailoverResponse>(jsonOptions)
+                        let newServiceUrl = response.ServiceUrl
                                 
-                            // This is a minimal implementation of ControlledClusterFailover
-                            match serviceUrlProp with
-                            | Some newServiceUrl when not (String.IsNullOrEmpty(newServiceUrl)) && newServiceUrl <> currentServiceUrl ->
-                                Log.Logger.LogInformation("ControlledClusterFailover switching to {0}", newServiceUrl)
-                                currentServiceUrl <- newServiceUrl
-                                match currentProviderContext with
-                                | Some ctx -> ctx.UpdateServiceUrl(newServiceUrl)
-                                | None -> ()
-                            | _ -> ()
+                        // This is a minimal implementation of ControlledClusterFailover
+                        if not (String.IsNullOrEmpty(newServiceUrl)) && newServiceUrl <> currentServiceUrl then
+                            Log.Logger.LogInformation("ControlledClusterFailover switching to {0}", newServiceUrl)
+                            currentServiceUrl <- newServiceUrl
+                            ctx.UpdateServiceUrl(newServiceUrl)
                     else
                         Log.Logger.LogWarning("ControlledClusterFailover failed to fetch config from {0}, status {1}", providerUrl, response.StatusCode)
-                with
-                | :? TaskCanceledException -> ()
-                | :? OperationCanceledException -> ()
-                | ex ->
+                with Flatten ex ->
                     Log.Logger.LogError(ex, "Error checking controlled cluster failover url")
         }
         |> ignore
 
     interface IServiceUrlProvider with
         member this.Initialize(context: IServiceUrlProviderContext) =
-            currentProviderContext <- Some context
+            run context
         member this.GetServiceUrl() = currentServiceUrl
         member this.Dispose() =
             cts.Cancel()
