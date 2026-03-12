@@ -1,9 +1,10 @@
 namespace Pulsar.Client.Api
 
 open System
+open System.Collections.Generic
 open System.Net.Http
 open System.Net.Http.Json
-open System.Security.Cryptography.X509Certificates
+open System.Net.Http.Headers
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
@@ -31,8 +32,7 @@ type ControlledClusterFailover
         providerUrl: string,
         checkInterval: TimeSpan,
         defaultServiceUrl: string,
-        defaultAuthentication: Authentication,
-        defaultTlsTrustCertificate: X509Certificate2
+        urlProviderHeader: IReadOnlyDictionary<string, string>
     ) =
 
     let jsonOptions = JsonSerializerOptions(JsonSerializerDefaults.Web)
@@ -43,6 +43,9 @@ type ControlledClusterFailover
         backgroundTask {
             // https://learn.microsoft.com/en-us/dotnet/fundamentals/networking/http/httpclient-guidelines
             use httpClient = new HttpClient(new SocketsHttpHandler(PooledConnectionLifetime = TimeSpan.FromMinutes(2)))
+            httpClient.DefaultRequestHeaders.Accept.Add(MediaTypeWithQualityHeaderValue("application/json"))
+            for header in urlProviderHeader do
+                httpClient.DefaultRequestHeaders.Add(header.Key, header.Value)
             while not cts.IsCancellationRequested do
                 try
                     do! Task.Delay checkInterval
@@ -75,8 +78,7 @@ type ControlledClusterFailoverBuilder() =
     let mutable providerUrl = ""
     let mutable checkInterval = TimeSpan.FromMinutes(1.0)
     let mutable defaultServiceUrl = ""
-    let mutable defaultAuthentication = Authentication.AuthenticationDisabled
-    let mutable defaultTlsTrustCertificate = null
+    let mutable urlProviderHeader = readOnlyDict []
 
     member this.ProviderUrl(url: string) =
         providerUrl <- url
@@ -90,12 +92,8 @@ type ControlledClusterFailoverBuilder() =
         defaultServiceUrl <- url
         this
 
-    member this.DefaultAuthentication(authentication: Authentication) =
-        defaultAuthentication <- authentication
-        this
-
-    member this.DefaultTlsTrustCertificate(certificate: X509Certificate2) =
-        defaultTlsTrustCertificate <- certificate
+    member this.UrlProviderHeader(header: IReadOnlyDictionary<string, string>) =
+        urlProviderHeader <- header
         this
 
     member this.Build() : IServiceUrlProvider =
@@ -103,11 +101,12 @@ type ControlledClusterFailoverBuilder() =
             invalidArg "providerUrl" "providerUrl shouldn't be null or empty"
         if String.IsNullOrEmpty(defaultServiceUrl) then
             invalidArg "defaultServiceUrl" "defaultServiceUrl shouldn't be null or empty"
+        if isNull urlProviderHeader then
+            invalidArg "urlProviderHeader" "UrlProviderHeader shouldn't be null"
 
         new ControlledClusterFailover(
             providerUrl,
             checkInterval,
             defaultServiceUrl,
-            defaultAuthentication,
-            defaultTlsTrustCertificate
+            urlProviderHeader
         ) :> IServiceUrlProvider
