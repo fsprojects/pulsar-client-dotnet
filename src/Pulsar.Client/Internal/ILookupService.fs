@@ -22,4 +22,4 @@ type internal ILookupService =
     abstract member GetSchema: CompleteTopicName * ?schema: SchemaVersion -> Task<TopicSchema option>
 
     //  Updates the service url.
-    abstract member UpdateServiceUrl: string -> unit
+    abstract member UpdateServiceUrl: ServiceUri -> unit

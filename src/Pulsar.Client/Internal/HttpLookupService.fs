@@ -95,11 +95,8 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
                 return result
             }
 
-        member this.UpdateServiceUrl(serviceUrl: string) =
-            match ServiceUri.parse serviceUrl with
-            | Result.Ok parsedServiceUri ->
-                serviceAddresses <- parsedServiceUri.Addresses
-            | _ -> ()
+        member this.UpdateServiceUrl(serviceUrl: ServiceUri) =
+            serviceAddresses <- serviceUrl.Addresses
 
     //  GET /admin/v2/{topic-domain}/{tenant}/{namespace}/{topic}/partitions?checkAllowAutoCreation=true
     member private this.GetPartitionedTopicMetadataInner (topicName: CompleteTopicName, backoff: Backoff, remainingTimeMs) =

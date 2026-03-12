@@ -73,11 +73,8 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 return result
             }
 
-        member this.UpdateServiceUrl(serviceUrl: string) =
-            match ServiceUri.parse serviceUrl with
-            | Result.Ok parsedServiceUri ->
-                endPointResolver.UpdateAddresses(parsedServiceUri.Addresses)
-            | _ -> ()
+        member this.UpdateServiceUrl(serviceUrl: ServiceUri) =
+            endPointResolver.UpdateAddresses(serviceUrl.Addresses)
 
     member private this.GetPartitionedTopicMetadataInner (topicName, backoff: Backoff, remainingTimeMs) =
          async {

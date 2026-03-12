@@ -138,16 +138,14 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
     let removeConsumer = fun consumer -> post mb (RemoveConsumer consumer)
     let addConsumer = fun consumer -> post mb (AddConsumer consumer)
 
-    let urlProviderContext =
-        { new IServiceUrlProviderContext with
-            member _.UpdateServiceUrl(serviceUrl) = this.UpdateServiceUrl(serviceUrl)
-            member _.UpdateAuthentication(authentication) = this.UpdateAuthentication(authentication)
-            member _.UpdateTlsTrustCertificate(certificate) = this.UpdateTlsTrustCertificate(certificate)
-        }
-
     do
         match currentConfig.ServiceUrlProvider with
-        | Some provider -> provider.Initialize(urlProviderContext)
+        | Some provider -> provider.Initialize({
+                new IServiceUrlProviderContext with
+                    member _.UpdateServiceUrl(serviceUrl) = this.UpdateServiceUrl(serviceUrl)
+                    member _.UpdateAuthentication(authentication) = this.UpdateAuthentication(authentication)
+                    member _.UpdateTlsTrustCertificate(certificate) = this.UpdateTlsTrustCertificate(certificate)
+            })
         | None -> ()
 
     static member Logger
@@ -383,11 +381,11 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
         match ServiceUri.parse serviceUrl with
         | Result.Ok parsedServiceUri ->
             currentConfig <- { currentConfig with ServiceAddresses = parsedServiceUri.Addresses }
+            connectionPool.UpdateConfig(currentConfig)
+            lookupService.UpdateServiceUrl(parsedServiceUri)
+            connectionPool.CloseAllConnections() |> ignore
         | Result.Error err ->
             Log.Logger.LogWarning("Failed to parse ServiceUrl {0}: {1}", serviceUrl, err)
-        connectionPool.UpdateConfig(currentConfig)
-        lookupService.UpdateServiceUrl(serviceUrl)
-        connectionPool.CloseAllConnections() |> ignore
 
     member private this.UpdateAuthentication(authentication: Authentication) =
         Log.Logger.LogInformation("Updating authentication")

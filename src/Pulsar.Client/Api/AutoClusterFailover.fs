@@ -8,9 +8,15 @@ open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open System.Security.Cryptography.X509Certificates
 open Pulsar.Client.Common
+open Pulsar.Client.Internal
 
 type FailoverPolicy =
     | Order = 0
+
+type private ServiceInfo = {
+    Url: string
+    EndPointResolver: EndPointResolver
+}
 
 type AutoClusterFailover
     (
@@ -26,33 +32,41 @@ type AutoClusterFailover
         checkInterval: TimeSpan
     ) =
 
-    let mutable currentServiceUrl = primary
-    let mutable currentProviderContext = None : IServiceUrlProviderContext option
+    let getServiceInfo (url: string) =
+        let serviceUri =
+            ServiceUri.parse(primary) |> Result.defaultWith (
+                fun err -> failwith $"Invalid service url: %s{url}, error: %s{err}")
+        { Url = url; EndPointResolver = EndPointResolver(serviceUri.Addresses) }
+
+    let primaryServiceInfo = getServiceInfo primary
+    let secondaryServiceInfos = secondary |> Array.map getServiceInfo
+    let mutable currentServiceInfo = primaryServiceInfo
     let cts = new CancellationTokenSource()
 
     let mutable recoveredTimestamp = 0L
     let mutable failedTimestamp = 0L
 
-    let probeAvailable (url: string) =
+    let probeAvailable (resolve: EndPointResolver) =
         backgroundTask {
+            let endpoint = resolve.Resolve()
             try
-                let uri = Uri(url.Replace("pulsar+ssl://", "pulsar://").Replace("http://", "pulsar://").Replace("https://", "pulsar://")) // ensure Uri parses it correctly just for host/port extraction
                 use client = new TcpClient()
-                use cts = new CancellationTokenSource(1000)
-                do! client.ConnectAsync(uri.Host, uri.Port, cts.Token)
+                use cts = new CancellationTokenSource(30_000)
+                do! client.ConnectAsync(endpoint.Host, endpoint.Port, cts.Token)
                 return true
             with ex ->
-                Log.Logger.LogWarning(ex, "Failed to probe available, url: {0}", url)
+                Log.Logger.LogWarning(ex, "Failed to probe available, url: {0}", endpoint)
                 return false
         }
 
-    do
+    let run (ctx: IServiceUrlProviderContext) =
+        Log.Logger.LogInformation("Initializing AutoClusterFailover")
         backgroundTask {
             while not cts.IsCancellationRequested do
                 try
                     do! Task.Delay checkInterval
-                    if currentServiceUrl = primary then
-                        let! available = probeAvailable primary
+                    if currentServiceInfo = primaryServiceInfo then
+                        let! available = probeAvailable primaryServiceInfo.EndPointResolver
                         if not available then
                             if failedTimestamp = 0L then
                                 failedTimestamp <- DateTime.UtcNow.Ticks
@@ -60,43 +74,37 @@ type AutoClusterFailover
                                 let! targetSecondary = 
                                     task {
                                         let mutable found = None
-                                        for sec in secondary do
+                                        for sec in secondaryServiceInfos do
                                             if found.IsNone then
-                                                let! avail = probeAvailable sec
+                                                let! avail = probeAvailable sec.EndPointResolver
                                                 if avail then found <- Some sec
                                         return found
                                     }
                                 match targetSecondary with
                                 | Some sec ->
-                                    Log.Logger.LogInformation("Switching to secondary cluster {0}", sec)
-                                    currentServiceUrl <- sec
-                                    match currentProviderContext with
-                                    | Some ctx ->
-                                        ctx.UpdateServiceUrl(sec)
-                                        if not (box secondaryAuthentication = null) && secondaryAuthentication.ContainsKey(sec) then
-                                            ctx.UpdateAuthentication(secondaryAuthentication[sec])
-                                        if not (box secondaryTlsTrustCertificate = null) && secondaryTlsTrustCertificate.ContainsKey(sec) then
-                                            ctx.UpdateTlsTrustCertificate(secondaryTlsTrustCertificate[sec])
-                                    | None -> ()
+                                    Log.Logger.LogInformation("Switching to secondary cluster {0}", sec.Url)
+                                    currentServiceInfo <- sec
+                                    ctx.UpdateServiceUrl(sec.Url)
+                                    if not (isNull secondaryAuthentication) && secondaryAuthentication.ContainsKey(sec.Url) then
+                                        ctx.UpdateAuthentication(secondaryAuthentication[sec.Url])
+                                    if not (isNull secondaryTlsTrustCertificate) && secondaryTlsTrustCertificate.ContainsKey(sec.Url) then
+                                        ctx.UpdateTlsTrustCertificate(secondaryTlsTrustCertificate[sec.Url])
                                     failedTimestamp <- 0L
                                 | None ->
                                     Log.Logger.LogWarning("Could not find any available secondary cluster")
                         else
                             failedTimestamp <- 0L
                     else
-                        let! available = probeAvailable primary
+                        let! available = probeAvailable primaryServiceInfo.EndPointResolver
                         if available then
                             if recoveredTimestamp = 0L then
                                 recoveredTimestamp <- DateTime.UtcNow.Ticks
                             elif TimeSpan.FromTicks(DateTime.UtcNow.Ticks - recoveredTimestamp) >= switchBackDelay then
                                 Log.Logger.LogInformation("Switching back to primary cluster {0}", primary)
-                                currentServiceUrl <- primary
-                                match currentProviderContext with
-                                | Some ctx ->
-                                    ctx.UpdateServiceUrl(primary)
-                                    ctx.UpdateAuthentication(primaryAuthentication)
-                                    ctx.UpdateTlsTrustCertificate(primaryTlsTrustCertificate)
-                                | None -> ()
+                                currentServiceInfo <- primaryServiceInfo
+                                ctx.UpdateServiceUrl(primary)
+                                ctx.UpdateAuthentication(primaryAuthentication)
+                                ctx.UpdateTlsTrustCertificate(primaryTlsTrustCertificate)
                                 recoveredTimestamp <- 0L
                         else
                             recoveredTimestamp <- 0L
@@ -111,8 +119,9 @@ type AutoClusterFailover
 
     interface IServiceUrlProvider with
         member this.Initialize(context: IServiceUrlProviderContext) =
-            currentProviderContext <- Some context
-        member this.GetServiceUrl() = currentServiceUrl
+            run context
+        member this.GetServiceUrl() = currentServiceInfo.Url
+
         member this.Dispose() =
             cts.Cancel()
             cts.Dispose()
