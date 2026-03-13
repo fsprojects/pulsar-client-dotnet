@@ -10,9 +10,6 @@ open System.Security.Cryptography.X509Certificates
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 
-type FailoverPolicy =
-    | Order = 0
-
 type private ServiceInfo = {
     Url: string
     EndPointResolver: EndPointResolver
@@ -22,7 +19,6 @@ type AutoClusterFailover
     (
         primary: string,
         secondary: string array,
-        failoverPolicy: FailoverPolicy,
         primaryAuthentication: Authentication,
         secondaryAuthentication: IReadOnlyDictionary<string, Authentication>,
         primaryTlsTrustCertificate: X509Certificate2,
@@ -130,7 +126,6 @@ type AutoClusterFailoverBuilder() =
     let mutable failoverDelay = TimeSpan.FromSeconds(30.0)
     let mutable switchBackDelay = TimeSpan.FromSeconds(60.0)
     let mutable checkInterval = TimeSpan.FromSeconds(30.0)
-    let mutable failoverPolicy = FailoverPolicy.Order
     let mutable primaryAuthentication = Authentication.AuthenticationDisabled
     let secondaryAuthentication = Dictionary<string, Authentication>()
     let mutable primaryTlsTrustCertificate = null : X509Certificate2
@@ -154,10 +149,6 @@ type AutoClusterFailoverBuilder() =
 
     member this.CheckInterval(interval: TimeSpan) =
         checkInterval <- interval
-        this
- 
-    member this.FailoverPolicy(policy: FailoverPolicy) =
-        failoverPolicy <- policy
         this
 
     member this.PrimaryAuthentication(authentication: Authentication) =
@@ -186,8 +177,7 @@ type AutoClusterFailoverBuilder() =
         
         new AutoClusterFailover(
             primary, 
-            secondary, 
-            failoverPolicy, 
+            secondary,
             primaryAuthentication, 
             secondaryAuthentication, 
             primaryTlsTrustCertificate, 
