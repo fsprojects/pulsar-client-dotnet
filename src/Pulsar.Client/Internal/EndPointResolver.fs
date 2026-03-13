@@ -22,3 +22,4 @@ type internal EndPointResolver(initialAddresses : Uri array) =
         if Array.isEmpty newAddresses then
             invalidArg "newAddresses" "Addresses list could not be empty."
         addresses <- newAddresses
+        currentIndex = -1
