@@ -39,8 +39,8 @@ type AutoClusterFailover
     let mutable currentServiceInfo = primaryServiceInfo
     let cts = new CancellationTokenSource()
 
-    let mutable recoveredTimestamp = 0L
-    let mutable failedTimestamp = 0L
+    let mutable recoveredTimestamp: DateTime option = None
+    let mutable failedTimestamp: DateTime option = None
 
     let probeAvailable (resolve: EndPointResolver) =
         backgroundTask {
@@ -64,10 +64,11 @@ type AutoClusterFailover
                     if currentServiceInfo = primaryServiceInfo then
                         let! available = probeAvailable primaryServiceInfo.EndPointResolver
                         if not available then
-                            if failedTimestamp = 0L then
-                                failedTimestamp <- DateTime.UtcNow.Ticks
-                            elif TimeSpan.FromTicks(DateTime.UtcNow.Ticks - failedTimestamp) >= failoverDelay then
-                                let! targetSecondary = 
+                            match failedTimestamp with
+                            | None ->
+                                failedTimestamp <- Some DateTime.UtcNow
+                            | Some ts when DateTime.UtcNow - ts >= failoverDelay ->
+                                let! targetSecondary =
                                     task {
                                         let mutable found = None
                                         for sec in secondaryServiceInfos do
@@ -85,25 +86,28 @@ type AutoClusterFailover
                                         ctx.UpdateAuthentication(secondaryAuthentication[sec.Url])
                                     if not (isNull secondaryTlsTrustCertificate) && secondaryTlsTrustCertificate.ContainsKey(sec.Url) then
                                         ctx.UpdateTlsTrustCertificate(secondaryTlsTrustCertificate[sec.Url])
-                                    failedTimestamp <- 0L
+                                    failedTimestamp <- None
                                 | None ->
                                     Log.Logger.LogWarning("Could not find any available secondary cluster")
+                            | _ -> ()
                         else
-                            failedTimestamp <- 0L
+                            failedTimestamp <- None
                     else
                         let! available = probeAvailable primaryServiceInfo.EndPointResolver
                         if available then
-                            if recoveredTimestamp = 0L then
-                                recoveredTimestamp <- DateTime.UtcNow.Ticks
-                            elif TimeSpan.FromTicks(DateTime.UtcNow.Ticks - recoveredTimestamp) >= switchBackDelay then
+                            match recoveredTimestamp with
+                            | None ->
+                                recoveredTimestamp <- Some DateTime.UtcNow
+                            | Some ts when DateTime.UtcNow - ts >= switchBackDelay ->
                                 Log.Logger.LogInformation("Switching back to primary cluster {0}", primary)
                                 currentServiceInfo <- primaryServiceInfo
                                 ctx.UpdateServiceUrl(primary)
                                 ctx.UpdateAuthentication(primaryAuthentication)
                                 ctx.UpdateTlsTrustCertificate(primaryTlsTrustCertificate)
-                                recoveredTimestamp <- 0L
+                                recoveredTimestamp <- None
+                            | _ -> ()
                         else
-                            recoveredTimestamp <- 0L
+                            recoveredTimestamp <- None
                 with Flatten ex ->
                     Log.Logger.LogError(ex, "Error checking cluster")
         }
