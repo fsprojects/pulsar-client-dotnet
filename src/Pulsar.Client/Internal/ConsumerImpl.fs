@@ -859,7 +859,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 | Batch (index, _) ->
                                     data.BatchIndex <- %index
                                 data
-                    // startMessageRollbackDurationInSec should be consider only once when consumer connects to first time
+                    // startMessageRollbackDurationInSec should be considered only once when consumer connects to first time
                     let startMessageRollbackDuration =
                         if startMessageRollbackDuration > TimeSpan.Zero && startMessageId = initialStartMessageId then
                             startMessageRollbackDuration
@@ -906,7 +906,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
                             continueLoop <- false
                         | _ ->
-                            // consumer was subscribed and connected but we got some error, keep trying
+                            // consumer was subscribed and connected, but we got some error, keep trying
                             connectionHandler.ReconnectLater ex
                 | _ ->
                     Log.Logger.LogWarning("{0} connection opened but connection state is {1}", prefix, connectionHandler.ConnectionState)
@@ -1325,6 +1325,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
                 Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                connectionHandler.Failed()
+                stopConsumer()
             else
                 Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore

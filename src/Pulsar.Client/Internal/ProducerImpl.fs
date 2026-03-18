@@ -825,6 +825,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 if t.IsFaulted then
                     let (Flatten ex) = t.Exception
                     Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                    connectionHandler.Failed()
+                    stopProducer()
                 else
                     Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
