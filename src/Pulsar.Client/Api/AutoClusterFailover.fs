@@ -81,7 +81,7 @@ type AutoClusterFailover
                                 | Some sec ->
                                     Log.Logger.LogInformation("Switching to secondary cluster {0}", sec.Url)
                                     currentServiceInfo <- sec
-                                    ctx.UpdateServiceUrl(sec.Url)
+                                    do! ctx.UpdateServiceUrl(sec.Url)
                                     if not (isNull secondaryAuthentication) && secondaryAuthentication.ContainsKey(sec.Url) then
                                         ctx.UpdateAuthentication(secondaryAuthentication[sec.Url])
                                     if not (isNull secondaryTlsTrustCertificate) && secondaryTlsTrustCertificate.ContainsKey(sec.Url) then
@@ -101,7 +101,7 @@ type AutoClusterFailover
                             | Some ts when DateTime.UtcNow - ts >= switchBackDelay ->
                                 Log.Logger.LogInformation("Switching back to primary cluster {0}", primary)
                                 currentServiceInfo <- primaryServiceInfo
-                                ctx.UpdateServiceUrl(primary)
+                                do! ctx.UpdateServiceUrl(primary)
                                 ctx.UpdateAuthentication(primaryAuthentication)
                                 ctx.UpdateTlsTrustCertificate(primaryTlsTrustCertificate)
                                 recoveredTimestamp <- None

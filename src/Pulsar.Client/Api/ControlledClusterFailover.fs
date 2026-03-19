@@ -58,7 +58,7 @@ type ControlledClusterFailover
                         if not (String.IsNullOrEmpty(newServiceUrl)) && newServiceUrl <> currentServiceUrl then
                             Log.Logger.LogInformation("ControlledClusterFailover switching to {0}", newServiceUrl)
                             currentServiceUrl <- newServiceUrl
-                            ctx.UpdateServiceUrl(newServiceUrl)
+                            do! ctx.UpdateServiceUrl(newServiceUrl)
                     else
                         Log.Logger.LogWarning("ControlledClusterFailover failed to fetch config from {0}, status {1}", providerUrl, response.StatusCode)
                 with Flatten ex ->

@@ -1,4 +1,4 @@
-namespace Pulsar.Client.Api
+﻿namespace Pulsar.Client.Api
 
 open System
 open System.Text.RegularExpressions
@@ -376,16 +376,19 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
         | PulsarClientState.Closed | PulsarClientState.Closing -> true
         | _ -> false
 
-    member this.UpdateServiceUrl(serviceUrl: string) =
-        Log.Logger.LogInformation("Updating service URL to {0}", serviceUrl)
-        match ServiceUri.parse serviceUrl with
-        | Result.Ok parsedServiceUri ->
-            currentConfig <- { currentConfig with ServiceAddresses = parsedServiceUri.Addresses }
-            connectionPool.UpdateConfig(currentConfig)
-            lookupService.UpdateServiceUrl(parsedServiceUri)
-            connectionPool.CloseAllConnections() |> ignore
-        | Result.Error err ->
-            Log.Logger.LogWarning("Failed to parse ServiceUrl {0}: {1}", serviceUrl, err)
+    member this.UpdateServiceUrl(serviceUrl: string): Task<unit> =
+        backgroundTask {
+            Log.Logger.LogInformation("Updating service URL to {0}", serviceUrl)
+            match ServiceUri.parse serviceUrl with
+            | Ok parsedServiceUri ->
+                currentConfig <- { currentConfig with ServiceAddresses = parsedServiceUri.Addresses }
+                connectionPool.UpdateConfig(currentConfig)
+                lookupService.UpdateServiceUrl(parsedServiceUri)
+                return! connectionPool.CloseAllConnections()
+            | Error err ->
+                Log.Logger.LogWarning("Failed to parse ServiceUrl {0}: {1}", serviceUrl, err)
+                return ()
+        }
 
     member private this.UpdateAuthentication(authentication: Authentication) =
         Log.Logger.LogInformation("Updating authentication")
