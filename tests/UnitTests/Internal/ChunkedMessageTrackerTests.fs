@@ -38,6 +38,7 @@ let tests =
     let testRawMessage =
         {
             MessageId = Unchecked.defaultof<MessageId>
+            ConsumerEpoch = ConsumerEpoch.DEFAULT_CONSUMER_EPOCH
             Metadata = Unchecked.defaultof<Metadata>
             RedeliveryCount = 0
             Payload = new MemoryStream [||]

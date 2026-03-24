@@ -156,7 +156,7 @@ module CommandsTests =
                 let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand
                         (newSubscribe topicName %"test-subscription" consumerId requestId consumerName
-                            SubscriptionType.Exclusive SubscriptionInitialPosition.Earliest false null true TimeSpan.Zero true None (Schema.BYTES().SchemaInfo) priorityLevel false)
+                            SubscriptionType.Exclusive SubscriptionInitialPosition.Earliest false null true TimeSpan.Zero true None (Schema.BYTES().SchemaInfo) priorityLevel false ConsumerEpoch.DEFAULT_CONSUMER_EPOCH)
 
                 totalSize |> Expect.equal "" 72
                 commandSize |> Expect.equal "" 68
