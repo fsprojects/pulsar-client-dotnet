@@ -243,7 +243,7 @@ let tests =
         }
         
         
-        testTask "Seek won't get stuck at the receive in MultiTopicsConsumer" {
+        testTask "Seek won't get stuck at the receive or receive duplicate messages in MultiTopicsConsumer" {
             Log.Debug("Started Seek won't get stuck at the receive in MultiTopicsConsumer")
             let client = getClient()
             let topicName = "persistent://public/default/multi-topic-seek"

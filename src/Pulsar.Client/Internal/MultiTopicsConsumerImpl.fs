@@ -83,7 +83,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let prefix = $"mt/consumer({consumerId}, {consumerName})"
     let consumers = Dictionary<CompleteTopicName,IConsumer<'T> * TaskGenerator<ResultOrException<Message<'T>>>>()
     let consumerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
-    let mutable pollerCts = new CancellationTokenSource()
+    let pollerCts = new CancellationTokenSource()
     let mutable connectionState = MultiTopicConnectionState.Uninitialized
     let mutable currentStream = Unchecked.defaultof<TaskSeq<ResultOrException<Message<'T>>>>
     let partitionedTopics = Dictionary<TopicName, ConsumerInitInfo<'T>>()
@@ -182,7 +182,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 if hasReachedEndOfTopic then
                     Log.Logger.LogWarning("{0} topic was terminated", topic)
                     do! Task.Delay(Timeout.Infinite) // infinite delay for terminated topic
-                let! message = consumer.ReceiveWrappedAsync(pollerCts.Token)
+                let! message = consumer.ReceiveWrappedAsync(CancellationToken.None)
                 return
                     message |> Result.map (fun msg ->
                         let newMessageId = { msg.MessageId with TopicName = topic }
@@ -647,15 +647,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     Log.Logger.LogInformation("{0} poller has stopped normally", prefix)
             )
 
-    let restartPoller() =
-        pollerCts.Cancel()
-        pollerCts.Dispose()
-        pollerCts <- new CancellationTokenSource()
-        currentStream <-
-            consumers
-            |> Seq.map (fun (KeyValue(_, (_, stream))) -> stream)
-            |> TaskSeq
-
     let mb = Channel.CreateUnbounded<MultiTopicConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (backgroundTask {
         let mutable continueLoop = true
@@ -891,7 +882,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     backgroundTask {
                         try
                             unAckedMessageTracker.Clear()
-                            pollerCts.Cancel()
                             clearIncomingMessages()
                             let! _ =
                                 consumers
@@ -900,9 +890,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                     | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
                                     | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
                                 |> Task.WhenAll
-                            clearIncomingMessages()
-                            restartPoller()
-                            runPoller pollerCts.Token |> ignore
+                            currentStream.RestartCompletedTasks()
                             channel.SetResult()
                         with Flatten ex ->
                             channel.SetException ex
@@ -912,15 +900,12 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 backgroundTask {
                     try
                         unAckedMessageTracker.Clear()
-                        pollerCts.Cancel()
                         clearIncomingMessages()
                         let! _ =
                             consumers
                             |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))
                             |> Task.WhenAll
-                        clearIncomingMessages()
-                        restartPoller()
-                        runPoller pollerCts.Token |> ignore
+                        currentStream.RestartCompletedTasks()
                         channel.SetResult()
                     with Flatten ex ->
                         channel.SetException ex
