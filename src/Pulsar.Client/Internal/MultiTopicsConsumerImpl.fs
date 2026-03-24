@@ -83,7 +83,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let prefix = $"mt/consumer({consumerId}, {consumerName})"
     let consumers = Dictionary<CompleteTopicName,IConsumer<'T> * TaskGenerator<ResultOrException<Message<'T>>>>()
     let consumerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
-    let pollerCts = new CancellationTokenSource()
+    let mutable pollerCts = new CancellationTokenSource()
     let mutable connectionState = MultiTopicConnectionState.Uninitialized
     let mutable currentStream = Unchecked.defaultof<TaskSeq<ResultOrException<Message<'T>>>>
     let partitionedTopics = Dictionary<TopicName, ConsumerInitInfo<'T>>()
@@ -403,6 +403,19 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         tryResumePoller()
         m
 
+    let rec tryDequeueValidMessage() =
+        if incomingMessages.Count = 0 then
+            None
+        else
+            let message = dequeueMessage()
+            match message with
+            | Ok msg when not (isValidConsumerEpoch msg) ->
+                Log.Logger.LogInformation("Dropping stale queued message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}], consumerEpoch : [{3}]",
+                    msg.MessageId.TopicName, msg.MessageId, msg.ConsumerEpoch, (consumers[msg.MessageId.TopicName] |> fst :?> ConsumerImpl<'T>).CurrentConsumerEpoch)
+                tryDequeueValidMessage()
+            | _ ->
+                Some message
+
     let hasEnoughMessagesForBatchReceive() =
         hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
 
@@ -431,20 +444,17 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         let mutable shouldContinue = true
         let mutable error = None
         while shouldContinue && incomingMessages.Count > 0 do
-            let m = incomingMessages.Peek()
-            match m with
-            | Ok msgPeeked ->
-                if messages.CanAdd msgPeeked then
-                    match dequeueMessage() with
-                    | Ok msg ->
-                        unAckedMessageTracker.Add msg.MessageId
-                        messages.Add msg
-                    | _ -> failwith "Impossible branch in replyWithBatch"
-                else
-                    shouldContinue <- false
-            | Error ex ->
+            match tryDequeueValidMessage() with
+            | Some (Ok msg) when messages.CanAdd msg ->
+                unAckedMessageTracker.Add msg.MessageId
+                messages.Add msg
+            | Some (Ok _) ->
+                shouldContinue <- false
+            | Some (Error ex) ->
                 shouldContinue <- false
                 error <- Some ex
+            | None ->
+                shouldContinue <- false
         match error with
         | Some ex when messages.Count = 0 ->
             // only fail when no batched messages before error happened
@@ -554,9 +564,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         if cancellationToken.IsCancellationRequested then
             channel.SetCanceled()
         else
-            if incomingMessages.Count > 0 then
-                replyWithMessage channel <| dequeueMessage()
-            else
+            match tryDequeueValidMessage() with
+            | Some message ->
+                replyWithMessage channel message
+            | None ->
                 let mutable synchronouslyCanceled = false
                 let tokenRegistration =
                     if cancellationToken.CanBeCanceled then
@@ -636,6 +647,16 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     Log.Logger.LogInformation("{0} poller has stopped normally", prefix)
             )
 
+    let restartPoller() =
+        pollerCts.Cancel()
+        pollerCts.Dispose()
+        pollerCts <- new CancellationTokenSource()
+        currentStream <-
+            consumers
+            |> Seq.map (fun (KeyValue(_, (_, stream))) -> stream)
+            |> TaskSeq
+        runPoller pollerCts.Token |> ignore
+
     let mb = Channel.CreateUnbounded<MultiTopicConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (backgroundTask {
         let mutable continueLoop = true
@@ -687,12 +708,18 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         msg.MessageId.TopicName, msg.MessageId, msg.ConsumerEpoch, (consumers[msg.MessageId.TopicName] |> fst :?> ConsumerImpl<'T>).CurrentConsumerEpoch)
                 | _ ->
                     if hasWaitingChannel then
-                        let waitingChannel = waiters |> dequeueWaiter
                         if (incomingMessages.Count = 0) then
-                            replyWithMessage waitingChannel message
+                            match message with
+                            | Ok msg when not (isValidConsumerEpoch msg) ->
+                                Log.Logger.LogInformation("Dropping stale direct message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}], consumerEpoch : [{3}]",
+                                    msg.MessageId.TopicName, msg.MessageId, msg.ConsumerEpoch, (consumers[msg.MessageId.TopicName] |> fst :?> ConsumerImpl<'T>).CurrentConsumerEpoch)
+                            | _ ->
+                                let waitingChannel = waiters |> dequeueWaiter
+                                replyWithMessage waitingChannel message
                         else
+                            let waitingChannel = waiters |> dequeueWaiter
                             enqueueMessage message
-                            replyWithMessage waitingChannel <| dequeueMessage()
+                            replyWithMessage waitingChannel <| tryDequeueValidMessage().Value
                     else
                         enqueueMessage message
                         if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
@@ -861,6 +888,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     backgroundTask {
                         try
                             unAckedMessageTracker.Clear()
+                            pollerCts.Cancel()
                             clearIncomingMessages()
                             let! _ =
                                 consumers
@@ -869,7 +897,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                     | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
                                     | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
                                 |> Task.WhenAll
-                            currentStream.RestartCompletedTasks()
+                            clearIncomingMessages()
+                            restartPoller()
                             channel.SetResult()
                         with Flatten ex ->
                             channel.SetException ex
@@ -879,12 +908,14 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 backgroundTask {
                     try
                         unAckedMessageTracker.Clear()
+                        pollerCts.Cancel()
                         clearIncomingMessages()
                         let! _ =
                             consumers
                             |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))
                             |> Task.WhenAll
-                        currentStream.RestartCompletedTasks()
+                        clearIncomingMessages()
+                        restartPoller()
                         channel.SetResult()
                     with Flatten ex ->
                         channel.SetException ex
