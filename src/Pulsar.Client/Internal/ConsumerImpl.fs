@@ -1129,9 +1129,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         incomingMessages.Clear()
                         incomingMessagesSize <- 0L
                         seekTask <- Some channel
-                        clientCnx.RemoveConsumer(consumerId)
-                        connectionHandler.ConnectionClosed clientCnx
-                        Log.Logger.LogInformation("{0} Successfully reset subscription to {1}; waiting for reconnection", prefix, seekData)
+                        Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
                     with Flatten ex ->
                         // re-set duringSeek and seekMessageId if seek failed
                         duringSeek <- originSeekMessageId
