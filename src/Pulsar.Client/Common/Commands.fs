@@ -258,7 +258,7 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: SubscriptionName)
     (consumerName: string) (subscriptionType: SubscriptionType) (subscriptionInitialPosition: SubscriptionInitialPosition)
     (readCompacted: bool) (startMessageId: MessageIdData) (durable: bool) (startMessageRollbackDuration: TimeSpan)
     (createTopicIfDoesNotExist: bool) (keySharedPolicy: KeySharedPolicy option) (schemaInfo: SchemaInfo) (priorityLevel: PriorityLevel)
-    (replicateSubscriptionState: bool)=
+    (replicateSubscriptionState: bool) (consumerEpoch: int64)=
     let schema = getProtoSchema schemaInfo
     let subType =
         match subscriptionType with
@@ -276,6 +276,8 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: SubscriptionName)
                     ConsumerName = consumerName, RequestId = %requestId, initialPosition = initialPosition, ReadCompacted = readCompacted,
                     StartMessageId = startMessageId, Durable = durable, ForceTopicCreation = createTopicIfDoesNotExist, PriorityLevel = %priorityLevel,
                     ReplicateSubscriptionState = replicateSubscriptionState)
+    if consumerEpoch <> ConsumerEpoch.DEFAULT_CONSUMER_EPOCH then
+        request.ConsumerEpoch <- uint64 consumerEpoch
     match keySharedPolicy with
     | Some keySharedPolicy ->
         let meta = KeySharedMeta()

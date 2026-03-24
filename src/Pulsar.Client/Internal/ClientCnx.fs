@@ -544,6 +544,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     TopicName = %""
                     ChunkMessageIds = None
                 }
+            ConsumerEpoch =
+                if cmd.ShouldSerializeConsumerEpoch() then
+                    int64 cmd.ConsumerEpoch
+                else
+                    ConsumerEpoch.DEFAULT_CONSUMER_EPOCH
             RedeliveryCount = int cmd.RedeliveryCount
             Metadata = metadata
             Payload = payload

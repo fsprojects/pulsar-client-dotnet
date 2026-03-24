@@ -370,6 +370,14 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let isPollingAllowed() =
         incomingMessages.Count <= sharedQueueResumeThreshold
 
+    let isValidConsumerEpoch (message: Message<'T>) =
+        match consumers.TryGetValue(message.MessageId.TopicName) with
+        | true, (consumer, _) ->
+            let consumerImpl = consumer :?> ConsumerImpl<'T>
+            ConsumerEpoch.isValidConsumerEpoch consumerImpl.CurrentConsumerEpoch message.ConsumerEpoch
+        | _ ->
+            false
+
     let enqueueMessage (m: ResultOrException<Message<'T>>) =
         match m with
         | Ok msg -> incomingMessagesSize <- incomingMessagesSize + msg.Data.LongLength
@@ -673,19 +681,23 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 let hasWaitingBatchChannel = batchWaiters.Count > 0
                 Log.Logger.LogDebug("{0} MessageReceived queueLength={1}, hasWaitingChannel={2},  hasWaitingBatchChannel={3}",
                     prefix, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
-                // handle message
-                if hasWaitingChannel then
-                    let waitingChannel = waiters |> dequeueWaiter
-                    if (incomingMessages.Count = 0) then
-                        replyWithMessage waitingChannel message
+                match message with
+                | Ok msg when not (isValidConsumerEpoch msg) ->
+                    Log.Logger.LogInformation("Consumer filter old epoch message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}], consumerEpoch : [{3}]",
+                        msg.MessageId.TopicName, msg.MessageId, msg.ConsumerEpoch, (consumers[msg.MessageId.TopicName] |> fst :?> ConsumerImpl<'T>).CurrentConsumerEpoch)
+                | _ ->
+                    if hasWaitingChannel then
+                        let waitingChannel = waiters |> dequeueWaiter
+                        if (incomingMessages.Count = 0) then
+                            replyWithMessage waitingChannel message
+                        else
+                            enqueueMessage message
+                            replyWithMessage waitingChannel <| dequeueMessage()
                     else
                         enqueueMessage message
-                        replyWithMessage waitingChannel <| dequeueMessage()
-                else
-                    enqueueMessage message
-                    if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                        let ch = batchWaiters |> dequeueBatchWaiter
-                        replyWithBatch ch
+                        if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                            let ch = batchWaiters |> dequeueBatchWaiter
+                            replyWithBatch ch
                 // check if should reply to poller immediately
                 if isPollingAllowed() |> not then
                     Log.Logger.LogDebug("{0} paused poller, incomingMessages={1}, sharedQueueResumeThreshold={2}", prefix, incomingMessages.Count, sharedQueueResumeThreshold)
