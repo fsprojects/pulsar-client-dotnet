@@ -182,7 +182,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 if hasReachedEndOfTopic then
                     Log.Logger.LogWarning("{0} topic was terminated", topic)
                     do! Task.Delay(Timeout.Infinite) // infinite delay for terminated topic
-                let! message = consumer.ReceiveWrappedAsync(CancellationToken.None)
+                let! message = consumer.ReceiveWrappedAsync(pollerCts.Token)
                 return
                     message |> Result.map (fun msg ->
                         let newMessageId = { msg.MessageId with TopicName = topic }
@@ -655,7 +655,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             consumers
             |> Seq.map (fun (KeyValue(_, (_, stream))) -> stream)
             |> TaskSeq
-        runPoller pollerCts.Token |> ignore
 
     let mb = Channel.CreateUnbounded<MultiTopicConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (backgroundTask {
@@ -717,9 +716,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                 let waitingChannel = waiters |> dequeueWaiter
                                 replyWithMessage waitingChannel message
                         else
-                            let waitingChannel = waiters |> dequeueWaiter
                             enqueueMessage message
-                            replyWithMessage waitingChannel <| tryDequeueValidMessage().Value
+                            match tryDequeueValidMessage() with
+                            | Some validMessage ->
+                                let waitingChannel = waiters |> dequeueWaiter
+                                replyWithMessage waitingChannel validMessage
+                            | None ->
+                                ()
                     else
                         enqueueMessage message
                         if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
@@ -899,6 +902,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                 |> Task.WhenAll
                             clearIncomingMessages()
                             restartPoller()
+                            runPoller pollerCts.Token |> ignore
                             channel.SetResult()
                         with Flatten ex ->
                             channel.SetException ex
@@ -916,6 +920,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             |> Task.WhenAll
                         clearIncomingMessages()
                         restartPoller()
+                        runPoller pollerCts.Token |> ignore
                         channel.SetResult()
                     with Flatten ex ->
                         channel.SetException ex

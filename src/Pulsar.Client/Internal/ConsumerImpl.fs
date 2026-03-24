@@ -101,7 +101,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let initialStartMessageId = startMessageId
     let mutable incomingMessagesSize = 0L
     let mutable currentConsumerEpoch = ConsumerEpoch.DEFAULT_CONSUMER_EPOCH
-    let mutable pendingSeekReconnection: TaskCompletionSource<unit> option = None
+    let mutable seekTask: TaskCompletionSource<unit> option = None
     let deadLettersProcessor = consumerConfig.DeadLetterProcessor topicName
     let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable
     let stats =
@@ -570,9 +570,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             batchWaitingChannel.TrySetException ex |> ignore
 
     let closeConsumerTasks() =
-        pendingSeekReconnection
+        seekTask
         |> Option.iter (fun channel -> channel.TrySetException(AlreadyClosedException "Consumer is already closed") |> ignore)
-        pendingSeekReconnection <- None
+        seekTask <- None
         unAckedMessageTracker.Close()
         acksGroupingTracker.Close()
         clearDeadLetters()
@@ -892,8 +892,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         subscribeTsc.TrySetResult() |> ignore
                         if initialFlowCount <> 0 then
                             increaseAvailablePermits initialFlowCount
-                        pendingSeekReconnection |> Option.iter (fun channel -> channel.TrySetResult() |> ignore)
-                        pendingSeekReconnection <- None
+                        seekTask |> Option.iter (fun channel -> channel.TrySetResult() |> ignore)
+                        seekTask <- None
                     with Flatten ex ->
                         clientCnx.RemoveConsumer consumerId
                         Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
@@ -1128,15 +1128,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         acksGroupingTracker.FlushAndClean()
                         incomingMessages.Clear()
                         incomingMessagesSize <- 0L
-                        pendingSeekReconnection <- Some channel
+                        seekTask <- Some channel
                         clientCnx.RemoveConsumer(consumerId)
                         connectionHandler.ConnectionClosed clientCnx
                         Log.Logger.LogInformation("{0} Successfully reset subscription to {1}; waiting for reconnection", prefix, seekData)
                     with Flatten ex ->
                         // re-set duringSeek and seekMessageId if seek failed
                         duringSeek <- originSeekMessageId
-                        pendingSeekReconnection |> Option.iter (fun reconnectionChannel -> reconnectionChannel.TrySetException(ex) |> ignore)
-                        pendingSeekReconnection <- None
+                        seekTask |> Option.iter (fun reconnectionChannel -> reconnectionChannel.TrySetException(ex) |> ignore)
+                        seekTask <- None
                         Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
                         channel.SetException ex
                 | _ ->
