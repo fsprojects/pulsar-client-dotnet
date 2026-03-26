@@ -23,7 +23,7 @@ module internal ConsumerEpoch =
     let DEFAULT_CONSUMER_EPOCH = -1L
 
     let isValidConsumerEpoch (consumerEpoch: int64) (messageConsumerEpoch: int64) =
-        messageConsumerEpoch = DEFAULT_CONSUMER_EPOCH || messageConsumerEpoch = consumerEpoch
+        messageConsumerEpoch = DEFAULT_CONSUMER_EPOCH || messageConsumerEpoch >= consumerEpoch
 
 
 [<CustomEquality; NoComparison>]
