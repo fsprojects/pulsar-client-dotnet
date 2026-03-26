@@ -370,13 +370,17 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let isPollingAllowed() =
         incomingMessages.Count <= sharedQueueResumeThreshold
 
-    let isValidConsumerEpoch (message: Message<'T>) =
-        match consumers.TryGetValue(message.MessageId.TopicName) with
-        | true, (consumer, _) ->
-            let consumerImpl = consumer :?> ConsumerImpl<'T>
-            ConsumerEpoch.isValidConsumerEpoch consumerImpl.CurrentConsumerEpoch message.ConsumerEpoch
+    let isValidateMessage (message: ResultOrException<Message<'T>>) =
+        match message with
+        | Ok msg ->
+            match consumers.TryGetValue(msg.MessageId.TopicName) with
+            | true, (consumer, _) ->
+                let consumerImpl = consumer :?> ConsumerImpl<'T>
+                ConsumerEpoch.isValidConsumerEpoch consumerImpl.CurrentConsumerEpoch msg.ConsumerEpoch
+            | _ ->
+                false
         | _ ->
-            false
+            true
 
     let enqueueMessage (m: ResultOrException<Message<'T>>) =
         match m with
@@ -403,18 +407,24 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         tryResumePoller()
         m
 
-    let rec tryDequeueValidMessage() =
-        if incomingMessages.Count = 0 then
-            None
-        else
-            let message = dequeueMessage()
-            match message with
-            | Ok msg when not (isValidConsumerEpoch msg) ->
+    let rec removeStaleMessages() =
+        if incomingMessages.Count > 0 then
+            match incomingMessages.Peek() with
+            | Ok msg when not (isValidateMessage (Ok msg)) ->
                 Log.Logger.LogInformation("Dropping stale queued message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}], consumerEpoch : [{3}]",
                     msg.MessageId.TopicName, msg.MessageId, msg.ConsumerEpoch, (consumers[msg.MessageId.TopicName] |> fst :?> ConsumerImpl<'T>).CurrentConsumerEpoch)
-                tryDequeueValidMessage()
+                dequeueMessage() |> ignore
+                removeStaleMessages()
             | _ ->
-                Some message
+                ()
+
+    let tryPeekValidMessage() =
+        removeStaleMessages()
+        if incomingMessages.Count = 0 then None else Some (incomingMessages.Peek())
+
+    let tryDequeueValidMessage() =
+        removeStaleMessages()
+        if incomingMessages.Count = 0 then None else Some (dequeueMessage())
 
     let hasEnoughMessagesForBatchReceive() =
         hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
@@ -444,13 +454,21 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         let mutable shouldContinue = true
         let mutable error = None
         while shouldContinue && incomingMessages.Count > 0 do
-            match tryDequeueValidMessage() with
+            match tryPeekValidMessage() with
             | Some (Ok msg) when messages.CanAdd msg ->
-                unAckedMessageTracker.Add msg.MessageId
-                messages.Add msg
+                match tryDequeueValidMessage() with
+                | Some (Ok dequeuedMsg) ->
+                    unAckedMessageTracker.Add dequeuedMsg.MessageId
+                    messages.Add dequeuedMsg
+                | Some (Error ex) ->
+                    shouldContinue <- false
+                    error <- Some ex
+                | None ->
+                    shouldContinue <- false
             | Some (Ok _) ->
                 shouldContinue <- false
             | Some (Error ex) ->
+                dequeueMessage() |> ignore
                 shouldContinue <- false
                 error <- Some ex
             | None ->
@@ -693,24 +711,18 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 Log.Logger.LogDebug("{0} MessageReceived queueLength={1}, hasWaitingChannel={2},  hasWaitingBatchChannel={3}",
                     prefix, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
                 match message with
-                | Ok msg when not (isValidConsumerEpoch msg) ->
-                    Log.Logger.LogInformation("Consumer filter old epoch message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}], consumerEpoch : [{3}]",
+                | Ok msg when not (isValidateMessage message) ->
+                    Log.Logger.LogInformation("Dropping stale direct message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}], consumerEpoch : [{3}]",
                         msg.MessageId.TopicName, msg.MessageId, msg.ConsumerEpoch, (consumers[msg.MessageId.TopicName] |> fst :?> ConsumerImpl<'T>).CurrentConsumerEpoch)
                 | _ ->
                     if hasWaitingChannel then
+                        let waitingChannel = waiters |> dequeueWaiter
                         if (incomingMessages.Count = 0) then
-                            match message with
-                            | Ok msg when not (isValidConsumerEpoch msg) ->
-                                Log.Logger.LogInformation("Dropping stale direct message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}], consumerEpoch : [{3}]",
-                                    msg.MessageId.TopicName, msg.MessageId, msg.ConsumerEpoch, (consumers[msg.MessageId.TopicName] |> fst :?> ConsumerImpl<'T>).CurrentConsumerEpoch)
-                            | _ ->
-                                let waitingChannel = waiters |> dequeueWaiter
-                                replyWithMessage waitingChannel message
+                            replyWithMessage waitingChannel message
                         else
                             enqueueMessage message
                             match tryDequeueValidMessage() with
                             | Some validMessage ->
-                                let waitingChannel = waiters |> dequeueWaiter
                                 replyWithMessage waitingChannel validMessage
                             | None ->
                                 ()
