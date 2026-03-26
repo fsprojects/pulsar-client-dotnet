@@ -138,6 +138,44 @@ let tests =
             Expect.equal "" "Hello2" <| msg.GetValue()
             Log.Debug("Finished Consumer seek can be done to serialized message")
         }
+
+        testTask "Consumer rejects a second seek while the first seek is still in progress" {
+
+            Log.Debug("Started Consumer rejects a second seek while the first seek is still in progress")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let consumerName = "seekConsumerRejectSecond"
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync()
+
+            let firstSeekTask = consumer.SeekAsync(MessageId.Earliest)
+            let secondSeekTask = consumer.SeekAsync(MessageId.Earliest)
+
+            let! (secondSeekException: exn) =
+                task {
+                    try
+                        do! secondSeekTask
+                        failtest "Second seek should be rejected while the first seek is still in progress"
+                        return Unchecked.defaultof<exn>
+                    with Flatten ex ->
+                        return ex
+                }
+
+            match secondSeekException with
+            | :? InvalidOperationException ->
+                Expect.equal "" "Seek operation is already in progress" secondSeekException.Message
+            | _ ->
+                failtestf "Expected InvalidOperationException, got %s" (secondSeekException.GetType().FullName)
+
+            do! firstSeekTask
+
+            Log.Debug("Finished Consumer rejects a second seek while the first seek is still in progress")
+        }
         
         testTask "Seek in the middle of the batch works properly" {
 
