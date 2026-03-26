@@ -97,11 +97,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mutable lastMessageIdInBroker = MessageId.Earliest
     let mutable lastDequeuedMessageId = MessageId.Earliest
     let mutable duringSeek = None
+    let mutable seekTask: TaskCompletionSource<unit> option = None
     let mutable hasSoughtByTimestamp = false
     let initialStartMessageId = startMessageId
     let mutable incomingMessagesSize = 0L
     let mutable currentConsumerEpoch = ConsumerEpoch.DEFAULT_CONSUMER_EPOCH
-    let mutable seekTask: TaskCompletionSource<unit> option = None
     let deadLettersProcessor = consumerConfig.DeadLetterProcessor topicName
     let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable
     let stats =
@@ -569,10 +569,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
             batchWaitingChannel.TrySetException ex |> ignore
 
+    let resolveSeekTask (resolve: TaskCompletionSource<unit> -> bool) =
+        match seekTask with
+        | Some channel when resolve channel ->
+            seekTask <- None
+        | _ -> ()
+
     let closeConsumerTasks() =
-        seekTask
-        |> Option.iter (fun channel -> channel.TrySetException(AlreadyClosedException "Consumer is already closed") |> ignore)
-        seekTask <- None
+        resolveSeekTask (fun channel -> channel.TrySetException(AlreadyClosedException "Consumer is already closed"))
         unAckedMessageTracker.Close()
         acksGroupingTracker.Close()
         clearDeadLetters()
@@ -892,8 +896,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         subscribeTsc.TrySetResult() |> ignore
                         if initialFlowCount <> 0 then
                             increaseAvailablePermits initialFlowCount
-                        seekTask |> Option.iter (fun channel -> channel.TrySetResult() |> ignore)
-                        seekTask <- None
+                        resolveSeekTask (fun channel -> channel.TrySetResult())
                     with Flatten ex ->
                         clientCnx.RemoveConsumer consumerId
                         Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
@@ -1104,42 +1107,46 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             | ConsumerMessage.SeekAsync (seekData, channel) ->
 
                 Log.Logger.LogDebug("{0} SeekAsync", prefix)
-                match connectionHandler.ConnectionState with
-                | Ready clientCnx ->
-                    let requestId = Generators.getNextRequestId()
-                    Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData)
-                    let payload, seekMessageId =
-                        match seekData with
-                        | SeekType.Timestamp timestamp ->
-                            hasSoughtByTimestamp <- true
-                            Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
-                        | SeekType.MessageId messageId ->
-                            hasSoughtByTimestamp <- false
-                            match messageId.ChunkMessageIds with
-                            | Some chunkMessageIds when chunkMessageIds.Length >0 ->
-                                    Commands.newSeekByMsgId consumerId requestId chunkMessageIds[0], chunkMessageIds[0]
-                            | _ -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
-                    let originSeekMessageId = duringSeek
-                    duringSeek <- Some seekMessageId
-                    try
-                        let! response = clientCnx.SendAndWaitForReply requestId payload
-                        response |> PulsarResponseType.GetEmpty
-                        lastDequeuedMessageId <- MessageId.Earliest
-                        acksGroupingTracker.FlushAndClean()
-                        incomingMessages.Clear()
-                        incomingMessagesSize <- 0L
-                        seekTask <- Some channel
-                        Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
-                    with Flatten ex ->
-                        // re-set duringSeek and seekMessageId if seek failed
-                        duringSeek <- originSeekMessageId
-                        seekTask |> Option.iter (fun reconnectionChannel -> reconnectionChannel.TrySetException(ex) |> ignore)
-                        seekTask <- None
-                        Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
-                        channel.SetException ex
+                match seekTask with
+                | Some currentSeekTask when not currentSeekTask.Task.IsCompleted ->
+                    InvalidOperationException("Seek operation is already in progress")
+                    |> channel.SetException
+                    Log.Logger.LogWarning("{0} Rejecting SeekAsync {1} because another seek is still in progress", prefix, seekData)
                 | _ ->
-                    NotConnectedException "Not connected to broker" |> channel.SetException
-                    Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        let requestId = Generators.getNextRequestId()
+                        Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData)
+                        let payload, seekMessageId =
+                            match seekData with
+                            | SeekType.Timestamp timestamp ->
+                                hasSoughtByTimestamp <- true
+                                Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
+                            | SeekType.MessageId messageId ->
+                                hasSoughtByTimestamp <- false
+                                match messageId.ChunkMessageIds with
+                                | Some chunkMessageIds when chunkMessageIds.Length >0 ->
+                                        Commands.newSeekByMsgId consumerId requestId chunkMessageIds[0], chunkMessageIds[0]
+                                | _ -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
+                        let originSeekMessageId = duringSeek
+                        duringSeek <- Some seekMessageId
+                        try
+                            let! response = clientCnx.SendAndWaitForReply requestId payload
+                            response |> PulsarResponseType.GetEmpty
+                            lastDequeuedMessageId <- MessageId.Earliest
+                            acksGroupingTracker.FlushAndClean()
+                            incomingMessages.Clear()
+                            incomingMessagesSize <- 0L
+                            seekTask <- Some channel
+                            Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
+                        with Flatten ex ->
+                            // re-set duringSeek and seekMessageId if seek failed
+                            duringSeek <- originSeekMessageId
+                            Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
+                            channel.SetException ex
+                    | _ ->
+                        NotConnectedException "Not connected to broker" |> channel.SetException
+                        Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
 
             | ConsumerMessage.ReachedEndOfTheTopic ->
 
