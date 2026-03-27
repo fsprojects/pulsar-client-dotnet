@@ -161,9 +161,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             this.SendFlowPermits avalablePermits
             avalablePermits <- 0
 
-    let isValidConsumerEpoch (messageConsumerEpoch: int64) =
-        ConsumerEpoch.isValidConsumerEpoch currentConsumerEpoch messageConsumerEpoch
-
     /// Clear the internal receiver queue and returns the message id of what was the 1st message in the queue that was not seen by the application
     let clearReceiverQueue() =
         let nextMsg =
@@ -937,7 +934,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
                         prefix, msgId, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
 
-                if not (isValidConsumerEpoch rawMessage.ConsumerEpoch) then
+                if not (this.isValidMessageEpoch rawMessage.ConsumerEpoch) then
                     Log.Logger.LogInformation("Consumer filter old epoch message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}], consumerEpoch : [{3}]",
                         topicName.CompleteTopicName, msgId, rawMessage.ConsumerEpoch, currentConsumerEpoch)
                     rawMessage.Payload.Dispose()
@@ -1722,7 +1719,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             | Ready _ -> trueTask
             | _ -> falseTask
 
-    member internal this.CurrentConsumerEpoch = currentConsumerEpoch
+    member internal _.isValidMessageEpoch (messageConsumerEpoch: int64) =
+        match consumerConfig.SubscriptionType with
+        | SubscriptionType.Failover
+        | SubscriptionType.Exclusive ->
+            ConsumerEpoch.isValidConsumerEpoch currentConsumerEpoch messageConsumerEpoch
+        | _ ->
+            true
 
 
     interface IAsyncDisposable with

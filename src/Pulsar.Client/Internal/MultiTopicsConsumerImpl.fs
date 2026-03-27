@@ -373,12 +373,17 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let isValidateMessage (message: ResultOrException<Message<'T>>) =
         match message with
         | Ok msg ->
-            match consumers.TryGetValue(msg.MessageId.TopicName) with
-            | true, (consumer, _) ->
-                let consumerImpl = consumer :?> ConsumerImpl<'T>
-                ConsumerEpoch.isValidConsumerEpoch consumerImpl.CurrentConsumerEpoch msg.ConsumerEpoch
+            match consumerConfig.SubscriptionType with
+            | SubscriptionType.Failover
+            | SubscriptionType.Exclusive ->
+                match consumers.TryGetValue(msg.MessageId.TopicName) with
+                | true, (consumer, _) ->
+                    let consumerImpl = consumer :?> ConsumerImpl<'T>
+                    consumerImpl.isValidMessageEpoch msg.ConsumerEpoch
+                | _ ->
+                    false
             | _ ->
-                false
+                true
         | _ ->
             true
 
@@ -411,8 +416,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         if incomingMessages.Count > 0 then
             match incomingMessages.Peek() with
             | Ok msg when not (isValidateMessage (Ok msg)) ->
-                Log.Logger.LogInformation("Dropping stale queued message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}], consumerEpoch : [{3}]",
-                    msg.MessageId.TopicName, msg.MessageId, msg.ConsumerEpoch, (consumers[msg.MessageId.TopicName] |> fst :?> ConsumerImpl<'T>).CurrentConsumerEpoch)
+                Log.Logger.LogInformation("Dropping stale queued message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}]",
+                    msg.MessageId.TopicName, msg.MessageId, msg.ConsumerEpoch)
                 dequeueMessage() |> ignore
                 removeStaleMessages()
             | _ ->
@@ -712,8 +717,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     prefix, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
                 match message with
                 | Ok msg when not (isValidateMessage message) ->
-                    Log.Logger.LogInformation("Dropping stale direct message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}], consumerEpoch : [{3}]",
-                        msg.MessageId.TopicName, msg.MessageId, msg.ConsumerEpoch, (consumers[msg.MessageId.TopicName] |> fst :?> ConsumerImpl<'T>).CurrentConsumerEpoch)
+                    Log.Logger.LogInformation("Dropping stale direct message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}]",
+                        msg.MessageId.TopicName, msg.MessageId, msg.ConsumerEpoch)
                 | _ ->
                     if hasWaitingChannel then
                         let waitingChannel = waiters |> dequeueWaiter
