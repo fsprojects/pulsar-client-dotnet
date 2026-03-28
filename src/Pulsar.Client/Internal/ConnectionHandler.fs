@@ -29,14 +29,14 @@ type internal ConnectionHandler( parentPrefix: string,
                         connectionPool: ConnectionPool,
                         lookup: ILookupService,
                         topic: CompleteTopicName,
-                        connectionOpened: uint64 -> unit,
+                        connectionOpened: Epoch -> unit,
                         connectionFailed: exn -> unit,
                         backoff: Backoff) as this =
 
     let mutable connectionState = Uninitialized
     let mutable lastDisconnectedTimestamp = 0L
     let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
-    let mutable epoch = 0UL
+    let mutable epoch = %0UL
     let prefix = parentPrefix + " ConnectionHandler"
 
     let isValidStateForReconnection() =
@@ -78,7 +78,7 @@ type internal ConnectionHandler( parentPrefix: string,
                     Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
                         prefix, topic, this.ConnectionState, delay)
                     this.ConnectionState <- Connecting
-                    epoch <- epoch + 1UL
+                    epoch <- epoch + %1UL
                     asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
                 else
                     Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
@@ -95,7 +95,7 @@ type internal ConnectionHandler( parentPrefix: string,
                         Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {3}ms ",
                             prefix, topic, this.ConnectionState, delay)
                         this.ConnectionState <- Connecting
-                        epoch <- epoch + 1UL
+                        epoch <- epoch + %1UL
                         asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
                     else
                         Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
@@ -141,7 +141,7 @@ type internal ConnectionHandler( parentPrefix: string,
 
     member this.ConnectionState
         with get() = Volatile.Read(&connectionState)
-        and private set(value) = Volatile.Write(&connectionState, value)
+        and private set value = Volatile.Write(&connectionState, value)
 
     member this.LastDisconnectedTimestamp
         with get() : TimeStamp = %(Volatile.Read(&lastDisconnectedTimestamp))

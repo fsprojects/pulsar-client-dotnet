@@ -199,10 +199,10 @@ let newLookup (topicName : CompleteTopicName) (requestId : RequestId) (authorita
     command |> serializeSimpleCommand
 
 let newProducer (topicName : CompleteTopicName) (producerName: string) (producerId : ProducerId) (requestId : RequestId)
-                (schemaInfo: SchemaInfo) (epoch: uint64) (txnEnabled: bool) (initialSubscriptionName: SubscriptionName) =
+                (schemaInfo: SchemaInfo) (epoch: Epoch) (txnEnabled: bool) (initialSubscriptionName: SubscriptionName) =
     let schema = getProtoSchema schemaInfo
     let request = CommandProducer(Topic = %topicName, ProducerId = %producerId, RequestId = %requestId,
-                                  Epoch = epoch, TxnEnabled = txnEnabled)
+                                  Epoch = %epoch, TxnEnabled = txnEnabled)
     if producerName |> String.IsNullOrEmpty |> not then
         request.ProducerName <- producerName
     if %initialSubscriptionName |> String.IsNullOrEmpty |> not then
@@ -258,7 +258,7 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: SubscriptionName)
     (consumerName: string) (subscriptionType: SubscriptionType) (subscriptionInitialPosition: SubscriptionInitialPosition)
     (readCompacted: bool) (startMessageId: MessageIdData) (durable: bool) (startMessageRollbackDuration: TimeSpan)
     (createTopicIfDoesNotExist: bool) (keySharedPolicy: KeySharedPolicy option) (schemaInfo: SchemaInfo) (priorityLevel: PriorityLevel)
-    (replicateSubscriptionState: bool) (consumerEpoch: int64)=
+    (replicateSubscriptionState: bool) (consumerEpoch: ConsumerEpoch)=
     let schema = getProtoSchema schemaInfo
     let subType =
         match subscriptionType with
@@ -276,8 +276,6 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: SubscriptionName)
                     ConsumerName = consumerName, RequestId = %requestId, initialPosition = initialPosition, ReadCompacted = readCompacted,
                     StartMessageId = startMessageId, Durable = durable, ForceTopicCreation = createTopicIfDoesNotExist, PriorityLevel = %priorityLevel,
                     ReplicateSubscriptionState = replicateSubscriptionState)
-    if consumerEpoch <> ConsumerEpoch.DEFAULT_CONSUMER_EPOCH then
-        request.ConsumerEpoch <- uint64 consumerEpoch
     match keySharedPolicy with
     | Some keySharedPolicy ->
         let meta = KeySharedMeta()
@@ -297,6 +295,7 @@ let newSubscribe (topicName: CompleteTopicName) (subscription: SubscriptionName)
         request.StartMessageRollbackDurationSec <- (startMessageRollbackDuration.TotalSeconds |> uint64)
     if schema.``type`` <> Schema.Type.None then
         request.Schema <- schema
+    request.ConsumerEpoch <- %consumerEpoch
     let command = BaseCommand(``type`` = CommandType.Subscribe, Subscribe = request)
     command |> serializeSimpleCommand
 
@@ -320,10 +319,13 @@ let newCloseProducer (producerId: ProducerId) (requestId : RequestId) =
     let command = BaseCommand(``type`` = CommandType.CloseProducer, CloseProducer = request)
     command |> serializeSimpleCommand
 
-let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<MessageIdData[]>) =
+let newRedeliverUnacknowledgedMessages (consumerId: ConsumerId) (messageIds : Option<MessageIdData[]>) (consumerEpoch: Option<ConsumerEpoch>) =
     let request = CommandRedeliverUnacknowledgedMessages(ConsumerId = %consumerId)
     match messageIds with
     | Some ids -> ids |> Array.iter request.MessageIds.Add
+    | None -> ()
+    match consumerEpoch with
+    | Some epoch -> request.ConsumerEpoch <- %epoch
     | None -> ()
     let command = BaseCommand(``type`` = CommandType.RedeliverUnacknowledgedMessages, redeliverUnacknowledgedMessages = request)
     command |> serializeSimpleCommand

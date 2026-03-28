@@ -89,6 +89,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let partitionedTopics = Dictionary<TopicName, ConsumerInitInfo<'T>>()
     let allTopics = HashSet()
     let mutable incomingMessagesSize = 0L
+    let mutable currentConsumerEpoch: ConsumerEpoch = %0UL
     let defaultWaitingPoller = Unchecked.defaultof<TaskCompletionSource<unit>>
     let mutable waitingPoller = defaultWaitingPoller
     let waiters = LinkedList<Waiter<'T>>()
@@ -373,17 +374,11 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let isValidateMessage (message: ResultOrException<Message<'T>>) =
         match message with
         | Ok msg ->
-            match consumerConfig.SubscriptionType with
-            | SubscriptionType.Failover
-            | SubscriptionType.Exclusive ->
-                match consumers.TryGetValue(msg.MessageId.TopicName) with
-                | true, (consumer, _) ->
-                    let consumerImpl = consumer :?> ConsumerImpl<'T>
-                    consumerImpl.isValidMessageEpoch msg.ConsumerEpoch
-                | _ ->
-                    false
+            match consumers.TryGetValue(msg.MessageId.TopicName) with
+            | true, _ ->
+                isValidConsumerEpoch msg.ConsumerEpoch currentConsumerEpoch consumerConfig.SubscriptionType
             | _ ->
-                true
+                false
         | _ ->
             true
 
@@ -811,12 +806,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 match this.ConnectionState with
                 | Ready ->
                     try
+                        currentConsumerEpoch <- currentConsumerEpoch + %1UL
                         let! _ =
                             consumers
                             |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.RedeliverUnacknowledgedMessagesAsync())
                             |> Task.WhenAll
-                        unAckedMessageTracker.Clear()
                         clearIncomingMessages()
+                        unAckedMessageTracker.Clear()
                         currentStream.RestartCompletedTasks()
                         channel |> Option.map _.SetResult() |> ignore
                     with ex ->

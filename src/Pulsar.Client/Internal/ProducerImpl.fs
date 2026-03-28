@@ -29,7 +29,7 @@ type internal ProducerTickType =
     | UpdateEncryptionKeys of IMessageEncryptor
 
 type internal ProducerMessage<'T> =
-    | ConnectionOpened of uint64
+    | ConnectionOpened of Epoch
     | ConnectionFailed of exn
     | ConnectionClosed of ClientCnx
     | AckReceived of SendReceipt

@@ -68,7 +68,7 @@ let tests =
 
         test "Message batching by count works correctly" {
             let messages = Messages(2, -1)
-            let message = Message(MessageId.Earliest, [||], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", fun () -> failwith "not implemented")
+            let message = Message(MessageId.Earliest, [||], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", Nullable(), fun () -> failwith "not implemented")
             messages.CanAdd(message) |> Expect.isTrue ""
             messages.Add(message)
             messages.CanAdd(message) |> Expect.isTrue ""
@@ -78,7 +78,7 @@ let tests =
 
         test "Message batching by size works correctly" {
             let messages = Messages(-1, 2)
-            let message = Message(MessageId.Earliest, [| 0uy |], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", fun () -> failwith "not implemented")
+            let message = Message(MessageId.Earliest, [| 0uy |], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", Nullable(), fun () -> failwith "not implemented")
             messages.CanAdd(message) |> Expect.isTrue ""
             messages.Add(message)
             messages.CanAdd(message) |> Expect.isTrue ""

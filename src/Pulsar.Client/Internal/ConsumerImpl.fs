@@ -29,7 +29,7 @@ type internal ConsumerTickType =
     | ChunkTick
 
 type internal ConsumerMessage<'T> =
-    | ConnectionOpened of uint64
+    | ConnectionOpened
     | ConnectionFailed of exn
     | ConnectionClosed of ClientCnx
     | ReachedEndOfTheTopic
@@ -101,7 +101,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mutable hasSoughtByTimestamp = false
     let initialStartMessageId = startMessageId
     let mutable incomingMessagesSize = 0L
-    let mutable currentConsumerEpoch = ConsumerEpoch.DEFAULT_CONSUMER_EPOCH
+    let mutable currentConsumerEpoch: ConsumerEpoch = %0UL
     let deadLettersProcessor = consumerConfig.DeadLetterProcessor topicName
     let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable
     let stats =
@@ -133,7 +133,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                           connectionPool,
                           lookup,
                           topicName.CompleteTopicName,
-                          (fun epoch -> post this.Mb (ConsumerMessage.ConnectionOpened epoch)),
+                          (fun _ -> post this.Mb ConsumerMessage.ConnectionOpened),
                           (fun ex -> post this.Mb (ConsumerMessage.ConnectionFailed ex)),
                           Backoff({ BackoffConfig.Default with
                                         Initial = clientConfig.InitialBackoffInterval
@@ -702,8 +702,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             rawMessage.RedeliveryCount,
                             rawMessage.Metadata.ReplicatedFrom,
                             rawMessage.Metadata.ProducerName,
-                            getValue,
-                            rawMessage.ConsumerEpoch
+                            rawMessage.ConsumerEpoch,
+                            getValue
                         )
             if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                 deadLettersProcessor.AddMessage(message.MessageId, message)
@@ -844,13 +844,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         let mutable continueLoop = true
         while continueLoop do
             match! mb.Reader.ReadAsync() with
-            | ConsumerMessage.ConnectionOpened epoch ->
+            | ConsumerMessage.ConnectionOpened ->
 
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
                     Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, topicName)
                     clientCnx.AddConsumer(consumerId, consumerOperations)
-                    currentConsumerEpoch <- int64 epoch
                     let requestId = Generators.getNextRequestId()
                     startMessageId <- clearReceiverQueue()
                     clearDeadLetters()
@@ -931,12 +930,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 let hasWaitingBatchChannel = batchWaiters.Count > 0
                 let msgId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
                 if Log.Logger.IsEnabled LogLevel.Debug then
-                    Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
+                    Log.Logger.LogDebug("{0} MessageReceived {1}, queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
                         prefix, msgId, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
-
-                if not (this.isValidMessageEpoch rawMessage.ConsumerEpoch) then
-                    Log.Logger.LogInformation("Consumer filter old epoch message, topic : [{0}], messageId : [{1}], messageConsumerEpoch : [{2}], consumerEpoch : [{3}]",
-                        topicName.CompleteTopicName, msgId, rawMessage.ConsumerEpoch, currentConsumerEpoch)
+                if not (isValidConsumerEpoch rawMessage.ConsumerEpoch currentConsumerEpoch consumerConfig.SubscriptionType) then
+                    Log.Logger.LogWarning("{0} Consumer filter old epoch message {1}, messageConsumerEpoch={2}, consumerEpoch={3}",
+                        prefix, msgId, rawMessage.ConsumerEpoch, currentConsumerEpoch)
+                    increaseAvailablePermits rawMessage.Metadata.NumMessages
                     rawMessage.Payload.Dispose()
                 elif rawMessage.CheckSumValid then
                     let! isDuplicate = acksGroupingTracker.IsDuplicate msgId
@@ -1064,7 +1063,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 backgroundTask {
                                     let! messageIdData = getRedeliveryMessageIdData ids
                                     if messageIdData.Length > 0 then
-                                        let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some messageIdData)
+                                        let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some messageIdData) None
                                         let! success = clientCnx.Send command
                                         if success then
                                             Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
@@ -1086,7 +1085,17 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 Log.Logger.LogDebug("{0} RedeliverAllUnacknowledged", prefix)
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
-                    let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
+                    // we should increase epoch every time, because MultiTopicsConsumerImpl also increase it,
+                    // we need to keep both epochs the same
+                    let epochToPass =
+                        match consumerConfig.SubscriptionType with
+                        | SubscriptionType.Failover
+                        | SubscriptionType.Exclusive ->
+                            currentConsumerEpoch <- currentConsumerEpoch + %1UL
+                            Some currentConsumerEpoch
+                        | _ ->
+                            None
+                    let command = Commands.newRedeliverUnacknowledgedMessages consumerId None epochToPass
                     let! success = clientCnx.Send command
                     if success then
                         let currentSize = incomingMessages.Count
@@ -1420,6 +1429,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     rawMessage.RedeliveryCount,
                     rawMessage.Metadata.ReplicatedFrom,
                     rawMessage.Metadata.ProducerName,
+                    rawMessage.ConsumerEpoch,
                     getValue
                 )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
@@ -1718,15 +1728,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             match connectionHandler.ConnectionState with
             | Ready _ -> trueTask
             | _ -> falseTask
-
-    member internal _.isValidMessageEpoch (messageConsumerEpoch: int64) =
-        match consumerConfig.SubscriptionType with
-        | SubscriptionType.Failover
-        | SubscriptionType.Exclusive ->
-            ConsumerEpoch.isValidConsumerEpoch currentConsumerEpoch messageConsumerEpoch
-        | _ ->
-            true
-
 
     interface IAsyncDisposable with
 
