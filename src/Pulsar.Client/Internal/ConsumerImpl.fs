@@ -1142,6 +1142,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             lastDequeuedMessageId <- MessageId.Earliest
                             acksGroupingTracker.FlushAndClean()
                             incomingMessages.Clear()
+                            currentConsumerEpoch <- currentConsumerEpoch + %1UL
                             incomingMessagesSize <- 0L
                             seekTask <- Some channel
                             Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
