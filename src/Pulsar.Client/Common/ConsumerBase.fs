@@ -55,10 +55,12 @@ let getConsumerName configName =
     else
         configName
 
+let isConsumerEpochSupported (subscriptionType: SubscriptionType) =
+    subscriptionType = SubscriptionType.Failover || subscriptionType = SubscriptionType.Exclusive
 
-let isValidConsumerEpoch (messageConsumerEpoch: Nullable<ConsumerEpoch>) (consumerEpoch: ConsumerEpoch) (subscriptionType: SubscriptionType) =
-    if (subscriptionType = SubscriptionType.Failover || subscriptionType = SubscriptionType.Exclusive)
-       && messageConsumerEpoch.HasValue && messageConsumerEpoch.Value < consumerEpoch then
-        false
+let isInvalidConsumerEpoch (subscriptionType: SubscriptionType) =
+    if isConsumerEpochSupported subscriptionType then
+        fun (messageConsumerEpoch: Nullable<ConsumerEpoch>) (consumerEpoch: ConsumerEpoch) ->
+            messageConsumerEpoch.HasValue && messageConsumerEpoch.Value < consumerEpoch
     else
-        true
+        fun _ _ -> false

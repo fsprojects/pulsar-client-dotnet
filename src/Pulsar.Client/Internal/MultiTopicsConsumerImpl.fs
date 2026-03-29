@@ -371,15 +371,9 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let isPollingAllowed() =
         incomingMessages.Count <= sharedQueueResumeThreshold
 
-    let (|ValidEpoch|InvalidEpoch|) (message: ResultOrException<Message<'T>>) =
-        match message with
-        | Ok msg ->
-            if isValidConsumerEpoch msg.ConsumerEpoch currentConsumerEpoch consumerConfig.SubscriptionType then
-                ValidEpoch
-            else
-                InvalidEpoch msg
-        | _ ->
-            ValidEpoch
+    let isInvalidConsumerEpoch = isInvalidConsumerEpoch consumerConfig.SubscriptionType
+    let isConsumerEpochSupported = isConsumerEpochSupported consumerConfig.SubscriptionType
+
 
     let enqueueMessage (m: ResultOrException<Message<'T>>) =
         match m with
@@ -683,10 +677,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     prefix, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
                 // handle message
                 match message with
-                | InvalidEpoch rawMessage ->
+                | Ok rawMessage when isInvalidConsumerEpoch rawMessage.ConsumerEpoch currentConsumerEpoch ->
                     Log.Logger.LogWarning("{0} Consumer filter old epoch message {1}, messageConsumerEpoch={2}, consumerEpoch={3}",
                         prefix, rawMessage.MessageId, rawMessage.ConsumerEpoch, currentConsumerEpoch)
-                | ValidEpoch ->
+                | _ ->
                     if hasWaitingChannel then
                         let waitingChannel = waiters |> dequeueWaiter
                         if (incomingMessages.Count = 0) then
@@ -700,11 +694,11 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             let ch = batchWaiters |> dequeueBatchWaiter
                             replyWithBatch ch
                 // check if should reply to poller immediately
-                if isPollingAllowed() |> not then
+                if isPollingAllowed() then
+                    pollerChannel.SetResult()
+                else
                     Log.Logger.LogDebug("{0} paused poller, incomingMessages={1}, sharedQueueResumeThreshold={2}", prefix, incomingMessages.Count, sharedQueueResumeThreshold)
                     waitingPoller <- pollerChannel
-                else
-                    pollerChannel.SetResult()
 
             | Receive receiveCallback ->
 
@@ -774,13 +768,14 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 match this.ConnectionState with
                 | Ready ->
                     try
-                        currentConsumerEpoch <- currentConsumerEpoch + %1UL
+                        clearIncomingMessages()
+                        unAckedMessageTracker.Clear()
+                        if isConsumerEpochSupported then
+                            currentConsumerEpoch <- currentConsumerEpoch + %1UL
                         let! _ =
                             consumers
                             |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.RedeliverUnacknowledgedMessagesAsync())
                             |> Task.WhenAll
-                        clearIncomingMessages()
-                        unAckedMessageTracker.Clear()
                         currentStream.RestartCompletedTasks()
                         channel |> Option.map _.SetResult() |> ignore
                     with ex ->
@@ -864,7 +859,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         try
                             unAckedMessageTracker.Clear()
                             clearIncomingMessages()
-                            currentConsumerEpoch <- currentConsumerEpoch + %1UL
+                            if isConsumerEpochSupported then
+                                currentConsumerEpoch <- currentConsumerEpoch + %1UL
                             let! _ =
                                 consumers
                                 |> Seq.map (fun (KeyValue(_, (consumer, _))) ->
