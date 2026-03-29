@@ -854,40 +854,38 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
             | Seek (seekData, channel) ->
 
-                    Log.Logger.LogDebug("{0} Seek {1}", prefix, seekData)
-                    backgroundTask {
-                        try
-                            unAckedMessageTracker.Clear()
-                            clearIncomingMessages()
-                            if isConsumerEpochSupported then
-                                currentConsumerEpoch <- currentConsumerEpoch + %1UL
-                            let! _ =
-                                consumers
-                                |> Seq.map (fun (KeyValue(_, (consumer, _))) ->
-                                    match seekData with
-                                    | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
-                                    | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
-                                |> Task.WhenAll
-                            currentStream.RestartCompletedTasks()
-                            channel.SetResult()
-                        with Flatten ex ->
-                            channel.SetException ex
-                    } |> ignore
+                Log.Logger.LogDebug("{0} Seek {1}", prefix, seekData)
+                try
+                    unAckedMessageTracker.Clear()
+                    clearIncomingMessages()
+                    if isConsumerEpochSupported then
+                        currentConsumerEpoch <- currentConsumerEpoch + %1UL
+                    let! _ =
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, (consumer, _))) ->
+                            match seekData with
+                            | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
+                            | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
+                        |> Task.WhenAll
+                    currentStream.RestartCompletedTasks()
+                    channel.SetResult()
+                with Flatten ex ->
+                    channel.SetException ex
 
             | SeekWithResolver (resolver, channel) ->
-                backgroundTask {
-                    try
-                        unAckedMessageTracker.Clear()
-                        clearIncomingMessages()
-                        let! _ =
-                            consumers
-                            |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))
-                            |> Task.WhenAll
-                        currentStream.RestartCompletedTasks()
-                        channel.SetResult()
-                    with Flatten ex ->
-                        channel.SetException ex
-                } |> ignore
+
+                Log.Logger.LogDebug("{0} Seek with resolver", prefix)
+                try
+                    unAckedMessageTracker.Clear()
+                    clearIncomingMessages()
+                    let! _ =
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))
+                        |> Task.WhenAll
+                    currentStream.RestartCompletedTasks()
+                    channel.SetResult()
+                with Flatten ex ->
+                    channel.SetException ex
 
             | PatternTickTime ->
 

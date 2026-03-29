@@ -290,30 +290,8 @@ let tests =
             let numberOfMessages = 30
             let numberOfMessagesBeforeSeek = 10
             let subscriptionName = "test-seek-stuck-" + Guid.NewGuid().ToString("N")
-            
-            let seekWithRetry (consumer: IConsumer<byte[]>) (targetTimestamp: TimeStamp) (maxRetries: int) =
-                task {
-                    let mutable retryCount = 0
-                    let mutable success = false
-                    while retryCount < maxRetries && not success do
-                        try
-                            do! consumer.SeekAsync(targetTimestamp)
-                            success <- true
-                        with Flatten ex ->
-                            match ex with
-                            | :? NotConnectedException as notConnectedEx ->
-                                retryCount <- retryCount + 1
-                                if retryCount >= maxRetries then
-                                    Log.Error("SeekAsync failed after {0} retries: {1}", maxRetries, notConnectedEx.Message)
-                                    raise notConnectedEx
-                                else
-                                    Log.Debug("SeekAsync failed (attempt {0}/{1}): {2}. Retrying in 1 second...", retryCount, maxRetries, notConnectedEx.Message)
-                                    do! Task.Delay(1000)
-                            | _ ->
-                                raise ex
-                }
-            
-            let! consumer =
+
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
@@ -348,7 +326,7 @@ let tests =
             do! Task.Delay(1000)
 
             Log.Debug("Seeking to timestamp: {0}", targetTimestamp)
-            do! seekWithRetry consumer targetTimestamp 10
+            do! consumer.SeekAsync(targetTimestamp)
             
             let receivedMessages = HashSet<string>()
             let cts = new CancellationTokenSource(TimeSpan.FromSeconds(30.0))
@@ -394,7 +372,7 @@ let tests =
                 cts.Dispose()
                 raise ex
             
-            Log.Debug("Finished Seek won't get stuck at the receive in MultiTopicsConsumer")
+            Log.Debug("Finished Seek won't get stuck at the receive or receive duplicate messages in MultiTopicsConsumer")
         }
        
     ]
