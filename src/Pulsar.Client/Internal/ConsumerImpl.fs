@@ -172,14 +172,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 None
         match duringSeek with
         | Some (seekMsgId, channel) ->
-            if channel.TrySetResult() then
-                Log.Logger.LogInformation("{0} Seek has been completed", prefix)
-            else
-                Log.Logger.LogWarning("{0} Seek has been completed, but could not set result to channel", prefix)
             duringSeek <- None
-            Some seekMsgId
+            Some seekMsgId, Some channel
         | None when isDurable ->
-            startMessageId
+            startMessageId, None
         | _  ->
             match nextMsg with
             | Some nextMessageInQueue ->
@@ -191,15 +187,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | MessageIdType.Single ->
                         // Get on previous message in previous entry
                         { nextMessageInQueue with EntryId = nextMessageInQueue.EntryId - %1L }
-                Some previousMessage
+                Some previousMessage, None
             | None ->
                 if lastDequeuedMessageId <> MessageId.Earliest then
                     // If the queue was empty we need to restart from the message just after the last one that has been dequeued
                     // in the past
-                    Some lastDequeuedMessageId
+                    Some lastDequeuedMessageId, None
                 else
                     // No message was received or dequeued by this consumer. Next message would still be the startMessageId
-                    startMessageId
+                    startMessageId, None
 
     let getLastMessageIdAsync() =
 
@@ -608,6 +604,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let encMsg = EncryptedMessage(rawMessage.Payload.ToArray(), encryptionKeys,
                                                   rawMessage.Metadata.EncryptionAlgo, rawMessage.Metadata.EncryptionParam)
                     let decryptPayload = msgCrypto.Decrypt(encMsg)
+                    rawMessage.Payload.Dispose()
                     { rawMessage with Payload = new MemoryStream(decryptPayload) } |> Ok
                 | None ->
                     raise <| CryptoException "Message is encrypted, but no encryption configured"
@@ -852,7 +849,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, topicName)
                     clientCnx.AddConsumer(consumerId, consumerOperations)
                     let requestId = Generators.getNextRequestId()
-                    startMessageId <- clearReceiverQueue()
+                    let initialMsgId, seekChannel = clearReceiverQueue()
+                    startMessageId <- initialMsgId
                     clearDeadLetters()
                     let msgIdData =
                         if isDurable then
@@ -893,6 +891,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         subscribeTsc.TrySetResult() |> ignore
                         if initialFlowCount <> 0 then
                             increaseAvailablePermits initialFlowCount
+                        seekChannel |> Option.iter (fun channel ->
+                            if channel.TrySetResult() then
+                                Log.Logger.LogInformation("{0} Seek has been completed", prefix)
+                            else
+                                Log.Logger.LogWarning("{0} Seek has been completed, but could not set result to channel", prefix)
+                        )
                     with Flatten ex ->
                         clientCnx.RemoveConsumer consumerId
                         Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
@@ -932,10 +936,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 if Log.Logger.IsEnabled LogLevel.Debug then
                     Log.Logger.LogDebug("{0} MessageReceived {1}, queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
                         prefix, msgId, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
-                use _ = rawMessage.Payload
                 if isInvalidConsumerEpoch rawMessage.ConsumerEpoch currentConsumerEpoch then
                     Log.Logger.LogWarning("{0} Consumer filter old epoch message {1}, messageConsumerEpoch={2}, consumerEpoch={3}",
                         prefix, msgId, rawMessage.ConsumerEpoch, currentConsumerEpoch)
+                    rawMessage.Payload.Dispose()
                     increaseAvailablePermits rawMessage.Metadata.NumMessages
                 elif rawMessage.CheckSumValid then
                     let! isDuplicate = acksGroupingTracker.IsDuplicate msgId
@@ -947,14 +951,18 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             if decryptedMessage.Payload.Length <= clientCnx.MaxMessageSize then
                                 match decompressMessage decryptedMessage isChunked with
                                 | Ok decompressedMessage ->
+                                    use _ = decompressedMessage.Payload
                                     do! handleMessagePayload clientCnx
                                             decompressedMessage msgId hasWaitingChannel hasWaitingBatchChannel false
                                             isChunked schemaDecodeFunction
                                 | Error _ ->
+                                    decryptedMessage.Payload.Dispose()
                                     do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecompressionError
                             else
+                                decryptedMessage.Payload.Dispose()
                                 do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.UncompressedSizeCorruption
                         | Error _ ->
+                            use _ = rawMessage.Payload
                             match consumerConfig.ConsumerCryptoFailureAction with
                             | ConsumerCryptoFailureAction.CONSUME ->
                                 Log.Logger.LogWarning("{0} {1} Decryption failed. Consuming encrypted message.",
@@ -974,8 +982,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 failwith "Unknown ConsumerCryptoFailureAction"
                     else
                         Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
+                        rawMessage.Payload.Dispose()
                         increaseAvailablePermits rawMessage.Metadata.NumMessages
                 else
+                    rawMessage.Payload.Dispose()
                     do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.ChecksumMismatch
 
             | ConsumerMessage.Receive receiveCallback ->

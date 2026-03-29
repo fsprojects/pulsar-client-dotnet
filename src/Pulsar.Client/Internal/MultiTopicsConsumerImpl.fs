@@ -878,6 +878,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 try
                     unAckedMessageTracker.Clear()
                     clearIncomingMessages()
+                    if isConsumerEpochSupported then
+                        currentConsumerEpoch <- currentConsumerEpoch + %1UL
                     let! _ =
                         consumers
                         |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))
