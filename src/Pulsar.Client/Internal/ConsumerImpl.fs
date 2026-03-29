@@ -1109,7 +1109,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                 Log.Logger.LogDebug("{0} SeekAsync", prefix)
                 match duringSeek with
-                | Some (_, channel) ->
+                | Some _ ->
                     InvalidOperationException("Seek operation is already in progress")
                     |> channel.SetException
                     Log.Logger.LogWarning("{0} Rejecting SeekAsync {1} because another seek is still in progress", prefix, seekData)
