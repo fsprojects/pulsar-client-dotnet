@@ -172,7 +172,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 None
         match duringSeek with
         | Some (seekMsgId, channel) ->
-            channel.TrySetResult() |> ignore
+            if channel.TrySetResult() then
+                Log.Logger.LogInformation("{0} Seek has been completed", prefix)
+            else
+                Log.Logger.LogWarning("{0} Seek has been completed, but could not set result to channel", prefix)
             duringSeek <- None
             Some seekMsgId
         | None when isDurable ->
@@ -1136,11 +1139,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             response |> PulsarResponseType.GetEmpty
                             lastDequeuedMessageId <- MessageId.Earliest
                             acksGroupingTracker.FlushAndClean()
+                            unAckedMessageTracker.Clear()
                             incomingMessages.Clear()
                             if isConsumerEpochSupported then
                                 currentConsumerEpoch <- currentConsumerEpoch + %1UL
                             incomingMessagesSize <- 0L
-                            Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
+                            Log.Logger.LogDebug("{0} Seek to {1} command has been sent", prefix, seekData)
                         with Flatten ex ->
                             // re-set duringSeek and seekMessageId if seek failed
                             duringSeek <- originSeekMessageId
