@@ -54,3 +54,11 @@ let getConsumerName configName =
         Generators.getRandomName()
     else
         configName
+
+
+let isValidConsumerEpoch (messageConsumerEpoch: Nullable<ConsumerEpoch>) (consumerEpoch: ConsumerEpoch) (subscriptionType: SubscriptionType) =
+    if (subscriptionType = SubscriptionType.Failover || subscriptionType = SubscriptionType.Exclusive)
+       && messageConsumerEpoch.HasValue && messageConsumerEpoch.Value < consumerEpoch then
+        false
+    else
+        true

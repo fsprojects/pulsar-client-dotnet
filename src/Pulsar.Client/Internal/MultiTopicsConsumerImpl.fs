@@ -89,6 +89,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let partitionedTopics = Dictionary<TopicName, ConsumerInitInfo<'T>>()
     let allTopics = HashSet()
     let mutable incomingMessagesSize = 0L
+    let mutable currentConsumerEpoch: ConsumerEpoch = %0UL
     let defaultWaitingPoller = Unchecked.defaultof<TaskCompletionSource<unit>>
     let mutable waitingPoller = defaultWaitingPoller
     let waiters = LinkedList<Waiter<'T>>()
@@ -370,6 +371,16 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let isPollingAllowed() =
         incomingMessages.Count <= sharedQueueResumeThreshold
 
+    let (|ValidEpoch|InvalidEpoch|) (message: ResultOrException<Message<'T>>) =
+        match message with
+        | Ok msg ->
+            if isValidConsumerEpoch msg.ConsumerEpoch currentConsumerEpoch consumerConfig.SubscriptionType then
+                ValidEpoch
+            else
+                InvalidEpoch msg
+        | _ ->
+            ValidEpoch
+
     let enqueueMessage (m: ResultOrException<Message<'T>>) =
         match m with
         | Ok msg -> incomingMessagesSize <- incomingMessagesSize + msg.Data.LongLength
@@ -398,8 +409,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let hasEnoughMessagesForBatchReceive() =
         hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
 
-
-
     let getAllPartitions () =
         backgroundTask {
             try
@@ -415,7 +424,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                Log.Logger.LogWarning(ex, "{0} Unabled to fetch new topics", prefix)
                return None
         }
-
 
     let replyWithBatch (channel: TaskCompletionSource<Messages<'T>>) =
         let messages = Messages(consumerConfig.BatchReceivePolicy.MaxNumMessages, consumerConfig.BatchReceivePolicy.MaxNumBytes)
@@ -674,18 +682,23 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 Log.Logger.LogDebug("{0} MessageReceived queueLength={1}, hasWaitingChannel={2},  hasWaitingBatchChannel={3}",
                     prefix, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
                 // handle message
-                if hasWaitingChannel then
-                    let waitingChannel = waiters |> dequeueWaiter
-                    if (incomingMessages.Count = 0) then
-                        replyWithMessage waitingChannel message
+                match message with
+                | InvalidEpoch rawMessage ->
+                    Log.Logger.LogWarning("{0} Consumer filter old epoch message {1}, messageConsumerEpoch={2}, consumerEpoch={3}",
+                        prefix, rawMessage.MessageId, rawMessage.ConsumerEpoch, currentConsumerEpoch)
+                | ValidEpoch ->
+                    if hasWaitingChannel then
+                        let waitingChannel = waiters |> dequeueWaiter
+                        if (incomingMessages.Count = 0) then
+                            replyWithMessage waitingChannel message
+                        else
+                            enqueueMessage message
+                            replyWithMessage waitingChannel <| dequeueMessage()
                     else
                         enqueueMessage message
-                        replyWithMessage waitingChannel <| dequeueMessage()
-                else
-                    enqueueMessage message
-                    if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                        let ch = batchWaiters |> dequeueBatchWaiter
-                        replyWithBatch ch
+                        if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                            let ch = batchWaiters |> dequeueBatchWaiter
+                            replyWithBatch ch
                 // check if should reply to poller immediately
                 if isPollingAllowed() |> not then
                     Log.Logger.LogDebug("{0} paused poller, incomingMessages={1}, sharedQueueResumeThreshold={2}", prefix, incomingMessages.Count, sharedQueueResumeThreshold)
@@ -761,12 +774,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 match this.ConnectionState with
                 | Ready ->
                     try
+                        currentConsumerEpoch <- currentConsumerEpoch + %1UL
                         let! _ =
                             consumers
                             |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.RedeliverUnacknowledgedMessagesAsync())
                             |> Task.WhenAll
-                        unAckedMessageTracker.Clear()
                         clearIncomingMessages()
+                        unAckedMessageTracker.Clear()
                         currentStream.RestartCompletedTasks()
                         channel |> Option.map _.SetResult() |> ignore
                     with ex ->
@@ -850,6 +864,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         try
                             unAckedMessageTracker.Clear()
                             clearIncomingMessages()
+                            currentConsumerEpoch <- currentConsumerEpoch + %1UL
                             let! _ =
                                 consumers
                                 |> Seq.map (fun (KeyValue(_, (consumer, _))) ->

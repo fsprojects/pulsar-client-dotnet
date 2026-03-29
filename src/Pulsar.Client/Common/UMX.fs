@@ -19,6 +19,8 @@ open FSharp.UMX
 [<Measure>] type private batchIndex
 [<Measure>] type private priorityLevel
 [<Measure>] type private timestamp
+[<Measure>] type private epoch
+[<Measure>] type private consumerEpoch
 
 type LedgerId = int64<ledgerId>
 type EntryId = int64<entryId>
@@ -36,3 +38,5 @@ type PartitionKey = string<partitionKey>
 type BatchIndex = int<batchIndex>
 type PriorityLevel = int<priorityLevel>
 type TimeStamp = int64<timestamp>
+type Epoch = uint64<epoch>
+type ConsumerEpoch = uint64<consumerEpoch>
