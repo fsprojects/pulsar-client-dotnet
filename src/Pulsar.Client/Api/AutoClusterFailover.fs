@@ -81,11 +81,11 @@ type AutoClusterFailover
                                 | Some sec ->
                                     Log.Logger.LogInformation("Switching to secondary cluster {0}", sec.Url)
                                     currentServiceInfo <- sec
-                                    do! ctx.UpdateServiceUrl(sec.Url)
                                     if not (isNull secondaryAuthentication) && secondaryAuthentication.ContainsKey(sec.Url) then
                                         ctx.UpdateAuthentication(secondaryAuthentication[sec.Url])
                                     if not (isNull secondaryTlsTrustCertificate) && secondaryTlsTrustCertificate.ContainsKey(sec.Url) then
                                         ctx.UpdateTlsTrustCertificate(secondaryTlsTrustCertificate[sec.Url])
+                                    do! ctx.UpdateServiceUrl(sec.Url)
                                     failedTimestamp <- None
                                 | None ->
                                     Log.Logger.LogWarning("Could not find any available secondary cluster")
@@ -101,9 +101,9 @@ type AutoClusterFailover
                             | Some ts when DateTime.UtcNow - ts >= switchBackDelay ->
                                 Log.Logger.LogInformation("Switching back to primary cluster {0}", primary)
                                 currentServiceInfo <- primaryServiceInfo
-                                do! ctx.UpdateServiceUrl(primary)
                                 ctx.UpdateAuthentication(primaryAuthentication)
                                 ctx.UpdateTlsTrustCertificate(primaryTlsTrustCertificate)
+                                do! ctx.UpdateServiceUrl(primary)
                                 recoveredTimestamp <- None
                             | _ -> ()
                         else
