@@ -57,7 +57,7 @@ type internal TableViewImpl<'T> private (reader: IReader<'T>) =
             with get () = data.Values
 
         member this.Item
-           with get(key) = data[key]
+           with get key = data[key]
 
         member this.GetEnumerator() =
             data.GetEnumerator()

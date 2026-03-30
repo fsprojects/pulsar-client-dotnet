@@ -96,10 +96,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         | None -> None
     let mutable lastMessageIdInBroker = MessageId.Earliest
     let mutable lastDequeuedMessageId = MessageId.Earliest
-    let mutable duringSeek = None
+    let mutable duringSeek: (MessageId * TaskCompletionSource<unit>) option = None
     let mutable hasSoughtByTimestamp = false
     let initialStartMessageId = startMessageId
     let mutable incomingMessagesSize = 0L
+    let mutable currentConsumerEpoch: ConsumerEpoch = %0UL
     let deadLettersProcessor = consumerConfig.DeadLetterProcessor topicName
     let isDurable = consumerConfig.SubscriptionMode = SubscriptionMode.Durable
     let stats =
@@ -170,11 +171,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             else
                 None
         match duringSeek with
-        | Some _ as seekMsgId ->
+        | Some (seekMsgId, channel) ->
             duringSeek <- None
-            seekMsgId
+            Some seekMsgId, Some channel
         | None when isDurable ->
-            startMessageId
+            startMessageId, None
         | _  ->
             match nextMsg with
             | Some nextMessageInQueue ->
@@ -186,15 +187,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     | MessageIdType.Single ->
                         // Get on previous message in previous entry
                         { nextMessageInQueue with EntryId = nextMessageInQueue.EntryId - %1L }
-                Some previousMessage
+                Some previousMessage, None
             | None ->
                 if lastDequeuedMessageId <> MessageId.Earliest then
                     // If the queue was empty we need to restart from the message just after the last one that has been dequeued
                     // in the past
-                    Some lastDequeuedMessageId
+                    Some lastDequeuedMessageId, None
                 else
                     // No message was received or dequeued by this consumer. Next message would still be the startMessageId
-                    startMessageId
+                    startMessageId, None
 
     let getLastMessageIdAsync() =
 
@@ -564,7 +565,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
             batchWaitingChannel.TrySetException ex |> ignore
 
+    let failSeekTask () =
+        match duringSeek with
+        | Some (_, channel) ->
+            channel.TrySetException(AlreadyClosedException "Consumer is already closed") |> ignore
+            duringSeek <- None
+        | _ -> ()
+
     let closeConsumerTasks() =
+        failSeekTask()
         unAckedMessageTracker.Close()
         acksGroupingTracker.Close()
         clearDeadLetters()
@@ -581,6 +590,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         failWaiters <| AlreadyClosedException "Consumer is already closed"
         Log.Logger.LogInformation("{0} stopped", prefix)
 
+    let isInvalidConsumerEpoch = isInvalidConsumerEpoch consumerConfig.SubscriptionType
+    let isConsumerEpochSupported = isConsumerEpochSupported consumerConfig.SubscriptionType
+
     let decryptMessage (rawMessage:RawMessage) =
         if rawMessage.Metadata.EncryptionKeys.Length = 0 then
             Ok rawMessage
@@ -592,6 +604,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let encMsg = EncryptedMessage(rawMessage.Payload.ToArray(), encryptionKeys,
                                                   rawMessage.Metadata.EncryptionAlgo, rawMessage.Metadata.EncryptionParam)
                     let decryptPayload = msgCrypto.Decrypt(encMsg)
+                    rawMessage.Payload.Dispose()
                     { rawMessage with Payload = new MemoryStream(decryptPayload) } |> Ok
                 | None ->
                     raise <| CryptoException "Message is encrypted, but no encryption configured"
@@ -693,6 +706,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             rawMessage.RedeliveryCount,
                             rawMessage.Metadata.ReplicatedFrom,
                             rawMessage.Metadata.ProducerName,
+                            rawMessage.ConsumerEpoch,
                             getValue
                         )
             if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
@@ -713,40 +727,34 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let handleMessagePayload clientCnx (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel
                                 isMessageUndecryptable isChunkedMessage schemaDecodeFunction =
         backgroundTask {
-            let! isDuplicate = acksGroupingTracker.IsDuplicate msgId
-            if isDuplicate then
-                Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
-                increaseAvailablePermits rawMessage.Metadata.NumMessages
-            else
-                if isMessageUndecryptable || (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
-                    // right now, chunked messages are only supported by non-shared subscription
-                    if isChunkedMessage then
-                        match processMessageChunk rawMessage msgId with
-                        | Some (chunkedPayload, msgIdWithChunk) ->
-                            handleSingleMessagePayload rawMessage msgIdWithChunk chunkedPayload hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction
-                        | None ->
-                            rawMessage.Payload.Dispose()
-                    else
-                        let bytes = rawMessage.Payload.ToArray()
-                        rawMessage.Payload.Dispose()
-                        handleSingleMessagePayload rawMessage msgId bytes hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction
-                elif rawMessage.Metadata.NumMessages > 0 then
-                    // handle batch message enqueuing; uncompressed payload has all messages in batch
-                    match wrapException (fun () ->
-                        this.ReceiveIndividualMessagesFromBatch rawMessage schemaDecodeFunction isMessageUndecryptable) with
-                    | Ok () ->
-                        // try respond to channel
-                        if hasWaitingChannel && incomingMessages.Count > 0 then
-                            let waitingChannel = waiters |> dequeueWaiter
-                            replyWithMessage waitingChannel <| dequeueMessage()
-                        elif hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                            let ch = batchWaiters |> dequeueBatchWaiter
-                            replyWithBatch ch
-                    | Error ex ->
-                        Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
-                        do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
+            if isMessageUndecryptable || (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
+                // right now, chunked messages are only supported by non-shared subscription
+                if isChunkedMessage then
+                    match processMessageChunk rawMessage msgId with
+                    | Some (chunkedPayload, msgIdWithChunk) ->
+                        handleSingleMessagePayload rawMessage msgIdWithChunk chunkedPayload hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction
+                    | None ->
+                        ()
                 else
-                    Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
+                    let bytes = rawMessage.Payload.ToArray()
+                    handleSingleMessagePayload rawMessage msgId bytes hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction
+            elif rawMessage.Metadata.NumMessages > 0 then
+                // handle batch message enqueuing; uncompressed payload has all messages in batch
+                match wrapException (fun () ->
+                    this.ReceiveIndividualMessagesFromBatch rawMessage schemaDecodeFunction isMessageUndecryptable) with
+                | Ok () ->
+                    // try respond to channel
+                    if hasWaitingChannel && incomingMessages.Count > 0 then
+                        let waitingChannel = waiters |> dequeueWaiter
+                        replyWithMessage waitingChannel <| dequeueMessage()
+                    elif hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                        let ch = batchWaiters |> dequeueBatchWaiter
+                        replyWithBatch ch
+                | Error ex ->
+                    Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
+                    do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
+            else
+                Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
         }
 
     let receive (receiveCallback: ReceiveCallback<'T>) =
@@ -841,7 +849,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, topicName)
                     clientCnx.AddConsumer(consumerId, consumerOperations)
                     let requestId = Generators.getNextRequestId()
-                    startMessageId <- clearReceiverQueue()
+                    let initialMsgId, seekChannel = clearReceiverQueue()
+                    startMessageId <- initialMsgId
                     clearDeadLetters()
                     let msgIdData =
                         if isDurable then
@@ -859,7 +868,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 | Batch (index, _) ->
                                     data.BatchIndex <- %index
                                 data
-                    // startMessageRollbackDurationInSec should be consider only once when consumer connects to first time
+                    // startMessageRollbackDurationInSec should be considered only once when consumer connects to first time
                     let startMessageRollbackDuration =
                         if startMessageRollbackDuration > TimeSpan.Zero && startMessageId = initialStartMessageId then
                             startMessageRollbackDuration
@@ -872,6 +881,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             consumerConfig.SubscriptionInitialPosition consumerConfig.ReadCompacted msgIdData isDurable
                             startMessageRollbackDuration createTopicIfDoesNotExist consumerConfig.KeySharedPolicy
                             schema.SchemaInfo consumerConfig.PriorityLevel consumerConfig.ReplicateSubscriptionState
+                            currentConsumerEpoch
                     try
                         let! response = clientCnx.SendAndWaitForReply requestId payload
                         response |> PulsarResponseType.GetEmpty
@@ -881,6 +891,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         subscribeTsc.TrySetResult() |> ignore
                         if initialFlowCount <> 0 then
                             increaseAvailablePermits initialFlowCount
+                        seekChannel |> Option.iter (fun channel ->
+                            if channel.TrySetResult() then
+                                Log.Logger.LogInformation("{0} Seek has been completed", prefix)
+                            else
+                                Log.Logger.LogWarning("{0} Seek has been completed, but could not set result to channel", prefix)
+                        )
                     with Flatten ex ->
                         clientCnx.RemoveConsumer consumerId
                         Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
@@ -906,7 +922,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
                             continueLoop <- false
                         | _ ->
-                            // consumer was subscribed and connected but we got some error, keep trying
+                            // consumer was subscribed and connected, but we got some error, keep trying
                             connectionHandler.ReconnectLater ex
                 | _ ->
                     Log.Logger.LogWarning("{0} connection opened but connection state is {1}", prefix, connectionHandler.ConnectionState)
@@ -918,10 +934,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 let hasWaitingBatchChannel = batchWaiters.Count > 0
                 let msgId = getNewIndividualMsgIdWithPartition rawMessage.MessageId
                 if Log.Logger.IsEnabled LogLevel.Debug then
-                    Log.Logger.LogDebug("{0} MessageReceived {1} queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
+                    Log.Logger.LogDebug("{0} MessageReceived {1}, queueLength={2}, hasWaitingChannel={3},  hasWaitingBatchChannel={4}",
                         prefix, msgId, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
-
-                if rawMessage.CheckSumValid then
+                if isInvalidConsumerEpoch rawMessage.ConsumerEpoch currentConsumerEpoch then
+                    Log.Logger.LogWarning("{0} Consumer filter old epoch message {1}, messageConsumerEpoch={2}, consumerEpoch={3}",
+                        prefix, msgId, rawMessage.ConsumerEpoch, currentConsumerEpoch)
+                    rawMessage.Payload.Dispose()
+                    increaseAvailablePermits rawMessage.Metadata.NumMessages
+                elif rawMessage.CheckSumValid then
                     let! isDuplicate = acksGroupingTracker.IsDuplicate msgId
                     if isDuplicate |> not then
                         let! schemaDecodeFunction = getSchemaDecodeFunction rawMessage.Metadata
@@ -931,14 +951,18 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             if decryptedMessage.Payload.Length <= clientCnx.MaxMessageSize then
                                 match decompressMessage decryptedMessage isChunked with
                                 | Ok decompressedMessage ->
+                                    use _ = decompressedMessage.Payload
                                     do! handleMessagePayload clientCnx
                                             decompressedMessage msgId hasWaitingChannel hasWaitingBatchChannel false
                                             isChunked schemaDecodeFunction
                                 | Error _ ->
+                                    decryptedMessage.Payload.Dispose()
                                     do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecompressionError
                             else
+                                decryptedMessage.Payload.Dispose()
                                 do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.UncompressedSizeCorruption
                         | Error _ ->
+                            use _ = rawMessage.Payload
                             match consumerConfig.ConsumerCryptoFailureAction with
                             | ConsumerCryptoFailureAction.CONSUME ->
                                 Log.Logger.LogWarning("{0} {1} Decryption failed. Consuming encrypted message.",
@@ -958,8 +982,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 failwith "Unknown ConsumerCryptoFailureAction"
                     else
                         Log.Logger.LogWarning("{0} Ignoring message as it was already being acked earlier by same consumer {1}", prefix, msgId)
+                        rawMessage.Payload.Dispose()
                         increaseAvailablePermits rawMessage.Metadata.NumMessages
                 else
+                    rawMessage.Payload.Dispose()
                     do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.ChecksumMismatch
 
             | ConsumerMessage.Receive receiveCallback ->
@@ -1047,7 +1073,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 backgroundTask {
                                     let! messageIdData = getRedeliveryMessageIdData ids
                                     if messageIdData.Length > 0 then
-                                        let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some messageIdData)
+                                        let command = Commands.newRedeliverUnacknowledgedMessages consumerId (Some messageIdData) None
                                         let! success = clientCnx.Send command
                                         if success then
                                             Log.Logger.LogDebug("{0} RedeliverAcknowledged complete", prefix)
@@ -1069,7 +1095,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 Log.Logger.LogDebug("{0} RedeliverAllUnacknowledged", prefix)
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
-                    let command = Commands.newRedeliverUnacknowledgedMessages consumerId None
+                    // we should increase epoch every time, because MultiTopicsConsumerImpl also increase it,
+                    // we need to keep both epochs the same
+                    let epochToPass =
+                        if isConsumerEpochSupported then
+                            currentConsumerEpoch <- currentConsumerEpoch + %1UL
+                            Some currentConsumerEpoch
+                        else
+                            None
+                    let command = Commands.newRedeliverUnacknowledgedMessages consumerId None epochToPass
                     let! success = clientCnx.Send command
                     if success then
                         let currentSize = incomingMessages.Count
@@ -1087,39 +1121,48 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             | ConsumerMessage.SeekAsync (seekData, channel) ->
 
                 Log.Logger.LogDebug("{0} SeekAsync", prefix)
-                match connectionHandler.ConnectionState with
-                | Ready clientCnx ->
-                    let requestId = Generators.getNextRequestId()
-                    Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData)
-                    let payload, seekMessageId =
-                        match seekData with
-                        | SeekType.Timestamp timestamp ->
-                            hasSoughtByTimestamp <- true
-                            Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
-                        | SeekType.MessageId messageId ->
-                            hasSoughtByTimestamp <- false
-                            match messageId.ChunkMessageIds with
-                            | Some chunkMessageIds when chunkMessageIds.Length >0 ->
-                                    Commands.newSeekByMsgId consumerId requestId chunkMessageIds[0], chunkMessageIds[0]
-                            | _ -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
-                    let originSeekMessageId = duringSeek
-                    duringSeek <- Some seekMessageId
-                    try
-                        let! response = clientCnx.SendAndWaitForReply requestId payload
-                        response |> PulsarResponseType.GetEmpty
-                        lastDequeuedMessageId <- MessageId.Earliest
-                        acksGroupingTracker.FlushAndClean()
-                        incomingMessages.Clear()
-                        Log.Logger.LogInformation("{0} Successfully reset subscription to {1}", prefix, seekData)
-                        channel.SetResult()
-                    with Flatten ex ->
-                        // re-set duringSeek and seekMessageId if seek failed
-                        duringSeek <- originSeekMessageId
-                        Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
-                        channel.SetException ex
+                match duringSeek with
+                | Some _ ->
+                    InvalidOperationException("Seek operation is already in progress")
+                    |> channel.SetException
+                    Log.Logger.LogWarning("{0} Rejecting SeekAsync {1} because another seek is still in progress", prefix, seekData)
                 | _ ->
-                    NotConnectedException "Not connected to broker" |> channel.SetException
-                    Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        let requestId = Generators.getNextRequestId()
+                        Log.Logger.LogInformation("{0} Seek subscription to {1}", prefix, seekData)
+                        let payload, seekMessageId =
+                            match seekData with
+                            | SeekType.Timestamp timestamp ->
+                                hasSoughtByTimestamp <- true
+                                Commands.newSeekByTimestamp consumerId requestId timestamp, MessageId.Earliest
+                            | SeekType.MessageId messageId ->
+                                hasSoughtByTimestamp <- false
+                                match messageId.ChunkMessageIds with
+                                | Some chunkMessageIds when chunkMessageIds.Length >0 ->
+                                        Commands.newSeekByMsgId consumerId requestId chunkMessageIds[0], chunkMessageIds[0]
+                                | _ -> Commands.newSeekByMsgId consumerId requestId messageId, messageId
+                        let originSeekMessageId = duringSeek
+                        duringSeek <- Some (seekMessageId, channel)
+                        try
+                            let! response = clientCnx.SendAndWaitForReply requestId payload
+                            response |> PulsarResponseType.GetEmpty
+                            lastDequeuedMessageId <- MessageId.Earliest
+                            acksGroupingTracker.FlushAndClean()
+                            unAckedMessageTracker.Clear()
+                            incomingMessages.Clear()
+                            if isConsumerEpochSupported then
+                                currentConsumerEpoch <- currentConsumerEpoch + %1UL
+                            incomingMessagesSize <- 0L
+                            Log.Logger.LogDebug("{0} Seek to {1} command has been sent", prefix, seekData)
+                        with Flatten ex ->
+                            // re-set duringSeek and seekMessageId if seek failed
+                            duringSeek <- originSeekMessageId
+                            Log.Logger.LogError(ex, "{0} Failed to reset subscription to {1}", prefix, seekData)
+                            channel.SetException ex
+                    | _ ->
+                        NotConnectedException "Not connected to broker" |> channel.SetException
+                        Log.Logger.LogError("{0} not connected, skipping SeekAsync {1}", prefix, seekData)
 
             | ConsumerMessage.ReachedEndOfTheTopic ->
 
@@ -1325,6 +1368,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
                 Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                connectionHandler.Failed()
+                stopConsumer()
             else
                 Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
@@ -1337,7 +1382,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
         let mutable skippedMessages = 0
-        use stream = rawMessage.Payload
+        let stream = rawMessage.Payload
         stream.Seek(0L, SeekOrigin.Begin) |> ignore
         use binaryReader = new BinaryReader(stream)
         for i in 0..batchSize-1 do
@@ -1396,6 +1441,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     rawMessage.RedeliveryCount,
                     rawMessage.Metadata.ReplicatedFrom,
                     rawMessage.Metadata.ProducerName,
+                    rawMessage.ConsumerEpoch,
                     getValue
                 )
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
@@ -1694,7 +1740,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             match connectionHandler.ConnectionState with
             | Ready _ -> trueTask
             | _ -> falseTask
-
 
     interface IAsyncDisposable with
 

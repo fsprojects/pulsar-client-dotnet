@@ -243,7 +243,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                             let producerTasks =
                                 seq { numPartitions..partitionedTopicNames.Length - 1 }
                                 |> Seq.map (fun partitionIndex ->
-                                    let partitionedTopic = partitionedTopicNames.[partitionIndex]
+                                    let partitionedTopic = partitionedTopicNames[partitionIndex]
                                     let partititonedConfig = { producerConfig with
                                                                 MaxPendingMessages = maxPendingMessages
                                                                 Topic = partitionedTopic }
@@ -287,6 +287,8 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
                 Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                this.ConnectionState <- Failed
+                stopProducer()
             else
                 Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
@@ -340,19 +342,19 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
         member this.SendAndForgetAsync (message: 'T) =
             let partition = _this.NewMessage message |> this.ChoosePartitionIfActive
-            producers.[partition].SendAndForgetAsync(message)
+            producers[partition].SendAndForgetAsync(message)
 
         member this.SendAndForgetAsync (message: MessageBuilder<'T>) =
             let partition = this.ChoosePartitionIfActive(message)
-            producers.[partition].SendAndForgetAsync(message)
+            producers[partition].SendAndForgetAsync(message)
 
         member this.SendAsync (message: 'T) =
             let partition = _this.NewMessage message |> this.ChoosePartitionIfActive
-            producers.[partition].SendAsync(message)
+            producers[partition].SendAsync(message)
 
         member this.SendAsync (message: MessageBuilder<'T>) =
             let partition = this.ChoosePartitionIfActive(message)
-            producers.[partition].SendAsync(message)
+            producers[partition].SendAsync(message)
 
         member this.NewMessage (value:'T,
             [<Optional; DefaultParameterValue(null:string)>]key:string,

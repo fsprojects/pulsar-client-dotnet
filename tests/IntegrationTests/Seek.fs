@@ -138,6 +138,44 @@ let tests =
             Expect.equal "" "Hello2" <| msg.GetValue()
             Log.Debug("Finished Consumer seek can be done to serialized message")
         }
+
+        testTask "Consumer rejects a second seek while the first seek is still in progress" {
+
+            Log.Debug("Started Consumer rejects a second seek while the first seek is still in progress")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let consumerName = "seekConsumerRejectSecond"
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName(consumerName)
+                    .SubscriptionName("test-subscription")
+                    .SubscribeAsync()
+
+            let firstSeekTask = consumer.SeekAsync(MessageId.Earliest)
+            let secondSeekTask = consumer.SeekAsync(MessageId.Earliest)
+
+            let! (secondSeekException: exn) =
+                task {
+                    try
+                        do! secondSeekTask
+                        failtest "Second seek should be rejected while the first seek is still in progress"
+                        return Unchecked.defaultof<exn>
+                    with Flatten ex ->
+                        return ex
+                }
+
+            match secondSeekException with
+            | :? InvalidOperationException ->
+                Expect.equal "" "Seek operation is already in progress" secondSeekException.Message
+            | _ ->
+                failtestf "Expected InvalidOperationException, got %s" (secondSeekException.GetType().FullName)
+
+            do! firstSeekTask
+
+            Log.Debug("Finished Consumer rejects a second seek while the first seek is still in progress")
+        }
         
         testTask "Seek in the middle of the batch works properly" {
 
@@ -243,38 +281,17 @@ let tests =
         }
         
         
-        testTask "Seek won't get stuck at the receive in MultiTopicsConsumer" {
+        testTask "Seek won't get stuck at the receive or receive duplicate messages in MultiTopicsConsumer" {
             Log.Debug("Started Seek won't get stuck at the receive in MultiTopicsConsumer")
             let client = getClient()
             let topicName = "persistent://public/default/multi-topic-seek"
             let producerName = "seekStuckProducer"
             let consumerName = "seekStuckConsumer"
             let numberOfMessages = 30
+            let numberOfMessagesBeforeSeek = 10
             let subscriptionName = "test-seek-stuck-" + Guid.NewGuid().ToString("N")
-            
-            let seekWithRetry (consumer: IConsumer<byte[]>) (targetTimestamp: TimeStamp) (maxRetries: int) =
-                task {
-                    let mutable retryCount = 0
-                    let mutable success = false
-                    while retryCount < maxRetries && not success do
-                        try
-                            do! consumer.SeekAsync(targetTimestamp)
-                            success <- true
-                        with Flatten ex ->
-                            match ex with
-                            | :? NotConnectedException as notConnectedEx ->
-                                retryCount <- retryCount + 1
-                                if retryCount >= maxRetries then
-                                    Log.Error("SeekAsync failed after {0} retries: {1}", maxRetries, notConnectedEx.Message)
-                                    raise notConnectedEx
-                                else
-                                    Log.Debug("SeekAsync failed (attempt {0}/{1}): {2}. Retrying in 1 second...", retryCount, maxRetries, notConnectedEx.Message)
-                                    do! Task.Delay(1000)
-                            | _ ->
-                                raise ex
-                }
-            
-            let! consumer =
+
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
                     .ConsumerName(consumerName)
@@ -288,18 +305,28 @@ let tests =
                     .EnableBatching(false)
                     .CreateAsync()
             
+            let messagesBeforeSeek = HashSet<string>()
+            for i in 1..numberOfMessagesBeforeSeek do
+                let messageContent = sprintf "BeforeSeek-%i-%s" i (Guid.NewGuid().ToString("N"))
+                messagesBeforeSeek.Add(messageContent) |> ignore
+                let messageBytes = Encoding.UTF8.GetBytes(messageContent)
+                let! (_ : MessageId) = producer.SendAsync(messageBytes)
+                ()
+            do! Task.Delay(1000)
+
+            let targetTimestamp = %(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+
             let expectedMessages = HashSet<string>()
             for i in 1..numberOfMessages do
-                let messageContent = sprintf "Message-%i-%s" i (Guid.NewGuid().ToString("N"))
+                let messageContent = sprintf "AfterSeek-%i-%s" i (Guid.NewGuid().ToString("N"))
                 expectedMessages.Add(messageContent) |> ignore
                 let messageBytes = Encoding.UTF8.GetBytes(messageContent)
                 let! (_ : MessageId) = producer.SendAsync(messageBytes)
                 ()
             do! Task.Delay(1000)
-            
-            let targetTimestamp = %(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 1000L * 3600L * 24L)
+
             Log.Debug("Seeking to timestamp: {0}", targetTimestamp)
-            do! seekWithRetry consumer targetTimestamp 10
+            do! consumer.SeekAsync(targetTimestamp)
             
             let receivedMessages = HashSet<string>()
             let cts = new CancellationTokenSource(TimeSpan.FromSeconds(30.0))
@@ -312,9 +339,26 @@ let tests =
                     receivedMessages.Add(received) |> ignore
                     do! consumer.AcknowledgeAsync(message.MessageId)
                 
-                Expect.equal "" numberOfMessages receivedMessages.Count
+                Expect.equal $"Expected to receive {numberOfMessages} messages, but got {receivedMessages.Count}" numberOfMessages receivedMessages.Count
                 for expectedMsg in expectedMessages do
-                    Expect.isTrue "" (receivedMessages.Contains(expectedMsg))
+                    Expect.isTrue $"Missing expected message: {expectedMsg}" (receivedMessages.Contains(expectedMsg))
+                for oldMsg in messagesBeforeSeek do
+                    Expect.isFalse $"Received stale pre-seek message: {oldMsg}" (receivedMessages.Contains(oldMsg))
+
+                let noMoreMessagesCts = new CancellationTokenSource(TimeSpan.FromSeconds(5.0))
+                try
+                    try
+                        let! (extraMessage : Message<byte[]>) = consumer.ReceiveAsync(noMoreMessagesCts.Token)
+                        let extraReceived = Encoding.UTF8.GetString(extraMessage.Data)
+                        let errorMsg = $"Unexpected extra message received within 5 seconds: {extraReceived}"
+                        Log.Error(errorMsg)
+                        failwith errorMsg
+                    with
+                    | :? OperationCanceledException
+                    | :? TaskCanceledException ->
+                        ()
+                finally
+                    noMoreMessagesCts.Dispose()
                 
                 cts.Dispose()
             with
@@ -328,7 +372,7 @@ let tests =
                 cts.Dispose()
                 raise ex
             
-            Log.Debug("Finished Seek won't get stuck at the receive in MultiTopicsConsumer")
+            Log.Debug("Finished Seek won't get stuck at the receive or receive duplicate messages in MultiTopicsConsumer")
         }
        
     ]

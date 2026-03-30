@@ -112,6 +112,15 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     ()
                 checkTimeoutedMessages()
 
+    let stopTransactionMetaStoreHandler() =
+        timeoutTimer.Stop()
+        for KeyValue(_, v) in pendingRequests do
+            v.SetException(AlreadyClosedException $"{prefix} is closed")
+        pendingRequests.Clear()
+        timeoutQueue.Clear()
+        connectionHandler.Close()
+        Log.Logger.LogInformation("{0} stopped", prefix)
+
     let mb = Channel.CreateUnbounded<TransactionMetaStoreMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (backgroundTask {
         let mutable continueLoop = true
@@ -151,6 +160,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                     Log.Logger.LogInformation("{0} connection failed {1}", prefix,
                                                 if nonRetriableError then "with unretriableError" else "after timeout")
                     connectionHandler.Failed()
+                    stopTransactionMetaStoreHandler()
                     continueLoop <- false
 
             | TransactionMetaStoreMessage.ConnectionClosed clientCnx ->
@@ -316,18 +326,16 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
 
             | Close ->
 
-                timeoutTimer.Stop()
-                for KeyValue(_, v) in pendingRequests do
-                    v.SetException(AlreadyClosedException "{0} is closed")
-                pendingRequests.Clear()
-                timeoutQueue.Clear()
-                connectionHandler.Close()
+                connectionHandler.Closed()
+                stopTransactionMetaStoreHandler()
                 continueLoop <- false
 
         }:> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
                 Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                connectionHandler.Failed()
+                stopTransactionMetaStoreHandler()
             else
                 Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore

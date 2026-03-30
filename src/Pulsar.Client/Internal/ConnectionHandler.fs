@@ -29,14 +29,14 @@ type internal ConnectionHandler( parentPrefix: string,
                         connectionPool: ConnectionPool,
                         lookup: ILookupService,
                         topic: CompleteTopicName,
-                        connectionOpened: uint64 -> unit,
+                        connectionOpened: Epoch -> unit,
                         connectionFailed: exn -> unit,
                         backoff: Backoff) as this =
 
     let mutable connectionState = Uninitialized
     let mutable lastDisconnectedTimestamp = 0L
     let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
-    let mutable epoch = 0UL
+    let mutable epoch = %0UL
     let prefix = parentPrefix + " ConnectionHandler"
 
     let isValidStateForReconnection() =
@@ -61,7 +61,7 @@ type internal ConnectionHandler( parentPrefix: string,
                             let! broker = lookup.GetBroker(topic)
                             let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize)
                             this.ConnectionState <- Ready clientCnx
-                            Log.Logger.LogDebug("{0} Successfuly reconnected to {1}, {2}", prefix, topic, clientCnx)
+                            Log.Logger.LogDebug("{0} Successfully reconnected to {1}, {2}", prefix, topic, clientCnx)
                             connectionOpened epoch
                         with Flatten ex ->
                             Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
@@ -78,7 +78,7 @@ type internal ConnectionHandler( parentPrefix: string,
                     Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
                         prefix, topic, this.ConnectionState, delay)
                     this.ConnectionState <- Connecting
-                    epoch <- epoch + 1UL
+                    epoch <- epoch + %1UL
                     asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
                 else
                     Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
@@ -95,7 +95,7 @@ type internal ConnectionHandler( parentPrefix: string,
                         Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {3}ms ",
                             prefix, topic, this.ConnectionState, delay)
                         this.ConnectionState <- Connecting
-                        epoch <- epoch + 1UL
+                        epoch <- epoch + %1UL
                         asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
                     else
                         Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
@@ -105,12 +105,13 @@ type internal ConnectionHandler( parentPrefix: string,
         }:> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} ConnectionHandler mailbox failure", prefix)
+                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                this.ConnectionState <- Failed
             else
-                Log.Logger.LogInformation("{0} ConnectionHandler mailbox has stopped normally", prefix))
+                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
 
-    member private __.Mb with get() : Channel<ConnectionHandlerMessage> = mb
+    member private _.Mb with get() : Channel<ConnectionHandlerMessage> = mb
 
     member this.GrabCnx() =
         post mb GrabCnx
@@ -141,7 +142,7 @@ type internal ConnectionHandler( parentPrefix: string,
 
     member this.ConnectionState
         with get() = Volatile.Read(&connectionState)
-        and private set(value) = Volatile.Write(&connectionState, value)
+        and private set value = Volatile.Write(&connectionState, value)
 
     member this.LastDisconnectedTimestamp
         with get() : TimeStamp = %(Volatile.Read(&lastDisconnectedTimestamp))
