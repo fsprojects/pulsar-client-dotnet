@@ -89,6 +89,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let partitionedTopics = Dictionary<TopicName, ConsumerInitInfo<'T>>()
     let allTopics = HashSet()
     let mutable incomingMessagesSize = 0L
+    let mutable currentConsumerEpoch: ConsumerEpoch = %0UL
     let defaultWaitingPoller = Unchecked.defaultof<TaskCompletionSource<unit>>
     let mutable waitingPoller = defaultWaitingPoller
     let waiters = LinkedList<Waiter<'T>>()
@@ -370,6 +371,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let isPollingAllowed() =
         incomingMessages.Count <= sharedQueueResumeThreshold
 
+    let isInvalidConsumerEpoch = isInvalidConsumerEpoch consumerConfig.SubscriptionType
+    let isConsumerEpochSupported = isConsumerEpochSupported consumerConfig.SubscriptionType
+
+
     let enqueueMessage (m: ResultOrException<Message<'T>>) =
         match m with
         | Ok msg -> incomingMessagesSize <- incomingMessagesSize + msg.Data.LongLength
@@ -398,8 +403,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let hasEnoughMessagesForBatchReceive() =
         hasEnoughMessagesForBatchReceive consumerConfig.BatchReceivePolicy incomingMessages.Count incomingMessagesSize
 
-
-
     let getAllPartitions () =
         backgroundTask {
             try
@@ -415,7 +418,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                Log.Logger.LogWarning(ex, "{0} Unabled to fetch new topics", prefix)
                return None
         }
-
 
     let replyWithBatch (channel: TaskCompletionSource<Messages<'T>>) =
         let messages = Messages(consumerConfig.BatchReceivePolicy.MaxNumMessages, consumerConfig.BatchReceivePolicy.MaxNumBytes)
@@ -674,24 +676,29 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 Log.Logger.LogDebug("{0} MessageReceived queueLength={1}, hasWaitingChannel={2},  hasWaitingBatchChannel={3}",
                     prefix, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
                 // handle message
-                if hasWaitingChannel then
-                    let waitingChannel = waiters |> dequeueWaiter
-                    if (incomingMessages.Count = 0) then
-                        replyWithMessage waitingChannel message
+                match message with
+                | Ok rawMessage when isInvalidConsumerEpoch rawMessage.ConsumerEpoch currentConsumerEpoch ->
+                    Log.Logger.LogWarning("{0} Consumer filter old epoch message {1}, messageConsumerEpoch={2}, consumerEpoch={3}",
+                        prefix, rawMessage.MessageId, rawMessage.ConsumerEpoch, currentConsumerEpoch)
+                | _ ->
+                    if hasWaitingChannel then
+                        let waitingChannel = waiters |> dequeueWaiter
+                        if (incomingMessages.Count = 0) then
+                            replyWithMessage waitingChannel message
+                        else
+                            enqueueMessage message
+                            replyWithMessage waitingChannel <| dequeueMessage()
                     else
                         enqueueMessage message
-                        replyWithMessage waitingChannel <| dequeueMessage()
-                else
-                    enqueueMessage message
-                    if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                        let ch = batchWaiters |> dequeueBatchWaiter
-                        replyWithBatch ch
+                        if hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                            let ch = batchWaiters |> dequeueBatchWaiter
+                            replyWithBatch ch
                 // check if should reply to poller immediately
-                if isPollingAllowed() |> not then
+                if isPollingAllowed() then
+                    pollerChannel.SetResult()
+                else
                     Log.Logger.LogDebug("{0} paused poller, incomingMessages={1}, sharedQueueResumeThreshold={2}", prefix, incomingMessages.Count, sharedQueueResumeThreshold)
                     waitingPoller <- pollerChannel
-                else
-                    pollerChannel.SetResult()
 
             | Receive receiveCallback ->
 
@@ -761,12 +768,14 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 match this.ConnectionState with
                 | Ready ->
                     try
+                        clearIncomingMessages()
+                        unAckedMessageTracker.Clear()
+                        if isConsumerEpochSupported then
+                            currentConsumerEpoch <- currentConsumerEpoch + %1UL
                         let! _ =
                             consumers
                             |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.RedeliverUnacknowledgedMessagesAsync())
                             |> Task.WhenAll
-                        unAckedMessageTracker.Clear()
-                        clearIncomingMessages()
                         currentStream.RestartCompletedTasks()
                         channel |> Option.map _.SetResult() |> ignore
                     with ex ->
@@ -845,38 +854,40 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
             | Seek (seekData, channel) ->
 
-                    Log.Logger.LogDebug("{0} Seek {1}", prefix, seekData)
-                    backgroundTask {
-                        try
-                            unAckedMessageTracker.Clear()
-                            clearIncomingMessages()
-                            let! _ =
-                                consumers
-                                |> Seq.map (fun (KeyValue(_, (consumer, _))) ->
-                                    match seekData with
-                                    | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
-                                    | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
-                                |> Task.WhenAll
-                            currentStream.RestartCompletedTasks()
-                            channel.SetResult()
-                        with Flatten ex ->
-                            channel.SetException ex
-                    } |> ignore
+                Log.Logger.LogDebug("{0} Seek {1}", prefix, seekData)
+                try
+                    unAckedMessageTracker.Clear()
+                    clearIncomingMessages()
+                    if isConsumerEpochSupported then
+                        currentConsumerEpoch <- currentConsumerEpoch + %1UL
+                    let! _ =
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, (consumer, _))) ->
+                            match seekData with
+                            | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
+                            | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
+                        |> Task.WhenAll
+                    currentStream.RestartCompletedTasks()
+                    channel.SetResult()
+                with Flatten ex ->
+                    channel.SetException ex
 
             | SeekWithResolver (resolver, channel) ->
-                backgroundTask {
-                    try
-                        unAckedMessageTracker.Clear()
-                        clearIncomingMessages()
-                        let! _ =
-                            consumers
-                            |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))
-                            |> Task.WhenAll
-                        currentStream.RestartCompletedTasks()
-                        channel.SetResult()
-                    with Flatten ex ->
-                        channel.SetException ex
-                } |> ignore
+
+                Log.Logger.LogDebug("{0} Seek with resolver", prefix)
+                try
+                    unAckedMessageTracker.Clear()
+                    clearIncomingMessages()
+                    if isConsumerEpochSupported then
+                        currentConsumerEpoch <- currentConsumerEpoch + %1UL
+                    let! _ =
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))
+                        |> Task.WhenAll
+                    currentStream.RestartCompletedTasks()
+                    channel.SetResult()
+                with Flatten ex ->
+                    channel.SetException ex
 
             | PatternTickTime ->
 

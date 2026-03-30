@@ -5,7 +5,6 @@ open System.IO.Pipelines
 open System.Reflection
 open Pulsar.Client.Common
 open System.Collections.Generic
-
 open Microsoft.Extensions.Logging
 open System.Threading.Tasks
 open Pulsar.Client.Transaction
@@ -544,6 +543,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     TopicName = %""
                     ChunkMessageIds = None
                 }
+            ConsumerEpoch =
+                if cmd.ShouldSerializeConsumerEpoch() then
+                    cmd.ConsumerEpoch |> UMX.tag |> Nullable
+                else
+                    Nullable()
             RedeliveryCount = int cmd.RedeliveryCount
             Metadata = metadata
             Payload = payload

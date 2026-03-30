@@ -18,7 +18,6 @@ type internal PartitionedTopicMetadata =
     }
     member this.IsMultiPartitioned with get() = this.Partitions > 0
 
-
 [<CustomEquality; NoComparison>]
 type SchemaVersion =
     {
@@ -226,6 +225,7 @@ type MessageKey =
 type internal RawMessage =
     {
         MessageId: MessageId
+        ConsumerEpoch: Nullable<ConsumerEpoch>
         Metadata: Metadata
         RedeliveryCount: int
         Payload: MemoryStream
@@ -266,7 +266,7 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
                   properties: IReadOnlyDictionary<string, string>, encryptionCtx: EncryptionContext option,
                   schemaVersion: byte[], sequenceId: SequenceId, orderingKey: byte[], publishTime: TimeStamp,
                   eventTime: Nullable<TimeStamp>,
-                  redeliveryCount: int32, replicatedFrom: string, producerName: string,
+                  redeliveryCount: int32, replicatedFrom: string, producerName: string, consumerEpoch: Nullable<ConsumerEpoch>,
                   getValue: unit -> 'T) =
     /// Get the unique message ID associated with this message.
     member this.MessageId = messageId
@@ -297,6 +297,8 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
     member this.ReplicatedFrom = replicatedFrom
     /// Get name of producer of the message
     member this.ProducerName = producerName
+    /// Get the consumer epoch associated with this message
+    member this.ConsumerEpoch = consumerEpoch
 
     /// Get the de-serialized value of the message, according the configured Schema.
     member this.GetValue() =
@@ -304,19 +306,19 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
 
     member internal this.WithMessageId messageId =
         Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
-                orderingKey, publishTime, eventTime, redeliveryCount, replicatedFrom, producerName, getValue)
+                orderingKey, publishTime, eventTime, redeliveryCount, replicatedFrom, producerName, consumerEpoch, getValue)
     /// Get a new instance of the message with updated data
     member this.WithData data =
         Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
-                orderingKey, publishTime, eventTime, redeliveryCount, replicatedFrom, producerName, getValue)
+                orderingKey, publishTime, eventTime, redeliveryCount, replicatedFrom, producerName, consumerEpoch, getValue)
     /// Get a new instance of the message with updated key
     member this.WithKey (key, hasBase64EncodedKey) =
         Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
-                orderingKey, publishTime, eventTime, redeliveryCount, replicatedFrom, producerName, getValue)
+                orderingKey, publishTime, eventTime, redeliveryCount, replicatedFrom, producerName, consumerEpoch, getValue)
     /// Get a new instance of the message with updated properties
     member this.WithProperties properties =
         Message(messageId, data, key, hasBase64EncodedKey, properties, encryptionCtx, schemaVersion, sequenceId,
-                orderingKey, publishTime, eventTime, redeliveryCount, replicatedFrom, producerName, getValue)
+                orderingKey, publishTime, eventTime, redeliveryCount, replicatedFrom, producerName, consumerEpoch, getValue)
 
 type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
 
