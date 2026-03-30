@@ -1,9 +1,12 @@
 ﻿module Pulsar.Client.IntegrationTests.Stats
 
 open System
+open System.Text.Json
 open Expecto
 
 open System.Threading.Tasks
+open System.Reflection
+open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.IntegrationTests.Common
 
@@ -55,5 +58,27 @@ let tests =
 
             Expect.equal consumerStats.TotalMsgsReceived numberOfMessages "The consumStats.TotalMsgsReceived is not equal to numberOfMessages"
             Expect.equal consumerStats.TotalAcksSent numberOfMessages "The consumStats.TotalAcksSent is not equal to numberOfMessages"
+        }
+
+        testTask "Broker topic stats should expose prefixed client version" {
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! (producer: IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .CreateAsync()
+
+            let! _ = producer.SendAsync([| 1uy |])
+            do! Task.Delay 3000
+
+            let url = $"{pulsarHttpAddress}/admin/v2/persistent/{topicName}/stats"
+            let! response : string = commonHttpClient.GetStringAsync(url)
+            let json = JsonDocument.Parse(response)
+            let publishers = json.RootElement.GetProperty("publishers")
+            let clientVersion = publishers[0].GetProperty("clientVersion").GetString()
+            let expectedVersion = $"pulsar-client-dotnet-{Assembly.GetAssembly(typeof<PulsarClient>).GetName().Version.ToString()}"
+
+            Expect.equal clientVersion expectedVersion "Expected broker stats to report the prefixed .NET client version."
         }
     ]
