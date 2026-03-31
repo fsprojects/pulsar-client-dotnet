@@ -36,19 +36,21 @@ module PulsarClientBuilderTests =
             test "Build throws an exception if ServiceUrl is empty" {
                 fun() -> builder().BuildAsync() |> ignore
                 |> Expect.throwsWithMessage<ArgumentException>
-                    "ServiceUrl or ServiceUrlProvider needs to be specified on the PulsarClientBuilder object."
+                    "ServiceUrl or ServiceInfoProvider needs to be specified on the PulsarClientBuilder object."
             }
 
-            test "Build throws an exception if ServiceUrlProvider returns empty string" {
+            test "Build throws an exception if both ServiceUrl and ServiceInfoProvider are set" {
                 fun() ->
-                    builder().ServiceUrlProvider({
-                        new IServiceUrlProvider with
+                    builder()
+                        .ServiceUrl("pulsar://test.com:6650")
+                        .ServiceInfoProvider({
+                        new IServiceInfoProvider with
                             member this.Initialize(var0) = failwith "unexpected"
-                            member this.GetServiceUrl() = ""
+                            member this.GetServiceInfo() = failwith "unexpected"
                             member _.Dispose() = ()
                     }).BuildAsync() |> ignore
                 |> Expect.throwsWithMessage<ArgumentException>
-                    "Cannot get service url from service url provider."
+                    "Can only chose one way ServiceUrl or ServiceInfoProvider."
             }
 
             test "Http lookup authentication authDataProvider" {

@@ -139,12 +139,10 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
     let addConsumer = fun consumer -> post mb (AddConsumer consumer)
 
     do
-        match currentConfig.ServiceUrlProvider with
+        match currentConfig.ServiceInfoProvider with
         | Some provider -> provider.Initialize({
-                new IServiceUrlProviderContext with
-                    member _.UpdateServiceUrl(serviceUrl) = this.UpdateServiceUrl(serviceUrl)
-                    member _.UpdateAuthentication(authentication) = this.UpdateAuthentication(authentication)
-                    member _.UpdateTlsTrustCertificate(certificate) = this.UpdateTlsTrustCertificate(certificate)
+                new IServiceInfoProviderContext with
+                    member _.UpdateServiceInfo(serviceUrl) = this.UpdateServiceInfo(serviceUrl)
             })
         | None -> ()
 
@@ -376,18 +374,18 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
         | PulsarClientState.Closed | PulsarClientState.Closing -> true
         | _ -> false
 
-    member this.UpdateServiceUrl(serviceUrl: string): Task<unit> =
+    member this.UpdateServiceInfo(serviceInfo: ServiceInfo): Task<unit> =
         backgroundTask {
-            Log.Logger.LogInformation("Updating service URL to {0}", serviceUrl)
-            match ServiceUri.parse serviceUrl with
-            | Ok parsedServiceUri ->
-                currentConfig <- { currentConfig with ServiceAddresses = parsedServiceUri.Addresses }
-                connectionPool.UpdateConfig(currentConfig)
-                lookupService.UpdateServiceUrl(parsedServiceUri)
-                return! connectionPool.CloseAllConnections()
-            | Error err ->
-                Log.Logger.LogWarning("Failed to parse ServiceUrl {0}: {1}", serviceUrl, err)
-                return ()
+            Log.Logger.LogInformation("Updating service URL to {0}", serviceInfo.ServiceUrl)
+            currentConfig <- {
+                currentConfig with
+                    ServiceAddresses = serviceInfo.ServiceUrl.Addresses
+                    Authentication = serviceInfo.Authentication
+                    TlsTrustCertificate = serviceInfo.TlsTrustCertificate
+            }
+            connectionPool.UpdateConfig(currentConfig)
+            lookupService.UpdateServiceUrl(serviceInfo.ServiceUrl)
+            return! connectionPool.CloseAllConnections()
         }
 
     member private this.UpdateAuthentication(authentication: Authentication) =

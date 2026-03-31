@@ -1,4 +1,4 @@
-namespace Pulsar.Client.Api
+﻿namespace Pulsar.Client.Api
 
 open System
 open Pulsar.Client.Common
@@ -12,21 +12,22 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
     let verify(config : PulsarClientConfiguration) =
         config
         |> invalidArgIf (fun c ->
-                c.ServiceAddresses.Length = 0 && c.ServiceUrlProvider.IsNone
-            ) "ServiceUrl or ServiceUrlProvider needs to be specified on the PulsarClientBuilder object."
+                c.ServiceAddresses.Length = 0 && c.ServiceInfoProvider.IsNone
+            ) "ServiceUrl or ServiceInfoProvider needs to be specified on the PulsarClientBuilder object."
         |> invalidArgIf (fun c ->
-                c.ServiceAddresses.Length > 0 && c.ServiceUrlProvider.IsSome
-            ) "Can only chose one way ServiceUrl or ServiceUrlProvider."
+                c.ServiceAddresses.Length > 0 && c.ServiceInfoProvider.IsSome
+            ) "Can only chose one way ServiceUrl or ServiceInfoProvider."
         |> (fun c ->
-                c.ServiceUrlProvider
-                |> Option.map _.GetServiceUrl()
-                |> Option.map (invalidArgIfBlankString "Cannot get service url from service url provider.")
-                |> Option.map (fun url ->
-                    match ServiceUri.parse url with
-                    | Result.Ok serviceUri ->
-                        { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls; Scheme = serviceUri.Scheme }
-                    | Result.Error message -> invalidArg null message
-                    )
+                c.ServiceInfoProvider
+                |> Option.map _.GetServiceInfo()
+                |> Option.map (fun serviceInfo -> {
+                    config with
+                        ServiceAddresses = serviceInfo.ServiceUrl.Addresses
+                        UseTls = serviceInfo.ServiceUrl.UseTls
+                        Scheme = serviceInfo.ServiceUrl.Scheme
+                        Authentication = serviceInfo.Authentication
+                        TlsTrustCertificate = serviceInfo.TlsTrustCertificate
+                })
                 |> Option.defaultValue c
             )
 
@@ -39,9 +40,9 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
             PulsarClientBuilder { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls ; Scheme = serviceUri.Scheme }
         | Result.Error message -> invalidArg null message
 
-    member this.ServiceUrlProvider (provider: IServiceUrlProvider) =
+    member this.ServiceInfoProvider (provider: IServiceInfoProvider) =
         PulsarClientBuilder
-            { config with ServiceUrlProvider = Some provider }
+            { config with ServiceInfoProvider = Some provider }
 
     member this.OperationTimeout operationTimeout =
         PulsarClientBuilder
@@ -53,6 +54,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
             { config with
                 MaxNumberOfRejectedRequestPerConnection = num |> invalidArgIfLessThanZero "MaxNumberOfRejectedRequestPerConnection can't be negative" }
 
+    [<Obsolete("use \"pulsar+ssl://\" in ServiceUrl to enable")>]
     member this.EnableTls useTls =
         PulsarClientBuilder
             { config with

@@ -10,32 +10,25 @@ open System.Security.Cryptography.X509Certificates
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 
-type private ServiceInfo = {
-    Url: string
+type private AutoServiceInfo = {
+    ServiceInfo: ServiceInfo
     EndPointResolver: EndPointResolver
 }
 
 type AutoClusterFailover
     (
-        primary: string,
-        secondary: string array,
-        primaryAuthentication: Authentication,
-        secondaryAuthentication: IReadOnlyDictionary<string, Authentication>,
-        primaryTlsTrustCertificate: X509Certificate2,
-        secondaryTlsTrustCertificate: IReadOnlyDictionary<string, X509Certificate2>,
+        primary: ServiceInfo,
+        secondary: ServiceInfo array,
         failoverDelay: TimeSpan,
         switchBackDelay: TimeSpan,
         checkInterval: TimeSpan
     ) =
 
-    let getServiceInfo (url: string) =
-        let serviceUri =
-            ServiceUri.parse(primary) |> Result.defaultWith (
-                fun err -> failwith $"Invalid service url: %s{url}, error: %s{err}")
-        { Url = url; EndPointResolver = EndPointResolver(serviceUri.Addresses) }
+    let getAutoServiceInfo (serviceInfo: ServiceInfo) =
+        { ServiceInfo = serviceInfo; EndPointResolver = EndPointResolver(serviceInfo.ServiceUrl.Addresses) }
 
-    let primaryServiceInfo = getServiceInfo primary
-    let secondaryServiceInfos = secondary |> Array.map getServiceInfo
+    let primaryServiceInfo = getAutoServiceInfo primary
+    let secondaryServiceInfos = secondary |> Array.map getAutoServiceInfo
     let mutable currentServiceInfo = primaryServiceInfo
     let cts = new CancellationTokenSource()
 
@@ -55,7 +48,7 @@ type AutoClusterFailover
                 return false
         }
 
-    let run (ctx: IServiceUrlProviderContext) =
+    let run (ctx: IServiceInfoProviderContext) =
         Log.Logger.LogInformation("Initializing AutoClusterFailover")
         backgroundTask {
             while not cts.IsCancellationRequested do
@@ -79,13 +72,9 @@ type AutoClusterFailover
                                     }
                                 match targetSecondary with
                                 | Some sec ->
-                                    Log.Logger.LogInformation("Switching to secondary cluster {0}", sec.Url)
+                                    Log.Logger.LogInformation("Switching to secondary cluster {0}", sec.ServiceInfo.ServiceUrl)
                                     currentServiceInfo <- sec
-                                    if not (isNull secondaryAuthentication) && secondaryAuthentication.ContainsKey(sec.Url) then
-                                        ctx.UpdateAuthentication(secondaryAuthentication[sec.Url])
-                                    if not (isNull secondaryTlsTrustCertificate) && secondaryTlsTrustCertificate.ContainsKey(sec.Url) then
-                                        ctx.UpdateTlsTrustCertificate(secondaryTlsTrustCertificate[sec.Url])
-                                    do! ctx.UpdateServiceUrl(sec.Url)
+                                    do! ctx.UpdateServiceInfo(sec.ServiceInfo)
                                     failedTimestamp <- None
                                 | None ->
                                     Log.Logger.LogWarning("Could not find any available secondary cluster")
@@ -101,9 +90,7 @@ type AutoClusterFailover
                             | Some ts when DateTime.UtcNow - ts >= switchBackDelay ->
                                 Log.Logger.LogInformation("Switching back to primary cluster {0}", primary)
                                 currentServiceInfo <- primaryServiceInfo
-                                ctx.UpdateAuthentication(primaryAuthentication)
-                                ctx.UpdateTlsTrustCertificate(primaryTlsTrustCertificate)
-                                do! ctx.UpdateServiceUrl(primary)
+                                do! ctx.UpdateServiceInfo(primary)
                                 recoveredTimestamp <- None
                             | _ -> ()
                         else
@@ -114,10 +101,10 @@ type AutoClusterFailover
         |> ignore
 
 
-    interface IServiceUrlProvider with
-        member this.Initialize(context: IServiceUrlProviderContext) =
+    interface IServiceInfoProvider with
+        member this.Initialize(context: IServiceInfoProviderContext) =
             run context
-        member this.GetServiceUrl() = currentServiceInfo.Url
+        member this.GetServiceInfo() = currentServiceInfo.ServiceInfo
 
         member this.Dispose() =
             cts.Cancel()
@@ -125,7 +112,7 @@ type AutoClusterFailover
 
 
 type AutoClusterFailoverBuilder() =
-    let mutable primary = ""
+    let mutable primary = None
     let mutable secondary = [||]
     let mutable failoverDelay = TimeSpan.FromSeconds(30.0)
     let mutable switchBackDelay = TimeSpan.FromSeconds(60.0)
@@ -135,12 +122,12 @@ type AutoClusterFailoverBuilder() =
     let mutable primaryTlsTrustCertificate = null : X509Certificate2
     let secondaryTlsTrustCertificate = Dictionary<string, X509Certificate2>()
 
-    member this.Primary(url: string) =
-        primary <- url
+    member this.Primary(serviceInfo: ServiceInfo) =
+        primary <- Some serviceInfo
         this
 
-    member this.Secondary(urls: string seq) =
-        secondary <- urls |> Seq.toArray
+    member this.Secondary(serviceInfos: ServiceInfo seq) =
+        secondary <- serviceInfos |> Seq.toArray
         this
 
     member this.FailoverDelay(delay: TimeSpan) =
@@ -173,21 +160,17 @@ type AutoClusterFailoverBuilder() =
             secondaryTlsTrustCertificate[kv.Key] <- kv.Value
         this
 
-    member this.Build() : IServiceUrlProvider =
-        if String.IsNullOrEmpty(primary) then
+    member this.Build() : IServiceInfoProvider =
+        if primary.IsNone then
             invalidArg "primary" "primary service url shouldn't be null or empty"
         if Array.isEmpty secondary then
             invalidArg "secondary" "secondary cluster service url shouldn't be null and should have at least one url"
         
         new AutoClusterFailover(
-            primary, 
+            primary.Value,
             secondary,
-            primaryAuthentication, 
-            secondaryAuthentication, 
-            primaryTlsTrustCertificate, 
-            secondaryTlsTrustCertificate, 
             failoverDelay, 
             switchBackDelay, 
             checkInterval
-        ) :> IServiceUrlProvider
+        ) :> IServiceInfoProvider
 

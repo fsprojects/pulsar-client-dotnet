@@ -27,7 +27,7 @@ type PulsarClientConfiguration =
         InitialBackoffInterval: TimeSpan
         MaxBackoffInterval: TimeSpan
         KeepAliveInterval: TimeSpan
-        ServiceUrlProvider: IServiceUrlProvider option
+        ServiceInfoProvider: IServiceInfoProvider option
     }
     static member Default =
         {
@@ -49,7 +49,7 @@ type PulsarClientConfiguration =
             InitialBackoffInterval = TimeSpan.FromMilliseconds(100.0)
             MaxBackoffInterval = TimeSpan.FromSeconds(60.0)
             KeepAliveInterval = TimeSpan.FromSeconds(30.0)
-            ServiceUrlProvider = None
+            ServiceInfoProvider = None
         }
 
 type ConsumerConfiguration<'T> =

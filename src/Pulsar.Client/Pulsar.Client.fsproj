@@ -86,7 +86,7 @@
     <Compile Include="Api\AuthenticationDataProvider.fs" />
     <Compile Include="Api\Authentication.fs" />
     <Compile Include="Api\IMessageRouter.fs" />
-    <Compile Include="Api\IServiceUrlProvider.fs" />
+    <Compile Include="Api\IServiceInfoProvider.fs" />
     <Compile Include="Api\IConsumer.fs" />
     <Compile Include="Api\IReader.fs" />
     <Compile Include="Api\IProducer.fs" />

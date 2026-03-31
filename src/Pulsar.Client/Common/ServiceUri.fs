@@ -3,7 +3,7 @@
 open System.Text.RegularExpressions
 open System
 
-type internal ServiceUri = {
+type ServiceUri = {
     OriginalString : string
     Addresses : Uri array
     UseTls : bool
