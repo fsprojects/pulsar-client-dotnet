@@ -42,7 +42,11 @@ type internal PulsarHttpClient () =
                 return! httpClient.GetFromJsonAsync<'T>(requestUri, jsonOptions)
         }
 
-type internal HttpLookupService (config: PulsarClientConfiguration, _connectionPool: ConnectionPool) =
+    member this.Dispose() =
+        httpClient.Dispose()
+
+
+type internal HttpLookupService (config: PulsarClientConfiguration) =
 
     let pulsarHttpClient = PulsarHttpClient()
     let mutable currentServiceInfo =
@@ -134,6 +138,9 @@ type internal HttpLookupService (config: PulsarClientConfiguration, _connectionP
 
         member this.UpdateServiceInfo(serviceInfo: ServiceInfo) =
             currentServiceInfo <- serviceInfo
+
+        member this.Dispose() =
+            pulsarHttpClient.Dispose()
 
     //  GET /admin/v2/{topic-domain}/{tenant}/{namespace}/{topic}/partitions?checkAllowAutoCreation=true
     member private this.GetPartitionedTopicMetadataInner (topicName: CompleteTopicName, backoff: Backoff, remainingTimeMs) =

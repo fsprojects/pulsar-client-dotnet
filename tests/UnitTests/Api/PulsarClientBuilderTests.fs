@@ -50,7 +50,7 @@ module PulsarClientBuilderTests =
                             member _.Dispose() = ()
                     }).BuildAsync() |> ignore
                 |> Expect.throwsWithMessage<ArgumentException>
-                    "Can only chose one way ServiceUrl or ServiceInfoProvider."
+                    "Can only choose one way ServiceUrl or ServiceInfoProvider."
             }
 
             test "Http lookup authentication authDataProvider" {

@@ -1,10 +1,12 @@
 ﻿namespace Pulsar.Client.Internal
 
+open System
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System.Threading.Tasks
 
 type internal ILookupService =
+    inherit IDisposable
 
     //  Get the partitions of the topic.
     abstract member GetPartitionsForTopic: TopicName -> Task<TopicName[]>

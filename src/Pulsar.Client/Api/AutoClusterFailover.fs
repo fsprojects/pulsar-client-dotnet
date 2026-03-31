@@ -1,12 +1,10 @@
 namespace Pulsar.Client.Api
 
 open System
-open System.Collections.Generic
 open System.Net.Sockets
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
-open System.Security.Cryptography.X509Certificates
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 
@@ -53,7 +51,7 @@ type AutoClusterFailover
         backgroundTask {
             while not cts.IsCancellationRequested do
                 try
-                    do! Task.Delay checkInterval
+                    do! Task.Delay(checkInterval, cts.Token)
                     if currentServiceInfo = primaryServiceInfo then
                         let! available = probeAvailable primaryServiceInfo.EndPointResolver
                         if not available then
@@ -117,10 +115,6 @@ type AutoClusterFailoverBuilder() =
     let mutable failoverDelay = TimeSpan.FromSeconds(30.0)
     let mutable switchBackDelay = TimeSpan.FromSeconds(60.0)
     let mutable checkInterval = TimeSpan.FromSeconds(30.0)
-    let mutable primaryAuthentication = Authentication.AuthenticationDisabled
-    let secondaryAuthentication = Dictionary<string, Authentication>()
-    let mutable primaryTlsTrustCertificate = null : X509Certificate2
-    let secondaryTlsTrustCertificate = Dictionary<string, X509Certificate2>()
 
     member this.Primary(serviceInfo: ServiceInfo) =
         primary <- Some serviceInfo
@@ -142,29 +136,11 @@ type AutoClusterFailoverBuilder() =
         checkInterval <- interval
         this
 
-    member this.PrimaryAuthentication(authentication: Authentication) =
-        primaryAuthentication <- authentication
-        this
-
-    member this.SecondaryAuthentication(secondaryAuth: IReadOnlyDictionary<string, Authentication>) =
-        for kv in secondaryAuth do
-            secondaryAuthentication[kv.Key] <- kv.Value
-        this
-
-    member this.PrimaryTlsTrustCertificate(certificate: X509Certificate2) =
-        primaryTlsTrustCertificate <- certificate
-        this
-
-    member this.SecondaryTlsTrustCertificate(secondaryCert: IReadOnlyDictionary<string, X509Certificate2>) =
-        for kv in secondaryCert do
-            secondaryTlsTrustCertificate[kv.Key] <- kv.Value
-        this
-
     member this.Build() : IServiceInfoProvider =
         if primary.IsNone then
-            invalidArg "primary" "primary service url shouldn't be null or empty"
+            invalidArg "primary" "Primary serviceInfo shouldn't be null or empty"
         if Array.isEmpty secondary then
-            invalidArg "secondary" "secondary cluster service url shouldn't be null and should have at least one url"
+            invalidArg "secondary" "Secondary serviceInfo list should have at least one item"
         
         new AutoClusterFailover(
             primary.Value,

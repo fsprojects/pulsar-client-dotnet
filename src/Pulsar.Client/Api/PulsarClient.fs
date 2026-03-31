@@ -40,9 +40,9 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
     let autoConsumeStubType =  typeof<AutoConsumeSchemaStub>
     let lookupService =
         if currentConfig.Scheme = ServiceUri.HTTP_SERVICE then
-            HttpLookupService(currentConfig, connectionPool) :> ILookupService
+            new HttpLookupService(currentConfig) :> ILookupService
         else
-            BinaryLookupService(currentConfig, connectionPool) :> ILookupService
+            new BinaryLookupService(currentConfig, connectionPool) :> ILookupService
 
     let transactionClient =
         if currentConfig.EnableTransaction then
@@ -113,6 +113,7 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
                             schemaProviders |> Seq.iter (fun (KeyValue (_, provider)) -> provider.Close())
                             currentConfig.Authentication.Dispose()
                             currentConfig.ServiceInfoProvider |> Option.iter _.Dispose()
+                            lookupService.Dispose()
                             tryStopMailbox()
                             channel.SetResult()
                         with ex ->

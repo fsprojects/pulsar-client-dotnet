@@ -84,6 +84,8 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
             endPointResolver.UpdateAddresses(serviceInfo.ServiceUrl.Addresses)
             currentServiceInfo <- serviceInfo
 
+        member this.Dispose() = ()
+
     member private this.GetPartitionedTopicMetadataInner (topicName, backoff: Backoff, remainingTimeMs) =
          async {
             try

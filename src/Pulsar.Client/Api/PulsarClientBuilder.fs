@@ -16,7 +16,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
             ) "ServiceUrl or ServiceInfoProvider needs to be specified on the PulsarClientBuilder object."
         |> invalidArgIf (fun c ->
                 c.ServiceAddresses.Length > 0 && c.ServiceInfoProvider.IsSome
-            ) "Can only chose one way ServiceUrl or ServiceInfoProvider."
+            ) "Can only choose one way ServiceUrl or ServiceInfoProvider."
         |> (fun c ->
                 c.ServiceInfoProvider
                 |> Option.map _.GetServiceInfo()
