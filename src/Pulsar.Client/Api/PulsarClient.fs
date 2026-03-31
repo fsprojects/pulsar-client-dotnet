@@ -112,6 +112,7 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
                             let! _ = Task.WhenAll (seq { yield! producersTasks; yield! consumerTasks })
                             schemaProviders |> Seq.iter (fun (KeyValue (_, provider)) -> provider.Close())
                             currentConfig.Authentication.Dispose()
+                            currentConfig.ServiceInfoProvider |> Option.iter _.Dispose()
                             tryStopMailbox()
                             channel.SetResult()
                         with ex ->
@@ -376,6 +377,7 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
 
     member this.UpdateServiceInfo(serviceInfo: ServiceInfo): Task<unit> =
         backgroundTask {
+            checkIfActive()
             Log.Logger.LogInformation("Updating service URL to {0}", serviceInfo.ServiceUrl.OriginalString)
             currentConfig <- {
                 currentConfig with
@@ -386,7 +388,7 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
                     TlsTrustCertificate = serviceInfo.TlsTrustCertificate
             }
             connectionPool.UpdateConfig(currentConfig)
-            lookupService.UpdateServiceUrl(serviceInfo.ServiceUrl)
+            lookupService.UpdateServiceInfo(serviceInfo)
             return! connectionPool.CloseAllConnections()
         }
 

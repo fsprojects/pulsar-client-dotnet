@@ -1,4 +1,4 @@
-namespace Pulsar.Client.Internal
+﻿namespace Pulsar.Client.Internal
 
 open Pulsar.Client.Common
 
@@ -219,14 +219,16 @@ type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
     member this.CloseAllConnections() =
         backgroundTask {
             Log.Logger.LogInformation("Closing all connections.")
-            for KeyValue(_, connectionTask) in connections do
-                try
-                    let! cnx = connectionTask.Value
-                    cnx.Dispose()
-                with ex ->
-                    Log.Logger.LogWarning(ex, "Couldn't get connection on closeAllConnections")
-                    ()
-            connections.Clear()
+            for key in connections.Keys do
+                match connections.TryRemove(key) with
+                | true, connectionTask ->
+                    try
+                        let! cnx = connectionTask.Value
+                        cnx.Dispose()
+                    with ex ->
+                        Log.Logger.LogWarning(ex, "Couldn't get connection on closeAllConnections")
+                        ()
+                | false, _ -> ()
         }
 
     member this.UpdateConfig(newConfig: PulsarClientConfiguration) =

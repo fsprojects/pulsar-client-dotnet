@@ -15,7 +15,7 @@ type internal EndPointResolver(initialAddresses : Uri array) =
     member this.Resolve() =
         let index = Interlocked.Increment(&currentIndex)
         let addr = addresses
-        let uri = addr[Math.Abs(index) % addr.Length]
+        let uri = addr[(index &&& Int32.MaxValue) % addr.Length]
         DnsEndPoint(uri.Host, uri.Port)
         
     member this.UpdateAddresses(newAddresses: Uri array) =
