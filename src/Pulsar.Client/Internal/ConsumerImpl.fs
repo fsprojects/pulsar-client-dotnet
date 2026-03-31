@@ -682,6 +682,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         if duringSeek.IsSome || (isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId)) then
             // We need to discard entries that were prior to startMessageId
             Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
+            increaseAvailablePermits 1
         else
             let msgKey = rawMessage.MessageKey
             let getValue () =
