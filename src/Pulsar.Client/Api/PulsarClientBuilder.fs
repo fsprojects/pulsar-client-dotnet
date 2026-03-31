@@ -21,7 +21,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
                 c.ServiceInfoProvider
                 |> Option.map _.GetServiceInfo()
                 |> Option.map (fun serviceInfo -> {
-                    config with
+                    c with
                         ServiceAddresses = serviceInfo.ServiceUrl.Addresses
                         UseTls = serviceInfo.ServiceUrl.UseTls
                         Scheme = serviceInfo.ServiceUrl.Scheme

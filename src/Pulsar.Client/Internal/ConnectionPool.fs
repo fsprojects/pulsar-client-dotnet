@@ -4,6 +4,7 @@ open Pulsar.Client.Common
 
 open System.Collections.Concurrent
 open System.Net
+open System.Threading
 open System.Threading.Tasks
 open Pipelines.Sockets.Unofficial
 open Microsoft.Extensions.Logging
@@ -58,6 +59,7 @@ type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
         |> String.concat "|"
 
     let remoteCertificateValidationCallback (_: obj) (cert: X509Certificate) (_: X509Chain) (errors: SslPolicyErrors) =
+        let config = Volatile.Read(&config)
         let CheckRemoteCertWithTrustCertificate() =
             if isNull config.TlsTrustCertificate then
                 false
@@ -130,6 +132,7 @@ type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
         | false, _ -> Log.Logger.LogDebug("Connection backgroundTask {0} was not removed", key)
 
     let rec connect (broker: Broker, maxMessageSize: int) =
+        let config = Volatile.Read(&config)
         Log.Logger.LogInformation("Connecting to {0} with maxMessageSize: {1}",
                                   broker, maxMessageSize)
         backgroundTask {
@@ -232,4 +235,4 @@ type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
         }
 
     member this.UpdateConfig(newConfig: PulsarClientConfiguration) =
-        config <- newConfig
+        Volatile.Write(&config, newConfig)

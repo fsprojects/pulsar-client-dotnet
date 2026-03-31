@@ -14,12 +14,12 @@ type internal EndPointResolver(initialAddresses : Uri array) =
             
     member this.Resolve() =
         let index = Interlocked.Increment(&currentIndex)
-        let addr = addresses
+        let addr = Volatile.Read(&addresses)
         let uri = addr[(index &&& Int32.MaxValue) % addr.Length]
         DnsEndPoint(uri.Host, uri.Port)
         
     member this.UpdateAddresses(newAddresses: Uri array) =
         if Array.isEmpty newAddresses then
             invalidArg "newAddresses" "Addresses list could not be empty."
-        addresses <- newAddresses
-        currentIndex <- -1
+        Volatile.Write(&addresses, newAddresses)
+        Interlocked.Exchange(&currentIndex, -1) |> ignore

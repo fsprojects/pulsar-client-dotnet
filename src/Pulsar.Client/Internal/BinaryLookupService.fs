@@ -5,6 +5,7 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System
 open System.Net
+open System.Threading
 open Microsoft.Extensions.Logging
 
 type internal BinaryLookupService (config: PulsarClientConfiguration, connectionPool: ConnectionPool) =
@@ -82,7 +83,7 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
 
         member this.UpdateServiceInfo(serviceInfo: ServiceInfo) =
             endPointResolver.UpdateAddresses(serviceInfo.ServiceUrl.Addresses)
-            currentServiceInfo <- serviceInfo
+            Volatile.Write(&currentServiceInfo, serviceInfo)
 
         member this.Dispose() = ()
 
@@ -121,8 +122,9 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
             let! response = clientCnx.SendAndWaitForReply requestId payload
             let lookupTopicResult = PulsarResponseType.GetLookupTopicResult response
             // (1) build response broker-address
+            let serviceInfo = Volatile.Read(&currentServiceInfo)
             let uri =
-                if currentServiceInfo.ServiceUrl.UseTls then
+                if serviceInfo.ServiceUrl.UseTls then
                     Uri(lookupTopicResult.BrokerServiceUrlTls)
                 else
                     Uri(lookupTopicResult.BrokerServiceUrl)

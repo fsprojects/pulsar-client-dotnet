@@ -7,6 +7,7 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System
 open System.Net
+open System.Threading
 open FSharp.UMX
 open System.Text.Json
 open Microsoft.Extensions.Logging
@@ -93,7 +94,8 @@ type internal HttpLookupService (config: PulsarClientConfiguration) =
         //  GET /lookup/v2/topic/{topic-domain}/{tenant}/{namespace}/{topic}
         member this.GetBroker(topicName : CompleteTopicName) =
             backgroundTask {
-                let addresses = currentServiceInfo.ServiceUrl.Addresses
+                let serviceInfo = Volatile.Read(&currentServiceInfo)
+                let addresses = serviceInfo.ServiceUrl.Addresses
                 let randomServiceUri = addresses[RandomGenerator.Next(0, addresses.Length)]
                 let topic: string = %topicName
                 let topicRestPath = topic.Replace("persistent://","persistent/").Replace("non-persistent://","non-persistent/")
@@ -102,9 +104,9 @@ type internal HttpLookupService (config: PulsarClientConfiguration) =
                     pulsarHttpClient.Get<{| BrokerUrl : string;
                                                BrokerUrlTls: string;
                                                HttpUrl: string;
-                                               HttpUrlTls: string |}>(url, currentServiceInfo.Authentication)
+                                               HttpUrlTls: string |}>(url, serviceInfo.Authentication)
                 let uri =
-                    if currentServiceInfo.ServiceUrl.UseTls then
+                    if serviceInfo.ServiceUrl.UseTls then
                         Uri(brokerResponse.BrokerUrlTls)
                     else
                         Uri(brokerResponse.BrokerUrl)
@@ -137,7 +139,7 @@ type internal HttpLookupService (config: PulsarClientConfiguration) =
             }
 
         member this.UpdateServiceInfo(serviceInfo: ServiceInfo) =
-            currentServiceInfo <- serviceInfo
+            Volatile.Write(&currentServiceInfo, serviceInfo)
 
         member this.Dispose() =
             pulsarHttpClient.Dispose()
@@ -146,13 +148,14 @@ type internal HttpLookupService (config: PulsarClientConfiguration) =
     member private this.GetPartitionedTopicMetadataInner (topicName: CompleteTopicName, backoff: Backoff, remainingTimeMs) =
          async {
             try
-                let addresses = currentServiceInfo.ServiceUrl.Addresses
+                let serviceInfo = Volatile.Read(&currentServiceInfo)
+                let addresses = serviceInfo.ServiceUrl.Addresses
                 let randomServiceUri = addresses[RandomGenerator.Next(0, addresses.Length)]
                 let topic: string = %topicName
                 let topicRestPath = topic.Replace("persistent://","persistent/").Replace("non-persistent://","non-persistent/")
                 let url = randomServiceUri.AbsoluteUri + $"admin/v2/%s{topicRestPath}/partitions?checkAllowAutoCreation=true"
                 let! brokerResponse =
-                    pulsarHttpClient.Get<{| Partitions: int |}>(url, currentServiceInfo.Authentication)
+                    pulsarHttpClient.Get<{| Partitions: int |}>(url, serviceInfo.Authentication)
                     |> Async.AwaitTask
                 return { Partitions = brokerResponse.Partitions }
 
@@ -170,7 +173,8 @@ type internal HttpLookupService (config: PulsarClientConfiguration) =
     member private this.GetTopicsUnderNamespaceInner (ns: NamespaceName, backoff: Backoff, remainingTimeMs: int, isPersistent: bool) =
         async {
             try
-                let addresses = currentServiceInfo.ServiceUrl.Addresses
+                let serviceInfo = Volatile.Read(&currentServiceInfo)
+                let addresses = serviceInfo.ServiceUrl.Addresses
                 let randomServiceUri = addresses[RandomGenerator.Next(0, addresses.Length)]
                 let mode =
                     match isPersistent with
@@ -178,7 +182,7 @@ type internal HttpLookupService (config: PulsarClientConfiguration) =
                     | false -> "NON_PERSISTENT"
                 let url = randomServiceUri.AbsoluteUri + $"admin/v2/namespaces/%s{ns.ToString()}/topics?mode=%s{mode}"
                 let! brokerResponse =
-                    pulsarHttpClient.Get<string[]>(url, currentServiceInfo.Authentication)
+                    pulsarHttpClient.Get<string[]>(url, serviceInfo.Authentication)
                     |> Async.AwaitTask
                 return brokerResponse
 
@@ -197,7 +201,8 @@ type internal HttpLookupService (config: PulsarClientConfiguration) =
                               backoff: Backoff, remainingTimeMs: int) =
         async {
             try
-                let addresses = currentServiceInfo.ServiceUrl.Addresses
+                let serviceInfo = Volatile.Read(&currentServiceInfo)
+                let addresses = serviceInfo.ServiceUrl.Addresses
                 let randomServiceUri = addresses[RandomGenerator.Next(0, addresses.Length)]
                 let topic: string = %topicName
                 let topicRestPath = topic.Replace("persistent://","").Replace("non-persistent://","")
@@ -216,7 +221,7 @@ type internal HttpLookupService (config: PulsarClientConfiguration) =
                                                Type: SchemaType;
                                                Timestamp: Int64;
                                                Data: string;
-                                               Properties: Dictionary<string, string> |}>(url, currentServiceInfo.Authentication)
+                                               Properties: Dictionary<string, string> |}>(url, serviceInfo.Authentication)
                     |> Async.AwaitTask
                 let schemaData =
                     match schemaResponse.Type with

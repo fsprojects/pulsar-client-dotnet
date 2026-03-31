@@ -53,7 +53,6 @@ type ControlledClusterFailover
                     if response.IsSuccessStatusCode then
                         let! response = response.Content.ReadFromJsonAsync<ControlledFailoverResponse>(jsonOptions)
                         let newServiceUrl = response.ServiceUrl
-                                
                         // This is a minimal implementation of ControlledClusterFailover
                         if not (String.IsNullOrEmpty(newServiceUrl))
                            && newServiceUrl <> currentServiceInfo.ServiceUrl.OriginalString then
@@ -63,7 +62,10 @@ type ControlledClusterFailover
                             do! ctx.UpdateServiceInfo(newServiceInfo)
                     else
                         Log.Logger.LogWarning("ControlledClusterFailover failed to fetch config from {0}, status {1}", providerUrl, response.StatusCode)
-                with Flatten ex ->
+                with
+                | :? OperationCanceledException when cts.IsCancellationRequested -> ()
+                | :? TaskCanceledException when cts.IsCancellationRequested -> ()
+                | Flatten ex ->
                     Log.Logger.LogError(ex, "Error checking controlled cluster failover url")
         }
         |> ignore

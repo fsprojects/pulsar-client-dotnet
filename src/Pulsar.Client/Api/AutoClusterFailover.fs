@@ -93,7 +93,10 @@ type AutoClusterFailover
                             | _ -> ()
                         else
                             recoveredTimestamp <- None
-                with Flatten ex ->
+                with
+                | :? OperationCanceledException when cts.IsCancellationRequested -> ()
+                | :? TaskCanceledException when cts.IsCancellationRequested -> ()
+                | Flatten ex ->
                     Log.Logger.LogError(ex, "Error checking cluster")
         }
         |> ignore
