@@ -376,10 +376,12 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
 
     member this.UpdateServiceInfo(serviceInfo: ServiceInfo): Task<unit> =
         backgroundTask {
-            Log.Logger.LogInformation("Updating service URL to {0}", serviceInfo.ServiceUrl)
+            Log.Logger.LogInformation("Updating service URL to {0}", serviceInfo.ServiceUrl.OriginalString)
             currentConfig <- {
                 currentConfig with
                     ServiceAddresses = serviceInfo.ServiceUrl.Addresses
+                    Scheme = serviceInfo.ServiceUrl.Scheme
+                    UseTls = serviceInfo.ServiceUrl.UseTls
                     Authentication = serviceInfo.Authentication
                     TlsTrustCertificate = serviceInfo.TlsTrustCertificate
             }
@@ -387,16 +389,6 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
             lookupService.UpdateServiceUrl(serviceInfo.ServiceUrl)
             return! connectionPool.CloseAllConnections()
         }
-
-    member private this.UpdateAuthentication(authentication: Authentication) =
-        Log.Logger.LogInformation("Updating authentication")
-        currentConfig <- { currentConfig with Authentication = authentication }
-        connectionPool.UpdateConfig(currentConfig)
-
-    member private this.UpdateTlsTrustCertificate(certificate: System.Security.Cryptography.X509Certificates.X509Certificate2) =
-        Log.Logger.LogInformation("Updating tls trust certificate")
-        currentConfig <- { currentConfig with TlsTrustCertificate = certificate }
-        connectionPool.UpdateConfig(currentConfig)
 
     member this.NewProducer() =
         ProducerBuilder(this.CreateProducerAsync, Schema.BYTES())
