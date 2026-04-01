@@ -57,7 +57,7 @@ module ServiceUriTests =
             test "Parse nows pulsar scheme" {
                 let address = "pulsar://host:6650"
                 let expected = Uri("pulsar://bassmaster:controller87@host:6650")
-                let actual = address |> ServiceUri.parse |> getAddresses |> List.head
+                let actual = address |> ServiceUri.parse |> getAddresses |> Array.head
                 Expect.equal actual expected "Parse should now pulsar scheme"
             }
 
@@ -65,7 +65,7 @@ module ServiceUriTests =
                 let address = "http://host:8080"
                 let expectedAddress = Uri("http://host:8080")
                 let expectedScheme = "http"
-                let actualAddress = address |> ServiceUri.parse |> getAddresses |> List.head
+                let actualAddress = address |> ServiceUri.parse |> getAddresses |> Array.head
                 let actualScheme = address |> ServiceUri.parse |> getScheme
                 Expect.equal actualAddress expectedAddress "Parse should now http address"
                 Expect.equal actualScheme expectedScheme "Parse should now http scheme"
@@ -74,46 +74,46 @@ module ServiceUriTests =
             test "Parse nows secure pulsar scheme" {
                 let address = "pulsar+ssl://host:6650"
                 let expected = Uri("pulsar://host:6650")
-                let actual = address |> ServiceUri.parse |> getAddresses |> List.head
+                let actual = address |> ServiceUri.parse |> getAddresses |> Array.head
                 Expect.equal actual expected "Parse should now secure pulsar scheme"
             }
 
             test "Parse sets default port for pulsar scheme" {
                 let address = "pulsar://host"
                 let expected = Uri("pulsar://host:6650")
-                let actual = address |> ServiceUri.parse |> getAddresses |> List.head
+                let actual = address |> ServiceUri.parse |> getAddresses |> Array.head
                 Expect.equal actual expected "Parse should set default port for pulsar scheme"
             }
 
             test "Parse sets default port for secure pulsar scheme" {
                 let address = "pulsar+ssl://host"
                 let expected = Uri("pulsar://host:6651")
-                let actual = address |> ServiceUri.parse |> getAddresses |> List.head
+                let actual = address |> ServiceUri.parse |> getAddresses |> Array.head
                 Expect.equal actual expected "Parse should set default port for secure pulsar scheme"
             }
 
             test "Parse sets default port for http scheme" {
                 let address = "http://host"
                 let expected = Uri("http://host:80")
-                let actual = address |> ServiceUri.parse |> getAddresses |> List.head
+                let actual = address |> ServiceUri.parse |> getAddresses |> Array.head
                 Expect.equal actual expected "Parse should set default port for http scheme"
             }
 
             test "Parse nows multiple hosts" {
-                let splitters = [","; ";"]
+                let splitters = [|","; ";"|]
 
                 let serviceUris =
                     splitters
-                    |> List.map(fun s -> sprintf "pulsar+ssl://host-1%shost-2:789%shost-3%shost-4:4789" s s s)
+                    |> Array.map(fun s -> sprintf "pulsar+ssl://host-1%shost-2:789%shost-3%shost-4:4789" s s s)
 
-                let expected = [
+                let expected = [|
                     Uri("pulsar://host-1:6651")
                     Uri("pulsar://host-2:789")
                     Uri("pulsar://host-3:6651")
                     Uri("pulsar://host-4:4789")
-                ]
+                |]
 
-                serviceUris |> List.iter (fun address ->
+                serviceUris |> Array.iter (fun address ->
                     let actual = address |> ServiceUri.parse |> getAddresses
                     Expect.equal actual expected "Parse should now multiple hosts"
                 )
@@ -122,7 +122,7 @@ module ServiceUriTests =
             test "Parse drops user info" {
                 let address = "pulsar://user:password@host:6650"
                 let expected = Uri("pulsar://host:6650")
-                let actual = address |> ServiceUri.parse |> getAddresses |> List.head
+                let actual = address |> ServiceUri.parse |> getAddresses |> Array.head
                 Expect.equal actual.AbsoluteUri expected.AbsoluteUri "Parse should drop user info part"
             }
 

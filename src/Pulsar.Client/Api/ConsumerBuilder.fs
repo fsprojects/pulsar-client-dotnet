@@ -80,7 +80,7 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
                     { c with
                         DeadLetterProcessor = deadLettersProcessor c newPolicy
                         DeadLetterPolicy = Some newPolicy
-                        Topics = seq { yield! c.Topics; yield TopicName(newPolicy.RetryLetterTopic) } |> Seq.cache }
+                        Topics = [| yield! c.Topics; yield TopicName(newPolicy.RetryLetterTopic) |] }
                 else
                     c
             )
@@ -97,10 +97,8 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
         { config with
             Topics = topic
                 |> invalidArgIfBlankString "Topic must not be blank"
-                |> fun t -> seq { TopicName(t.Trim()) }
-                |> Seq.append config.Topics
-                |> Seq.distinct
-                |> Seq.cache }
+                |> fun t -> [| yield TopicName(t.Trim()); yield! config.Topics |]
+                |> Array.distinct }
         |> this.With
 
     member this.Topics (topics: string seq) =
@@ -110,7 +108,7 @@ type ConsumerBuilder<'T> private (createConsumerAsync, createProducerAsync, conf
                 |> Seq.map (fun t -> TopicName(t.Trim()))
                 |> Seq.append config.Topics
                 |> Seq.distinct
-                |> Seq.cache }
+                |> Array.ofSeq }
         |> this.With
         
     member this.TopicsPattern pattern =

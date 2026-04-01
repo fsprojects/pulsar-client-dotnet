@@ -147,3 +147,5 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, credentials
 
         | Some tokenResult ->
             upcast AuthenticationDataToken(fun () -> tokenResult.AccessToken)
+
+    override _.Dispose() = ()

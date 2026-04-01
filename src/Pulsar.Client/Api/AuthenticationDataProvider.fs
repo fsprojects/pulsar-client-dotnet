@@ -3,6 +3,7 @@
 open Pulsar.Client.Common
 open System.Text
 open System.Security.Cryptography.X509Certificates
+open System.Collections.Generic
 
 type AuthenticationDataProvider() =
 
@@ -25,6 +26,16 @@ type AuthenticationDataProvider() =
     abstract member GetCommandData: unit -> string
     default this.GetCommandData() =
         ""
+
+    //HTTP
+
+    abstract member HasDataForHttp: unit -> bool
+    default this.HasDataForHttp() =
+        false
+
+    abstract member GetHttpHeaders: unit -> KeyValuePair<string, string> seq
+    default this.GetHttpHeaders() =
+        Seq.empty
 
     abstract member Authenticate: AuthData -> AuthData
     default this.Authenticate authData =

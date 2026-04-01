@@ -3,9 +3,9 @@
 open System.Text.RegularExpressions
 open System
 
-type internal ServiceUri = {
+type ServiceUri = {
     OriginalString : string
-    Addresses : Uri list
+    Addresses : Uri array
     UseTls : bool
     Scheme : string
 }
@@ -78,6 +78,6 @@ module internal ServiceUri =
 
                 let getUri (builder : UriBuilder) = builder.Uri
 
-                let addresses = hosts |> Seq.map (createBuilder >> rewritePort >> dropUserInfo >> getUri) |> List.ofSeq
+                let addresses = hosts |> Seq.map (createBuilder >> rewritePort >> dropUserInfo >> getUri) |> Array.ofSeq
 
                 Ok { OriginalString = str; Addresses = addresses; UseTls = useTls; Scheme = scheme }

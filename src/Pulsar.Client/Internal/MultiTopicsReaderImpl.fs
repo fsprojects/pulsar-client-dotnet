@@ -20,7 +20,7 @@ type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfigurati
 
     let consumerConfig = {
         ConsumerConfiguration<'T>.Default with
-            Topics = seq { readerConfig.Topic } |> Seq.cache
+            Topics = [| readerConfig.Topic |]
             SubscriptionName = %subscriptionName
             SubscriptionType = SubscriptionType.Exclusive
             SubscriptionMode = SubscriptionMode.NonDurable

@@ -28,9 +28,10 @@ type internal PulsarClientMessage =
     | Close of TaskCompletionSource<Unit>
     | Stop
 
-type PulsarClient internal (config: PulsarClientConfiguration) as this =
+type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
 
-    let connectionPool = ConnectionPool(config)
+    let mutable currentConfig = initialConfig
+    let connectionPool = ConnectionPool(currentConfig)
     let producers = HashSet<IAsyncDisposable>()
     let consumers = HashSet<IAsyncDisposable>()
     let schemaProviders = Dictionary<CompleteTopicName, MultiVersionSchemaInfoProvider>()
@@ -38,14 +39,14 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
     let autoProduceStubType =  typeof<AutoProduceBytesSchemaStub>
     let autoConsumeStubType =  typeof<AutoConsumeSchemaStub>
     let lookupService =
-        if config.Scheme = ServiceUri.HTTP_SERVICE then
-            HttpLookupService(config,connectionPool) :> ILookupService
+        if currentConfig.Scheme = ServiceUri.HTTP_SERVICE then
+            new HttpLookupService(currentConfig) :> ILookupService
         else
-            BinaryLookupService(config,connectionPool) :> ILookupService
+            new BinaryLookupService(currentConfig, connectionPool) :> ILookupService
 
     let transactionClient =
-        if config.EnableTransaction then
-            TransactionCoordinatorClient(config, connectionPool, lookupService) |> Some
+        if currentConfig.EnableTransaction then
+            TransactionCoordinatorClient(currentConfig, connectionPool, lookupService) |> Some
         else
             None
 
@@ -102,7 +103,7 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
             | Close channel ->
                 match this.ClientState with
                 | Active ->
-                    Log.Logger.LogInformation("Client closing. URL: {0}", config.ServiceAddresses)
+                    Log.Logger.LogInformation("Client closing. URL: {0}", currentConfig.ServiceAddresses)
                     this.ClientState <- Closing
                     let producersTasks = producers |> Seq.map (fun producer -> backgroundTask { return! producer.DisposeAsync() } )
                     let consumerTasks = consumers |> Seq.map (fun consumer -> backgroundTask { return! consumer.DisposeAsync() })
@@ -110,7 +111,9 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                         try
                             let! _ = Task.WhenAll (seq { yield! producersTasks; yield! consumerTasks })
                             schemaProviders |> Seq.iter (fun (KeyValue (_, provider)) -> provider.Close())
-                            config.Authentication.Dispose()
+                            currentConfig.Authentication.Dispose()
+                            currentConfig.ServiceInfoProvider |> Option.iter _.Dispose()
+                            lookupService.Dispose()
                             tryStopMailbox()
                             channel.SetResult()
                         with ex ->
@@ -119,11 +122,11 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                             channel.SetResult()
                     } |> ignore
                 | _ ->
-                    channel.SetException(AlreadyClosedException("Client already closed. URL: " + config.ServiceAddresses.ToString()))
+                    channel.SetException(AlreadyClosedException("Client already closed. URL: " + currentConfig.ServiceAddresses.ToString()))
             | Stop ->
                 this.ClientState <- Closed
-                do! connectionPool.CloseAsync()
-                transactionClient |> Option.iter (fun tc -> tc.Close())
+                do! connectionPool.CloseAllConnections()
+                transactionClient |> Option.iter _.Close()
                 Log.Logger.LogInformation("Pulsar client stopped")
                 continueLoop <- false
         } :> Task).ContinueWith(fun t ->
@@ -136,6 +139,14 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
 
     let removeConsumer = fun consumer -> post mb (RemoveConsumer consumer)
     let addConsumer = fun consumer -> post mb (AddConsumer consumer)
+
+    do
+        match currentConfig.ServiceInfoProvider with
+        | Some provider -> provider.Initialize({
+                new IServiceInfoProviderContext with
+                    member _.UpdateServiceInfo(serviceUrl) = this.UpdateServiceInfo(serviceUrl)
+            })
+        | None -> ()
 
     static member Logger
         with get () = Log.Logger
@@ -216,7 +227,7 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                 else
                     Task.FromResult([||])
             let patternInfo = { InitialTopics = consumerInfos; GetTopics = getTopicsFun; GetConsumerInfo = getConsumerInfoFun }
-            let! consumer = MultiTopicsConsumerImpl.InitPattern(consumerConfig, config, connectionPool,
+            let! consumer = MultiTopicsConsumerImpl.InitPattern(consumerConfig, currentConfig, connectionPool,
                                                             patternInfo, lookupService, interceptors, removeConsumer)
             addConsumer consumer
             return consumer :> IConsumer<'T>
@@ -226,12 +237,20 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
         backgroundTask {
             checkIfActive()
             Log.Logger.LogDebug("MultiTopicSubscribeAsync started")
-            let! partitionsForTopis =
+            let! partitionsForTopics =
                 consumerConfig.Topics
                 |> Seq.map (fun topic -> this.GetConsumerInitInfo(schema, topic))
                 |> Task.WhenAll
-            let! consumer = MultiTopicsConsumerImpl.InitMultiTopic(consumerConfig, config, connectionPool, partitionsForTopis,
-                                                             lookupService, interceptors, removeConsumer)
+            let! consumer =
+                MultiTopicsConsumerImpl.InitMultiTopic(
+                    consumerConfig,
+                    currentConfig,
+                    connectionPool,
+                    partitionsForTopics,
+                    lookupService,
+                    interceptors,
+                    removeConsumer
+                )
             addConsumer consumer
             return consumer :> IConsumer<'T>
         }
@@ -251,12 +270,12 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                     SchemaProvider = schemaProvider
                     Metadata = metadata
                 }
-                let! consumer = MultiTopicsConsumerImpl.InitPartitioned(consumerConfig, config, connectionPool, consumerInitInfo,
+                let! consumer = MultiTopicsConsumerImpl.InitPartitioned(consumerConfig, currentConfig, connectionPool, consumerInitInfo,
                                                              lookupService, interceptors, removeConsumer)
                 addConsumer consumer
                 return consumer :> IConsumer<'T>
             else
-                let! consumer = ConsumerImpl.Init(consumerConfig, config, consumerConfig.SingleTopic, connectionPool, -1, false,
+                let! consumer = ConsumerImpl.Init(consumerConfig, currentConfig, consumerConfig.SingleTopic, connectionPool, -1, false,
                                                   None, TimeSpan.Zero, lookupService, true, activeSchema, schemaProvider,
                                                   interceptors, removeConsumer)
                 addConsumer consumer
@@ -279,12 +298,12 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                     ()
             let removeProducer = fun producer -> post mb (RemoveProducer producer)
             if metadata.IsMultiPartitioned then
-                let! producer = PartitionedProducerImpl.Init(producerConfig, config, connectionPool, metadata.Partitions,
+                let! producer = PartitionedProducerImpl.Init(producerConfig, currentConfig, connectionPool, metadata.Partitions,
                                                              lookupService, activeSchema, interceptors, removeProducer)
                 post mb (AddProducer producer)
                 return producer :> IProducer<'T>
             else
-                let! producer = ProducerImpl.Init(producerConfig, config, connectionPool, -1, lookupService,
+                let! producer = ProducerImpl.Init(producerConfig, currentConfig, connectionPool, -1, lookupService,
                                                   activeSchema, interceptors, removeProducer)
                 post mb (AddProducer producer)
                 return producer :> IProducer<'T>
@@ -307,10 +326,10 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                         SchemaProvider = schemaProvider
                         Metadata = metadata
                     }
-                    MultiTopicsReaderImpl.Init(readerConfig, config, connectionPool, consumerInitInfo,
+                    MultiTopicsReaderImpl.Init(readerConfig, currentConfig, connectionPool, consumerInitInfo,
                                                              schema, schemaProvider, lookupService)
                 else
-                    ReaderImpl.Init(readerConfig, config, connectionPool, schema, schemaProvider, lookupService)
+                    ReaderImpl.Init(readerConfig, currentConfig, connectionPool, schema, schemaProvider, lookupService)
             post mb (AddConsumer reader)
             return reader
         }
@@ -338,10 +357,10 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
                         SchemaProvider = schemaProvider
                         Metadata = metadata
                     }
-                    MultiTopicsReaderImpl.Init(readerConfig, config, connectionPool, consumerInitInfo,
+                    MultiTopicsReaderImpl.Init(readerConfig, currentConfig, connectionPool, consumerInitInfo,
                                                              schema, schemaProvider, lookupService)
                 else
-                    ReaderImpl.Init(readerConfig, config, connectionPool, schema, schemaProvider, lookupService)
+                    ReaderImpl.Init(readerConfig, currentConfig, connectionPool, schema, schemaProvider, lookupService)
             post mb (AddConsumer reader)
             return reader
         }
@@ -364,6 +383,23 @@ type PulsarClient internal (config: PulsarClientConfiguration) as this =
         match this.ClientState with
         | PulsarClientState.Closed | PulsarClientState.Closing -> true
         | _ -> false
+
+    member this.UpdateServiceInfo(serviceInfo: ServiceInfo): Task<unit> =
+        backgroundTask {
+            checkIfActive()
+            Log.Logger.LogInformation("Updating service URL to {0}", serviceInfo.ServiceUrl.OriginalString)
+            currentConfig <- {
+                currentConfig with
+                    ServiceAddresses = serviceInfo.ServiceUrl.Addresses
+                    Scheme = serviceInfo.ServiceUrl.Scheme
+                    UseTls = serviceInfo.ServiceUrl.UseTls
+                    Authentication = serviceInfo.Authentication
+                    TlsTrustCertificate = serviceInfo.TlsTrustCertificate
+            }
+            connectionPool.UpdateConfig(currentConfig)
+            lookupService.UpdateServiceInfo(serviceInfo)
+            return! connectionPool.CloseAllConnections()
+        }
 
     member this.NewProducer() =
         ProducerBuilder(this.CreateProducerAsync, Schema.BYTES())
