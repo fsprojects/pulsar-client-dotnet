@@ -33,10 +33,10 @@ type internal PulsarHttpClient () =
         backgroundTask {
             let authenticationDataProvider = auth.GetAuthData()
             if authenticationDataProvider.HasDataForHttp() then
-                let request = new HttpRequestMessage(HttpMethod.Get, requestUri)
+                use request = new HttpRequestMessage(HttpMethod.Get, requestUri)
                 for headerPropertyEntry in authenticationDataProvider.GetHttpHeaders() do
                     request.Headers.Add(headerPropertyEntry.Key, headerPropertyEntry.Value)
-                let! response = httpClient.SendAsync(request)
+                use! response = httpClient.SendAsync(request)
                 response.EnsureSuccessStatusCode() |> ignore
                 return! response.Content.ReadFromJsonAsync<'T>(jsonOptions)
             else

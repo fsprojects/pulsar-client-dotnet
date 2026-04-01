@@ -42,7 +42,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
 
     member this.ServiceInfoProvider (provider: IServiceInfoProvider) =
         PulsarClientBuilder
-            { config with ServiceInfoProvider = Some provider }
+            { config with ServiceInfoProvider = provider |> invalidArgIfDefault "ServiceInfoProvider can't be null" |> Some }
 
     member this.OperationTimeout operationTimeout =
         PulsarClientBuilder

@@ -120,7 +120,7 @@ type AutoClusterFailoverBuilder() =
     let mutable checkInterval = TimeSpan.FromSeconds(30.0)
 
     member this.Primary(serviceInfo: ServiceInfo) =
-        primary <- Some serviceInfo
+        primary <- serviceInfo |> invalidArgIfDefault "ServiceInfo can't be null" |> Some
         this
 
     member this.Secondary(serviceInfos: ServiceInfo seq) =
@@ -141,7 +141,7 @@ type AutoClusterFailoverBuilder() =
 
     member this.Build() : IServiceInfoProvider =
         if primary.IsNone then
-            invalidArg "primary" "Primary serviceInfo shouldn't be null or empty"
+            invalidArg "primary" "Primary serviceInfo must be set"
         if Array.isEmpty secondary then
             invalidArg "secondary" "Secondary serviceInfo list should have at least one item"
         

@@ -49,10 +49,10 @@ type ControlledClusterFailover
             while not cts.IsCancellationRequested do
                 try
                     do! Task.Delay(checkInterval, cts.Token)
-                    let! response = httpClient.GetAsync(providerUrl, cts.Token)
+                    use! response = httpClient.GetAsync(providerUrl, cts.Token)
                     if response.IsSuccessStatusCode then
-                        let! response = response.Content.ReadFromJsonAsync<ControlledFailoverResponse>(jsonOptions)
-                        let newServiceUrl = response.ServiceUrl
+                        let! failoverResponse = response.Content.ReadFromJsonAsync<ControlledFailoverResponse>(jsonOptions)
+                        let newServiceUrl = failoverResponse.ServiceUrl
                         // This is a minimal implementation of ControlledClusterFailover
                         if not (String.IsNullOrEmpty(newServiceUrl))
                            && newServiceUrl <> currentServiceInfo.ServiceUrl.OriginalString then
@@ -93,7 +93,7 @@ type ControlledClusterFailoverBuilder() =
         this
 
     member this.DefaultServiceInfo(serviceInfo: ServiceInfo) =
-        defaultServiceInfo <- Some serviceInfo
+        defaultServiceInfo <- serviceInfo |> invalidArgIfDefault "ServiceInfo can't be null" |> Some
         this
 
     member this.UrlProviderHeader(header: IReadOnlyDictionary<string, string>) =
@@ -104,7 +104,7 @@ type ControlledClusterFailoverBuilder() =
         if String.IsNullOrEmpty(providerUrl) then
             invalidArg "providerUrl" "providerUrl shouldn't be null or empty"
         if defaultServiceInfo.IsNone then
-            invalidArg "defaultServiceInfo" "defaultServiceInfo shouldn't be null or empty"
+            invalidArg "defaultServiceInfo" "defaultServiceInfo must be set"
         if isNull urlProviderHeader then
             invalidArg "urlProviderHeader" "UrlProviderHeader shouldn't be null"
 
