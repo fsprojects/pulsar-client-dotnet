@@ -215,7 +215,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 let partitionedTopic = topic.GetPartition(partitionIndex)
                 let partititonedConfig = { consumerConfig with
                                             ReceiverQueueSize = receiverQueueSize
-                                            Topics = seq { partitionedTopic } |> Seq.cache }
+                                            Topics = [| partitionedTopic |] }
                 backgroundTask {
                     let! result =
                         ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic,
@@ -264,7 +264,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                 let partitionedTopic = topic.GetPartition(partitionIndex)
                                 let partititonedConfig = { consumerConfig with
                                                             ReceiverQueueSize = receiverQueueSize
-                                                            Topics = seq { partitionedTopic } |> Seq.cache }
+                                                            Topics = [| partitionedTopic |] }
                                 backgroundTask {
                                     let! result =
                                         ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic,
@@ -278,7 +278,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                 backgroundTask {
                                     let partititonedConfig = { consumerConfig with
                                                                 ReceiverQueueSize = receiverQueueSize
-                                                                Topics = seq { consumerInitInfo.TopicName } |> Seq.cache }
+                                                                Topics = [| consumerInitInfo.TopicName |] }
                                     let! result =
                                         ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic,
                                                           connectionPool, -1, true, startMessageId, startMessageRollbackDuration,
@@ -493,7 +493,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                         let partitionedTopic = partitionedTopicNames[partitionIndex]
                                         let partititonedConfig = { consumerConfig with
                                                                     ReceiverQueueSize = receiverQueueSize
-                                                                    Topics = seq { partitionedTopic } |> Seq.cache }
+                                                                    Topics = [| partitionedTopic |] }
                                         backgroundTask {
                                             let! result =
                                                  ConsumerImpl.Init(partititonedConfig, clientConfig, partititonedConfig.SingleTopic,

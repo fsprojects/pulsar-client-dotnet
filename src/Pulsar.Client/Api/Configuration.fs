@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Api
+namespace Pulsar.Client.Api
 
 open FSharp.UMX
 open Pulsar.Client.Common
@@ -9,7 +9,7 @@ open System.Security.Cryptography.X509Certificates
 
 type PulsarClientConfiguration =
     {
-        ServiceAddresses: Uri list
+        ServiceAddresses: Uri array
         OperationTimeout: TimeSpan
         StatsInterval: TimeSpan
         MaxNumberOfRejectedRequestPerConnection: int
@@ -27,10 +27,11 @@ type PulsarClientConfiguration =
         InitialBackoffInterval: TimeSpan
         MaxBackoffInterval: TimeSpan
         KeepAliveInterval: TimeSpan
+        ServiceInfoProvider: IServiceInfoProvider option
     }
     static member Default =
         {
-            ServiceAddresses = List.empty<Uri>
+            ServiceAddresses = [||]
             OperationTimeout = TimeSpan.FromMilliseconds(30000.0)
             StatsInterval = TimeSpan.Zero
             MaxNumberOfRejectedRequestPerConnection = 50
@@ -48,11 +49,12 @@ type PulsarClientConfiguration =
             InitialBackoffInterval = TimeSpan.FromMilliseconds(100.0)
             MaxBackoffInterval = TimeSpan.FromSeconds(60.0)
             KeepAliveInterval = TimeSpan.FromSeconds(30.0)
+            ServiceInfoProvider = None
         }
 
 type ConsumerConfiguration<'T> =
     {
-        Topics: TopicName seq
+        Topics: TopicName array
         TopicsPattern: string
         ConsumerName: string
         SubscriptionName: SubscriptionName
@@ -84,10 +86,10 @@ type ConsumerConfiguration<'T> =
         ExpireTimeOfIncompleteChunkedMessage: TimeSpan
         ReplicateSubscriptionState: bool
     }
-    member this.SingleTopic with get() = this.Topics |> Seq.head
+    member this.SingleTopic with get() = this.Topics |> Array.head
     static member Default =
         {
-            Topics = []
+            Topics = [||]
             TopicsPattern = ""
             ConsumerName = ""
             SubscriptionName = %""

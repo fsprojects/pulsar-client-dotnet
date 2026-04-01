@@ -27,8 +27,6 @@ type Authentication() =
                 member this.GetAuthMethodName() = "none"
                 member this.GetAuthData() = AuthenticationDataProvider()
         }
-        
-    
 
     interface IDisposable with
           member this.Dispose() = this.Dispose()

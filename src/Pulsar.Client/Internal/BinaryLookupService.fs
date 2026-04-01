@@ -5,11 +5,19 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System
 open System.Net
+open System.Threading
 open Microsoft.Extensions.Logging
 
 type internal BinaryLookupService (config: PulsarClientConfiguration, connectionPool: ConnectionPool) =
 
     let endPointResolver = EndPointResolver(config.ServiceAddresses)
+    let mutable currentServiceInfo =
+        ServiceInfo({
+            OriginalString = "" // not used here
+            Addresses = config.ServiceAddresses
+            UseTls = config.UseTls
+            Scheme = config.Scheme
+        }, config.Authentication, config.TlsTrustCertificate)
 
     let resolveEndPoint() = endPointResolver.Resolve()
 
@@ -73,6 +81,12 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 return result
             }
 
+        member this.UpdateServiceInfo(serviceInfo: ServiceInfo) =
+            endPointResolver.UpdateAddresses(serviceInfo.ServiceUrl.Addresses)
+            Volatile.Write(&currentServiceInfo, serviceInfo)
+
+        member this.Dispose() = ()
+
     member private this.GetPartitionedTopicMetadataInner (topicName, backoff: Backoff, remainingTimeMs) =
          async {
             try
@@ -108,8 +122,9 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
             let! response = clientCnx.SendAndWaitForReply requestId payload
             let lookupTopicResult = PulsarResponseType.GetLookupTopicResult response
             // (1) build response broker-address
+            let serviceInfo = Volatile.Read(&currentServiceInfo)
             let uri =
-                if config.UseTls then
+                if serviceInfo.ServiceUrl.UseTls then
                     Uri(lookupTopicResult.BrokerServiceUrlTls)
                 else
                     Uri(lookupTopicResult.BrokerServiceUrl)

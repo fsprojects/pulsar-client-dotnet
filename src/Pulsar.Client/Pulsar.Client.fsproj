@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>3.14.1</Version>
+    <Version>3.15.0</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsprojects/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Added client name to reported clientVersion</PackageReleaseNotes>
+    <PackageReleaseNotes>Auto cluster failover support</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsprojects/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>Apache;Pulsar;F#;FSharp</PackageTags>
     <Authors>Vladimir Shchur and contributors</Authors>
-    <PackageVersion>3.14.1</PackageVersion>
+    <PackageVersion>3.15.0</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -86,6 +86,7 @@
     <Compile Include="Api\AuthenticationDataProvider.fs" />
     <Compile Include="Api\Authentication.fs" />
     <Compile Include="Api\IMessageRouter.fs" />
+    <Compile Include="Api\IServiceInfoProvider.fs" />
     <Compile Include="Api\IConsumer.fs" />
     <Compile Include="Api\IReader.fs" />
     <Compile Include="Api\IProducer.fs" />
@@ -139,7 +140,6 @@
     <Compile Include="Internal\EndPointResolver.fs" />
     <Compile Include="Internal\ILookupService.fs" />
     <Compile Include="Internal\BinaryLookupService.fs" />
-    <Compile Include="Internal\PulsarHttpClient.fs" />
     <Compile Include="Internal\HttpLookupService.fs" />
     <Compile Include="Internal\ConnectionHandler.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTracker.fs" />
@@ -163,6 +163,8 @@
     <Compile Include="Api\ReaderBuilder.fs" />
     <Compile Include="Api\TableViewBuilder.fs" />
     <Compile Include="Api\PulsarClient.fs" />
+    <Compile Include="Api\AutoClusterFailover.fs" />
+    <Compile Include="Api\ControlledClusterFailover.fs" />
     <Compile Include="Api\PulsarClientBuilder.fs" />
   </ItemGroup>
   <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="ResolveReferences">
