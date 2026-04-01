@@ -13,7 +13,7 @@ namespace CsharpExamples
             const string serviceUrl = "pulsar+ssl://my-pulsar-cluster:6651";
             const string subscriptionName = "my-subscription";
             var topicName = $"my-topic-{DateTime.Now.Ticks}";
-            var ca = X509CertificateLoader.LoadCertificateFromFile(@"path-to-ca.crt");
+            var ca = new X509Certificate2(@"path-to-ca.crt");
             var userTls = AuthenticationFactory.Tls(@"path-to-user.pfx");
                 
             var client = await new PulsarClientBuilder()

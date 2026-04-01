@@ -112,7 +112,7 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
                             let! _ = Task.WhenAll (seq { yield! producersTasks; yield! consumerTasks })
                             schemaProviders |> Seq.iter (fun (KeyValue (_, provider)) -> provider.Close())
                             currentConfig.Authentication.Dispose()
-                            currentConfig.ServiceInfoProvider |> Option.iter _.Dispose()
+                            currentConfig.ServiceInfoProvider |> Option.iter (fun provider -> provider.Dispose())
                             lookupService.Dispose()
                             tryStopMailbox()
                             channel.SetResult()
@@ -126,7 +126,7 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
             | Stop ->
                 this.ClientState <- Closed
                 do! connectionPool.CloseAllConnections()
-                transactionClient |> Option.iter _.Close()
+                transactionClient |> Option.iter (fun tc -> tc.Close())
                 Log.Logger.LogInformation("Pulsar client stopped")
                 continueLoop <- false
         } :> Task).ContinueWith(fun t ->

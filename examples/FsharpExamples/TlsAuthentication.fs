@@ -13,7 +13,7 @@ let runTlsAuthentication () =
     let serviceUrl = "pulsar+ssl://my-pulsar-cluster:6651"
     let subscriptionName = "my-subscription"
     let topicName = sprintf "my-topic-%i" DateTime.Now.Ticks;
-    use ca = X509CertificateLoader.LoadCertificateFromFile(@"path-to-ca.crt")
+    use ca = new X509Certificate2(@"path-to-ca.crt")
     let userTls = AuthenticationFactory.Tls(@"path-to-user.pfx")
 
     task {

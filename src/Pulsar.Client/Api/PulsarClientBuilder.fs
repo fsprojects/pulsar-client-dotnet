@@ -19,7 +19,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
             ) "Can only choose one way ServiceUrl or ServiceInfoProvider."
         |> (fun c ->
                 c.ServiceInfoProvider
-                |> Option.map _.GetServiceInfo()
+                |> Option.map (fun provider -> provider.GetServiceInfo())
                 |> Option.map (fun serviceInfo -> {
                     c with
                         ServiceAddresses = serviceInfo.ServiceUrl.Addresses
