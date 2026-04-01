@@ -66,7 +66,7 @@ type internal ConsumerInitInfo<'T> =
 type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                            topicName: TopicName, connectionPool: ConnectionPool,
                            partitionIndex: int, hasParentConsumer: bool, startMessageId: MessageId option,
-                           startMessageRollbackDuration: TimeSpan, lookup: BinaryLookupService,
+                           startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
                            createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
                            schemaProvider: MultiVersionSchemaInfoProvider option,
                            interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) as this =
@@ -209,8 +209,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         return response |> PulsarResponseType.GetLastMessageId
                     with
                     | Flatten ex ->
-                        Log.Logger.LogError(ex, "{0} failed getLastMessageId", prefix)
-                        return reraize ex
+                        let nextDelay = Math.Min(backoff.Next(), remainingTimeMs)
+                        let nonRetriableError = ex |> PulsarClientException.isRetriableError |> not
+                        if nextDelay <= 0 || nonRetriableError then
+                            Log.Logger.LogError(ex, "{0} failed getLastMessageId", prefix)
+                            return reraize ex
+                        else
+                            Log.Logger.LogWarning(ex, "{0} failed getLastMessageId -- Will try again in {1} ms", prefix, nextDelay)
+                            do! Async.Sleep nextDelay
+                            return! internalGetLastMessageIdAsync(backoff, remainingTimeMs - nextDelay)
                 | _ ->
                     let nextDelay = Math.Min(backoff.Next(), remainingTimeMs)
                     if nextDelay <= 0 then
@@ -1435,7 +1442,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                        topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
-                       hasParent: bool, startMessageId: MessageId option, startMessageRollbackDuration: TimeSpan, lookup: BinaryLookupService,
+                       hasParent: bool, startMessageId: MessageId option, startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
                        createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
                        interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
         backgroundTask {
@@ -1695,7 +1702,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                            topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
                            hasParent: bool, startMessageId: MessageId option,
-                           lookup: BinaryLookupService,
+                           lookup: ILookupService,
                            createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
                            schemaProvider: MultiVersionSchemaInfoProvider option,
                            interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) as this =

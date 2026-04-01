@@ -5,22 +5,87 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 open System
 open System.Net
+open System.Threading
 open Microsoft.Extensions.Logging
 
 type internal BinaryLookupService (config: PulsarClientConfiguration, connectionPool: ConnectionPool) =
 
     let endPointResolver = EndPointResolver(config.ServiceAddresses)
+    let mutable currentServiceInfo =
+        ServiceInfo({
+            OriginalString = "" // not used here
+            Addresses = config.ServiceAddresses
+            UseTls = config.UseTls
+            Scheme = config.Scheme
+        }, config.Authentication, config.TlsTrustCertificate)
 
     let resolveEndPoint() = endPointResolver.Resolve()
 
-    member this.GetPartitionsForTopic (topicName: TopicName) =
-        backgroundTask {
-            let! metadata = this.GetPartitionedTopicMetadata topicName.CompleteTopicName
-            if metadata.Partitions > 0 then
-                return Array.init metadata.Partitions topicName.GetPartition
-            else
-                return [| topicName |]
-        }
+    interface ILookupService with
+
+        member this.GetPartitionsForTopic (topicName: TopicName) =
+            backgroundTask {
+                let backoff =
+                    Backoff {
+                        Initial = TimeSpan.FromMilliseconds(100.0)
+                        MandatoryStop = config.OperationTimeout + config.OperationTimeout
+                        Max = TimeSpan.FromMinutes(1.0)
+                    }
+                let! metadata = this.GetPartitionedTopicMetadataInner(
+                    topicName.CompleteTopicName,
+                    backoff,
+                    int config.OperationTimeout.TotalMilliseconds
+                )
+                if metadata.Partitions > 0 then
+                    return Array.init metadata.Partitions topicName.GetPartition
+                else
+                    return [| topicName |]
+            }
+
+        member this.GetPartitionedTopicMetadata topicName =
+            backgroundTask {
+                let backoff =
+                    Backoff {
+                        Initial = TimeSpan.FromMilliseconds(100.0)
+                        MandatoryStop = config.OperationTimeout + config.OperationTimeout
+                        Max = TimeSpan.FromMinutes(1.0)
+                    }
+                let! result = this.GetPartitionedTopicMetadataInner(topicName, backoff, int config.OperationTimeout.TotalMilliseconds)
+                return result
+            }
+
+        member this.GetBroker(topicName: CompleteTopicName) =
+            this.FindBroker(resolveEndPoint(), false, topicName, 0)
+
+        member this.GetTopicsUnderNamespace (ns : NamespaceName, isPersistent : bool) =
+            backgroundTask {
+                let backoff =
+                    Backoff {
+                        Initial = TimeSpan.FromMilliseconds(100.0)
+                        MandatoryStop = config.OperationTimeout + config.OperationTimeout
+                        Max = TimeSpan.FromMinutes(1.0)
+                    }
+                let! result = this.GetTopicsUnderNamespaceInner(ns, backoff, int config.OperationTimeout.TotalMilliseconds, isPersistent)
+                return result
+            }
+
+        member this.GetSchema(topicName: CompleteTopicName, ?schemaVersion: SchemaVersion) =
+            backgroundTask {
+                let backoff =
+                    Backoff {
+                        Initial = TimeSpan.FromMilliseconds(100.0)
+                        MandatoryStop = config.OperationTimeout + config.OperationTimeout
+                        Max = TimeSpan.FromMinutes(1.0)
+                    }
+                let! result = this.GetSchemaInner(topicName, schemaVersion, backoff, int config.OperationTimeout.TotalMilliseconds)
+                return result
+            }
+
+        member this.UpdateServiceInfo(serviceInfo: ServiceInfo) =
+            endPointResolver.UpdateAddresses(serviceInfo.ServiceUrl.Addresses)
+            Volatile.Write(&currentServiceInfo, serviceInfo)
+
+        member this.Dispose() = ()
 
     member private this.GetPartitionedTopicMetadataInner (topicName, backoff: Backoff, remainingTimeMs) =
          async {
@@ -46,19 +111,6 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 return! this.GetPartitionedTopicMetadataInner(topicName, backoff, remainingTimeMs - nextDelay)
         }
 
-     member this.GetPartitionedTopicMetadata topicName =
-        backgroundTask {
-            let backoff = Backoff { BackoffConfig.Default with
-                                        Initial = TimeSpan.FromMilliseconds(100.0)
-                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
-                                        Max = TimeSpan.FromMinutes(1.0) }
-            let! result = this.GetPartitionedTopicMetadataInner(topicName, backoff, int config.OperationTimeout.TotalMilliseconds)
-            return result
-        }
-
-    member this.GetBroker(topicName: CompleteTopicName) =
-        this.FindBroker(resolveEndPoint(), false, topicName, 0)
-
     member private this.FindBroker(endpoint: DnsEndPoint, authoritative: bool, topicName: CompleteTopicName,
                                    redirectCount: int) =
         backgroundTask {
@@ -70,8 +122,9 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
             let! response = clientCnx.SendAndWaitForReply requestId payload
             let lookupTopicResult = PulsarResponseType.GetLookupTopicResult response
             // (1) build response broker-address
+            let serviceInfo = Volatile.Read(&currentServiceInfo)
             let uri =
-                if config.UseTls then
+                if serviceInfo.ServiceUrl.UseTls then
                     Uri(lookupTopicResult.BrokerServiceUrlTls)
                 else
                     Uri(lookupTopicResult.BrokerServiceUrl)
@@ -110,16 +163,6 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 return! this.GetTopicsUnderNamespaceInner(ns, backoff, remainingTimeMs - delay, isPersistent)
         }
 
-    member this.GetTopicsUnderNamespace (ns : NamespaceName, isPersistent : bool) =
-        backgroundTask {
-            let backoff = Backoff { BackoffConfig.Default with
-                                        Initial = TimeSpan.FromMilliseconds(100.0)
-                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
-                                        Max = TimeSpan.FromMinutes(1.0) }
-            let! result = this.GetTopicsUnderNamespaceInner(ns, backoff, int config.OperationTimeout.TotalMilliseconds, isPersistent)
-            return result
-        }
-
     member private this.GetSchemaInner(topicName: CompleteTopicName, schemaVersion: SchemaVersion option,
                               backoff: Backoff, remainingTimeMs: int) =
         async {
@@ -142,15 +185,5 @@ type internal BinaryLookupService (config: PulsarClientConfiguration, connection
                 Log.Logger.LogWarning(ex, "GetSchema failed will retry in {0} ms", delay)
                 do! Async.Sleep delay
                 return! this.GetSchemaInner(topicName, schemaVersion, backoff, remainingTimeMs - delay)
-        }
-
-    member this.GetSchema(topicName: CompleteTopicName, ?schemaVersion: SchemaVersion) =
-        backgroundTask {
-            let backoff = Backoff { BackoffConfig.Default with
-                                        Initial = TimeSpan.FromMilliseconds(100.0)
-                                        MandatoryStop = (config.OperationTimeout + config.OperationTimeout)
-                                        Max = TimeSpan.FromMinutes(1.0) }
-            let! result = this.GetSchemaInner(topicName, schemaVersion, backoff, int config.OperationTimeout.TotalMilliseconds)
-            return result
         }
 

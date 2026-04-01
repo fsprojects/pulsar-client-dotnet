@@ -10,23 +10,39 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
     let MIN_STATS_INTERVAL_SECONDS = 1
 
     let verify(config : PulsarClientConfiguration) =
-        let checkValue check config =
-            check config |> ignore
-            config
-
         config
-        |> checkValue
-            (fun c ->
-                c.ServiceAddresses
-                |> invalidArgIf (fun addresses -> addresses |> List.isEmpty) "Service Url needs to be specified on the PulsarClientBuilder object.")
+        |> invalidArgIf (fun c ->
+                c.ServiceAddresses.Length = 0 && c.ServiceInfoProvider.IsNone
+            ) "ServiceUrl or ServiceInfoProvider needs to be specified on the PulsarClientBuilder object."
+        |> invalidArgIf (fun c ->
+                c.ServiceAddresses.Length > 0 && c.ServiceInfoProvider.IsSome
+            ) "Can only choose one way ServiceUrl or ServiceInfoProvider."
+        |> (fun c ->
+                c.ServiceInfoProvider
+                |> Option.map (fun provider -> provider.GetServiceInfo())
+                |> Option.map (fun serviceInfo -> {
+                    c with
+                        ServiceAddresses = serviceInfo.ServiceUrl.Addresses
+                        UseTls = serviceInfo.ServiceUrl.UseTls
+                        Scheme = serviceInfo.ServiceUrl.Scheme
+                        Authentication = serviceInfo.Authentication
+                        TlsTrustCertificate = serviceInfo.TlsTrustCertificate
+                })
+                |> Option.defaultValue c
+            )
+
 
     new() = PulsarClientBuilder(PulsarClientConfiguration.Default)
 
     member this.ServiceUrl (url: string) =
         match url |> ServiceUri.parse with
-        | (Result.Ok serviceUri) ->
-            PulsarClientBuilder { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls }
-        | (Result.Error message) -> invalidArg null message
+        | Result.Ok serviceUri ->
+            PulsarClientBuilder { config with ServiceAddresses = serviceUri.Addresses; UseTls = serviceUri.UseTls ; Scheme = serviceUri.Scheme }
+        | Result.Error message -> invalidArg null message
+
+    member this.ServiceInfoProvider (provider: IServiceInfoProvider) =
+        PulsarClientBuilder
+            { config with ServiceInfoProvider = provider |> invalidArgIfDefault "ServiceInfoProvider can't be null" |> Some }
 
     member this.OperationTimeout operationTimeout =
         PulsarClientBuilder
@@ -38,6 +54,7 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
             { config with
                 MaxNumberOfRejectedRequestPerConnection = num |> invalidArgIfLessThanZero "MaxNumberOfRejectedRequestPerConnection can't be negative" }
 
+    [<Obsolete("use \"pulsar+ssl://\" in ServiceUrl to enable")>]
     member this.EnableTls useTls =
         PulsarClientBuilder
             { config with
@@ -111,7 +128,6 @@ type PulsarClientBuilder private (config: PulsarClientConfiguration) =
             do! client.Init()
             return client
         }
-
 
     member this.Configuration =
         config

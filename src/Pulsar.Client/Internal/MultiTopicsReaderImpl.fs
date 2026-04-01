@@ -11,7 +11,7 @@ open Pulsar.Client.Schema
 
 type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientConfig: PulsarClientConfiguration,
                         connectionPool: ConnectionPool, consumerInitInfo: ConsumerInitInfo<'T>,
-                         schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: BinaryLookupService) =
+                         schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: ILookupService) =
     let subscriptionName =
         if String.IsNullOrEmpty readerConfig.SubscriptionRolePrefix then
             "mt/reader-" + Guid.NewGuid().ToString("N").Substring(22)
@@ -20,7 +20,7 @@ type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfigurati
 
     let consumerConfig = {
         ConsumerConfiguration<'T>.Default with
-            Topics = seq { readerConfig.Topic } |> Seq.cache
+            Topics = [| readerConfig.Topic |]
             SubscriptionName = %subscriptionName
             SubscriptionType = SubscriptionType.Exclusive
             SubscriptionMode = SubscriptionMode.NonDurable
@@ -46,7 +46,7 @@ type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfigurati
 
     static member internal Init(config: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
                                 consumerInitInfo: ConsumerInitInfo<'T>,
-                                schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: BinaryLookupService) =
+                                schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: ILookupService) =
         backgroundTask {
             let reader = MultiTopicsReaderImpl(config, clientConfig, connectionPool, consumerInitInfo, schema, schemaProvider, lookup)
             do! reader.InitInternal()

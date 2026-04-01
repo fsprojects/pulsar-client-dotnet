@@ -6,6 +6,7 @@ open Pulsar.Client.Api
 
 open System.Text
 open System.Threading.Tasks
+open System.Security.Cryptography.X509Certificates
 open Pulsar.Client.Common
 open Pulsar.Client.Transaction
 open Serilog
@@ -18,20 +19,20 @@ open FSharp.UMX
 [<Literal>]
 let pulsarAddress = "pulsar://127.0.0.1:6650"
 
+[<Literal>]
+let pulsarHttpAddress = "http://127.0.0.1:8080"
+
 #if !NOTLS
 [<Literal>]
 let pulsarSslAddress = "pulsar+ssl://127.0.0.1:6651"
 
-[<Literal>]
-let pulsarHttpAddress = "http://127.0.0.1:8080"
-
 // ssl folder copied by from https://github.com/apache/pulsar/tree/master/tests/docker-images/latest-version-image/ssl
 // generate pfx file from pem, leave the password blank
 // openssl pkcs12 -in admin.cert.pem -inkey admin.key-pk8.pem -export -out admin.pfx
-let ca = new Security.Cryptography.X509Certificates.X509Certificate2(@"../ssl/ca.cert.pem")
+let ca = X509Certificate2(@"../ssl/ca.cert.pem")
 // Load the client certificate for the mtls encryption
 // The admin.pfx contains both client certificate and private key, which can be used for both mtls encryption and authentication.
-let clientCert = new Security.Cryptography.X509Certificates.X509Certificate2(@"../ssl/admin.pfx")
+let clientCert = X509Certificate2(@"../ssl/admin.pfx", "", X509KeyStorageFlags.DefaultKeySet)
 // Use client certificate for tls authentication
 let sslAdmin = AuthenticationFactory.Tls(@"../ssl/admin.pfx")
 let sslUser1 = AuthenticationFactory.Tls(@"../ssl/user1.pfx")
@@ -58,9 +59,16 @@ let commonClient =
         .ServiceUrl(pulsarAddress)
         .BuildAsync().Result
 
+let commonHttpLookupClient =
+    PulsarClientBuilder()
+        .ServiceUrl(pulsarHttpAddress)
+        .BuildAsync().Result
+
 let commonHttpClient = new HttpClient()
 
 let getClient() = commonClient
+
+let getHttpLookupClient() = commonHttpLookupClient
 
 let extractTimeStamp (date: DateTime) : TimeStamp =
     let mss = (date - DateTime.UnixEpoch).TotalMilliseconds |> int64
@@ -70,14 +78,12 @@ let extractTimeStamp (date: DateTime) : TimeStamp =
 let sslClient =
     PulsarClientBuilder()
         .ServiceUrl(pulsarSslAddress)
-        .EnableTls(true)
         .TlsTrustCertificate(ca)
         .BuildAsync().Result
 
 let sslAdminClient =
     PulsarClientBuilder()
         .ServiceUrl(pulsarSslAddress)
-        .EnableTls(true)
         .TlsTrustCertificate(ca)
         .Authentication(sslAdmin)
         .BuildAsync().Result
@@ -85,7 +91,6 @@ let sslAdminClient =
 let sslTokenClient =
     PulsarClientBuilder()
         .ServiceUrl(pulsarSslAddress)
-        .EnableTls(true)
         .TlsTrustCertificate(ca)
         .TlsCertificate(clientCert)
         .Authentication(AuthenticationFactory.Token("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.hkExtZmCXOi1byo_sVzZrxZcwN88tvVVMlNcxQEs3TY"))
@@ -94,7 +99,6 @@ let sslTokenClient =
 let sslUser1Client =
     PulsarClientBuilder()
         .ServiceUrl(pulsarSslAddress)
-        .EnableTls(true)
         .TlsTrustCertificate(ca)
         .Authentication(sslUser1)
         .BuildAsync().Result

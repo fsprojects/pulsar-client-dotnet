@@ -4,6 +4,7 @@ open Pulsar.Client.Common
 
 open System.Collections.Concurrent
 open System.Net
+open System.Threading
 open System.Threading.Tasks
 open Pipelines.Sockets.Unofficial
 open Microsoft.Extensions.Logging
@@ -14,9 +15,9 @@ open System.Net.Sockets
 open System.Net.Security
 open System.Security.Cryptography.X509Certificates
 
-type internal ConnectionPool (config: PulsarClientConfiguration) =
+type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
 
-
+    let mutable config = initialConfig
     let connections = ConcurrentDictionary<LogicalAddress, Lazy<Task<ClientCnx>>>()
 
     // from https://github.com/mgravell/Pipelines.Sockets.Unofficial/blob/master/src/Pipelines.Sockets.Unofficial/SocketConnection.Connect.cs
@@ -58,6 +59,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         |> String.concat "|"
 
     let remoteCertificateValidationCallback (_: obj) (cert: X509Certificate) (_: X509Chain) (errors: SslPolicyErrors) =
+        let config = Volatile.Read(&config)
         let CheckRemoteCertWithTrustCertificate() =
             if isNull config.TlsTrustCertificate then
                 false
@@ -130,6 +132,7 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         | false, _ -> Log.Logger.LogDebug("Connection backgroundTask {0} was not removed", key)
 
     let rec connect (broker: Broker, maxMessageSize: int) =
+        let config = Volatile.Read(&config)
         Log.Logger.LogInformation("Connecting to {0} with maxMessageSize: {1}",
                                   broker, maxMessageSize)
         backgroundTask {
@@ -218,13 +221,20 @@ type internal ConnectionPool (config: PulsarClientConfiguration) =
         this.GetConnection({ LogicalAddress = LogicalAddress address; PhysicalAddress = PhysicalAddress address },
                            Commands.DEFAULT_MAX_MESSAGE_SIZE)
 
-    member this.CloseAsync() =
+    member this.CloseAllConnections() =
         backgroundTask {
-            for KeyValue(_, connectionTask) in connections do
-                try
-                    let! cnx = connectionTask.Value
-                    cnx.Dispose()
-                with ex ->
-                    Log.Logger.LogError(ex, "Couldn't get connection on close")
-                    ()
+            Log.Logger.LogInformation("Closing all connections.")
+            for key in connections.Keys do
+                match connections.TryRemove(key) with
+                | true, connectionTask ->
+                    try
+                        let! cnx = connectionTask.Value
+                        cnx.Dispose()
+                    with ex ->
+                        Log.Logger.LogWarning(ex, "Couldn't get connection on closeAllConnections")
+                        ()
+                | false, _ -> ()
         }
+
+    member this.UpdateConfig(newConfig: PulsarClientConfiguration) =
+        Volatile.Write(&config, newConfig)

@@ -10,7 +10,7 @@ open Pulsar.Client.Internal
 open Pulsar.Client.Schema
 
 type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                         schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: BinaryLookupService) =
+                         schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: ILookupService) =
     let subscriptionName =
         if String.IsNullOrEmpty readerConfig.SubscriptionRolePrefix |> not then
             readerConfig.SubscriptionRolePrefix + "-reader-" + Guid.NewGuid().ToString("N").Substring(22)
@@ -21,7 +21,7 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
 
     let consumerConfig = {
         ConsumerConfiguration<'T>.Default with
-            Topics = seq { readerConfig.Topic } |> Seq.cache
+            Topics = [| readerConfig.Topic |]
             SubscriptionName = %subscriptionName
             SubscriptionType = SubscriptionType.Exclusive
             SubscriptionMode = SubscriptionMode.NonDurable
@@ -49,7 +49,7 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
         }
 
     static member internal Init(config: ReaderConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
-                                schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: BinaryLookupService) =
+                                schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option, lookup: ILookupService) =
         backgroundTask {
             let reader = ReaderImpl(config, clientConfig, connectionPool, schema, schemaProvider, lookup)
             do! reader.InitInternal()
