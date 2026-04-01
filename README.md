@@ -82,7 +82,6 @@ Features list (based on [Client Feature Matrix](https://github.com/apache/pulsar
         * `brew services start bookkeeper`
     1. Run commands in `/tests/IntegrationTests/commands.txt`
     1. Change `pulsarAddress` in Common.fs to point your pulsar cluster
-    1. Ensure `advertisedAddress` in broker.conf to point your pulsar cluster
     1. Ensure `public/default` namespace with default settings
     1. Ensure `public/retention` namespace with time or storage size retention configured
  - Send a Pull Request
