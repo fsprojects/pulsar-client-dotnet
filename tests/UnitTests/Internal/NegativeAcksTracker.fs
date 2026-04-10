@@ -6,7 +6,7 @@ open FSharp.UMX
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Internal
-open Pulsar.Client.UnitTests.Internal
+open Pulsar.Client.UnitTests
 open Pulsar.Client.Common
 
 [<Tests>]

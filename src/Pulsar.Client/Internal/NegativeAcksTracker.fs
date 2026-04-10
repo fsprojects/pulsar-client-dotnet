@@ -81,7 +81,7 @@ type internal NegativeAcksTracker(prefix: string,
             let timer = new Timer(timerIntervalms)
             timer.AutoReset <- true
             timer.Elapsed.Add(fun _ -> post mb TickTime)
-            timer.Start() |> ignore
+            timer.Start()
             timer :> IDisposable
         | Some getScheduler ->
             getScheduler(fun _ -> post mb TickTime)

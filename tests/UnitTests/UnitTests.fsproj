@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Expect.fs" />
+    <Compile Include="ManualInvokeScheduler.fs" />
     <Compile Include="Common\Properties.fs" />
     <Compile Include="Common\HashTests.fs" />
     <Compile Include="Common\TopicNameTests.fs" />
@@ -23,10 +24,10 @@
     <Compile Include="Api\ConsumerBuilderTests.fs" />
     <Compile Include="Api\ProducerBuilderTests.fs" />
     <Compile Include="Api\PulsarClientBuilderTests.fs" />
+    <Compile Include="Api\AutoClusterFailoverTests.fs" />
     <Compile Include="Internal\EndPointResolverTests.fs" />
     <Compile Include="Internal\CompressionCodecTests.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTrackerTests.fs" />
-    <Compile Include="Internal\ManualInvokeScheduler.fs" />
     <Compile Include="Internal\UnAckedMessageTrackerTests.fs" />
     <Compile Include="Internal\NegativeAcksTracker.fs" />
     <Compile Include="Internal\SchemaTests.fs" />
