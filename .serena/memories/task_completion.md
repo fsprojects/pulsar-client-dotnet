@@ -1,0 +1,1 @@
+After code changes, prefer the smallest verification that matches the area touched. Minimum common path: `dotnet build -c Release`. For unit-test-only or library changes, run `dotnet run -c Release --project tests/UnitTests/UnitTests.fsproj --no-build`.
