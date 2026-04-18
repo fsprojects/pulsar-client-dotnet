@@ -75,7 +75,6 @@ module internal AutoClusterFailoverLogic =
                             PrimaryRecoveredTimestamp = None
                         }, AutoClusterDecision.SwitchToSecondary idx
                     | None ->
-                        Log.Logger.LogWarning("Secondary cluster is not available yet after failover delay")
                         return state, AutoClusterDecision.NoAction
                 | _ ->
                     return state, AutoClusterDecision.NoAction
@@ -135,6 +134,8 @@ type AutoClusterFailover
                 let! avail = probeAvailable secondaryServiceInfos[i].EndPointResolver
                 if avail then found <- Some i
                 i <- i + 1
+            if found.IsNone then
+                Log.Logger.LogWarning("Available secondary cluster wasn't found")
             return found
         }
 
