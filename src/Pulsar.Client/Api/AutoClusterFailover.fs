@@ -23,13 +23,13 @@ type internal AutoClusterMode =
 
 type internal AutoClusterState = {
     Mode: AutoClusterMode
-    FailedTimestamp: DateTime option
-    RecoveredTimestamp: DateTime option
+    PrimaryFailedTimestamp: DateTime option
+    PrimaryRecoveredTimestamp: DateTime option
 }
 
 [<RequireQualifiedAccess>]
 type internal AutoClusterDecision =
-    | Noop
+    | NoAction
     | SwitchToSecondary of index: int
     | SwitchToPrimary
 
@@ -44,74 +44,56 @@ module internal AutoClusterFailoverLogic =
 
     let initialState = {
         Mode = AutoClusterMode.Primary
-        FailedTimestamp = None
-        RecoveredTimestamp = None
+        PrimaryFailedTimestamp = None
+        PrimaryRecoveredTimestamp = None
     }
-
-    /// Determines whether secondary endpoints need to be probed this tick.
-    /// This avoids unnecessary network calls when the primary is healthy or the
-    /// failover delay hasn't elapsed yet.
-    let shouldProbeSecondaries
-        (now: DateTime)
-        (config: AutoClusterConfig)
-        (primaryAvailable: bool)
-        (state: AutoClusterState)
-        : bool =
-        match state.Mode with
-        | AutoClusterMode.Primary ->
-            not primaryAvailable &&
-            match state.FailedTimestamp with
-            | Some ts -> now - ts >= config.FailoverDelay
-            | None -> false
-        | AutoClusterMode.Secondary _ ->
-            false
 
     /// Single pure state transition covering both primary and secondary modes.
     /// - primaryAvailable: result of probing the primary endpoint.
-    /// - availableSecondaryIndex: index of the first available secondary
+    /// - findFirstAvailableSecondary: get index of the first available secondary
     ///   (None means no secondary was probed or none was available).
     let step
         (now: DateTime)
         (config: AutoClusterConfig)
         (primaryAvailable: bool)
-        (availableSecondaryIndex: int option)
-        (state: AutoClusterState)
-        : AutoClusterState * AutoClusterDecision =
-
-        match state.Mode with
-        | AutoClusterMode.Primary ->
-            if primaryAvailable then
-                { state with FailedTimestamp = None }, AutoClusterDecision.Noop
-            else
-                match state.FailedTimestamp with
+        (findFirstAvailableSecondary: unit -> Task<int option>)
+        (state: AutoClusterState) =
+        backgroundTask {            
+            match state.Mode, primaryAvailable with
+            | AutoClusterMode.Primary, true ->
+                return { state with PrimaryFailedTimestamp = None }, AutoClusterDecision.NoAction
+            | AutoClusterMode.Primary, false ->
+                match state.PrimaryFailedTimestamp with
                 | None ->
-                    { state with FailedTimestamp = Some now }, AutoClusterDecision.Noop
+                    return { state with PrimaryFailedTimestamp = Some now }, AutoClusterDecision.NoAction
                 | Some ts when now - ts >= config.FailoverDelay ->
-                    match availableSecondaryIndex with
+                    match! findFirstAvailableSecondary() with
                     | Some idx ->
-                        { Mode = AutoClusterMode.Secondary idx
-                          FailedTimestamp = None
-                          RecoveredTimestamp = None },
-                        AutoClusterDecision.SwitchToSecondary idx
+                        return {
+                            Mode = AutoClusterMode.Secondary idx
+                            PrimaryFailedTimestamp = None
+                            PrimaryRecoveredTimestamp = None
+                        }, AutoClusterDecision.SwitchToSecondary idx
                     | None ->
-                        state, AutoClusterDecision.Noop
+                        Log.Logger.LogWarning("Secondary cluster is not available yet after failover delay")
+                        return state, AutoClusterDecision.NoAction
                 | _ ->
-                    state, AutoClusterDecision.Noop
-
-        | AutoClusterMode.Secondary _ ->
-            if primaryAvailable then
-                match state.RecoveredTimestamp with
+                    return state, AutoClusterDecision.NoAction
+            | AutoClusterMode.Secondary _, true ->
+                match state.PrimaryRecoveredTimestamp with
                 | None ->
-                    { state with RecoveredTimestamp = Some now }, AutoClusterDecision.Noop
+                    return { state with PrimaryRecoveredTimestamp = Some now }, AutoClusterDecision.NoAction
                 | Some ts when now - ts >= config.SwitchBackDelay ->
-                    { Mode = AutoClusterMode.Primary
-                      FailedTimestamp = None
-                      RecoveredTimestamp = None },
-                    AutoClusterDecision.SwitchToPrimary
+                    return {
+                        Mode = AutoClusterMode.Primary
+                        PrimaryFailedTimestamp = None
+                        PrimaryRecoveredTimestamp = None
+                    }, AutoClusterDecision.SwitchToPrimary
                 | _ ->
-                    state, AutoClusterDecision.Noop
-            else
-                { state with RecoveredTimestamp = None }, AutoClusterDecision.Noop
+                    return state, AutoClusterDecision.NoAction
+            | AutoClusterMode.Secondary _, false ->
+                return { state with PrimaryRecoveredTimestamp = None }, AutoClusterDecision.NoAction
+        }
 
 // Orchestrator
 
@@ -172,7 +154,7 @@ type AutoClusterFailover
                 match context with
                 | Some ctx -> do! ctx.UpdateServiceInfo(primary)
                 | None -> ()
-            | AutoClusterDecision.Noop -> ()
+            | AutoClusterDecision.NoAction -> ()
         }
 
     let tick () =
@@ -180,17 +162,11 @@ type AutoClusterFailover
             try
                 let! primaryAvailable = probeAvailable primaryServiceInfo.EndPointResolver
                 let now = getCurrentTime()
-                let! availableSecondaryIndex =
-                    if AutoClusterFailoverLogic.shouldProbeSecondaries now config primaryAvailable state then
-                        findFirstAvailableSecondary()
-                    else
-                        Task.FromResult(None)
-                let newState, decision =
-                    AutoClusterFailoverLogic.step now config primaryAvailable availableSecondaryIndex state
+                let! newState, decision =
+                    AutoClusterFailoverLogic.step now config primaryAvailable findFirstAvailableSecondary state
                 state <- newState
                 do! applyDecision decision
-            with
-            | Flatten ex ->
+            with Flatten ex ->
                 Log.Logger.LogError(ex, "Error checking cluster")
         }
 
@@ -219,7 +195,7 @@ type AutoClusterFailover
                     use cts = new CancellationTokenSource(30_000)
                     do! client.ConnectAsync(endpoint.Host, endpoint.Port, cts.Token)
                     return true
-                with ex ->
+                with Flatten ex ->
                     Log.Logger.LogWarning(ex, "Failed to probe available, url: {0}", endpoint)
                     return false
             }

@@ -18,150 +18,118 @@ module AutoClusterFailoverTests =
         SwitchBackDelay = TimeSpan.FromSeconds(60.0)
         SecondaryCount = 2
     }
+    let noSecondaryAvailable = fun () -> Task.FromResult(None)
+    let secondaryAvailable index = fun () -> Task.FromResult(Some index)
 
     // ---- Pure state-machine tests ----
 
     [<Tests>]
-    let pureTests =
+    let stepTests =
 
         testList "AutoClusterFailoverLogic" [
 
-            // -- shouldProbeSecondaries --
-
-            test "shouldProbeSecondaries: false when primary is available" {
-                let state = { AutoClusterFailoverLogic.initialState with FailedTimestamp = Some t0 }
-                AutoClusterFailoverLogic.shouldProbeSecondaries t0 config true state
-                |> Expect.isFalse "should not probe when primary is up"
-            }
-
-            test "shouldProbeSecondaries: false when no failedTimestamp yet" {
-                let state = AutoClusterFailoverLogic.initialState
-                AutoClusterFailoverLogic.shouldProbeSecondaries t0 config false state
-                |> Expect.isFalse "should not probe before first failure recorded"
-            }
-
-            test "shouldProbeSecondaries: false when within failover delay" {
-                let state = { AutoClusterFailoverLogic.initialState with FailedTimestamp = Some t0 }
-                let now = t0 + TimeSpan.FromSeconds(29.0)
-                AutoClusterFailoverLogic.shouldProbeSecondaries now config false state
-                |> Expect.isFalse "should not probe before delay elapsed"
-            }
-
-            test "shouldProbeSecondaries: true when primary down and delay elapsed" {
-                let state = { AutoClusterFailoverLogic.initialState with FailedTimestamp = Some t0 }
-                let now = t0 + TimeSpan.FromSeconds(30.0)
-                AutoClusterFailoverLogic.shouldProbeSecondaries now config false state
-                |> Expect.isTrue "should probe after delay elapsed"
-            }
-
-            test "shouldProbeSecondaries: false when on secondary" {
-                let state = { AutoClusterFailoverLogic.initialState with Mode = AutoClusterMode.Secondary 0 }
-                AutoClusterFailoverLogic.shouldProbeSecondaries t0 config false state
-                |> Expect.isFalse "should not probe secondaries when already on secondary"
-            }
-
             // -- step: on primary --
 
-            test "step: primary available clears failedTimestamp" {
-                let state = { AutoClusterFailoverLogic.initialState with FailedTimestamp = Some t0 }
-                let newState, decision =
-                    AutoClusterFailoverLogic.step t0 config true None state
-                newState.FailedTimestamp |> Expect.isNone "FailedTimestamp should be cleared"
-                decision |> Expect.equal "should be Noop" AutoClusterDecision.Noop
+            testTask "step: primary available clears failedTimestamp" {
+                let state = { AutoClusterFailoverLogic.initialState with PrimaryFailedTimestamp = Some t0 }
+                let! newState, decision =
+                    AutoClusterFailoverLogic.step t0 config true noSecondaryAvailable state
+                newState.PrimaryFailedTimestamp |> Expect.isNone "FailedTimestamp should be cleared"
+                decision |> Expect.equal "should be Noop" AutoClusterDecision.NoAction
             }
 
-            test "step: primary unavailable records failedTimestamp on first failure" {
+            testTask "step: primary unavailable records failedTimestamp on first failure" {
                 let state = AutoClusterFailoverLogic.initialState
-                let newState, decision =
-                    AutoClusterFailoverLogic.step t0 config false None state
-                newState.FailedTimestamp |> Expect.equal "should record timestamp" (Some t0)
-                decision |> Expect.equal "should be Noop" AutoClusterDecision.Noop
+                let! newState, decision =
+                    AutoClusterFailoverLogic.step t0 config false noSecondaryAvailable state
+                newState.PrimaryFailedTimestamp |> Expect.equal "should record timestamp" (Some t0)
+                decision |> Expect.equal "should be Noop" AutoClusterDecision.NoAction
             }
 
-            test "step: does not switch before failover delay elapses" {
-                let state = { AutoClusterFailoverLogic.initialState with FailedTimestamp = Some t0 }
+            testTask "step: does not switch before failover delay elapses" {
+                let state = { AutoClusterFailoverLogic.initialState with PrimaryFailedTimestamp = Some t0 }
                 let now = t0 + TimeSpan.FromSeconds(29.0)
-                let newState, decision =
-                    AutoClusterFailoverLogic.step now config false (Some 0) state
+                let! newState, decision =
+                    AutoClusterFailoverLogic.step now config false (secondaryAvailable 0) state
                 newState.Mode |> Expect.equal "should stay Primary" AutoClusterMode.Primary
-                decision |> Expect.equal "should be Noop" AutoClusterDecision.Noop
+                decision |> Expect.equal "should be Noop" AutoClusterDecision.NoAction
             }
 
-            test "step: switches to secondary after failover delay" {
-                let state = { AutoClusterFailoverLogic.initialState with FailedTimestamp = Some t0 }
+            testTask "step: switches to secondary after failover delay" {
+                let state = { AutoClusterFailoverLogic.initialState with PrimaryFailedTimestamp = Some t0 }
                 let now = t0 + TimeSpan.FromSeconds(30.0)
-                let newState, decision =
-                    AutoClusterFailoverLogic.step now config false (Some 1) state
+                let! newState, decision =
+                    AutoClusterFailoverLogic.step now config false (secondaryAvailable 1) state
                 newState.Mode |> Expect.equal "should switch to Secondary 1" (AutoClusterMode.Secondary 1)
-                newState.FailedTimestamp |> Expect.isNone "FailedTimestamp should be cleared"
+                newState.PrimaryFailedTimestamp |> Expect.isNone "FailedTimestamp should be cleared"
                 decision |> Expect.equal "should switch" (AutoClusterDecision.SwitchToSecondary 1)
             }
 
-            test "step: no available secondary keeps state unchanged" {
-                let state = { AutoClusterFailoverLogic.initialState with FailedTimestamp = Some t0 }
+            testTask "step: no available secondary keeps state unchanged" {
+                let state = { AutoClusterFailoverLogic.initialState with PrimaryFailedTimestamp = Some t0 }
                 let now = t0 + TimeSpan.FromSeconds(30.0)
-                let newState, decision =
-                    AutoClusterFailoverLogic.step now config false None state
-                newState.FailedTimestamp |> Expect.equal "should keep timestamp" (Some t0)
-                decision |> Expect.equal "should be Noop" AutoClusterDecision.Noop
+                let! newState, decision =
+                    AutoClusterFailoverLogic.step now config false noSecondaryAvailable state
+                newState.PrimaryFailedTimestamp |> Expect.equal "should keep timestamp" (Some t0)
+                decision |> Expect.equal "should be Noop" AutoClusterDecision.NoAction
             }
 
-            test "step: primary becomes available resets failedTimestamp" {
-                let state = { AutoClusterFailoverLogic.initialState with FailedTimestamp = Some t0 }
+            testTask "step: primary becomes available resets failedTimestamp" {
+                let state = { AutoClusterFailoverLogic.initialState with PrimaryFailedTimestamp = Some t0 }
                 let now = t0 + TimeSpan.FromSeconds(10.0)
-                let newState, _ =
-                    AutoClusterFailoverLogic.step now config true None state
-                newState.FailedTimestamp |> Expect.isNone "FailedTimestamp should be cleared"
+                let! newState, _ =
+                    AutoClusterFailoverLogic.step now config true noSecondaryAvailable state
+                newState.PrimaryFailedTimestamp |> Expect.isNone "FailedTimestamp should be cleared"
             }
 
             // -- step: on secondary --
 
-            test "step: on secondary, primary available records recoveredTimestamp" {
+            testTask "step: on secondary, primary available records recoveredTimestamp" {
                 let state = { AutoClusterFailoverLogic.initialState with Mode = AutoClusterMode.Secondary 0 }
-                let newState, decision =
-                    AutoClusterFailoverLogic.step t0 config true None state
-                newState.RecoveredTimestamp |> Expect.equal "should record timestamp" (Some t0)
-                decision |> Expect.equal "should be Noop" AutoClusterDecision.Noop
+                let! newState, decision =
+                    AutoClusterFailoverLogic.step t0 config true noSecondaryAvailable state
+                newState.PrimaryRecoveredTimestamp |> Expect.equal "should record timestamp" (Some t0)
+                decision |> Expect.equal "should be Noop" AutoClusterDecision.NoAction
             }
 
-            test "step: on secondary, does not switch back before switchBackDelay" {
+            testTask "step: on secondary, does not switch back before switchBackDelay" {
                 let state = {
                     Mode = AutoClusterMode.Secondary 0
-                    FailedTimestamp = None
-                    RecoveredTimestamp = Some t0
+                    PrimaryFailedTimestamp = None
+                    PrimaryRecoveredTimestamp = Some t0
                 }
                 let now = t0 + TimeSpan.FromSeconds(59.0)
-                let newState, decision =
-                    AutoClusterFailoverLogic.step now config true None state
+                let! newState, decision =
+                    AutoClusterFailoverLogic.step now config true noSecondaryAvailable state
                 newState.Mode |> Expect.equal "should stay Secondary" (AutoClusterMode.Secondary 0)
-                decision |> Expect.equal "should be Noop" AutoClusterDecision.Noop
+                decision |> Expect.equal "should be Noop" AutoClusterDecision.NoAction
             }
 
-            test "step: on secondary, switches back to primary after switchBackDelay" {
+            testTask "step: on secondary, switches back to primary after switchBackDelay" {
                 let state = {
                     Mode = AutoClusterMode.Secondary 0
-                    FailedTimestamp = None
-                    RecoveredTimestamp = Some t0
+                    PrimaryFailedTimestamp = None
+                    PrimaryRecoveredTimestamp = Some t0
                 }
                 let now = t0 + TimeSpan.FromSeconds(60.0)
-                let newState, decision =
-                    AutoClusterFailoverLogic.step now config true None state
+                let! newState, decision =
+                    AutoClusterFailoverLogic.step now config true noSecondaryAvailable state
                 newState.Mode |> Expect.equal "should be Primary" AutoClusterMode.Primary
-                newState.RecoveredTimestamp |> Expect.isNone "RecoveredTimestamp should be cleared"
+                newState.PrimaryRecoveredTimestamp |> Expect.isNone "RecoveredTimestamp should be cleared"
                 decision |> Expect.equal "should switch back" AutoClusterDecision.SwitchToPrimary
             }
 
-            test "step: on secondary, primary goes down again clears recoveredTimestamp" {
+            testTask "step: on secondary, primary goes down again clears recoveredTimestamp" {
                 let state = {
                     Mode = AutoClusterMode.Secondary 0
-                    FailedTimestamp = None
-                    RecoveredTimestamp = Some t0
+                    PrimaryFailedTimestamp = None
+                    PrimaryRecoveredTimestamp = Some t0
                 }
                 let now = t0 + TimeSpan.FromSeconds(10.0)
-                let newState, decision =
-                    AutoClusterFailoverLogic.step now config false None state
-                newState.RecoveredTimestamp |> Expect.isNone "RecoveredTimestamp should be cleared"
-                decision |> Expect.equal "should be Noop" AutoClusterDecision.Noop
+                let! newState, decision =
+                    AutoClusterFailoverLogic.step now config false noSecondaryAvailable state
+                newState.PrimaryRecoveredTimestamp |> Expect.isNone "RecoveredTimestamp should be cleared"
+                decision |> Expect.equal "should be Noop" AutoClusterDecision.NoAction
             }
         ]
 
