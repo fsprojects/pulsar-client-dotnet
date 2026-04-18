@@ -167,7 +167,7 @@ type AutoClusterFailover
                 | Some ctx -> do! ctx.UpdateServiceInfo(sec.ServiceInfo)
                 | None -> ()
             | AutoClusterDecision.SwitchToPrimary ->
-                Log.Logger.LogInformation("Switching back to primary cluster {0}", primary)
+                Log.Logger.LogInformation("Switching back to primary cluster {0}", primary.ServiceUrl)
                 currentServiceInfo <- primaryServiceInfo
                 match context with
                 | Some ctx -> do! ctx.UpdateServiceInfo(primary)
@@ -201,8 +201,8 @@ type AutoClusterFailover
             t.AutoReset <- false
             t.Elapsed.Add(fun _ ->
                 backgroundTask {
-                    do! tick()
                     if not isDisposed then
+                        do! tick()
                         try t.Start() with _ -> ()
                 } |> ignore)
             t :> IDisposable
