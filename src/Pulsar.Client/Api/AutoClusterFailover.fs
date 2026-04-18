@@ -4,112 +4,225 @@ open System
 open System.Net.Sockets
 open System.Threading
 open System.Threading.Tasks
+open System.Timers
 open Microsoft.Extensions.Logging
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 
-type private AutoServiceInfo = {
+type internal AutoServiceInfo = {
     ServiceInfo: ServiceInfo
     EndPointResolver: EndPointResolver
 }
 
+// Pure state machine
+
+[<RequireQualifiedAccess>]
+type internal AutoClusterMode =
+    | Primary
+    | Secondary of index: int
+
+type internal AutoClusterState = {
+    Mode: AutoClusterMode
+    PrimaryFailedTimestamp: DateTime option
+    PrimaryRecoveredTimestamp: DateTime option
+}
+
+[<RequireQualifiedAccess>]
+type internal AutoClusterDecision =
+    | NoAction
+    | SwitchToSecondary of index: int
+    | SwitchToPrimary
+
+type internal AutoClusterConfig = {
+    FailoverDelay: TimeSpan
+    SwitchBackDelay: TimeSpan
+    SecondaryCount: int
+}
+
+[<RequireQualifiedAccess>]
+module internal AutoClusterFailoverLogic =
+
+    let initialState = {
+        Mode = AutoClusterMode.Primary
+        PrimaryFailedTimestamp = None
+        PrimaryRecoveredTimestamp = None
+    }
+
+    /// Single pure state transition covering both primary and secondary modes.
+    /// - primaryAvailable: result of probing the primary endpoint.
+    /// - findFirstAvailableSecondary: get index of the first available secondary
+    ///   (None means no secondary was probed or none was available).
+    let step
+        (now: DateTime)
+        (config: AutoClusterConfig)
+        (primaryAvailable: bool)
+        (findFirstAvailableSecondary: unit -> Task<int option>)
+        (state: AutoClusterState) =
+        backgroundTask {            
+            match state.Mode, primaryAvailable with
+            | AutoClusterMode.Primary, true ->
+                return { state with PrimaryFailedTimestamp = None }, AutoClusterDecision.NoAction
+            | AutoClusterMode.Primary, false ->
+                match state.PrimaryFailedTimestamp with
+                | None ->
+                    return { state with PrimaryFailedTimestamp = Some now }, AutoClusterDecision.NoAction
+                | Some ts when now - ts >= config.FailoverDelay ->
+                    match! findFirstAvailableSecondary() with
+                    | Some idx ->
+                        return {
+                            Mode = AutoClusterMode.Secondary idx
+                            PrimaryFailedTimestamp = None
+                            PrimaryRecoveredTimestamp = None
+                        }, AutoClusterDecision.SwitchToSecondary idx
+                    | None ->
+                        return state, AutoClusterDecision.NoAction
+                | _ ->
+                    return state, AutoClusterDecision.NoAction
+            | AutoClusterMode.Secondary _, true ->
+                match state.PrimaryRecoveredTimestamp with
+                | None ->
+                    return { state with PrimaryRecoveredTimestamp = Some now }, AutoClusterDecision.NoAction
+                | Some ts when now - ts >= config.SwitchBackDelay ->
+                    return {
+                        Mode = AutoClusterMode.Primary
+                        PrimaryFailedTimestamp = None
+                        PrimaryRecoveredTimestamp = None
+                    }, AutoClusterDecision.SwitchToPrimary
+                | _ ->
+                    return state, AutoClusterDecision.NoAction
+            | AutoClusterMode.Secondary _, false ->
+                return { state with PrimaryRecoveredTimestamp = None }, AutoClusterDecision.NoAction
+        }
+
+// Orchestrator
+
 type AutoClusterFailover
+    internal
     (
         primary: ServiceInfo,
         secondary: ServiceInfo array,
         failoverDelay: TimeSpan,
         switchBackDelay: TimeSpan,
-        checkInterval: TimeSpan
+        checkInterval: TimeSpan,
+        getCurrentTime: unit -> DateTime,
+        probeAvailable: EndPointResolver -> Task<bool>,
+        getTickScheduler: ((unit -> Task<unit>) -> IDisposable) option
     ) =
 
     let getAutoServiceInfo (serviceInfo: ServiceInfo) =
         { ServiceInfo = serviceInfo; EndPointResolver = EndPointResolver(serviceInfo.ServiceUrl.Addresses) }
 
+    let config = {
+        FailoverDelay = failoverDelay
+        SwitchBackDelay = switchBackDelay
+        SecondaryCount = secondary.Length
+    }
+
     let primaryServiceInfo = getAutoServiceInfo primary
     let secondaryServiceInfos = secondary |> Array.map getAutoServiceInfo
     let mutable currentServiceInfo = primaryServiceInfo
-    let cts = new CancellationTokenSource()
+    let mutable state = AutoClusterFailoverLogic.initialState
 
-    let mutable recoveredTimestamp: DateTime option = None
-    let mutable failedTimestamp: DateTime option = None
+    let mutable context: IServiceInfoProviderContext option = None
+    let mutable isDisposed = false
 
-    let probeAvailable (resolve: EndPointResolver) =
+    let findFirstAvailableSecondary () =
+        task {
+            let mutable found = None
+            let mutable i = 0
+            while found.IsNone && i < secondaryServiceInfos.Length do
+                let! avail = probeAvailable secondaryServiceInfos[i].EndPointResolver
+                if avail then found <- Some i
+                i <- i + 1
+            if found.IsNone then
+                Log.Logger.LogWarning("Available secondary cluster wasn't found")
+            return found
+        }
+
+    let applyDecision (decision: AutoClusterDecision) =
         backgroundTask {
-            let endpoint = resolve.Resolve()
+            match decision with
+            | AutoClusterDecision.SwitchToSecondary idx ->
+                let sec = secondaryServiceInfos[idx]
+                Log.Logger.LogInformation("Switching to secondary cluster {0}", sec.ServiceInfo.ServiceUrl)
+                currentServiceInfo <- sec
+                match context with
+                | Some ctx -> do! ctx.UpdateServiceInfo(sec.ServiceInfo)
+                | None -> ()
+            | AutoClusterDecision.SwitchToPrimary ->
+                Log.Logger.LogInformation("Switching back to primary cluster {0}", primary.ServiceUrl)
+                currentServiceInfo <- primaryServiceInfo
+                match context with
+                | Some ctx -> do! ctx.UpdateServiceInfo(primary)
+                | None -> ()
+            | AutoClusterDecision.NoAction -> ()
+        }
+
+    let tick () =
+        backgroundTask {
             try
-                use client = new TcpClient()
-                use cts = new CancellationTokenSource(30_000)
-                do! client.ConnectAsync(endpoint.Host, endpoint.Port, cts.Token)
-                return true
-            with ex ->
-                Log.Logger.LogWarning(ex, "Failed to probe available, url: {0}", endpoint)
-                return false
+                let! primaryAvailable = probeAvailable primaryServiceInfo.EndPointResolver
+                let now = getCurrentTime()
+                let! newState, decision =
+                    AutoClusterFailoverLogic.step now config primaryAvailable findFirstAvailableSecondary state
+                state <- newState
+                do! applyDecision decision
+            with Flatten ex ->
+                Log.Logger.LogError(ex, "Error checking cluster")
         }
 
-    let run (ctx: IServiceInfoProviderContext) =
-        Log.Logger.LogInformation("Initializing AutoClusterFailover")
-        backgroundTask {
-            while not cts.IsCancellationRequested do
+    let timer =
+        match getTickScheduler with
+        | None ->
+            let t = new Timer(checkInterval.TotalMilliseconds)
+            t.AutoReset <- false
+            t.Elapsed.Add(fun _ ->
+                backgroundTask {
+                    if not isDisposed then
+                        do! tick()
+                        try t.Start() with _ -> ()
+                } |> ignore)
+            t :> IDisposable
+        | Some getScheduler ->
+            getScheduler(tick)
+
+    /// Production constructor — uses real clock, TCP probe, and timer-based scheduler.
+    new(primary, secondary, failoverDelay, switchBackDelay, checkInterval) =
+        let defaultProbe (resolver: EndPointResolver) =
+            backgroundTask {
+                let endpoint = resolver.Resolve()
                 try
-                    do! Task.Delay(checkInterval, cts.Token)
-                    if currentServiceInfo = primaryServiceInfo then
-                        let! available = probeAvailable primaryServiceInfo.EndPointResolver
-                        if not available then
-                            match failedTimestamp with
-                            | None ->
-                                failedTimestamp <- Some DateTime.UtcNow
-                            | Some ts when DateTime.UtcNow - ts >= failoverDelay ->
-                                let! targetSecondary =
-                                    task {
-                                        let mutable found = None
-                                        for sec in secondaryServiceInfos do
-                                            if found.IsNone then
-                                                let! avail = probeAvailable sec.EndPointResolver
-                                                if avail then found <- Some sec
-                                        return found
-                                    }
-                                match targetSecondary with
-                                | Some sec ->
-                                    Log.Logger.LogInformation("Switching to secondary cluster {0}", sec.ServiceInfo.ServiceUrl)
-                                    currentServiceInfo <- sec
-                                    do! ctx.UpdateServiceInfo(sec.ServiceInfo)
-                                    failedTimestamp <- None
-                                | None ->
-                                    Log.Logger.LogWarning("Could not find any available secondary cluster")
-                            | _ -> ()
-                        else
-                            failedTimestamp <- None
-                    else
-                        let! available = probeAvailable primaryServiceInfo.EndPointResolver
-                        if available then
-                            match recoveredTimestamp with
-                            | None ->
-                                recoveredTimestamp <- Some DateTime.UtcNow
-                            | Some ts when DateTime.UtcNow - ts >= switchBackDelay ->
-                                Log.Logger.LogInformation("Switching back to primary cluster {0}", primary)
-                                currentServiceInfo <- primaryServiceInfo
-                                do! ctx.UpdateServiceInfo(primary)
-                                recoveredTimestamp <- None
-                            | _ -> ()
-                        else
-                            recoveredTimestamp <- None
-                with
-                | :? OperationCanceledException when cts.IsCancellationRequested -> ()
-                | :? TaskCanceledException when cts.IsCancellationRequested -> ()
-                | Flatten ex ->
-                    Log.Logger.LogError(ex, "Error checking cluster")
-        }
-        |> ignore
-
+                    use client = new TcpClient()
+                    use cts = new CancellationTokenSource(30_000)
+                    do! client.ConnectAsync(endpoint.Host, endpoint.Port, cts.Token)
+                    return true
+                with Flatten ex ->
+                    Log.Logger.LogWarning(ex, "Failed to probe available, url: {0}", endpoint)
+                    return false
+            }
+        new AutoClusterFailover(
+            primary, secondary, failoverDelay, switchBackDelay, checkInterval,
+            (fun () -> DateTime.UtcNow),
+            defaultProbe,
+            None
+        )
 
     interface IServiceInfoProvider with
-        member this.Initialize(context: IServiceInfoProviderContext) =
-            run context
-        member this.GetServiceInfo() = currentServiceInfo.ServiceInfo
+        member _.Initialize(ctx: IServiceInfoProviderContext) =
+            Log.Logger.LogInformation("Initializing AutoClusterFailover")
+            context <- Some ctx
+            match getTickScheduler with
+            | None ->
+                // Start the production timer on Initialize
+                (timer :?> Timer).Start()
+            | Some _ ->
+                // Test scheduler is already ready; ticks are driven externally
+                ()
+        member _.GetServiceInfo() = currentServiceInfo.ServiceInfo
 
-        member this.Dispose() =
-            cts.Cancel()
-            cts.Dispose()
+        member _.Dispose() =
+            isDisposed <- true
+            timer.Dispose()
 
 
 type AutoClusterFailoverBuilder() =
@@ -152,4 +265,3 @@ type AutoClusterFailoverBuilder() =
             switchBackDelay, 
             checkInterval
         ) :> IServiceInfoProvider
-

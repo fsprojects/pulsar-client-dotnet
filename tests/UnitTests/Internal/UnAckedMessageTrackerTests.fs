@@ -7,6 +7,7 @@ open Expecto
 open Expecto.Flip
 open Pulsar.Client.Internal
 open Pulsar.Client.Common
+open Pulsar.Client.UnitTests
 
 [<Tests>]
 let tests =
@@ -15,8 +16,6 @@ let tests =
     let emptyScheduler _ = { new IDisposable with member __.Dispose() = () }
 
     testList "UnAckedMessageTracker" [
-
-
 
         testTask "UnAckedMessageTracker add 3 and remove until 1 works" {
             let tracker = UnAckedMessageTracker("UnAckedMessageTracker_2", TimeSpan.FromMilliseconds(50.0), TimeSpan.FromMilliseconds(25.0), emptyRedeliver, emptyScheduler) :> IUnAckedMessageTracker
