@@ -5,15 +5,34 @@ open System.Collections.Generic
 open System.Dynamic
 open System.Text
 open System.Text.Json
+open System.Text.Json.Serialization
 open Avro
 open Pulsar.Client.Api
 open AvroSchemaGenerator
 open Pulsar.Client.Common
 
+type internal DateTimeTimestampMillisConverter() =
+    inherit JsonConverter<DateTime>()
+    override this.Read(reader: byref<Utf8JsonReader>, _, _) =
+        match reader.TokenType with
+        | JsonTokenType.Number ->
+            reader.GetInt64()
+            |> DateTimeOffset.FromUnixTimeMilliseconds
+            |> _.UtcDateTime
+        | JsonTokenType.String ->
+            reader.GetDateTime()
+        | _ ->
+            raise <| JsonException $"Unexpected token parsing DateTime. Expected Number or String, got {reader.TokenType}."
+
+    override this.Write(writer: Utf8JsonWriter, value: DateTime, _) =
+        DateTimeOffset(value).ToUnixTimeMilliseconds()
+        |> writer.WriteNumberValue
+
 type internal JsonSchema<'T> () =
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
     let options = JsonSerializerOptions(IgnoreNullValues = true)
+    do options.Converters.Add(DateTimeTimestampMillisConverter())
     let stringSchema = typeof<'T>.GetSchema()
     override this.SchemaInfo = { Name = ""; Type = SchemaType.JSON; Schema = stringSchema |> Encoding.UTF8.GetBytes; Properties = Map.empty }
     override this.Encode value =

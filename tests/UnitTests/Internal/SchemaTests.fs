@@ -3,6 +3,8 @@ module Pulsar.Client.UnitTests.Internal.SchemaTests
 open System
 open System.Collections.Generic
 open System.Diagnostics
+open System.Text
+open System.Text.Json
 open AvroGenerated
 open Expecto
 open Expecto.Flip
@@ -25,6 +27,9 @@ type ProtobufSchemaTest = {
 
 [<CLIMutable>]
 type AvroSchemaTest = { X: string; Y: ResizeArray<int> }
+
+[<CLIMutable>]
+type DateTimeSchemaTest = { OccurredAt: DateTime }
 
 [<CLIMutable>]
 [<ProtoContract>]
@@ -192,6 +197,47 @@ let tests =
                     |> schema.Decode
                 Expect.equal "" input.X output.X
                 Expect.sequenceEqual "" input.Y output.Y
+        }
+
+        test "JSON schema DateTime encoding writes numeric timestamp value" {
+            let schema = Schema.JSON<DateTimeSchemaTest>()
+            let input = { OccurredAt = DateTime(2026, 4, 20, 6, 30, 3, DateTimeKind.Utc).AddTicks(715180L) }
+            let payload = schema.Encode(input)
+            use doc = JsonDocument.Parse(payload)
+
+            Expect.equal "" JsonValueKind.Number (doc.RootElement.GetProperty("OccurredAt").ValueKind)
+        }
+
+        test "JSON schema DateTime decoding accepts numeric timestamp value" {
+            let schema = Schema.JSON<DateTimeSchemaTest>()
+            let expected = DateTimeOffset.FromUnixTimeMilliseconds(1776666603071L).UtcDateTime
+            let payload = Encoding.UTF8.GetBytes("""{"OccurredAt":1776666603071}""")
+
+            let output = schema.Decode(payload)
+
+            Expect.equal "" expected output.OccurredAt
+        }
+
+        test "JSON schema DateTime decoding accepts legacy string timestamp value" {
+            let schema = Schema.JSON<DateTimeSchemaTest>()
+            let expected = DateTime(2026, 4, 20, 6, 30, 3, DateTimeKind.Utc).AddTicks(715180L)
+            let payload = Encoding.UTF8.GetBytes("""{"OccurredAt":"2026-04-20T06:30:03.071518Z"}""")
+
+            let output = schema.Decode(payload)
+
+            Expect.equal "" expected output.OccurredAt
+        }
+
+        test "Avro schema DateTime encoding writes numeric timestamp value" {
+            let schema = Schema.AVRO<DateTimeSchemaTest>()
+            let input = { OccurredAt = DateTime(2026, 4, 20, 6, 30, 3, DateTimeKind.Utc).AddTicks(715180L) }
+            use stream = new IO.MemoryStream(schema.Encode(input))
+            let decoder = Avro.IO.BinaryDecoder(stream)
+            let unionBranch = decoder.ReadLong()
+            let timestamp = decoder.ReadLong()
+
+            Expect.equal "" 1L unionBranch
+            Expect.equal "" (DateTimeOffset(input.OccurredAt).ToUnixTimeMilliseconds()) timestamp
         }
         
         test "Protobuf native" {
