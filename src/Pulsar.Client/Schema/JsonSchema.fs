@@ -13,6 +13,12 @@ open Pulsar.Client.Common
 
 type internal DateTimeTimestampMillisConverter() =
     inherit JsonConverter<DateTime>()
+    let normalizeToUtc (value: DateTime) =
+        if value.Kind = DateTimeKind.Utc then
+            value
+        else
+            DateTime.SpecifyKind(value, DateTimeKind.Utc)
+
     override this.Read(reader: byref<Utf8JsonReader>, _, _) =
         match reader.TokenType with
         | JsonTokenType.Number ->
@@ -25,7 +31,10 @@ type internal DateTimeTimestampMillisConverter() =
             raise <| JsonException $"Unexpected token parsing DateTime. Expected Number or String, got {reader.TokenType}."
 
     override this.Write(writer: Utf8JsonWriter, value: DateTime, _) =
-        DateTimeOffset(value).ToUnixTimeMilliseconds()
+        value
+        |> normalizeToUtc
+        |> DateTimeOffset
+        |> _.ToUnixTimeMilliseconds()
         |> writer.WriteNumberValue
 
 type internal JsonSchema<'T> () =
