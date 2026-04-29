@@ -111,7 +111,13 @@ let tests =
                     .SubscriptionName("test-subscription")
                     .SubscribeAsync() 
 
-            let input = { SimpleRecord3.Name = "abc"; Age = 20; Date = DateTime.UtcNow }
+            // JSON schema encodes DateTime as timestamp-millis, so keep the
+            // expected value at the same precision used by the wire payload.
+            let inputDate =
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                |> DateTimeOffset.FromUnixTimeMilliseconds
+                |> _.UtcDateTime
+            let input = { SimpleRecord3.Name = "abc"; Age = 20; Date = inputDate }
             let! _ = producer.SendAsync(input) 
 
             let! (msg : Message<SimpleRecord3>) = consumer.ReceiveAsync() 
