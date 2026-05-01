@@ -199,31 +199,25 @@ let tests =
                 Expect.sequenceEqual "" input.Y output.Y
         }
 
-        test "JSON schema DateTime encoding writes numeric timestamp value" {
-            let schema = Schema.JSON<DateTimeSchemaTest>()
-            let input = { OccurredAt = DateTime(2026, 4, 20, 6, 30, 3, DateTimeKind.Utc).AddTicks(715180L) }
-            let payload = schema.Encode(input)
-            use doc = JsonDocument.Parse(payload)
-
-            Expect.equal "" JsonValueKind.Number (doc.RootElement.GetProperty("OccurredAt").ValueKind)
-        }
-
-        test "JSON schema DateTime encoding works for local and unspecified DateTime values" {
+        test "JSON schema DateTime encoding works for all kinds of DateTime values" {
             let schema = Schema.JSON<DateTimeSchemaTest>()
             let inputs = [
                 DateTime(2026, 4, 20, 6, 30, 3, DateTimeKind.Local).AddTicks(715180L)
                 DateTime(2026, 4, 20, 6, 30, 3, DateTimeKind.Unspecified).AddTicks(715180L)
+                DateTime(2026, 4, 20, 6, 30, 3, DateTimeKind.Utc).AddTicks(715180L)
             ]
 
             for input in inputs do
                 let payload = schema.Encode({ OccurredAt = input })
                 use doc = JsonDocument.Parse(payload)
-                let timestamp = doc.RootElement.GetProperty("OccurredAt").GetInt64()
+                let occuredAtProperty = doc.RootElement.GetProperty("OccurredAt")
+                Expect.equal "" JsonValueKind.Number occuredAtProperty.ValueKind
+                
+                let timestamp = occuredAtProperty.GetInt64()
                 let expected =
                     input
                     |> DateTimeOffset
                     |> _.ToUnixTimeMilliseconds()
-
                 Expect.equal "" expected timestamp
         }
 
