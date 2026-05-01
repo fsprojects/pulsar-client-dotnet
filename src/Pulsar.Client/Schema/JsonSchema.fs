@@ -2,7 +2,6 @@ namespace Pulsar.Client.Schema
 
 open System
 open System.Collections.Generic
-open System.Dynamic
 open System.Text
 open System.Text.Json
 open System.Text.Json.Serialization
@@ -34,7 +33,7 @@ type internal DateTimeTimestampMillisConverter() =
 type internal JsonSchema<'T> () =
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
-    let options = JsonSerializerOptions(IgnoreNullValues = true)
+    let options = JsonSerializerOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)
     do options.Converters.Add(DateTimeTimestampMillisConverter())
     let stringSchema = typeof<'T>.GetSchema()
     override this.SchemaInfo = { Name = ""; Type = SchemaType.JSON; Schema = stringSchema |> Encoding.UTF8.GetBytes; Properties = Map.empty }
@@ -47,7 +46,7 @@ type internal JsonSchema<'T> () =
 
 type internal GenericJsonSchema (topicSchema: TopicSchema) =
     inherit ISchema<GenericRecord>()
-    let dynamicSerializerOptions = JsonSerializerOptions(IgnoreNullValues = true)
+    let dynamicSerializerOptions = JsonSerializerOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)
     do dynamicSerializerOptions.Converters.Add <| DynamicJsonConverter()
     let stringSchema = topicSchema.SchemaInfo.Schema |> Encoding.UTF8.GetString
     let avroSchema = Schema.Parse(stringSchema) :?> RecordSchema
@@ -63,10 +62,10 @@ type internal GenericJsonSchema (topicSchema: TopicSchema) =
         let doc = JsonSerializer.Deserialize<IDictionary<string, obj>>(ReadOnlySpan bytes, dynamicSerializerOptions)
         let fields =
             schemaFields
-            |> Seq.map (fun sf -> { Name = sf.Name; Value = doc.[sf.Name]; Index = sf.Pos })
+            |> Seq.map (fun sf -> { Name = sf.Name; Value = doc[sf.Name]; Index = sf.Pos })
             |> Seq.toArray
-        let scemaVersionBytes =
-            topicSchema.SchemaVersion
-            |> Option.map _.Bytes
-            |> Option.toObj
-        GenericRecord(scemaVersionBytes, fields)
+        let schemaVersionBytes =
+            match topicSchema.SchemaVersion with
+            | Some v -> v.Bytes
+            | None -> null
+        GenericRecord(schemaVersionBytes, fields)

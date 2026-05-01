@@ -208,7 +208,7 @@ let tests =
             Expect.equal "" JsonValueKind.Number (doc.RootElement.GetProperty("OccurredAt").ValueKind)
         }
 
-        test "JSON schema DateTime encoding treats non-UTC values as UTC" {
+        test "JSON schema DateTime encoding works for local and unspecified DateTime values" {
             let schema = Schema.JSON<DateTimeSchemaTest>()
             let inputs = [
                 DateTime(2026, 4, 20, 6, 30, 3, DateTimeKind.Local).AddTicks(715180L)
@@ -220,7 +220,7 @@ let tests =
                 use doc = JsonDocument.Parse(payload)
                 let timestamp = doc.RootElement.GetProperty("OccurredAt").GetInt64()
                 let expected =
-                    DateTime.SpecifyKind(input, DateTimeKind.Utc)
+                    input
                     |> DateTimeOffset
                     |> _.ToUnixTimeMilliseconds()
 
