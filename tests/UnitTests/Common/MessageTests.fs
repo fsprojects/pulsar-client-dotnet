@@ -66,6 +66,33 @@ let tests =
             Expect.equal "" msgId deserialized
         }
 
+        test "Batch MessageId serialization acker isolation" {
+            let sharedAcker = BatchMessageAcker(2)
+            let msgId1 = { LedgerId = %1L; EntryId = %1L; Type = Batch(%0, sharedAcker); Partition = 1; TopicName = %""; ChunkMessageIds = None }
+            let msgId2 = { LedgerId = %1L; EntryId = %1L; Type = Batch(%1, sharedAcker); Partition = 1; TopicName = %""; ChunkMessageIds = None }
+            
+            let bytes1 = msgId1.ToByteArray()
+            let bytes2 = msgId2.ToByteArray()
+            
+            let deserialized1 = MessageId.FromByteArray bytes1
+            let deserialized2 = MessageId.FromByteArray bytes2
+            
+            match deserialized1.Type, deserialized2.Type with
+            | Batch (_, acker1), Batch (_, acker2) ->
+                // The deserialized ackers are different instances!
+                Expect.isFalse "Ackers must not be the same instance" (obj.ReferenceEquals(acker1, acker2))
+                
+                // Let's ack individual indices
+                let acked1 = acker1.AckIndividual(%0)
+                let acked2 = acker2.AckIndividual(%1)
+                
+                // Neither one reports the whole batch is acknowledged
+                Expect.isFalse "Acker 1 should not be fully acked" acked1
+                Expect.isFalse "Acker 2 should not be fully acked" acked2
+            | _ ->
+                failwith "Deserialized message ID must be Batch type"
+        }
+
         test "Message batching by count works correctly" {
             let messages = Messages(2, -1)
             let message = Message(MessageId.Earliest, [||], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", Nullable(), fun () -> failwith "not implemented")

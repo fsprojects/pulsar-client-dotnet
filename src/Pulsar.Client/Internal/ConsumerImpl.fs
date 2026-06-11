@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Api
+namespace Pulsar.Client.Api
 
 open System.Collections
 
@@ -260,6 +260,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let negativeAcksTracker = NegativeAcksTracker(prefix, consumerConfig.NegativeAckRedeliveryDelay, negativeAcksRedeliver)
 
+    let batchAckers = Dictionary<struct(LedgerId*EntryId), BatchMessageAcker>()
+
     let getConnectionState() = connectionHandler.ConnectionState
     let sendAckPayload (cnx: ClientCnx) payload = cnx.Send payload
 
@@ -356,16 +358,23 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             let command =
                 match messageId.Type with
                 | Batch (batchIndex, batchAcker) ->
+                    let key = struct(messageId.LedgerId, messageId.EntryId)
+                    let acker =
+                        match batchAckers.TryGetValue(key) with
+                        | true, sharedAcker -> sharedAcker
+                        | false, _ ->
+                            batchAckers[key] <- batchAcker
+                            batchAcker
                     let ackSet =
                         match ackType with
                         | Cumulative ->
-                            batchAcker.AckCumulative(batchIndex) |> ignore
-                            let bitSet = BitArray(batchAcker.GetBatchSize(), true)
+                            acker.AckCumulative(batchIndex) |> ignore
+                            let bitSet = BitArray(acker.GetBatchSize(), true)
                             for i in 0 .. %batchIndex do
                                 bitSet[i] <- false
                             bitSet
                         | Individual ->
-                            let bitSet = BitArray(batchAcker.GetBatchSize(), true)
+                            let bitSet = BitArray(acker.GetBatchSize(), true)
                             bitSet[%batchIndex] <- false
                             bitSet
                     let allBitsAreZero =
@@ -382,7 +391,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         else
                             ackSet |> toLongArray
                     Commands.newAck consumerId messageId.LedgerId messageId.EntryId ackType properties adjustedSet
-                            None (Some txnId) (Some requestId) (batchAcker.GetBatchSize() |> Some)
+                            None (Some txnId) (Some requestId) (acker.GetBatchSize() |> Some)
                 | _ ->
                     Commands.newAck consumerId messageId.LedgerId messageId.EntryId ackType properties null
                             None (Some txnId) (Some requestId) None
@@ -402,10 +411,23 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             doTransactionAcknowledgeForResponse ackType properties txn.Id tcs messageId
         | None ->
             match messageId.Type with
-            | Batch batchDetails when not (markAckForBatchMessage messageId batchDetails ackType properties) ->
-                if consumerConfig.BatchIndexAcknowledgmentEnabled then
-                    acksGroupingTracker.AddBatchIndexAcknowledgment(messageId, ackType, properties)
-                // other messages in batch are still pending ack.
+            | Batch batchDetails ->
+                let struct(batchIndex, batchAcker) = batchDetails
+                let key = struct(messageId.LedgerId, messageId.EntryId)
+                let acker =
+                    match batchAckers.TryGetValue(key) with
+                    | true, sharedAcker -> sharedAcker
+                    | false, _ ->
+                        batchAckers[key] <- batchAcker
+                        batchAcker
+                if not (markAckForBatchMessage messageId struct(batchIndex, acker) ackType properties) then
+                    if consumerConfig.BatchIndexAcknowledgmentEnabled then
+                        acksGroupingTracker.AddBatchIndexAcknowledgment(messageId, ackType, properties)
+                else
+                    batchAckers.Remove(key) |> ignore
+                    sendAcknowledge messageId ackType properties
+                    if Log.Logger.IsEnabled LogLevel.Debug then
+                        Log.Logger.LogDebug("{0} acknowledged message - {1}, acktype {2}", prefix, messageId, ackType)
             | _ ->
                 sendAcknowledge messageId ackType properties
                 if Log.Logger.IsEnabled LogLevel.Debug then
@@ -583,6 +605,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         interceptors.Close()
         statTimer.Stop()
         chunkTimer.Stop()
+        batchAckers.Clear()
         cleanup(this)
 
     let stopConsumer () =
@@ -1382,6 +1405,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     default this.ReceiveIndividualMessagesFromBatch (rawMessage: RawMessage) schemaDecodeFunction isMessageUndecryptable =
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
+        batchAckers[struct(rawMessage.MessageId.LedgerId, rawMessage.MessageId.EntryId)] <- acker
         let mutable skippedMessages = 0
         let stream = rawMessage.Payload
         stream.Seek(0L, SeekOrigin.Begin) |> ignore
