@@ -26,6 +26,7 @@
     <Compile Include="Api\PulsarClientBuilderTests.fs" />
     <Compile Include="Api\AutoClusterFailoverTests.fs" />
     <Compile Include="Internal\EndPointResolverTests.fs" />
+    <Compile Include="Internal\ConnectionPoolTests.fs" />
     <Compile Include="Internal\CompressionCodecTests.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTrackerTests.fs" />
     <Compile Include="Internal\UnAckedMessageTrackerTests.fs" />

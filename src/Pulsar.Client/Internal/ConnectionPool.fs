@@ -15,6 +15,19 @@ open System.Net.Sockets
 open System.Net.Security
 open System.Security.Cryptography.X509Certificates
 
+module internal SocketFactory =
+
+    let createSocket (endpoint: DnsEndPoint) : Socket =
+        match endpoint.AddressFamily with
+        | AddressFamily.Unspecified ->
+            let socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp)
+            socket.DualMode <- true
+            socket
+        | AddressFamily.Unix ->
+            new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified)
+        | family ->
+            new Socket(family, SocketType.Stream, ProtocolType.Tcp)
+
 type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
 
     let mutable config = initialConfig
@@ -22,17 +35,7 @@ type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
 
     // from https://github.com/mgravell/Pipelines.Sockets.Unofficial/blob/master/src/Pipelines.Sockets.Unofficial/SocketConnection.Connect.cs
     let getSocket (endpoint: DnsEndPoint) =
-        let addressFamily =
-            if endpoint.AddressFamily = AddressFamily.Unspecified then
-                AddressFamily.InterNetwork
-            else
-                endpoint.AddressFamily
-        let protocolType =
-            if addressFamily = AddressFamily.Unix then
-                ProtocolType.Unspecified
-            else
-                ProtocolType.Tcp
-        let socket = new Socket(addressFamily, SocketType.Stream, protocolType)
+        let socket = SocketFactory.createSocket endpoint
         SocketConnection.SetRecommendedClientOptions(socket)
 
         use args = new SocketAwaitableEventArgs(PipeScheduler.ThreadPool)
