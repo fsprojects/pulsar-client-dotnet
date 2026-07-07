@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Internal
+namespace Pulsar.Client.Internal
 
 open Pulsar.Client.Common
 
@@ -20,9 +20,17 @@ module internal SocketFactory =
     let createSocket (endpoint: DnsEndPoint) : Socket =
         match endpoint.AddressFamily with
         | AddressFamily.Unspecified ->
-            let socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp)
-            socket.DualMode <- true
-            socket
+            // The address family is unknown ahead of time for hostname-based service URLs.
+            // Prefer a dual-mode IPv6 socket so that ConnectAsync can reach IPv4, IPv6 or
+            // dual-stack brokers (fixes IPv6-only environments, see #360). Guard behind
+            // OSSupportsIPv6 and fall back to IPv4 on hosts where IPv6 is disabled/unsupported
+            // to preserve previously-working IPv4 hostname connections.
+            if Socket.OSSupportsIPv6 then
+                let socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp)
+                socket.DualMode <- true
+                socket
+            else
+                new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
         | AddressFamily.Unix ->
             new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified)
         | family ->
