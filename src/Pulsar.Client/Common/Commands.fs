@@ -169,7 +169,8 @@ let newMultiMessageAck (consumerId : ConsumerId) (messages: seq<LedgerId*EntryId
     command |> serializeSimpleCommand
 
 let newConnect (authMethodName: string) (authData: AuthData) (clientVersion: string) (protocolVersion: ProtocolVersion) (proxyToBroker: Option<DnsEndPoint>) =
-    let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = int protocolVersion, AuthMethodName = authMethodName)
+    let request = CommandConnect(ClientVersion = clientVersion, ProtocolVersion = int protocolVersion, AuthMethodName = authMethodName,
+                                 FeatureFlags = FeatureFlags(SupportsAuthRefresh = true))
     if authMethodName = "ycav1" then
         request.AuthMethod <- AuthMethod.AuthMethodYcaV1
     if authData.Bytes.Length > 0 then

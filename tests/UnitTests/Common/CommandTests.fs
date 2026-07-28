@@ -99,11 +99,12 @@ module CommandsTests =
                 let totalSize, commandSize, command =
                     serializeDeserializeSimpleCommand (newConnect authMethodName authData clientVersion protocolVersion None)
 
-                totalSize |> Expect.equal "" 32
-                commandSize |> Expect.equal "" 28
+                totalSize |> Expect.equal "" 36
+                commandSize |> Expect.equal "" 32
                 command.``type``  |> Expect.equal "" CommandType.Connect
                 command.Connect.ClientVersion |> Expect.equal "" clientVersion
                 command.Connect.ProtocolVersion |> Expect.equal "" (int protocolVersion)
+                command.Connect.FeatureFlags.SupportsAuthRefresh |> Expect.equal "" true
             }
 
             test "newMessage should return correct frame" {
