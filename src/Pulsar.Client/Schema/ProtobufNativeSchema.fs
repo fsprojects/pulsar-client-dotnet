@@ -39,7 +39,7 @@ type VirtualFile(fileName:string, content:string)=
                 let embededResourceStream = path |> getEmbeddedProtoName |> protobufReflectionAssembly.GetManifestResourceStream
                 new StreamReader(embededResourceStream) :> TextReader
 
-type internal ProtoBufNativeSchema<'T > () =
+type internal ProtoBufNativeSchema<'T> private (schemaInfo: SchemaInfo option) =
     inherit ISchema<'T>()
 
     let getDescriptor( )=
@@ -75,6 +75,9 @@ type internal ProtoBufNativeSchema<'T > () =
         getDescriptor () |> JsonSerializer.Serialize |> Encoding.UTF8.GetBytes
 
     let parameterIsClass =  typeof<'T>.IsClass
+
+    new() = ProtoBufNativeSchema(None)
+
     override this.Decode bytes =
         use stream = new MemoryStream(bytes)
         Serializer.Deserialize(stream)
@@ -87,24 +90,23 @@ type internal ProtoBufNativeSchema<'T > () =
         stream.ToArray()
 
     override this.SchemaInfo =
-        {
-        Name = ""
-        Type = SchemaType.PROTOBUF_NATIVE
-        Schema = stringSchema()
-        Properties = Map.empty
-    }
+        schemaInfo
+        |> Option.defaultWith (fun () -> {
+            Name = ""
+            Type = SchemaType.PROTOBUF_NATIVE
+            Schema = stringSchema()
+            Properties = Map.empty
+        })
+    override this.SupportSchemaVersioning = true
+    override this.GetSpecificSchema (schemaInfo, _) =
+        ProtoBufNativeSchema<'T>(Some schemaInfo) :> ISchema<_>
 
 
 type internal GenericProtobufNativeSchema(topicSchema: TopicSchema) =
     inherit ISchema<GenericRecord>()
 
     override this.Encode _ = raise <| SchemaSerializationException "GenericProtobufNativeSchema is for consuming only!"
-    override this.SchemaInfo = {
-        Name = ""
-        Type = SchemaType.PROTOBUF_NATIVE
-        Schema = topicSchema.SchemaInfo.Schema
-        Properties = Map.empty
-    }
+    override this.SchemaInfo = topicSchema.SchemaInfo
 
     override this.Decode bytes =
         let schemaVersionBytes =
@@ -161,3 +163,6 @@ type internal GenericProtobufNativeSchema(topicSchema: TopicSchema) =
             |> Seq.toArray
 
         GenericRecord(schemaVersionBytes, fields)
+
+    override this.GetSpecificSchema (schemaInfo, schemaVersion) =
+        GenericProtobufNativeSchema({ SchemaInfo = schemaInfo; SchemaVersion = schemaVersion }) :> ISchema<_>

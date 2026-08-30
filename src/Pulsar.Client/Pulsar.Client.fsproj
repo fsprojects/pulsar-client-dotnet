@@ -81,6 +81,7 @@
     <Compile Include="Api\BatchReceivePolicy.fs" />
     <Compile Include="Api\KeySharedPolicy.fs" />
     <Compile Include="Api\ISchema.fs" />
+    <Compile Include="Common\Message.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Common\ConsumerBase.fs" />
     <Compile Include="Api\AuthenticationDataProvider.fs" />

@@ -544,6 +544,8 @@ let tests =
             let! (msg : Message<GenericRecord>) = consumer.ReceiveAsync() 
             do! consumer.AcknowledgeAsync msg.MessageId 
             let record = msg.GetValue()
+            let readerSchema = msg.GetReaderSchema()
+            readerSchema.IsSome |> Expect.isTrue ""
             // we could get the correct schema version for each message.
             Expect.equal "" 0L (BitConverter.ToInt64(ReadOnlySpan<byte>(record.SchemaVersion |> Array.rev)))
             Expect.equal "" simpleMessage.Name (record.GetField("Name") |> unbox)
@@ -553,11 +555,50 @@ let tests =
             let! (msg2 : Message<GenericRecord>) = consumer.ReceiveAsync() 
             do! consumer.AcknowledgeAsync msg2.MessageId 
             let record2 = msg2.GetValue()
+            let readerSchema2 = msg2.GetReaderSchema()
+            readerSchema2.IsSome |> Expect.isTrue ""
             Expect.equal "" 1L (BitConverter.ToInt64( ReadOnlySpan<byte>(record2.SchemaVersion |> Array.rev)))
             Expect.equal "" simpleMessage2.Name (record2.GetField("Name") |> unbox)
             Expect.equal "" simpleMessage2.Age (record2.GetField("Age") |> unbox)
-            
+
+            Expect.notEqual "" readerSchema.Value.SchemaInfo.Schema readerSchema2.Value.SchemaInfo.Schema
+
+            let republishTopicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let! (republisher: IProducer<byte[]>) =
+                client.NewProducer(Schema.AUTO_PRODUCE(readerSchema.Value))
+                    .Topic(republishTopicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            let! _ = republisher.SendAsync(msg.Data)
+
+            let! (republisher2: IProducer<byte[]>) =
+                client.NewProducer(Schema.AUTO_PRODUCE(readerSchema2.Value))
+                    .Topic(republishTopicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            let! _ = republisher2.SendAsync(msg2.Data)
+
+            let! (republishedConsumer: IConsumer<GenericRecord>) =
+                client.NewConsumer(Schema.AUTO_CONSUME())
+                    .Topic(republishTopicName)
+                    .ConsumerName("auto-consume-republished")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+                    .SubscribeAsync()
+
+            let! (republishedMessage: Message<GenericRecord>) = republishedConsumer.ReceiveAsync()
+            let! (republishedMessage2: Message<GenericRecord>) = republishedConsumer.ReceiveAsync()
+            let republishedSchema = republishedMessage.GetReaderSchema()
+            let republishedSchema2 = republishedMessage2.GetReaderSchema()
+
+            republishedSchema.IsSome |> Expect.isTrue ""
+            republishedSchema2.IsSome |> Expect.isTrue ""
+            Expect.sequenceEqual "" readerSchema.Value.SchemaInfo.Schema republishedSchema.Value.SchemaInfo.Schema
+            Expect.sequenceEqual "" readerSchema2.Value.SchemaInfo.Schema republishedSchema2.Value.SchemaInfo.Schema
+            Expect.equal "" simpleMessage.Name (republishedMessage.GetValue().GetField("Name") |> unbox)
+            Expect.equal "" simpleMessage2.Name (republishedMessage2.GetValue().GetField("Name") |> unbox)
             do! consumer.UnsubscribeAsync() 
+            do! republishedConsumer.UnsubscribeAsync()
           
             Log.Debug("Finished Auto consume with multi-version schema")
         }

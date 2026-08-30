@@ -40,6 +40,14 @@ type internal KeyValueSchema =
         let valueSchemaInfo = KeyValueSchema.DecodeSubSchemaInfo(schemaInfo, KeyValueSchema.VALUE_SCHEMA_NAME,
                                                           KeyValueSchema.VALUE_SCHEMA_TYPE, KeyValueSchema.VALUE_SCHEMA_PROPS, valueSchemaData)
         (keySchemaInfo, valueSchemaInfo)
+    static member DecodeKeyValueEncodingType(schemaInfo: SchemaInfo) =
+        match schemaInfo.Properties.TryGetValue KeyValueSchema.KV_ENCODING_TYPE with
+        | true, encodingTypeString ->
+            match KeyValueEncodingType.TryParse encodingTypeString with
+            | true, encodingType -> encodingType
+            | _ -> failwith "Invalid KeyValueEncodingType passed"
+        | _ ->
+            KeyValueEncodingType.INLINE
     static member private DecodeSubSchemaInfo (parentSchemaInfo: SchemaInfo, schemaNameProperty, schemaTypeProperty, schemaPropsProperty, schemaData) =
         let schemaName =
             match parentSchemaInfo.Properties.TryGetValue schemaNameProperty with
@@ -70,7 +78,7 @@ type internal KeyValueSchema =
         let kvSchemaData = KeyValueSchema.GetKeyValueBytes(keySchemaInfo.Schema, valueSchemaInfo.Schema)
         let keyProps = KeyValueSchema.EncodeSubSchemaInfo(keySchemaInfo, KeyValueSchema.KEY_SCHEMA_NAME,
                                                           KeyValueSchema.KEY_SCHEMA_TYPE, KeyValueSchema.KEY_SCHEMA_PROPS)
-        let valueProps = KeyValueSchema.EncodeSubSchemaInfo(keySchemaInfo, KeyValueSchema.VALUE_SCHEMA_NAME,
+        let valueProps = KeyValueSchema.EncodeSubSchemaInfo(valueSchemaInfo, KeyValueSchema.VALUE_SCHEMA_NAME,
                                                           KeyValueSchema.VALUE_SCHEMA_TYPE, KeyValueSchema.VALUE_SCHEMA_PROPS)
         let properties =
             seq {
@@ -92,8 +100,11 @@ type internal KeyValueSchema =
         }
 
 
-type internal KeyValueSchema<'K,'V>(keySchema: ISchema<'K>, valueSchema: ISchema<'V>, kvType: KeyValueEncodingType) =
+type internal KeyValueSchema<'K,'V> private (keySchema: ISchema<'K>, valueSchema: ISchema<'V>,
+                                             kvType: KeyValueEncodingType, schemaInfo: SchemaInfo option) =
     inherit ISchema<KeyValuePair<'K,'V>>()
+    new(keySchema, valueSchema, kvType) =
+        KeyValueSchema(keySchema, valueSchema, kvType, None)
     member this.KeyValueEncodingType = kvType
     member this.KeySchema = keySchema
     member this.ValueSchema = valueSchema
@@ -102,9 +113,11 @@ type internal KeyValueSchema<'K,'V>(keySchema: ISchema<'K>, valueSchema: ISchema
         let v = valueSchema.Decode(valueBytes)
         KeyValuePair(k, v)
     override this.SchemaInfo =
-        KeyValueSchema.EncodeKeyValueSchemaInfo("KeyValue", keySchema.SchemaInfo, valueSchema.SchemaInfo, kvType)
+        schemaInfo
+        |> Option.defaultWith (fun () ->
+            KeyValueSchema.EncodeKeyValueSchemaInfo("KeyValue", keySchema.SchemaInfo, valueSchema.SchemaInfo, kvType))
     override this.SupportSchemaVersioning =
-        keySchema.SupportSchemaVersioning && valueSchema.SupportSchemaVersioning
+        keySchema.SupportSchemaVersioning || valueSchema.SupportSchemaVersioning
     override this.Encode (KeyValue(key, value)) =
         match kvType with
         | KeyValueEncodingType.INLINE ->
@@ -115,6 +128,19 @@ type internal KeyValueSchema<'K,'V>(keySchema: ISchema<'K>, valueSchema: ISchema
             valueSchema.Encode(value)
         | _ ->
             failwith "Unsupported KeyValueEncodingType"
+    override this.Validate bytes =
+        match kvType with
+        | KeyValueEncodingType.INLINE ->
+            this.Decode(bytes) |> ignore
+        | KeyValueEncodingType.SEPARATED ->
+            valueSchema.Validate(bytes)
+        | _ ->
+            failwith "Unsupported KeyValueEncodingType"
+    override this.GetSpecificSchema (schemaInfo, schemaVersion) =
+        let keySchemaInfo, valueSchemaInfo = KeyValueSchema.DecodeKeyValueSchemaInfo(schemaInfo)
+        let specificKeySchema = keySchema.GetSpecificSchema(keySchemaInfo, schemaVersion)
+        let specificValueSchema = valueSchema.GetSpecificSchema(valueSchemaInfo, schemaVersion)
+        KeyValueSchema(specificKeySchema, specificValueSchema, kvType, Some schemaInfo) :> ISchema<_>
     override this.Decode bytes =
         match kvType with
         | KeyValueEncodingType.INLINE ->
@@ -164,3 +190,10 @@ type internal KeyValueProcessor =
                 None
         else
             None
+
+    static member GetDecodeFunction (schema: ISchema<'T>) =
+        match KeyValueProcessor.GetInstance schema with
+        | Some keyValueProcessor ->
+            fun key payload -> keyValueProcessor.DecodeKeyValue(key, payload) :?> 'T
+        | None ->
+            fun _ payload -> schema.Decode(payload)

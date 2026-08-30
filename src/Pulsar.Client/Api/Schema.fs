@@ -56,6 +56,10 @@ type Schema =
         KeyValueSchema(keySchema, valueSchema, kvType) :> ISchema<KeyValuePair<'K,'V>>
     static member AUTO_PRODUCE() =
         AutoProduceBytesSchemaStub() :> ISchema<byte[]>
+    /// Create a schema that publishes raw bytes using the supplied schema definition and validation.
+    static member AUTO_PRODUCE<'T>(schema: ISchema<'T>) =
+        ArgumentNullException.ThrowIfNull(schema)
+        AutoProduceBytesSchema(schema.SchemaInfo, schema.Validate) :> ISchema<byte[]>
     static member AUTO_CONSUME() =
         AutoConsumeSchemaStub() :> ISchema<Pulsar.Client.Api.GenericRecord>
     static member internal GetValidateFunction (topicSchema: TopicSchema) =
@@ -77,9 +81,16 @@ type Schema =
             let (keySchemaData, valueSchemaData) = KeyValueSchema.DecodeKeyValueSchemaInfo(topicSchema.SchemaInfo)
             let keyValidation = Schema.GetValidateFunction({topicSchema with SchemaInfo = keySchemaData})
             let dataValidation = Schema.GetValidateFunction({topicSchema with SchemaInfo = valueSchemaData})
-            fun bytes ->
-                keyValidation bytes
-                dataValidation bytes
+            match KeyValueSchema.DecodeKeyValueEncodingType(topicSchema.SchemaInfo) with
+            | KeyValueEncodingType.INLINE ->
+                fun bytes ->
+                    let keyBytes, valueBytes = KeyValueSchema.SeparateKeyAndValueBytes(bytes)
+                    keyValidation keyBytes
+                    dataValidation valueBytes
+            | KeyValueEncodingType.SEPARATED ->
+                dataValidation
+            | encodingType ->
+                raise <| ArgumentException $"Unsupported KeyValueEncodingType {encodingType}"
         | _ -> raise <| ArgumentException $"Retrieve schema instance from schema info for type {schema.Type} is not supported yet"        
     static member internal GetAutoConsumeSchema (topicSchema: TopicSchema) =
         let schema = topicSchema.SchemaInfo

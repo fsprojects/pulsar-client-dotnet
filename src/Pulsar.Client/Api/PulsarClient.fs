@@ -284,7 +284,7 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
                 match! lookupService.GetSchema(producerConfig.Topic.CompleteTopicName) with
                 | Some schemaInfo ->
                     let validate = Schema.GetValidateFunction schemaInfo
-                    let autoProduceSchema = AutoProduceBytesSchema(schemaInfo.SchemaInfo.Name, schemaInfo.SchemaInfo.Type, schemaInfo.SchemaInfo.Schema, validate) |> box
+                    let autoProduceSchema = AutoProduceBytesSchema(schemaInfo.SchemaInfo, validate) |> box
                     activeSchema <- autoProduceSchema |> unbox
                 | None ->
                     ()
