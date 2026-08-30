@@ -69,7 +69,7 @@ let tests =
 
         test "Message batching by count works correctly" {
             let messages = Messages(2, -1)
-            let message = Message(MessageId.Earliest, [||], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", Nullable(), None, fun () -> failwith "not implemented")
+            let message = Message(MessageId.Earliest, [||], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", Nullable(), Schema.BYTES(), fun () -> failwith "not implemented")
             messages.CanAdd(message) |> Expect.isTrue ""
             messages.Add(message)
             messages.CanAdd(message) |> Expect.isTrue ""
@@ -79,7 +79,7 @@ let tests =
 
         test "Message batching by size works correctly" {
             let messages = Messages(-1, 2)
-            let message = Message(MessageId.Earliest, [| 0uy |], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", Nullable(), None, fun () -> failwith "not implemented")
+            let message = Message(MessageId.Earliest, [| 0uy |], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", Nullable(), Schema.BYTES(), fun () -> failwith "not implemented")
             messages.CanAdd(message) |> Expect.isTrue ""
             messages.Add(message)
             messages.CanAdd(message) |> Expect.isTrue ""
@@ -91,7 +91,7 @@ let tests =
             let readerSchema = Schema.BYTES()
             let message =
                 Message(MessageId.Earliest, [| 0uy |], %"", false, EmptyProps, None, [| 1uy |], %0L,
-                        [||], %0L, Nullable(), 0, "", "", Nullable(), Some readerSchema, fun () -> [| 0uy |])
+                        [||], %0L, Nullable(), 0, "", "", Nullable(), readerSchema, fun () -> [| 0uy |])
             let copiedMessages = [
                 message.WithMessageId(MessageId.Latest)
                 message.WithData([| 1uy |])
@@ -99,9 +99,8 @@ let tests =
                 message.WithProperties(readOnlyDict [ "key", "value" ])
             ]
 
+            obj.ReferenceEquals(readerSchema, message.GetReaderSchema()) |> Expect.isTrue ""
             for copiedMessage in copiedMessages do
-                let copiedReaderSchema = copiedMessage.GetReaderSchema()
-                copiedReaderSchema.IsSome |> Expect.isTrue ""
-                obj.ReferenceEquals(readerSchema, copiedReaderSchema.Value) |> Expect.isTrue ""
+                obj.ReferenceEquals(readerSchema, copiedMessage.GetReaderSchema()) |> Expect.isTrue ""
         }
     ]

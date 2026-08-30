@@ -7,22 +7,17 @@ open System.Text
 open Pulsar.Client.Api
 open AvroSchemaGenerator
 
-type internal ProtobufSchema<'T> private (schemaInfo: SchemaInfo option) =
+type internal ProtobufSchema<'T>() =
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
     let stringSchema = typeof<'T>.GetSchema()
-
-    new() = ProtobufSchema(None)
-
-    override this.SchemaInfo =
-        schemaInfo
-        |> Option.defaultWith (fun () -> {
-            Name = ""
-            Type = SchemaType.PROTOBUF
-            Schema = stringSchema |> Encoding.UTF8.GetBytes
-            Properties = Map.empty
-        })
-    override this.SupportSchemaVersioning = true
+    let schemaInfo = {
+        Name = ""
+        Type = SchemaType.PROTOBUF
+        Schema = stringSchema |> Encoding.UTF8.GetBytes
+        Properties = Map.empty
+    }
+    override this.SchemaInfo = schemaInfo
     override this.Encode value =
         if parameterIsClass && (isNull <| box value) then
             raise <| SchemaSerializationException "Need Non-Null content value"
@@ -32,5 +27,3 @@ type internal ProtobufSchema<'T> private (schemaInfo: SchemaInfo option) =
     override this.Decode bytes =
         use stream = new MemoryStream(bytes)
         Serializer.Deserialize(stream)
-    override this.GetSpecificSchema (schemaInfo, _) =
-        ProtobufSchema<'T>(Some schemaInfo) :> ISchema<_>

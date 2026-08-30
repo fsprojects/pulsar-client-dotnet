@@ -30,32 +30,25 @@ type internal DateTimeTimestampMillisConverter() =
         |> _.ToUnixTimeMilliseconds()
         |> writer.WriteNumberValue
 
-type internal JsonSchema<'T> private (schemaInfo: SchemaInfo option) =
+type internal JsonSchema<'T> () =
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
     let options = JsonSerializerOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)
     do options.Converters.Add(DateTimeTimestampMillisConverter())
     let stringSchema = typeof<'T>.GetSchema()
-
-    new() = JsonSchema(None)
-
-    override this.SchemaInfo =
-        schemaInfo
-        |> Option.defaultWith (fun () -> {
-            Name = ""
-            Type = SchemaType.JSON
-            Schema = stringSchema |> Encoding.UTF8.GetBytes
-            Properties = Map.empty
-        })
-    override this.SupportSchemaVersioning = true
+    let schemaInfo = {
+        Name = ""
+        Type = SchemaType.JSON
+        Schema = stringSchema |> Encoding.UTF8.GetBytes
+        Properties = Map.empty
+    }
+    override this.SchemaInfo = schemaInfo
     override this.Encode value =
         if parameterIsClass && (isNull <| box value) then
             raise <| SchemaSerializationException "Need Non-Null content value"
         JsonSerializer.SerializeToUtf8Bytes(value, options)
     override this.Decode bytes =
         JsonSerializer.Deserialize<'T>(ReadOnlySpan bytes, options)
-    override this.GetSpecificSchema (schemaInfo, _) =
-        JsonSchema<'T>(Some schemaInfo) :> ISchema<_>
 
 type internal GenericJsonSchema (topicSchema: TopicSchema) =
     inherit ISchema<GenericRecord>()

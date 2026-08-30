@@ -136,11 +136,13 @@ type internal KeyValueSchema<'K,'V> private (keySchema: ISchema<'K>, valueSchema
             valueSchema.Validate(bytes)
         | _ ->
             failwith "Unsupported KeyValueEncodingType"
-    override this.GetSpecificSchema (schemaInfo, schemaVersion) =
-        let keySchemaInfo, valueSchemaInfo = KeyValueSchema.DecodeKeyValueSchemaInfo(schemaInfo)
+    override this.GetSpecificSchema (writtenSchemaInfo, schemaVersion) =
+        let keySchemaInfo, valueSchemaInfo = KeyValueSchema.DecodeKeyValueSchemaInfo(writtenSchemaInfo)
         let specificKeySchema = keySchema.GetSpecificSchema(keySchemaInfo, schemaVersion)
         let specificValueSchema = valueSchema.GetSpecificSchema(valueSchemaInfo, schemaVersion)
-        KeyValueSchema(specificKeySchema, specificValueSchema, kvType, Some schemaInfo) :> ISchema<_>
+        // the writer decided how key and value were framed, so decode with its encoding type, not ours
+        let writtenKvType = KeyValueSchema.DecodeKeyValueEncodingType(writtenSchemaInfo)
+        KeyValueSchema(specificKeySchema, specificValueSchema, writtenKvType, Some writtenSchemaInfo) :> ISchema<_>
     override this.Decode bytes =
         match kvType with
         | KeyValueEncodingType.INLINE ->
@@ -178,16 +180,17 @@ type internal KeyValueProcessor<'K,'V>(schema: KeyValueSchema<'K,'V>) =
                 
 type internal KeyValueProcessor =
     static member GetInstance (schema: ISchema<'T>) =
-        if schema.SchemaInfo.Type = SchemaType.KEY_VALUE && schema.GetType().Name <> "AutoProduceBytesSchema" then
+        let schemaInfo = schema.SchemaInfo
+        // only SEPARATED encoding needs a processor, and the encoding type is readable from the schema
+        // info, so decide before paying for MakeGenericType/CreateInstance
+        if schemaInfo.Type = SchemaType.KEY_VALUE
+           && schema.GetType().Name <> "AutoProduceBytesSchema"
+           && KeyValueSchema.DecodeKeyValueEncodingType(schemaInfo) = KeyValueEncodingType.SEPARATED then
             let kvType = typeof<'T>
             let kvpTypeTemplate = typedefof<KeyValueProcessor<_,_>>
             let kvpType = kvpTypeTemplate.MakeGenericType(kvType.GetGenericArguments())
             let obj = Activator.CreateInstance(kvpType, schema)
-            let kvp = (obj :?> IKeyValueProcessor)
-            if kvp.EncodingType = KeyValueEncodingType.SEPARATED then
-                Some kvp
-            else
-                None
+            Some (obj :?> IKeyValueProcessor)
         else
             None
 

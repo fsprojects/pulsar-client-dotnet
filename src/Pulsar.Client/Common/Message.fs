@@ -10,7 +10,7 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
                   schemaVersion: byte[], sequenceId: SequenceId, orderingKey: byte[], publishTime: TimeStamp,
                   eventTime: Nullable<TimeStamp>,
                   redeliveryCount: int32, replicatedFrom: string, producerName: string, consumerEpoch: Nullable<ConsumerEpoch>,
-                  readerSchema: ISchema<'T> option, getValue: unit -> 'T) =
+                  readerSchema: ISchema<'T>, getValue: unit -> 'T) =
     /// Get the unique message ID associated with this message.
     member this.MessageId = messageId
     /// Get the raw payload of the message.
@@ -47,7 +47,10 @@ type Message<'T> internal (messageId: MessageId, data: byte[], key: PartitionKey
     member this.GetValue() =
         getValue()
 
-    /// Get the schema used to decode this message at its written schema version, if available.
+    /// Get the schema of this message. When the consumer's schema supports versioning (e.g. AVRO) and
+    /// the message's schema version is successfully resolved, the returned schema's SchemaInfo identifies
+    /// the schema the message was written with. In all other cases this falls back to the schema the
+    /// consumer was created with.
     member this.GetReaderSchema() =
         readerSchema
 

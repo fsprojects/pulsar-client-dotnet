@@ -480,11 +480,26 @@ let tests =
                 KeyValueSchema.GetKeyValueBytes(keySchema.Encode(1), valueSchema.Encode("value"))
             let separatedPayload = valueSchema.Encode("value")
 
+            // INLINE validates the key and the value against their own halves of the payload - validating
+            // either one against the whole framed payload would fail the 4-byte length check of INT32
             Schema.GetValidateFunction(inlineTopicSchema) inlinePayload
+            Expect.throws "not a key-value framed payload"
+                (fun () -> Schema.GetValidateFunction(inlineTopicSchema) separatedPayload)
+
+            // SEPARATED carries the key out of band, so only the value payload is validated - had the key
+            // been validated too, INT32 would have rejected these 5 bytes
             Schema.GetValidateFunction(separatedTopicSchema) separatedPayload
+            // the value schema is still applied, so swapping it for INT32 makes the same payload fail
+            let separatedIntValueTopicSchema = {
+                separatedTopicSchema with
+                    SchemaInfo =
+                        Schema.KEY_VALUE(valueSchema, keySchema, KeyValueEncodingType.SEPARATED).SchemaInfo
+            }
+            Expect.throws "value schema must reject foreign bytes"
+                (fun () -> Schema.GetValidateFunction(separatedIntValueTopicSchema) separatedPayload)
         }
 
-        test "Structured schemas preserve version-specific schema info" {
+        test "Generic schemas preserve version-specific schema info" {
             let properties = readOnlyDict [ "version", "writer" ]
             let version: SchemaVersion option = Some { Bytes = [| 1uy |] }
             let assertSchemaInfo expected (actual: SchemaInfo) =
@@ -493,40 +508,22 @@ let tests =
                 Expect.sequenceEqual "" expected.Schema actual.Schema
                 obj.ReferenceEquals(expected.Properties, actual.Properties) |> Expect.isTrue ""
 
-            let jsonSchema = Schema.JSON<JsonSchemaTest>()
             let jsonSchemaInfo = {
-                jsonSchema.SchemaInfo with
+                Schema.JSON<JsonSchemaTest>().SchemaInfo with
                     Name = "json-writer"
                     Properties = properties
             }
-            let specificJsonSchema = jsonSchema.GetSpecificSchema(jsonSchemaInfo, version)
-            assertSchemaInfo jsonSchemaInfo specificJsonSchema.SchemaInfo
-
             let genericJsonSchema =
                 GenericJsonSchema({ SchemaInfo = jsonSchemaInfo; SchemaVersion = version })
                 :> ISchema<GenericRecord>
             let specificGenericJsonSchema = genericJsonSchema.GetSpecificSchema(jsonSchemaInfo, version)
             assertSchemaInfo jsonSchemaInfo specificGenericJsonSchema.SchemaInfo
 
-            let protobufSchema = Schema.PROTOBUF<ProtobufSchemaTest>()
-            let protobufSchemaInfo = {
-                protobufSchema.SchemaInfo with
-                    Name = "protobuf-writer"
-                    Properties = properties
-            }
-            let specificProtobufSchema = protobufSchema.GetSpecificSchema(protobufSchemaInfo, version)
-            assertSchemaInfo protobufSchemaInfo specificProtobufSchema.SchemaInfo
-
-            let protobufNativeSchema = Schema.PROTOBUF_NATIVE<ProtobufNativeSchemaTest>()
             let protobufNativeSchemaInfo = {
-                protobufNativeSchema.SchemaInfo with
+                Schema.PROTOBUF_NATIVE<ProtobufNativeSchemaTest>().SchemaInfo with
                     Name = "protobuf-native-writer"
                     Properties = properties
             }
-            let specificProtobufNativeSchema =
-                protobufNativeSchema.GetSpecificSchema(protobufNativeSchemaInfo, version)
-            assertSchemaInfo protobufNativeSchemaInfo specificProtobufNativeSchema.SchemaInfo
-
             let genericProtobufNativeSchema =
                 GenericProtobufNativeSchema({
                     SchemaInfo = protobufNativeSchemaInfo
@@ -536,6 +533,13 @@ let tests =
             let specificGenericProtobufNativeSchema =
                 genericProtobufNativeSchema.GetSpecificSchema(protobufNativeSchemaInfo, version)
             assertSchemaInfo protobufNativeSchemaInfo specificGenericProtobufNativeSchema.SchemaInfo
+        }
+
+        test "Auto produce rejects unresolved schema stubs" {
+            Expect.throwsT<ArgumentException> ""
+                (fun () -> Schema.AUTO_PRODUCE(Schema.AUTO_CONSUME()) |> ignore)
+            Expect.throwsT<ArgumentException> ""
+                (fun () -> Schema.AUTO_PRODUCE(Schema.AUTO_PRODUCE()) |> ignore)
         }
         
         ptest "Serialize schema perf" {

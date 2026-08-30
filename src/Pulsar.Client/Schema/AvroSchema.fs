@@ -12,10 +12,18 @@ open AvroSchemaGenerator
 open Pulsar.Client.Common
 
 type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T>, avroWriter: DatumWriter<'T>,
-                                     schemaInfo: SchemaInfo) =
+                                     ?schemaInfo: SchemaInfo) =
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
     let defaultValue = Unchecked.defaultof<'T>
+    let schemaInfo =
+        schemaInfo
+        |> Option.defaultWith (fun () -> {
+            Name = ""
+            Type = SchemaType.AVRO
+            Schema = schema.ToString() |> Encoding.UTF8.GetBytes
+            Properties = Map.empty
+        })
 
     new () =
          let tpe = typeof<'T>
@@ -23,13 +31,7 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
             let avroSchema = tpe.GetField("_SCHEMA").GetValue(null) :?> Schema
             let avroWriter = SpecificDatumWriter<'T>(avroSchema)
             let avroReader = SpecificDatumReader<'T>(avroSchema, avroSchema)
-            let schemaInfo = {
-                Name = ""
-                Type = SchemaType.AVRO
-                Schema = avroSchema.ToString() |> Encoding.UTF8.GetBytes
-                Properties = Map.empty
-            }
-            AvroSchema(avroSchema, avroReader, avroWriter, schemaInfo)
+            AvroSchema(avroSchema, avroReader, avroWriter)
          else
             let schemaString = tpe.GetSchema()
             AvroSchema(schemaString)
@@ -38,13 +40,7 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
         let avroSchema = Schema.Parse(schemaString)
         let avroWriter = ReflectWriter<'T>(avroSchema)
         let avroReader = ReflectReader<'T>(avroSchema, avroSchema)
-        let schemaInfo = {
-            Name = ""
-            Type = SchemaType.AVRO
-            Schema = avroSchema.ToString() |> Encoding.UTF8.GetBytes
-            Properties = Map.empty
-        }
-        AvroSchema(avroSchema, avroReader, avroWriter, schemaInfo)
+        AvroSchema(avroSchema, avroReader, avroWriter)
 
     override this.SchemaInfo = schemaInfo
     override this.SupportSchemaVersioning = true
@@ -57,19 +53,23 @@ type internal AvroSchema<'T> private (schema: Schema, avroReader: DatumReader<'T
     override this.Decode bytes =
         use stream = new MemoryStream(bytes)
         avroReader.Read(defaultValue, BinaryDecoder(stream))
-    override this.GetSpecificSchema (schemaInfo, _) =
-        let writtenSchema = Schema.Parse(schemaInfo.Schema |> Encoding.UTF8.GetString)
+    override this.GetSpecificSchema (writtenSchemaInfo, _) =
+        // The returned schema decodes data written with writtenSchemaInfo and reports it as its own
+        // SchemaInfo, so that the schema identifies the data's writer (as Java's atSchemaVersion does).
+        // It still encodes with the reader's writer, so it is meant for consuming and for republishing
+        // the original payload through Schema.AUTO_PRODUCE, not for producing new values.
+        let writtenSchema = Schema.Parse(writtenSchemaInfo.Schema |> Encoding.UTF8.GetString)
         if avroReader :? SpecificDatumReader<'T> then
-            AvroSchema(schema, SpecificDatumReader(writtenSchema, schema), avroWriter, schemaInfo) :> ISchema<'T>
+            AvroSchema(schema, SpecificDatumReader(writtenSchema, schema), avroWriter, writtenSchemaInfo) :> ISchema<'T>
         else
             if writtenSchema.Fullname <> schema.Fullname then
                 // Avro doesnt figure that the written classname might be different from the reader classname
                 // Seems like it might be a bug in ReflectReader, but this works around that
                 let cache = ClassCache()
                 cache.LoadClassCache(typeof<'T>, writtenSchema)
-                AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema, cache), avroWriter, schemaInfo) :> ISchema<'T>
+                AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema, cache), avroWriter, writtenSchemaInfo) :> ISchema<'T>
             else
-                AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema), avroWriter, schemaInfo) :> ISchema<'T>
+                AvroSchema(schema, ReflectReader<'T>(writtenSchema, schema), avroWriter, writtenSchemaInfo) :> ISchema<'T>
 
 type internal GenericAvroSchema(schemaInfo: SchemaInfo, schemaVersion: SchemaVersion option) =
     inherit ISchema<GenericRecord>()

@@ -319,9 +319,9 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
                         Metadata = metadata
                     }
                     MultiTopicsReaderImpl.Init(readerConfig, currentConfig, connectionPool, consumerInitInfo,
-                                                             schema, schemaProvider, lookupService)
+                                                             activeSchema, schemaProvider, lookupService)
                 else
-                    ReaderImpl.Init(readerConfig, currentConfig, connectionPool, schema, schemaProvider, lookupService)
+                    ReaderImpl.Init(readerConfig, currentConfig, connectionPool, activeSchema, schemaProvider, lookupService)
             post mb (AddConsumer reader)
             return reader
         }
@@ -350,9 +350,9 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
                         Metadata = metadata
                     }
                     MultiTopicsReaderImpl.Init(readerConfig, currentConfig, connectionPool, consumerInitInfo,
-                                                             schema, schemaProvider, lookupService)
+                                                             activeSchema, schemaProvider, lookupService)
                 else
-                    ReaderImpl.Init(readerConfig, currentConfig, connectionPool, schema, schemaProvider, lookupService)
+                    ReaderImpl.Init(readerConfig, currentConfig, connectionPool, activeSchema, schemaProvider, lookupService)
             post mb (AddConsumer reader)
             return reader
         }

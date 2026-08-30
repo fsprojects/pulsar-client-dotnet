@@ -39,7 +39,7 @@ type VirtualFile(fileName:string, content:string)=
                 let embededResourceStream = path |> getEmbeddedProtoName |> protobufReflectionAssembly.GetManifestResourceStream
                 new StreamReader(embededResourceStream) :> TextReader
 
-type internal ProtoBufNativeSchema<'T> private (schemaInfo: SchemaInfo option) =
+type internal ProtoBufNativeSchema<'T> () =
     inherit ISchema<'T>()
 
     let getDescriptor( )=
@@ -76,7 +76,13 @@ type internal ProtoBufNativeSchema<'T> private (schemaInfo: SchemaInfo option) =
 
     let parameterIsClass =  typeof<'T>.IsClass
 
-    new() = ProtoBufNativeSchema(None)
+    // building the descriptor is expensive, so keep the result but stay cheap to construct
+    let schemaInfo = lazy {
+        Name = ""
+        Type = SchemaType.PROTOBUF_NATIVE
+        Schema = stringSchema()
+        Properties = Map.empty
+    }
 
     override this.Decode bytes =
         use stream = new MemoryStream(bytes)
@@ -89,17 +95,7 @@ type internal ProtoBufNativeSchema<'T> private (schemaInfo: SchemaInfo option) =
         Serializer.Serialize(stream, value)
         stream.ToArray()
 
-    override this.SchemaInfo =
-        schemaInfo
-        |> Option.defaultWith (fun () -> {
-            Name = ""
-            Type = SchemaType.PROTOBUF_NATIVE
-            Schema = stringSchema()
-            Properties = Map.empty
-        })
-    override this.SupportSchemaVersioning = true
-    override this.GetSpecificSchema (schemaInfo, _) =
-        ProtoBufNativeSchema<'T>(Some schemaInfo) :> ISchema<_>
+    override this.SchemaInfo = schemaInfo.Value
 
 
 type internal GenericProtobufNativeSchema(topicSchema: TopicSchema) =
