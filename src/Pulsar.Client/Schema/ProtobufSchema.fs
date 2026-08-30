@@ -11,12 +11,13 @@ type internal ProtobufSchema<'T>() =
     inherit ISchema<'T>()
     let parameterIsClass =  typeof<'T>.IsClass
     let stringSchema = typeof<'T>.GetSchema()
-    override this.SchemaInfo = {
+    let schemaInfo = {
         Name = ""
         Type = SchemaType.PROTOBUF
         Schema = stringSchema |> Encoding.UTF8.GetBytes
         Properties = Map.empty
     }
+    override this.SchemaInfo = schemaInfo
     override this.Encode value =
         if parameterIsClass && (isNull <| box value) then
             raise <| SchemaSerializationException "Need Non-Null content value"
@@ -26,4 +27,3 @@ type internal ProtobufSchema<'T>() =
     override this.Decode bytes =
         use stream = new MemoryStream(bytes)
         Serializer.Deserialize(stream)
-

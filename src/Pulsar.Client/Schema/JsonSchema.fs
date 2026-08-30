@@ -36,7 +36,13 @@ type internal JsonSchema<'T> () =
     let options = JsonSerializerOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)
     do options.Converters.Add(DateTimeTimestampMillisConverter())
     let stringSchema = typeof<'T>.GetSchema()
-    override this.SchemaInfo = { Name = ""; Type = SchemaType.JSON; Schema = stringSchema |> Encoding.UTF8.GetBytes; Properties = Map.empty }
+    let schemaInfo = {
+        Name = ""
+        Type = SchemaType.JSON
+        Schema = stringSchema |> Encoding.UTF8.GetBytes
+        Properties = Map.empty
+    }
+    override this.SchemaInfo = schemaInfo
     override this.Encode value =
         if parameterIsClass && (isNull <| box value) then
             raise <| SchemaSerializationException "Need Non-Null content value"
@@ -51,12 +57,8 @@ type internal GenericJsonSchema (topicSchema: TopicSchema) =
     let stringSchema = topicSchema.SchemaInfo.Schema |> Encoding.UTF8.GetString
     let avroSchema = Schema.Parse(stringSchema) :?> RecordSchema
     let schemaFields = avroSchema.Fields
-    override this.SchemaInfo = {
-        Name = ""
-        Type = SchemaType.JSON
-        Schema = topicSchema.SchemaInfo.Schema
-        Properties = Map.empty
-    }
+    override this.SchemaInfo = topicSchema.SchemaInfo
+    override this.SupportSchemaVersioning = true
     override this.Encode _ = raise <| SchemaSerializationException "GenericJsonSchema is for consuming only!"
     override this.Decode bytes =
         let doc = JsonSerializer.Deserialize<IDictionary<string, obj>>(ReadOnlySpan bytes, dynamicSerializerOptions)
@@ -69,3 +71,6 @@ type internal GenericJsonSchema (topicSchema: TopicSchema) =
             | Some v -> v.Bytes
             | None -> null
         GenericRecord(schemaVersionBytes, fields)
+
+    override this.GetSpecificSchema (schemaInfo, schemaVersion) =
+        GenericJsonSchema({ SchemaInfo = schemaInfo; SchemaVersion = schemaVersion }) :> ISchema<_>

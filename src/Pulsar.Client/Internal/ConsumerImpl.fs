@@ -19,6 +19,7 @@ open System.Threading
 open System.Timers
 open ConsumerBase
 open System.Threading.Channels
+open System.Runtime.CompilerServices
 
 type internal ParseResult<'T> =
     | ParseOk of struct(byte[]*'T)
@@ -124,8 +125,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             chunkTimer.AutoReset <- true
             chunkTimer.Elapsed.Add(fun _ -> post this.Mb (Tick ChunkTick))
             chunkTimer.Start()
-
-    let keyValueProcessor = KeyValueProcessor.GetInstance schema
 
     let connectionHandler =
         ConnectionHandler(prefix,
@@ -636,24 +635,35 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             stats.IncrementNumReceiveFailed()
         }
 
-    let getSchemaDecodeFunction (metadata: Metadata) =
+    // the decode function depends only on the schema instance, and MultiVersionSchemaInfoProvider hands out
+    // one cached instance per schema version, so build it once per schema instead of once per message
+    let defaultDecodeFunction = KeyValueProcessor.GetDecodeFunction schema
+    let specificDecodeFunctions = ConditionalWeakTable<ISchema<'T>, string -> byte[] -> 'T>()
+    let createDecodeFunction =
+        ConditionalWeakTable<ISchema<'T>, string -> byte[] -> 'T>.CreateValueCallback(
+            fun messageSchema -> KeyValueProcessor.GetDecodeFunction messageSchema)
+
+    let getMessageDecodeFunction (messageSchema: ISchema<'T>) =
+        if obj.ReferenceEquals(messageSchema, schema) then
+            defaultDecodeFunction
+        else
+            specificDecodeFunctions.GetValue(messageSchema, createDecodeFunction)
+
+    let getSchemaAndDecodeFunction (metadata: Metadata) =
         backgroundTask {
-            // mutable workaround for unsupported let! inside let
-            let mutable schemaDecodeFunction = Unchecked.defaultof<byte[]->'T>
-            if schemaProvider.IsNone || metadata.SchemaVersion.IsNone then
-                schemaDecodeFunction <- schema.Decode
+            if metadata.SchemaVersion.IsNone || schemaProvider.IsNone then
+                return struct (defaultDecodeFunction, schema)
             else
                 let schemaVersion = metadata.SchemaVersion.Value
                 try
                     let! specificSchemaOption = schemaProvider.Value.GetSchemaByVersion(schema, schemaVersion)
-                    schemaDecodeFunction <-
-                        match specificSchemaOption with
-                        | Some specificSchema -> specificSchema.Decode
-                        | None -> schema.Decode
+                    // without a schema for this version we still decode with the consumer's schema,
+                    // so that is also the schema the message was read with
+                    let messageSchema = specificSchemaOption |> Option.defaultValue schema
+                    return struct (getMessageDecodeFunction messageSchema, messageSchema)
                 with Flatten ex ->
                     Log.Logger.LogError(ex, "{0} Couldn't get schema by version", prefix)
-                    schemaDecodeFunction <- fun _ -> raise <| SchemaSerializationException ex.Message
-            return schemaDecodeFunction
+                    return struct ((fun _ _ -> raise <| SchemaSerializationException ex.Message), schema)
         }
 
     let processMessageChunk (rawMessage: RawMessage) msgId =
@@ -678,38 +688,46 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 trackMessage rawMessage.MessageId
             None
 
-    let handleSingleMessagePayload (rawMessage: RawMessage) msgId payload hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction =
+    let createMessage (rawMessage: RawMessage) (decoder: struct ((string -> byte[] -> 'T) * ISchema<'T>))
+                      isMessageUndecryptable messageId (payload: byte[]) (msgKey: string) hasBase64EncodedKey
+                      properties sequenceId orderingKey eventTime nullValue =
+        let struct (schemaDecodeFunction, readerSchema) = decoder
+        let getValue () =
+            if nullValue then
+                Unchecked.defaultof<'T>
+            else
+                schemaDecodeFunction msgKey payload
+        Message(
+            messageId,
+            payload,
+            %msgKey,
+            hasBase64EncodedKey,
+            properties,
+            EncryptionContext.FromMetadata(rawMessage.Metadata, isEncrypted = isMessageUndecryptable),
+            getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
+            sequenceId,
+            orderingKey,
+            rawMessage.Metadata.PublishTime,
+            eventTime,
+            rawMessage.RedeliveryCount,
+            rawMessage.Metadata.ReplicatedFrom,
+            rawMessage.Metadata.ProducerName,
+            rawMessage.ConsumerEpoch,
+            readerSchema,
+            getValue
+        )
+
+    let handleSingleMessagePayload (rawMessage: RawMessage) msgId payload hasWaitingChannel hasWaitingBatchChannel
+                                   isMessageUndecryptable decoder =
         if duringSeek.IsSome || (isSameEntry(rawMessage.MessageId) && isPriorEntryIndex(rawMessage.MessageId.EntryId)) then
             // We need to discard entries that were prior to startMessageId
             Log.Logger.LogInformation("{0} Ignoring message from before the startMessageId: {1}", prefix, startMessageId)
             increaseAvailablePermits 1
         else
-            let msgKey = rawMessage.MessageKey
-            let getValue () =
-                if rawMessage.Metadata.NullValue then
-                    Unchecked.defaultof<'T>
-                else
-                    keyValueProcessor
-                    |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, payload) :?> 'T)
-                    |> Option.defaultWith (fun () -> schemaDecodeFunction payload)
-            let message = Message(
-                            msgId,
-                            payload,
-                            %msgKey,
-                            rawMessage.IsKeyBase64Encoded,
-                            rawMessage.Properties,
-                            EncryptionContext.FromMetadata(rawMessage.Metadata, isEncrypted = isMessageUndecryptable),
-                            getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                            rawMessage.Metadata.SequenceId,
-                            rawMessage.Metadata.OrderingKey,
-                            rawMessage.Metadata.PublishTime,
-                            rawMessage.Metadata.EventTime,
-                            rawMessage.RedeliveryCount,
-                            rawMessage.Metadata.ReplicatedFrom,
-                            rawMessage.Metadata.ProducerName,
-                            rawMessage.ConsumerEpoch,
-                            getValue
-                        )
+            let message = createMessage rawMessage decoder isMessageUndecryptable msgId payload
+                              rawMessage.MessageKey rawMessage.IsKeyBase64Encoded rawMessage.Properties
+                              rawMessage.Metadata.SequenceId rawMessage.Metadata.OrderingKey
+                              rawMessage.Metadata.EventTime rawMessage.Metadata.NullValue
             if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                 deadLettersProcessor.AddMessage(message.MessageId, message)
             if hasWaitingChannel then
@@ -726,23 +744,25 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     replyWithBatch ch
 
     let handleMessagePayload clientCnx (rawMessage: RawMessage) msgId hasWaitingChannel hasWaitingBatchChannel
-                                isMessageUndecryptable isChunkedMessage schemaDecodeFunction =
+                                isMessageUndecryptable isChunkedMessage decoder =
         backgroundTask {
             if isMessageUndecryptable || (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
                 // right now, chunked messages are only supported by non-shared subscription
                 if isChunkedMessage then
                     match processMessageChunk rawMessage msgId with
                     | Some (chunkedPayload, msgIdWithChunk) ->
-                        handleSingleMessagePayload rawMessage msgIdWithChunk chunkedPayload hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction
+                        handleSingleMessagePayload rawMessage msgIdWithChunk chunkedPayload hasWaitingChannel
+                            hasWaitingBatchChannel isMessageUndecryptable decoder
                     | None ->
                         ()
                 else
                     let bytes = rawMessage.Payload.ToArray()
-                    handleSingleMessagePayload rawMessage msgId bytes hasWaitingChannel hasWaitingBatchChannel isMessageUndecryptable schemaDecodeFunction
+                    handleSingleMessagePayload rawMessage msgId bytes hasWaitingChannel hasWaitingBatchChannel
+                        isMessageUndecryptable decoder
             elif rawMessage.Metadata.NumMessages > 0 then
                 // handle batch message enqueuing; uncompressed payload has all messages in batch
                 match wrapException (fun () ->
-                    this.ReceiveIndividualMessagesFromBatch rawMessage schemaDecodeFunction isMessageUndecryptable) with
+                    this.ReceiveIndividualMessagesFromBatch rawMessage decoder isMessageUndecryptable) with
                 | Ok () ->
                     // try respond to channel
                     if hasWaitingChannel && incomingMessages.Count > 0 then
@@ -945,7 +965,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 elif rawMessage.CheckSumValid then
                     let! isDuplicate = acksGroupingTracker.IsDuplicate msgId
                     if isDuplicate |> not then
-                        let! schemaDecodeFunction = getSchemaDecodeFunction rawMessage.Metadata
+                        let! decoder = getSchemaAndDecodeFunction rawMessage.Metadata
                         let isChunked = rawMessage.Metadata.NumChunks > 1 && consumerConfig.SubscriptionType <> SubscriptionType.Shared
                         match decryptMessage rawMessage with
                         | Ok decryptedMessage ->
@@ -955,7 +975,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                     use _ = decompressedMessage.Payload
                                     do! handleMessagePayload clientCnx
                                             decompressedMessage msgId hasWaitingChannel hasWaitingBatchChannel false
-                                            isChunked schemaDecodeFunction
+                                            isChunked decoder
                                 | Error _ ->
                                     decryptedMessage.Payload.Dispose()
                                     do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecompressionError
@@ -970,7 +990,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                                         prefix, msgId)
                                 do! handleMessagePayload clientCnx
                                         rawMessage msgId hasWaitingChannel hasWaitingBatchChannel true
-                                        isChunked schemaDecodeFunction
+                                        isChunked decoder
                             | ConsumerCryptoFailureAction.DISCARD ->
                                 Log.Logger.LogWarning("{0} {1}. Decryption failed. Discarding encrypted message.",
                                                         prefix, msgId)
@@ -1378,8 +1398,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     do startStatTimer()
     do startChunkTimer()
 
-    abstract member ReceiveIndividualMessagesFromBatch: RawMessage -> (byte [] -> 'T) -> bool -> unit
-    default this.ReceiveIndividualMessagesFromBatch (rawMessage: RawMessage) schemaDecodeFunction isMessageUndecryptable =
+    abstract member ReceiveIndividualMessagesFromBatch:
+        RawMessage -> struct ((string -> byte [] -> 'T) * ISchema<'T>) -> bool -> unit
+    default this.ReceiveIndividualMessagesFromBatch (rawMessage: RawMessage) decoder isMessageUndecryptable =
         let batchSize = rawMessage.Metadata.NumMessages
         let acker = BatchMessageAcker(batchSize)
         let mutable skippedMessages = 0
@@ -1407,14 +1428,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         Type = Batch(%i, acker)
                         TopicName = topicName.CompleteTopicName
                 }
-                let msgKey = singleMessageMetadata.PartitionKey
-                let getValue () =
-                    if singleMessageMetadata.NullValue then
-                        Unchecked.defaultof<'T>
-                    else
-                        keyValueProcessor
-                        |> Option.map (fun kvp -> kvp.DecodeKeyValue(msgKey, singleMessagePayload) :?> 'T)
-                        |> Option.defaultWith (fun () -> schemaDecodeFunction singleMessagePayload)
                 let properties =
                     if singleMessageMetadata.Properties.Count > 0 then
                         singleMessageMetadata.Properties
@@ -1427,24 +1440,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         Nullable(%(int64 singleMessageMetadata.EventTime))
                     else
                         Nullable()
-                let message = Message (
-                    messageId,
-                    singleMessagePayload,
-                    %msgKey,
-                    singleMessageMetadata.PartitionKeyB64Encoded,
-                    properties,
-                    EncryptionContext.FromMetadata(rawMessage.Metadata, isEncrypted = isMessageUndecryptable),
-                    getSchemaVersionBytes rawMessage.Metadata.SchemaVersion,
-                    %(int64 singleMessageMetadata.SequenceId),
-                    singleMessageMetadata.OrderingKey,
-                    rawMessage.Metadata.PublishTime,
-                    eventTime,
-                    rawMessage.RedeliveryCount,
-                    rawMessage.Metadata.ReplicatedFrom,
-                    rawMessage.Metadata.ProducerName,
-                    rawMessage.ConsumerEpoch,
-                    getValue
-                )
+                let message = createMessage rawMessage decoder isMessageUndecryptable messageId singleMessagePayload
+                                  singleMessageMetadata.PartitionKey singleMessageMetadata.PartitionKeyB64Encoded properties
+                                  %(int64 singleMessageMetadata.SequenceId) singleMessageMetadata.OrderingKey
+                                  eventTime singleMessageMetadata.NullValue
                 if (rawMessage.RedeliveryCount >= deadLettersProcessor.MaxRedeliveryCount) then
                     deadLettersProcessor.AddMessage(messageId, message)
                 enqueueMessage message
