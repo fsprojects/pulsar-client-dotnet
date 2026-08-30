@@ -58,6 +58,7 @@ type internal GenericJsonSchema (topicSchema: TopicSchema) =
     let avroSchema = Schema.Parse(stringSchema) :?> RecordSchema
     let schemaFields = avroSchema.Fields
     override this.SchemaInfo = topicSchema.SchemaInfo
+    override this.SupportSchemaVersioning = true
     override this.Encode _ = raise <| SchemaSerializationException "GenericJsonSchema is for consuming only!"
     override this.Decode bytes =
         let doc = JsonSerializer.Deserialize<IDictionary<string, obj>>(ReadOnlySpan bytes, dynamicSerializerOptions)

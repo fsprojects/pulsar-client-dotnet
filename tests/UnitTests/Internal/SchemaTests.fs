@@ -412,6 +412,9 @@ let tests =
             |> fun decoded ->
                 Expect.equal "" value.X decoded.X
                 Expect.sequenceEqual "" value.Y decoded.Y
+            // a version-specific schema describes how data was already written, so it must not encode
+            Expect.throwsT<SchemaSerializationException> ""
+                (fun () -> writerSchema.Encode(value) |> ignore)
         }
 
         test "Version-specific separated KeyValue schema preserves metadata and validates the value payload" {

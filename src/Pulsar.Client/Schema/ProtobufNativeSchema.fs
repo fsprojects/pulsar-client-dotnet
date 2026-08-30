@@ -103,6 +103,7 @@ type internal GenericProtobufNativeSchema(topicSchema: TopicSchema) =
 
     override this.Encode _ = raise <| SchemaSerializationException "GenericProtobufNativeSchema is for consuming only!"
     override this.SchemaInfo = topicSchema.SchemaInfo
+    override this.SupportSchemaVersioning = true
 
     override this.Decode bytes =
         let schemaVersionBytes =
