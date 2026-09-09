@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Internal
 
+open System.Linq
 open Pulsar.Client.Common
 open Pulsar.Client.Api
 open System.IO
@@ -183,24 +184,28 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
     override this.CreateOpSendMsg() =
         raise <| NotSupportedException()
     override this.CreateOpSendMsgs () =
-        keyBatchItems
-        |> Seq.map (fun (KeyValue(_, batchItems)) ->
-            let sequenceId = batchItems |> Seq.map _.SequenceId |> Seq.max
-            sequenceId, batchItems)
+        let batches = Array.zeroCreate keyBatchItems.Count
+        let mutable index = 0
+        for KeyValue(_, batchItems) in keyBatchItems do
+            let sequenceId = batchItems.MaxBy(_.SequenceId).SequenceId
+            batches[index] <- struct(sequenceId, batchItems)
+            index <- index + 1
         // Deduplication tracks producer-wide progress, so key batches use increasing upper bounds.
-        |> Seq.sortBy fst
-        |> Seq.map (fun (sequenceId, batchItems) ->
-            let stream = MemoryStreamManager.GetStream("KeyBasedBatcher")
-            {
-                OpSendMsg = makeBatch stream batchItems
-                SequenceId = sequenceId
-                HighestSequenceId = sequenceId
-                PartitionKey = batchItems[0].Message.Key
-                OrderingKey = batchItems[0].Message.OrderingKey
-                TxnId = this.CurrentTxnId
-                ReplicationClusters = batchItems[0].Message.ReplicationClusters
-                Stream = stream
-            })
+        batches |> Array.sortInPlaceBy (fun struct(sequenceId, _) -> sequenceId)
+        seq {
+            for struct(sequenceId, batchItems) in batches do
+                let stream = MemoryStreamManager.GetStream("KeyBasedBatcher")
+                yield {
+                    OpSendMsg = makeBatch stream batchItems
+                    SequenceId = sequenceId
+                    HighestSequenceId = sequenceId
+                    PartitionKey = batchItems[0].Message.Key
+                    OrderingKey = batchItems[0].Message.OrderingKey
+                    TxnId = this.CurrentTxnId
+                    ReplicationClusters = batchItems[0].Message.ReplicationClusters
+                    Stream = stream
+                }
+        }
     override this.Clear() =
         keyBatchItems.Clear()
         this.CurrentBatchSizeBytes <- 0
