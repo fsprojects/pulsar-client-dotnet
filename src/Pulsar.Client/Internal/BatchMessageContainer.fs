@@ -57,7 +57,7 @@ type internal OpSendMsg<'T> = BatchCallback<'T>[]
 type internal OpSendMsgWrapper<'T> = {
     Stream: MemoryStream
     OpSendMsg: OpSendMsg<'T>
-    LowestSequenceId: SequenceId
+    SequenceId: SequenceId
     HighestSequenceId: SequenceId
     PartitionKey: MessageKey option
     OrderingKey: byte[] option
@@ -126,7 +126,7 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
         let highestSequenceId = batchItems[batchItems.Count - 1].SequenceId
         {
             OpSendMsg = makeBatch stream batchItems
-            LowestSequenceId = lowestSequenceId
+            SequenceId = lowestSequenceId
             HighestSequenceId = highestSequenceId
             PartitionKey = batchItems[0].Message.Key
             OrderingKey = batchItems[0].Message.OrderingKey
@@ -185,13 +185,16 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
     override this.CreateOpSendMsgs () =
         keyBatchItems
         |> Seq.map (fun (KeyValue(_, batchItems)) ->
+            let sequenceId = batchItems |> Seq.map _.SequenceId |> Seq.max
+            sequenceId, batchItems)
+        // Deduplication tracks producer-wide progress, so key batches use increasing upper bounds.
+        |> Seq.sortBy fst
+        |> Seq.map (fun (sequenceId, batchItems) ->
             let stream = MemoryStreamManager.GetStream("KeyBasedBatcher")
-            let lowestSequenceId = batchItems[0].SequenceId
-            let highestSequenceId = batchItems[batchItems.Count - 1].SequenceId
             {
                 OpSendMsg = makeBatch stream batchItems
-                LowestSequenceId = lowestSequenceId
-                HighestSequenceId = highestSequenceId
+                SequenceId = sequenceId
+                HighestSequenceId = sequenceId
                 PartitionKey = batchItems[0].Message.Key
                 OrderingKey = batchItems[0].Message.OrderingKey
                 TxnId = this.CurrentTxnId
