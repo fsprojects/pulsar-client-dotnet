@@ -3,6 +3,7 @@ module Pulsar.Client.UnitTests.Common.MessageTests
 open System
 open Expecto
 open Expecto.Flip
+open Pulsar.Client.Api
 open Pulsar.Client.Common
 open FSharp.UMX
 open Pulsar.Client.Internal
@@ -68,7 +69,7 @@ let tests =
 
         test "Message batching by count works correctly" {
             let messages = Messages(2, -1)
-            let message = Message(MessageId.Earliest, [||], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", Nullable(), fun () -> failwith "not implemented")
+            let message = Message(MessageId.Earliest, [||], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", Nullable(), Schema.BYTES(), fun () -> failwith "not implemented")
             messages.CanAdd(message) |> Expect.isTrue ""
             messages.Add(message)
             messages.CanAdd(message) |> Expect.isTrue ""
@@ -78,11 +79,28 @@ let tests =
 
         test "Message batching by size works correctly" {
             let messages = Messages(-1, 2)
-            let message = Message(MessageId.Earliest, [| 0uy |], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", Nullable(), fun () -> failwith "not implemented")
+            let message = Message(MessageId.Earliest, [| 0uy |], %"", false, EmptyProps, None, [||], %0L, [||], %0L, Nullable(), 0, "", "", Nullable(), Schema.BYTES(), fun () -> failwith "not implemented")
             messages.CanAdd(message) |> Expect.isTrue ""
             messages.Add(message)
             messages.CanAdd(message) |> Expect.isTrue ""
             messages.Add(message)
             messages.CanAdd(message) |> Expect.isFalse ""
+        }
+
+        test "Reader schema is preserved by message copy helpers" {
+            let readerSchema = Schema.BYTES()
+            let message =
+                Message(MessageId.Earliest, [| 0uy |], %"", false, EmptyProps, None, [| 1uy |], %0L,
+                        [||], %0L, Nullable(), 0, "", "", Nullable(), readerSchema, fun () -> [| 0uy |])
+            let copiedMessages = [
+                message.WithMessageId(MessageId.Latest)
+                message.WithData([| 1uy |])
+                message.WithKey(%"key", false)
+                message.WithProperties(readOnlyDict [ "key", "value" ])
+            ]
+
+            obj.ReferenceEquals(readerSchema, message.GetReaderSchema()) |> Expect.isTrue ""
+            for copiedMessage in copiedMessages do
+                obj.ReferenceEquals(readerSchema, copiedMessage.GetReaderSchema()) |> Expect.isTrue ""
         }
     ]

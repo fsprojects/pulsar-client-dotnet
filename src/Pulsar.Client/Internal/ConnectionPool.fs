@@ -1,4 +1,4 @@
-﻿namespace Pulsar.Client.Internal
+namespace Pulsar.Client.Internal
 
 open Pulsar.Client.Common
 
@@ -15,6 +15,27 @@ open System.Net.Sockets
 open System.Net.Security
 open System.Security.Cryptography.X509Certificates
 
+module internal SocketFactory =
+
+    let createSocket (endpoint: DnsEndPoint) : Socket =
+        match endpoint.AddressFamily with
+        | AddressFamily.Unspecified ->
+            // The address family is unknown ahead of time for hostname-based service URLs.
+            // Prefer a dual-mode IPv6 socket so that ConnectAsync can reach IPv4, IPv6 or
+            // dual-stack brokers (fixes IPv6-only environments, see #360). Guard behind
+            // OSSupportsIPv6 and fall back to IPv4 on hosts where IPv6 is disabled/unsupported
+            // to preserve previously-working IPv4 hostname connections.
+            if Socket.OSSupportsIPv6 then
+                let socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp)
+                socket.DualMode <- true
+                socket
+            else
+                new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
+        | AddressFamily.Unix ->
+            new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified)
+        | family ->
+            new Socket(family, SocketType.Stream, ProtocolType.Tcp)
+
 type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
 
     let mutable config = initialConfig
@@ -22,17 +43,7 @@ type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
 
     // from https://github.com/mgravell/Pipelines.Sockets.Unofficial/blob/master/src/Pipelines.Sockets.Unofficial/SocketConnection.Connect.cs
     let getSocket (endpoint: DnsEndPoint) =
-        let addressFamily =
-            if endpoint.AddressFamily = AddressFamily.Unspecified then
-                AddressFamily.InterNetwork
-            else
-                endpoint.AddressFamily
-        let protocolType =
-            if addressFamily = AddressFamily.Unix then
-                ProtocolType.Unspecified
-            else
-                ProtocolType.Tcp
-        let socket = new Socket(addressFamily, SocketType.Stream, protocolType)
+        let socket = SocketFactory.createSocket endpoint
         SocketConnection.SetRecommendedClientOptions(socket)
 
         use args = new SocketAwaitableEventArgs(PipeScheduler.ThreadPool)

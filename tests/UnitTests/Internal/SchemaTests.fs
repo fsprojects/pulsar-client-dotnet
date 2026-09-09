@@ -28,8 +28,19 @@ type ProtobufSchemaTest = {
 [<CLIMutable>]
 type AvroSchemaTest = { X: string; Y: ResizeArray<int> }
 
+[<CLIMutable; AvroSchemaGenerator.Attributes.Aliases("AvroSchemaTest")>]
+type AvroSchemaTest2 = { X: string; Y: ResizeArray<int>; Z: string }
+
 [<CLIMutable>]
 type DateTimeSchemaTest = { OccurredAt: DateTime }
+
+type TestSchema(schemaInfo, validate) =
+    inherit ISchema<string>()
+
+    override this.SchemaInfo = schemaInfo
+    override this.Encode value = Encoding.UTF8.GetBytes(value)
+    override this.Decode bytes = Encoding.UTF8.GetString(bytes)
+    override this.Validate bytes = validate bytes
 
 [<CLIMutable>]
 [<ProtoContract>]
@@ -344,7 +355,195 @@ let tests =
                     |> processor.Value.DecodeKeyValue
                     |> unbox
                 Expect.equal "" input output
-        }        
+        }
+
+        test "Schema-bound auto produce preserves schema info and validates bytes" {
+            let properties =
+                readOnlyDict [ "source", "reader-schema" ]
+            let schemaInfo = {
+                Name = "writer"
+                Type = SchemaType.JSON
+                Schema = Encoding.UTF8.GetBytes("""{"type":"record","name":"Value","fields":[]}""")
+                Properties = properties
+            }
+            let mutable validatedBytes = None
+            let sourceSchema =
+                TestSchema(schemaInfo, fun bytes -> validatedBytes <- Some bytes)
+                :> ISchema<string>
+            let autoProduceSchema = Schema.AUTO_PRODUCE(sourceSchema)
+            let payload = Encoding.UTF8.GetBytes("{}")
+
+            let encoded = autoProduceSchema.Encode(payload)
+
+            obj.ReferenceEquals(payload, encoded) |> Expect.isTrue ""
+            validatedBytes.IsSome |> Expect.isTrue ""
+            obj.ReferenceEquals(payload, validatedBytes.Value) |> Expect.isTrue ""
+            Expect.equal "" schemaInfo.Name autoProduceSchema.SchemaInfo.Name
+            Expect.equal "" schemaInfo.Type autoProduceSchema.SchemaInfo.Type
+            Expect.sequenceEqual "" schemaInfo.Schema autoProduceSchema.SchemaInfo.Schema
+            obj.ReferenceEquals(schemaInfo.Properties, autoProduceSchema.SchemaInfo.Properties) |> Expect.isTrue ""
+        }
+
+        test "Parameterless auto produce remains an unresolved schema stub" {
+            let autoProduceSchema = Schema.AUTO_PRODUCE()
+
+            Expect.equal "" SchemaType.AUTO_PUBLISH autoProduceSchema.SchemaInfo.Type
+            Expect.throwsT<SchemaSerializationException> "" (fun () -> autoProduceSchema.Encode([||]) |> ignore)
+        }
+
+        test "Version-specific Avro schema exposes writer schema info" {
+            let readerSchema = Schema.AVRO<AvroSchemaTest>()
+            let properties =
+                readOnlyDict [ "version", "writer" ]
+            let writerSchemaInfo = {
+                readerSchema.SchemaInfo with
+                    Name = "writer"
+                    Properties = properties
+            }
+            let writerSchema =
+                readerSchema.GetSpecificSchema(writerSchemaInfo, Some { Bytes = [| 1uy |] })
+            let value = { AvroSchemaTest.X = "X1"; Y = ResizeArray([ 1; 2 ]) }
+
+            Expect.equal "" writerSchemaInfo.Name writerSchema.SchemaInfo.Name
+            obj.ReferenceEquals(properties, writerSchema.SchemaInfo.Properties) |> Expect.isTrue ""
+            value
+            |> readerSchema.Encode
+            |> writerSchema.Decode
+            |> fun decoded ->
+                Expect.equal "" value.X decoded.X
+                Expect.sequenceEqual "" value.Y decoded.Y
+            // a version-specific schema describes how data was already written, so it must not encode
+            Expect.throwsT<SchemaSerializationException> ""
+                (fun () -> writerSchema.Encode(value) |> ignore)
+        }
+
+        test "Version-specific separated KeyValue schema preserves metadata and validates the value payload" {
+            let valueSchema = Schema.AVRO<AvroSchemaTest>()
+            let readerSchema =
+                Schema.KEY_VALUE(Schema.INT32(), valueSchema, KeyValueEncodingType.SEPARATED)
+            let writerSchemaInfo = {
+                readerSchema.SchemaInfo with
+                    Name = "key-value-writer"
+            }
+            let writerSchema =
+                readerSchema.GetSpecificSchema(writerSchemaInfo, Some { Bytes = [| 1uy |] })
+            let payload =
+                valueSchema.Encode({ AvroSchemaTest.X = "X1"; Y = ResizeArray([ 1; 2 ]) })
+            let autoProduceSchema = Schema.AUTO_PRODUCE(writerSchema)
+
+            Expect.equal "" writerSchemaInfo.Name writerSchema.SchemaInfo.Name
+            Expect.equal "" SchemaType.AVRO
+                (KeyValueSchema.DecodeKeyValueSchemaInfo(writerSchema.SchemaInfo) |> snd).Type
+            obj.ReferenceEquals(payload, autoProduceSchema.Encode(payload)) |> Expect.isTrue ""
+        }
+
+        test "Version-specific separated KeyValue decoder uses the writer schema" {
+            let keySchema = Schema.INT32()
+            let writerValueSchema = Schema.AVRO<AvroSchemaTest>()
+            let readerValueSchema = Schema.AVRO<AvroSchemaTest2>()
+            let readerSchema =
+                Schema.KEY_VALUE(keySchema, readerValueSchema, KeyValueEncodingType.SEPARATED)
+            let writerSchemaInfo =
+                KeyValueSchema.EncodeKeyValueSchemaInfo(
+                    "KeyValue",
+                    keySchema.SchemaInfo,
+                    writerValueSchema.SchemaInfo,
+                    KeyValueEncodingType.SEPARATED)
+            let specificReaderSchema =
+                readerSchema.GetSpecificSchema(writerSchemaInfo, Some { Bytes = [| 1uy |] })
+            let decode = KeyValueProcessor.GetDecodeFunction specificReaderSchema
+            let writerValue = { AvroSchemaTest.X = "X1"; Y = ResizeArray([ 1; 2 ]) }
+            let key = keySchema.Encode(1) |> Convert.ToBase64String
+            let payload = writerValueSchema.Encode(writerValue)
+
+            let decoded = decode key payload
+
+            Expect.equal "" 1 decoded.Key
+            Expect.equal "" writerValue.X decoded.Value.X
+            Expect.sequenceEqual "" writerValue.Y decoded.Value.Y
+            Expect.isNull "" decoded.Value.Z
+        }
+
+        test "Auto produce validation respects KeyValue encoding" {
+            let keySchema = Schema.INT32()
+            let valueSchema = Schema.STRING()
+            let inlineSchema =
+                Schema.KEY_VALUE(keySchema, valueSchema, KeyValueEncodingType.INLINE)
+            let separatedSchema =
+                Schema.KEY_VALUE(keySchema, valueSchema, KeyValueEncodingType.SEPARATED)
+            let inlineTopicSchema = {
+                SchemaInfo = inlineSchema.SchemaInfo
+                SchemaVersion = None
+            }
+            let separatedTopicSchema = {
+                SchemaInfo = separatedSchema.SchemaInfo
+                SchemaVersion = None
+            }
+            let inlinePayload =
+                KeyValueSchema.GetKeyValueBytes(keySchema.Encode(1), valueSchema.Encode("value"))
+            let separatedPayload = valueSchema.Encode("value")
+
+            // INLINE validates the key and the value against their own halves of the payload - validating
+            // either one against the whole framed payload would fail the 4-byte length check of INT32
+            Schema.GetValidateFunction(inlineTopicSchema) inlinePayload
+            Expect.throws "not a key-value framed payload"
+                (fun () -> Schema.GetValidateFunction(inlineTopicSchema) separatedPayload)
+
+            // SEPARATED carries the key out of band, so only the value payload is validated - had the key
+            // been validated too, INT32 would have rejected these 5 bytes
+            Schema.GetValidateFunction(separatedTopicSchema) separatedPayload
+            // the value schema is still applied, so swapping it for INT32 makes the same payload fail
+            let separatedIntValueTopicSchema = {
+                separatedTopicSchema with
+                    SchemaInfo =
+                        Schema.KEY_VALUE(valueSchema, keySchema, KeyValueEncodingType.SEPARATED).SchemaInfo
+            }
+            Expect.throws "value schema must reject foreign bytes"
+                (fun () -> Schema.GetValidateFunction(separatedIntValueTopicSchema) separatedPayload)
+        }
+
+        test "Generic schemas preserve version-specific schema info" {
+            let properties = readOnlyDict [ "version", "writer" ]
+            let version: SchemaVersion option = Some { Bytes = [| 1uy |] }
+            let assertSchemaInfo expected (actual: SchemaInfo) =
+                Expect.equal "" expected.Name actual.Name
+                Expect.equal "" expected.Type actual.Type
+                Expect.sequenceEqual "" expected.Schema actual.Schema
+                obj.ReferenceEquals(expected.Properties, actual.Properties) |> Expect.isTrue ""
+
+            let jsonSchemaInfo = {
+                Schema.JSON<JsonSchemaTest>().SchemaInfo with
+                    Name = "json-writer"
+                    Properties = properties
+            }
+            let genericJsonSchema =
+                GenericJsonSchema({ SchemaInfo = jsonSchemaInfo; SchemaVersion = version })
+                :> ISchema<GenericRecord>
+            let specificGenericJsonSchema = genericJsonSchema.GetSpecificSchema(jsonSchemaInfo, version)
+            assertSchemaInfo jsonSchemaInfo specificGenericJsonSchema.SchemaInfo
+
+            let protobufNativeSchemaInfo = {
+                Schema.PROTOBUF_NATIVE<ProtobufNativeSchemaTest>().SchemaInfo with
+                    Name = "protobuf-native-writer"
+                    Properties = properties
+            }
+            let genericProtobufNativeSchema =
+                GenericProtobufNativeSchema({
+                    SchemaInfo = protobufNativeSchemaInfo
+                    SchemaVersion = version
+                })
+                :> ISchema<GenericRecord>
+            let specificGenericProtobufNativeSchema =
+                genericProtobufNativeSchema.GetSpecificSchema(protobufNativeSchemaInfo, version)
+            assertSchemaInfo protobufNativeSchemaInfo specificGenericProtobufNativeSchema.SchemaInfo
+        }
+
+        test "Auto produce rejects unresolved schema stubs" {
+            Expect.throwsT<ArgumentException> ""
+                (fun () -> Schema.AUTO_PRODUCE(Schema.AUTO_CONSUME()) |> ignore)
+            Expect.throwsT<ArgumentException> ""
+                (fun () -> Schema.AUTO_PRODUCE(Schema.AUTO_PRODUCE()) |> ignore)
+        }
         
         ptest "Serialize schema perf" {
             let inputs = [{ JsonSchemaTest.X = "X1"; Y= seq { 1; 2 } |> ResizeArray}]

@@ -18,7 +18,6 @@ namespace CsharpExamples
                 
             var client = await new PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
-                .EnableTls(true)
                 .TlsTrustCertificate(ca)
                 .Authentication(userTls)
                 .BuildAsync();

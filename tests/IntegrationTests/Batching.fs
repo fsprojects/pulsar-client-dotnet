@@ -297,14 +297,23 @@ let tests =
                     .EnableBatching(true)
                     .BatchingMaxMessages(messagesNumber / 2)
                     .BatchingMaxBytes(100)
+                    // batches have to be closed by size only, the default 1ms publish delay
+                    // randomly splits them and makes the expected batch indexes unpredictable
+                    .BatchingMaxPublishDelay(TimeSpan.FromMinutes(1.0))
                     .MaxPendingMessages(1)
                     .BlockIfQueueFull(true)
                     .CreateAsync()
 
-            for i in 0 .. messagesNumber-1 do
-                let buffer = Array.zeroCreate<byte> 50
-                Random.Shared.NextBytes(buffer)
-                producer.SendAsync(buffer) |> ignore
+            let sendTasks =
+                [| for _ in 1 .. messagesNumber do
+                    let buffer = Array.zeroCreate<byte> 50
+                    Random.Shared.NextBytes(buffer)
+                    yield producer.SendAsync(buffer) |]
+
+            // the last message doesn't fill a batch, so it is flushed explicitly
+            // after all the full batches have been acknowledged
+            let! _ = Task.WhenAll(sendTasks[.. messagesNumber - 2])
+            do! producer.FlushAsync()
 
             for i in 0 .. messagesNumber-1 do
                 let! (message: Message<byte[]>) = consumer.ReceiveAsync()
@@ -340,12 +349,20 @@ let tests =
                     .EnableBatching(true)
                     .BatchingMaxMessages(messagesNumber / 2)
                     .BatchingMaxBytes(100)
+                    // batches have to be closed by size only, the default 1ms publish delay
+                    // randomly splits them and makes the expected batch indexes unpredictable
+                    .BatchingMaxPublishDelay(TimeSpan.FromMinutes(1.0))
                     .MaxPendingMessages(1)
                     .BlockIfQueueFull(true)
                     .CreateAsync()
 
-            for i in 0 .. messagesNumber-1 do
-                producer.SendAsync(producer.NewMessage(null)) |> ignore
+            let sendTasks =
+                [| for _ in 1 .. messagesNumber -> producer.SendAsync(producer.NewMessage(null)) |]
+
+            // the last message doesn't fill a batch, so it is flushed explicitly
+            // after all the full batches have been acknowledged
+            let! _ = Task.WhenAll(sendTasks[.. messagesNumber - 2])
+            do! producer.FlushAsync()
 
             for i in 0 .. messagesNumber-1 do
                 let! (message: Message<byte[]>) = consumer.ReceiveAsync()

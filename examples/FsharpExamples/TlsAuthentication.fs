@@ -21,7 +21,6 @@ let runTlsAuthentication () =
         let! client =
             PulsarClientBuilder()
                 .ServiceUrl(serviceUrl)
-                .EnableTls(true)
                 .TlsTrustCertificate(ca)
                 .Authentication(userTls)
                 .BuildAsync()

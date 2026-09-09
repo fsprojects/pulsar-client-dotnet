@@ -544,6 +544,13 @@ let tests =
             let! (msg : Message<GenericRecord>) = consumer.ReceiveAsync() 
             do! consumer.AcknowledgeAsync msg.MessageId 
             let record = msg.GetValue()
+            let readerSchema = msg.GetReaderSchema()
+            // the broker is free to reformat the schema JSON it stores, so compare parsed schemas
+            let parseAvroSchema (schema: ISchema<GenericRecord>) =
+                schema.SchemaInfo.Schema
+                |> System.Text.Encoding.UTF8.GetString
+                |> Avro.Schema.Parse
+                |> string
             // we could get the correct schema version for each message.
             Expect.equal "" 0L (BitConverter.ToInt64(ReadOnlySpan<byte>(record.SchemaVersion |> Array.rev)))
             Expect.equal "" simpleMessage.Name (record.GetField("Name") |> unbox)
@@ -553,11 +560,50 @@ let tests =
             let! (msg2 : Message<GenericRecord>) = consumer.ReceiveAsync() 
             do! consumer.AcknowledgeAsync msg2.MessageId 
             let record2 = msg2.GetValue()
+            let readerSchema2 = msg2.GetReaderSchema()
             Expect.equal "" 1L (BitConverter.ToInt64( ReadOnlySpan<byte>(record2.SchemaVersion |> Array.rev)))
             Expect.equal "" simpleMessage2.Name (record2.GetField("Name") |> unbox)
             Expect.equal "" simpleMessage2.Age (record2.GetField("Age") |> unbox)
-            
-            do! consumer.UnsubscribeAsync() 
+
+            // each message reports the schema it was actually written with
+            Expect.notEqual "" (parseAvroSchema readerSchema) (parseAvroSchema readerSchema2)
+
+            let republishTopicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let! (republisher: IProducer<byte[]>) =
+                client.NewProducer(Schema.AUTO_PRODUCE(readerSchema))
+                    .Topic(republishTopicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            let! _ = republisher.SendAsync(msg.Data)
+
+            let! (republisher2: IProducer<byte[]>) =
+                client.NewProducer(Schema.AUTO_PRODUCE(readerSchema2))
+                    .Topic(republishTopicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            let! _ = republisher2.SendAsync(msg2.Data)
+
+            let! (republishedConsumer: IConsumer<GenericRecord>) =
+                client.NewConsumer(Schema.AUTO_CONSUME())
+                    .Topic(republishTopicName)
+                    .ConsumerName("auto-consume-republished")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+                    .SubscribeAsync()
+
+            let! (republishedMessage: Message<GenericRecord>) = republishedConsumer.ReceiveAsync()
+            let! (republishedMessage2: Message<GenericRecord>) = republishedConsumer.ReceiveAsync()
+
+            // both messages kept the writer schema they were originally published under
+            Expect.equal "" (parseAvroSchema readerSchema) (parseAvroSchema (republishedMessage.GetReaderSchema()))
+            Expect.equal "" (parseAvroSchema readerSchema2) (parseAvroSchema (republishedMessage2.GetReaderSchema()))
+            Expect.equal "" simpleMessage.Name (republishedMessage.GetValue().GetField("Name") |> unbox)
+            Expect.equal "" simpleMessage.Surname (republishedMessage.GetValue().GetField("Surname") |> unbox)
+            Expect.equal "" simpleMessage2.Name (republishedMessage2.GetValue().GetField("Name") |> unbox)
+            do! consumer.UnsubscribeAsync()
+            do! republishedConsumer.UnsubscribeAsync()
+            do! republisher.DisposeAsync().AsTask()
+            do! republisher2.DisposeAsync().AsTask()
           
             Log.Debug("Finished Auto consume with multi-version schema")
         }

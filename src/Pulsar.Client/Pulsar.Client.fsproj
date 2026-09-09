@@ -7,17 +7,17 @@
     <Title>Pulsar.Client</Title>
     <RootNamespace>Pulsar.Client</RootNamespace>
     <AssemblyName>Pulsar.Client</AssemblyName>
-    <Version>3.15.2</Version>
+    <Version>3.19.0</Version>
     <Company>F# community</Company>
     <Description>.NET client library for Apache Pulsar</Description>
     <RepositoryUrl>https://github.com/fsprojects/pulsar-client-dotnet</RepositoryUrl>
-    <PackageReleaseNotes>Fixed date representation for JSON schema</PackageReleaseNotes>
+    <PackageReleaseNotes>Support reader schemas and schema-bound auto-produce</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/fsprojects/pulsar-client-dotnet</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>Apache;Pulsar;F#;FSharp</PackageTags>
     <Authors>Vladimir Shchur and contributors</Authors>
-    <PackageVersion>3.15.2</PackageVersion>
+    <PackageVersion>3.19.0</PackageVersion>
     <DebugType>portable</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -45,12 +45,12 @@
     <PackageReference Include="protobuf-net" Version="3.2.30" />
     <PackageReference Include="zlib.net-mutliplatform" Version="1.0.6" />
     <PackageReference Include="K4os.Compression.LZ4" Version="1.3.6" />
-    <PackageReference Include="Snappier" Version="1.1.6" />
+    <PackageReference Include="Snappier" Version="1.3.1" />
     <PackageReference Include="ZstdNet" Version="1.4.5" />
     <PackageReference Include="Pipelines.Sockets.Unofficial" Version="2.2.8" />
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.0" />
     <PackageReference Include="AvroSchemaGenerator" Version="2.9.2" />
-    <PackageReference Include="Apache.Avro" Version="1.11.3" />
+    <PackageReference Include="Apache.Avro" Version="1.12.1" />
     <PackageReference Include="NSec.Cryptography" Version="22.4.0" />
     <PackageReference Include="PemUtils" Version="3.0.0.82" />
     <PackageReference Include="protobuf-net.Reflection" Version="3.2.12" />
@@ -81,6 +81,7 @@
     <Compile Include="Api\BatchReceivePolicy.fs" />
     <Compile Include="Api\KeySharedPolicy.fs" />
     <Compile Include="Api\ISchema.fs" />
+    <Compile Include="Common\Message.fs" />
     <Compile Include="Common\Commands.fs" />
     <Compile Include="Common\ConsumerBase.fs" />
     <Compile Include="Api\AuthenticationDataProvider.fs" />

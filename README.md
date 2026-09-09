@@ -48,6 +48,7 @@ Features list (based on [Client Feature Matrix](https://github.com/apache/pulsar
 - [X] Batch-Index Ack
 - [ ] SNI Routing
 - [X] Table view
+- [X] Auto cluster failover
 
 ## Quick contributing guide
 
