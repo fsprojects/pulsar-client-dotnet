@@ -24,6 +24,7 @@
     <Compile Include="DeadLetters.fs" />
     <Compile Include="Compression.fs" />
     <Compile Include="SequenceId.fs" />
+    <Compile Include="ProducerBatchOrdering.fs" />
     <Compile Include="ProducerInterceptor.fs" />
     <Compile Include="ConsumerInterceptor.fs" />
     <Compile Include="Tls.fs" />

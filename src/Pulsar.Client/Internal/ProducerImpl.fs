@@ -304,13 +304,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let getHighestSequenceId (pendingMessage: PendingMessage<'T>): SequenceId =
         %Math.Max(%pendingMessage.SequenceId, %pendingMessage.HighestSequenceId)
 
-    let processOpSendMsg { OpSendMsg = opSendMsg; LowestSequenceId = lowestSequenceId; HighestSequenceId = highestSequenceId;
+    let processOpSendMsg { OpSendMsg = opSendMsg; SequenceId = sequenceId; HighestSequenceId = highestSequenceId;
                           PartitionKey = partitionKey; OrderingKey = orderingKey; TxnId = txnId; ReplicationClusters = replicationClusters;
                           Stream = stream } =
         let payloadLength = int stream.Length
         let batchCallbacks = opSendMsg
         let batchSize = batchCallbacks.Length
-        let metadata = createMessageMetadata lowestSequenceId txnId (Some batchSize)
+        let metadata = createMessageMetadata sequenceId txnId (Some batchSize)
                            payloadLength partitionKey EmptyProps None orderingKey None replicationClusters
         let compressedBatchPayload = compressionCodec.Encode stream
         if (compressedBatchPayload.Length > maxMessageSize) then
@@ -323,9 +323,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             match encryptResult with
             | Ok encryptedBatchPayload ->
                 let sendTask =
-                    Commands.newSend producerId lowestSequenceId (Some highestSequenceId) batchSize metadata encryptedBatchPayload
+                    Commands.newSend producerId sequenceId (Some highestSequenceId) batchSize metadata encryptedBatchPayload
                 let pendingMessage = {
-                    SequenceId = lowestSequenceId
+                    SequenceId = sequenceId
                     HighestSequenceId = highestSequenceId
                     SendTask = sendTask
                     Payload = encryptedBatchPayload
@@ -422,6 +422,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 else
                    doBatchSendAndAdd batchItem
             else
+                // Preserve sequence order when a message bypasses the accumulated batch.
+                if producerConfig.BatchingEnabled then
+                    batchMessageAndSend()
                 let compressedPayload = compressionCodec.Encode (new MemoryStream(message.Payload))
                 let payloadLength = int compressedPayload.Length
                 if payloadLength > maxMessageSize && not producerConfig.ChunkingEnabled then

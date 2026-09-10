@@ -1,5 +1,6 @@
 ﻿namespace Pulsar.Client.Internal
 
+open System.Linq
 open Pulsar.Client.Common
 open Pulsar.Client.Api
 open System.IO
@@ -57,7 +58,7 @@ type internal OpSendMsg<'T> = BatchCallback<'T>[]
 type internal OpSendMsgWrapper<'T> = {
     Stream: MemoryStream
     OpSendMsg: OpSendMsg<'T>
-    LowestSequenceId: SequenceId
+    SequenceId: SequenceId
     HighestSequenceId: SequenceId
     PartitionKey: MessageKey option
     OrderingKey: byte[] option
@@ -126,7 +127,7 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
         let highestSequenceId = batchItems[batchItems.Count - 1].SequenceId
         {
             OpSendMsg = makeBatch stream batchItems
-            LowestSequenceId = lowestSequenceId
+            SequenceId = lowestSequenceId
             HighestSequenceId = highestSequenceId
             PartitionKey = batchItems[0].Message.Key
             OrderingKey = batchItems[0].Message.OrderingKey
@@ -183,21 +184,28 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
     override this.CreateOpSendMsg() =
         raise <| NotSupportedException()
     override this.CreateOpSendMsgs () =
-        keyBatchItems
-        |> Seq.map (fun (KeyValue(_, batchItems)) ->
-            let stream = MemoryStreamManager.GetStream("KeyBasedBatcher")
-            let lowestSequenceId = batchItems[0].SequenceId
-            let highestSequenceId = batchItems[batchItems.Count - 1].SequenceId
-            {
-                OpSendMsg = makeBatch stream batchItems
-                LowestSequenceId = lowestSequenceId
-                HighestSequenceId = highestSequenceId
-                PartitionKey = batchItems[0].Message.Key
-                OrderingKey = batchItems[0].Message.OrderingKey
-                TxnId = this.CurrentTxnId
-                ReplicationClusters = batchItems[0].Message.ReplicationClusters
-                Stream = stream
-            })
+        let batches = Array.zeroCreate keyBatchItems.Count
+        let mutable index = 0
+        for KeyValue(_, batchItems) in keyBatchItems do
+            let sequenceId = batchItems.MaxBy(_.SequenceId).SequenceId
+            batches[index] <- struct(sequenceId, batchItems)
+            index <- index + 1
+        // Deduplication tracks producer-wide progress, so key batches use increasing upper bounds.
+        batches |> Array.sortInPlaceBy (fun struct(sequenceId, _) -> sequenceId)
+        seq {
+            for struct(sequenceId, batchItems) in batches do
+                let stream = MemoryStreamManager.GetStream("KeyBasedBatcher")
+                yield {
+                    OpSendMsg = makeBatch stream batchItems
+                    SequenceId = sequenceId
+                    HighestSequenceId = sequenceId
+                    PartitionKey = batchItems[0].Message.Key
+                    OrderingKey = batchItems[0].Message.OrderingKey
+                    TxnId = this.CurrentTxnId
+                    ReplicationClusters = batchItems[0].Message.ReplicationClusters
+                    Stream = stream
+                }
+        }
     override this.Clear() =
         keyBatchItems.Clear()
         this.CurrentBatchSizeBytes <- 0
