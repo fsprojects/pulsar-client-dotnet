@@ -89,9 +89,13 @@ type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
         || currentSizeOfMessages = maxSizeOfMessages
 
     member internal this.CanAdd(message: Message<'T>) =
-        ((maxNumberOfMessages > 0 && currentNumberOfMessages + 1 > maxNumberOfMessages)
-            || (maxSizeOfMessages > 0L && currentSizeOfMessages + (int64 message.Data.Length) > maxSizeOfMessages))
-        |> not
+        // An empty batch always accepts a message, matching the Java client: otherwise a message whose
+        // payload exceeds maxSizeOfMessages sits at the head of the receiver queue forever, every
+        // BatchReceiveAsync returns an empty batch immediately, and the message is never delivered or acked.
+        currentNumberOfMessages = 0
+        || (((maxNumberOfMessages > 0 && currentNumberOfMessages + 1 > maxNumberOfMessages)
+             || (maxSizeOfMessages > 0L && currentSizeOfMessages + (int64 message.Data.Length) > maxSizeOfMessages))
+            |> not)
 
     member internal this.Add(message: Message<'T>) =
         currentNumberOfMessages <- currentNumberOfMessages + 1
