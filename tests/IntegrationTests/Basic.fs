@@ -42,17 +42,14 @@ let tests =
             // a malformed message crashes the consumer mailbox
             post (consumer :?> ConsumerImpl<byte[]>).Mb
                 (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
-            do! Task.Delay 500
-
-            let! (failed : bool) =
+            let rec waitUntilFailed () : Task<unit> =
                 task {
-                    try
-                        let! (_ : Message<byte[]>) = consumer.ReceiveAsync()
-                        return false
-                    with _ ->
-                        return true
+                    let! isConnected = consumer.IsConnected()
+                    if isConnected then
+                        do! Task.Delay 10
+                        return! waitUntilFailed ()
                 }
-            Expect.isTrue "consumer should be failed" failed
+            do! waitUntilFailed().WaitAsync(TimeSpan.FromSeconds(15.0))
 
             // the exclusive subscription must be free for another consumer
             let! (consumer2 : IConsumer<byte[]>) =
