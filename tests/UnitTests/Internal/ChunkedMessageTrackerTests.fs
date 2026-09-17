@@ -157,6 +157,65 @@ let tests =
             Expect.equal "" xMsgId msgId1
         }
 
+        testTask "Out-of-order chunk does not leave a dangling pending entry" {
+            let tracker = ChunkedMessageTracker("ChunkedMessageTracker_6", 2, false, TimeSpan.FromMilliseconds(10.0), fun _ _ -> ())
+            let metadata1 = { testMetadata with NumChunks = 3; TotalChunkMsgSize = 3; Uuid = %"1" }
+            let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 1uy |] }
+            match tracker.GetContext(metadata1) with
+            | Ok ctx -> tracker.MessageReceived(rawMessage1, msgId1, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            let metadata2 = { testMetadata with NumChunks = 3; TotalChunkMsgSize = 3; Uuid = %"1"; ChunkId = %2 }
+            tracker.GetContext(metadata2) |> Expect.isError ""
+            do! Task.Delay 30
+            tracker.RemoveExpireIncompleteChunkedMessages()
+            // the uuid can be reused afterwards
+            tracker.GetContext(metadata1) |> Expect.isOk ""
+        }
+
+        testTask "Redelivered first chunk restarts the message without duplicating the pending entry" {
+            let mutable acked = ResizeArray<MessageId>()
+            let tracker = ChunkedMessageTracker("ChunkedMessageTracker_7", 1, false, TimeSpan.FromMilliseconds(10.0), fun msgId _ -> acked.Add msgId)
+            let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"1" }
+            let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 1uy |] }
+            match tracker.GetContext(metadata1) with
+            | Ok ctx -> tracker.MessageReceived(rawMessage1, msgId1, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            // chunk 0 delivered again, e.g. after a reconnect
+            match tracker.GetContext(metadata1) with
+            | Ok ctx -> tracker.MessageReceived(rawMessage1, msgId1, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            Expect.isEmpty "" acked
+            let metadata2 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"1"; ChunkId = %1 }
+            let msgId2 = { EntryId = %2L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessage2 = { testRawMessage with MessageId = msgId2; Metadata = metadata2; Payload = new MemoryStream [| 2uy |] }
+            match tracker.GetContext(metadata2) with
+            | Ok ctx ->
+                match tracker.MessageReceived(rawMessage2, msgId2, ctx, testCodec) with
+                | Some (bytes, _) -> Expect.sequenceEqual "" [| 1uy; 2uy |] bytes
+                | None -> failwith "No Message received"
+            | _ -> failwith "No context"
+            do! Task.Delay 30
+            tracker.RemoveExpireIncompleteChunkedMessages()
+            // a new message must not evict anything: the queue is empty
+            let metadata3 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"2" }
+            tracker.GetContext(metadata3) |> Expect.isOk ""
+            Expect.isEmpty "" acked
+        }
+
+        test "Chunk id equal to the chunk count is rejected" {
+            let tracker = ChunkedMessageTracker("ChunkedMessageTracker_8", 2, true, TimeSpan.Zero, fun _ _ -> ())
+            let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"1" }
+            let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 1uy |] }
+            match tracker.GetContext(metadata1) with
+            | Ok ctx -> tracker.MessageReceived(rawMessage1, msgId1, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            let metadata2 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"1"; ChunkId = %2 }
+            tracker.GetContext(metadata2) |> Expect.isError ""
+        }
+
         test "Wrong chunk order handled as expected" {
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_5", 2, true, TimeSpan.Zero, fun _ _ -> ())
             let metadata1 = { testMetadata with NumChunks = 3; TotalChunkMsgSize = 3 }

@@ -48,24 +48,31 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
     let removeOldestPendingChunkedMessage() =
         let firstPendingMsgUuid = pendingChunkedMessageUuidQueue.First.Value
         Log.Logger.LogWarning("{0} RemoveOldestPendingChunkedMessage {1}", prefix, firstPendingMsgUuid)
-        let ctx = chunkedMessagesMap[firstPendingMsgUuid]
         pendingChunkedMessageUuidQueue.RemoveFirst()
-        removeChunkMessage firstPendingMsgUuid ctx autoAckOldestChunkedMessageOnQueueFull
+        match chunkedMessagesMap.TryGetValue firstPendingMsgUuid with
+        | true, ctx -> removeChunkMessage firstPendingMsgUuid ctx autoAckOldestChunkedMessageOnQueueFull
+        | _ -> ()
 
     member this.GetContext (metadata: Metadata) =
         if metadata.ChunkId = %0 then
+            match chunkedMessagesMap.TryGetValue(metadata.Uuid) with
+            | true, oldCtx ->
+                // redelivered first chunk restarts the message, the uuid is already pending
+                oldCtx.Dispose()
+            | _ ->
+                if maxPendingChunkedMessage > 0 && (pendingChunkedMessageUuidQueue.Count + 1) > maxPendingChunkedMessage then
+                    removeOldestPendingChunkedMessage()
+                pendingChunkedMessageUuidQueue.AddLast(metadata.Uuid) |> ignore
             let ctx = ChunkedMessageCtx(metadata.NumChunks, metadata.TotalChunkMsgSize)
             chunkedMessagesMap[metadata.Uuid] <- ctx
-            if maxPendingChunkedMessage > 0 && (pendingChunkedMessageUuidQueue.Count + 1) > maxPendingChunkedMessage then
-                removeOldestPendingChunkedMessage()
-            pendingChunkedMessageUuidQueue.AddLast(metadata.Uuid) |> ignore
             Ok ctx
         else
             match chunkedMessagesMap.TryGetValue(metadata.Uuid) with
             | true, ctx ->
-                if metadata.ChunkId <> ctx.LastChunkId + %1 || %metadata.ChunkId > metadata.NumChunks then
+                if metadata.ChunkId <> ctx.LastChunkId + %1 || %metadata.ChunkId >= metadata.NumChunks then
                     ctx.Dispose()
                     chunkedMessagesMap.Remove(metadata.Uuid) |> ignore
+                    pendingChunkedMessageUuidQueue.Remove(metadata.Uuid) |> ignore
                     Error <| $"Received unexpected chunk uuid = {metadata.Uuid}, last-chunk-id = {ctx.LastChunkId}, chunkId = {metadata.ChunkId}, total-chunks = {metadata.NumChunks}"
                 else
                     Ok ctx
@@ -87,9 +94,13 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
     member this.RemoveExpireIncompleteChunkedMessages() =
         if pendingChunkedMessageUuidQueue.Count > 0 then
             let firstMsgUuid = pendingChunkedMessageUuidQueue.First.Value
-            let ctx = chunkedMessagesMap[firstMsgUuid]
-            if Stopwatch.GetElapsedTime(ctx.ReceivedTime) > expireTimeOfIncompleteChunkedMessage then
-                Log.Logger.LogWarning("{0} RemoveExpireIncompleteChunkedMessages {1}", prefix, pendingChunkedMessageUuidQueue.First.Value)
+            match chunkedMessagesMap.TryGetValue firstMsgUuid with
+            | true, ctx ->
+                if Stopwatch.GetElapsedTime(ctx.ReceivedTime) > expireTimeOfIncompleteChunkedMessage then
+                    Log.Logger.LogWarning("{0} RemoveExpireIncompleteChunkedMessages {1}", prefix, firstMsgUuid)
+                    pendingChunkedMessageUuidQueue.RemoveFirst()
+                    removeChunkMessage firstMsgUuid ctx true
+                    this.RemoveExpireIncompleteChunkedMessages()
+            | _ ->
                 pendingChunkedMessageUuidQueue.RemoveFirst()
-                removeChunkMessage firstMsgUuid ctx true
                 this.RemoveExpireIncompleteChunkedMessages()
