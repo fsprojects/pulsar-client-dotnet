@@ -375,4 +375,67 @@ let tests =
             Log.Debug("Finished 'Null message with batch get sent if batch size exceeds'")
 
         }
+
+        testTask "Batch receive delivers a single message larger than MaxNumBytes" {
+
+            // Regression: a message whose payload exceeds BatchReceivePolicy.MaxNumBytes must still be
+            // delivered as a batch of one (Java client: "It's ok to add at least one message into a batch").
+            // Before the fix, BatchReceiveAsync returned an empty batch immediately and forever, the message
+            // was never delivered nor acknowledged, and a caller looping on BatchReceiveAsync spun at 100% CPU.
+            Log.Debug("Started 'Batch receive delivers a single message larger than MaxNumBytes'")
+
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let maxNumBytes = 512L * 1024L
+            let payload = Array.zeroCreate<byte> (int maxNumBytes * 2)
+            payload.[0] <- 7uy
+            payload.[payload.Length - 1] <- 9uy
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("oversizeBatchConsumer")
+                    .SubscriptionName("test-subscription")
+                    .BatchReceivePolicy(BatchReceivePolicy(10, maxNumBytes, TimeSpan.FromMilliseconds(100.0)))
+                    .SubscribeAsync()
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName("oversizeBatchProducer")
+                    .EnableBatching(false)
+                    .CreateAsync()
+
+            let! (_ : MessageId) = producer.SendAsync(payload)
+
+            let cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10.0))
+            let mutable emptyBatches = 0
+            let mutable delivered : Messages<byte[]> option = None
+            try
+                while delivered.IsNone && not cts.IsCancellationRequested do
+                    let! (batch : Messages<byte[]>) = consumer.BatchReceiveAsync(cts.Token)
+                    if batch.Count > 0 then
+                        delivered <- Some batch
+                    else
+                        emptyBatches <- emptyBatches + 1
+            with :? OperationCanceledException ->
+                ()
+
+            match delivered with
+            | None ->
+                failwith $"Oversize message was never delivered by BatchReceiveAsync; got {emptyBatches} empty batches in 10s"
+            | Some batch ->
+                Expect.equal "batch count" 1 batch.Count
+                let (message : Message<byte[]>) = batch |> Seq.head
+                Expect.equal "payload length" payload.Length message.Data.Length
+                Expect.equal "first byte" 7uy message.Data.[0]
+                Expect.equal "last byte" 9uy message.Data.[message.Data.Length - 1]
+                do! consumer.AcknowledgeAsync(batch)
+
+            cts.Dispose()
+            do! consumer.UnsubscribeAsync()
+            do! producer.DisposeAsync()
+
+            Log.Debug("Finished 'Batch receive delivers a single message larger than MaxNumBytes'")
+        }
     ]

@@ -89,9 +89,15 @@ type Messages<'T> internal(maxNumberOfMessages: int, maxSizeOfMessages: int64) =
         || currentSizeOfMessages = maxSizeOfMessages
 
     member internal this.CanAdd(message: Message<'T>) =
-        ((maxNumberOfMessages > 0 && currentNumberOfMessages + 1 > maxNumberOfMessages)
-            || (maxSizeOfMessages > 0L && currentSizeOfMessages + (int64 message.Data.Length) > maxSizeOfMessages))
-        |> not
+        if currentNumberOfMessages = 0 then
+            // An empty batch always accepts at least one message.
+            true
+        elif maxNumberOfMessages > 0 && currentNumberOfMessages + 1 > maxNumberOfMessages then
+            false
+        elif maxSizeOfMessages > 0L && currentSizeOfMessages + (int64 message.Data.Length) > maxSizeOfMessages then
+            false
+        else
+            true
 
     member internal this.Add(message: Message<'T>) =
         currentNumberOfMessages <- currentNumberOfMessages + 1
