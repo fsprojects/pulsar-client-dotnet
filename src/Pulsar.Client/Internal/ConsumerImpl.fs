@@ -1389,6 +1389,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
                 Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                match connectionHandler.ConnectionState with
+                | Ready clientCnx ->
+                    // release the consumer at the broker, otherwise it stays attached to the subscription
+                    clientCnx.SendAndForget(Commands.newCloseConsumer consumerId (Generators.getNextRequestId()))
+                    clientCnx.RemoveConsumer consumerId
+                | _ ->
+                    ()
                 connectionHandler.Failed()
                 stopConsumer()
             else

@@ -11,9 +11,9 @@ open Expecto.Flip
 
 open System.Text
 open System.Threading.Tasks
-open Microsoft.Extensions.Logging
 open Pulsar.Client.Api
 open Pulsar.Client.Common
+open Pulsar.Client.Internal
 open Serilog
 open Pulsar.Client.IntegrationTests
 open Pulsar.Client.IntegrationTests.Common
@@ -23,6 +23,48 @@ open FSharp.UMX
 let tests =
 
     testList "Basic" [
+
+        testTask "Consumer is closed at the broker when its mailbox fails" {
+
+            Log.Debug("Started Consumer is closed at the broker when its mailbox fails")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("failingMailbox")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+
+            // a malformed message crashes the consumer mailbox
+            post (consumer :?> ConsumerImpl<byte[]>).Mb
+                (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
+            
+            let deadline = DateTime.UtcNow.AddSeconds 5.0
+            let mutable connected = true
+            while connected do
+                if DateTime.UtcNow >= deadline then
+                    failwith "Consumer did not fail within 5 seconds"
+                let! isConnected = consumer.IsConnected()
+                if isConnected then
+                    do! Task.Delay 100
+                connected <- isConnected            
+
+            // the exclusive subscription must be free for another consumer
+            let! (consumer2 : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("replacement")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(15.0))
+            do! consumer2.UnsubscribeAsync()
+
+            Log.Debug("Finished Consumer is closed at the broker when its mailbox fails")
+        }
 
         testTask "Sent message/messageId should be equal to received message/messageId" {
 
