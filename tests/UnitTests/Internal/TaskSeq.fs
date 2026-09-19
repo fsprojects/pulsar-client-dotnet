@@ -199,8 +199,15 @@ let tests =
             
             
             let ts = TaskSeq<int>([gen1; gen2; gen3; gen4])
-            let results = [ for _ in 1..50 -> ts.Next().Result ]
+            let results1 = [|
+                for _ in 1..10 do
+                    ts.Next().Result
+            |]
+            let results2 = [|
+                for _ in 1..10 do
+                    ts.Next().Result
+            |]
             
-            Expect.isTrue "all picks came from the same task" (results |> List.distinct |> List.length > 1)
+            Expect.notEqual "" results1 results2 
         }
     ]

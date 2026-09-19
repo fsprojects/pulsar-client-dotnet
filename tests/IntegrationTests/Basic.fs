@@ -11,7 +11,6 @@ open Expecto.Flip
 
 open System.Text
 open System.Threading.Tasks
-open Microsoft.Extensions.Logging
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
@@ -42,17 +41,16 @@ let tests =
             // a malformed message crashes the consumer mailbox
             post (consumer :?> ConsumerImpl<byte[]>).Mb
                 (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
-            do! async {
-                let deadline = DateTime.UtcNow.AddSeconds 5.0
-                let mutable connected = true
-                while connected do
-                    if DateTime.UtcNow >= deadline then
-                        failwith "consumer did not fail within 5 seconds"
-                    let! isConnected = consumer.IsConnected() |> Async.AwaitTask
-                    if isConnected then
-                        do! Async.Sleep 100
-                    connected <- isConnected
-            }
+            
+            let deadline = DateTime.UtcNow.AddSeconds 5.0
+            let mutable connected = true
+            while connected do
+                if DateTime.UtcNow >= deadline then
+                    failwith "Consumer did not fail within 5 seconds"
+                let! isConnected = consumer.IsConnected()
+                if isConnected then
+                    do! Task.Delay 100
+                connected <- isConnected            
 
             // the exclusive subscription must be free for another consumer
             let! (consumer2 : IConsumer<byte[]>) =

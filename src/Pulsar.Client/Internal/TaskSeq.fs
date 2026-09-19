@@ -35,7 +35,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
         let mutable result = null
         while (i < tasksCount && completedFound = false) do
             let index = (randIndex + i) % tasksCount
-            let t = tasks.[index]
+            let t = tasks[index]
             if t.IsCompleted then
                 completedFound <- true
                 result <- t
@@ -69,7 +69,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 Log.Logger.LogTrace("TaskSeq.Next nextWaiting:{0}", nextWaiting)
                 if not started then
                     for i in [1..generators.Count- 1] do
-                        generators.[i]() |> tasks.Add
+                        generators[i]() |> tasks.Add
                     started <- true
                 if nextWaiting || tasks.Count = 1 then
                     waitingQueue.Enqueue channel
@@ -82,7 +82,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 Log.Logger.LogTrace("TaskSeq.NextComplete nextWaiting:{0}", nextWaiting)
                 let index = tasks.IndexOf(completedTask)
                 if index > 0 then
-                    tasks.[index] <- generators.[index]()
+                    tasks[index] <- generators[index]()
                 else
                     Log.Logger.LogWarning("TaskSeq: generator was removed, but task has completed")
                 if tasks.Count > 1 && waitingQueue.Count > 0 then
@@ -95,8 +95,8 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
 
                 Log.Logger.LogTrace("TaskSeq.RestartCompleted nextWaiting:{0}", nextWaiting)
                 for index in 0..tasks.Count-1 do
-                    if tasks.[index].IsCompleted then
-                        tasks.[index] <- generators.[index]()
+                    if tasks[index].IsCompleted then
+                        tasks[index] <- generators[index]()
 
             | AddGenerators newGenerators ->
 
@@ -114,7 +114,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 else
                     resetWhenAnyTcs.SetCanceled()
                     resetWhenAnyTcs <- TaskCompletionSource<'T>()
-                    tasks.[0] <- resetWhenAnyTcs.Task
+                    tasks[0] <- resetWhenAnyTcs.Task
 
             | RemoveGenerator generator ->
 

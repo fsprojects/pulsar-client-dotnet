@@ -1392,9 +1392,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
                     // release the consumer at the broker, otherwise it stays attached to the subscription
-                    clientCnx.RemoveConsumer consumerId
                     clientCnx.SendAndForget(Commands.newCloseConsumer consumerId (Generators.getNextRequestId()))
-                | _ -> ()
+                    clientCnx.RemoveConsumer consumerId
+                | _ ->
+                    ()
                 connectionHandler.Failed()
                 stopConsumer()
             else
