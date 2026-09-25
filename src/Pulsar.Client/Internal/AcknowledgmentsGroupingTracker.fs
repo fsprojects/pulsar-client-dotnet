@@ -91,9 +91,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                             if success && pendingIndividualAcks.Count > 0 then
                                 let messages =
                                     seq {
-                                        while pendingIndividualAcks.Count > 0 do
-                                            let messageId = pendingIndividualAcks.Min
-                                            pendingIndividualAcks.Remove(messageId) |> ignore
+                                        for messageId in pendingIndividualAcks do
                                             // if messageId is chunked then all the chunked related to that msg also processed so, ack all of them
                                             match messageId.ChunkMessageIds with
                                             | Some messageIds ->
@@ -107,10 +105,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                 let messages =
                                     seq {
                                         let mutable prevoiusMessageId = pendingIndividualBatchIndexAcks.Min
-                                        pendingIndividualBatchIndexAcks.Remove(prevoiusMessageId) |> ignore
-                                        while pendingIndividualBatchIndexAcks.Count > 0 do
-                                            let messageId = pendingIndividualBatchIndexAcks.Min
-                                            pendingIndividualBatchIndexAcks.Remove(messageId) |> ignore
+                                        for messageId in pendingIndividualBatchIndexAcks do
                                             if (messageId.EntryId = prevoiusMessageId.EntryId &&
                                                 messageId.LedgerId = prevoiusMessageId.LedgerId &&
                                                  messageId.Partition = prevoiusMessageId.Partition) then
@@ -125,6 +120,9 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                                 let payload = Commands.newMultiMessageAck consumerId allMultiackMessages
                                 let! ackSuccess = sendAckPayload cnx payload
                                 if ackSuccess then
+                                    // Only drop pending ids after a successful send so a failed flush can retry.
+                                    pendingIndividualAcks.Clear()
+                                    pendingIndividualBatchIndexAcks.Clear()
                                     Log.Logger.LogDebug("{0} newMultiMessageAck completed, acked {1} messages",
                                                         prefix, allMultiackMessages.Count)
                                 success <- ackSuccess
@@ -235,6 +233,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
 
                     do! flush None
                     pendingIndividualAcks.Clear()
+                    pendingIndividualBatchIndexAcks.Clear()
                     cumulativeAckFlushRequired <- false
                     lastCumulativeAck <- MessageId.Earliest
 
