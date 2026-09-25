@@ -233,6 +233,7 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
 
                     do! flush None
                     pendingIndividualAcks.Clear()
+                    pendingIndividualBatchIndexAcks.Clear()
                     cumulativeAckFlushRequired <- false
                     lastCumulativeAck <- MessageId.Earliest
 
