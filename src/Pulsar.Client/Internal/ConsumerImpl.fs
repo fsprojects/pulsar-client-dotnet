@@ -304,8 +304,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             } |> ignore
 
         acksGroupingTracker.AddAcknowledgment(messageId, ackType, properties)
-        // Consumer acknowledgment operation immediately succeeds. In any case, if we're not able to send ack to broker,
-        // the messages will be re-delivered
 
     let ackOrTrack msgId autoAck =
         if autoAck then

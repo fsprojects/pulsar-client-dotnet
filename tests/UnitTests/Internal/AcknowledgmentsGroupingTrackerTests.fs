@@ -1,13 +1,32 @@
 ﻿module Pulsar.Client.UnitTests.Internal.AcknowledgmentsGroupingTrackerTests
 
 open System
+open System.IO
+open System.IO.Pipelines
 open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
+open ProtoBuf
+open pulsar.proto
 open Pulsar.Client.Internal
 open Pulsar.Client.Common
 open FSharp.UMX
 
+let private writeSendTask ((write, _): SendTask) =
+    use stream = new MemoryStream()
+    let writer = PipeWriter.Create(stream, StreamPipeWriterOptions(leaveOpen = true))
+    (write writer).GetAwaiter().GetResult()
+    writer.Complete()
+    stream.ToArray()
+
+let private readAckMessageIds (bytes: byte[]) =
+    use stream = new MemoryStream(bytes)
+    use reader = new BinaryReader(stream)
+    reader.ReadInt32() |> int32FromBigEndian |> ignore
+    let commandSize = reader.ReadInt32() |> int32FromBigEndian
+    use commandStream = new MemoryStream(reader.ReadBytes(commandSize))
+    let command = Serializer.Deserialize<BaseCommand>(commandStream)
+    [ for messageId in command.Ack.MessageIds -> messageId.ledgerId, messageId.entryId ]
 
 [<Tests>]
 let tests =
@@ -144,5 +163,147 @@ let tests =
 
             do! Task.Delay(100)
             Expect.equal "" 1 sendPayloadCalledCount
+        }
+
+        testTask "Individual acks are retried after failed flush" {
+            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let payloads = ResizeArray<byte[]>()
+            let sendPayload _cnx payload =
+                task {
+                    payloads.Add(writeSendTask payload)
+                    return payloads.Count > 1
+                }
+            let messageId = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+
+            ackTracker.AddAcknowledgment(messageId, Individual, EmptyProperties)
+            do! ackTracker.FlushAsync(getState())
+            do! ackTracker.FlushAsync(getState())
+
+            Expect.equal "" 2 payloads.Count
+            Expect.sequenceEqual "" payloads[0] payloads[1]
+
+            ackTracker.Close()
+        }
+
+        testTask "Batch acks are retried after failed flush" {
+            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let payloads = ResizeArray<byte[]>()
+            let sendPayload _cnx payload =
+                task {
+                    payloads.Add(writeSendTask payload)
+                    return payloads.Count > 1
+                }
+            let acker = BatchMessageAcker(2)
+            acker.AckIndividual(%0) |> ignore
+            acker.AckIndividual(%1) |> ignore
+            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Batch(%0, acker); Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let message2 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Batch(%1, acker); Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+
+            ackTracker.AddBatchIndexAcknowledgment(message1, Individual, EmptyProperties)
+            ackTracker.AddBatchIndexAcknowledgment(message2, Individual, EmptyProperties)
+            do! ackTracker.FlushAsync(getState())
+            do! ackTracker.FlushAsync(getState())
+
+            Expect.equal "" 2 payloads.Count
+            Expect.sequenceEqual "" payloads[0] payloads[1]
+
+            ackTracker.Close()
+        }
+
+        testTask "Individual acks are not retried after successful flush" {
+            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let payloads = ResizeArray<byte[]>()
+            let sendPayload _cnx payload =
+                task {
+                    payloads.Add(writeSendTask payload)
+                    return true
+                }
+            let messageId = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+
+            ackTracker.AddAcknowledgment(messageId, Individual, EmptyProperties)
+            do! ackTracker.FlushAsync(getState())
+            do! ackTracker.FlushAsync(getState())
+
+            Expect.equal "" 1 payloads.Count
+
+            ackTracker.Close()
+        }
+
+        testTask "Batch acks are not retried after successful flush" {
+            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let payloads = ResizeArray<byte[]>()
+            let sendPayload _cnx payload =
+                task {
+                    payloads.Add(writeSendTask payload)
+                    return true
+                }
+            let acker = BatchMessageAcker(2)
+            acker.AckIndividual(%0) |> ignore
+            acker.AckIndividual(%1) |> ignore
+            let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Batch(%0, acker); Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let message2 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Batch(%1, acker); Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+
+            ackTracker.AddBatchIndexAcknowledgment(message1, Individual, EmptyProperties)
+            ackTracker.AddBatchIndexAcknowledgment(message2, Individual, EmptyProperties)
+            do! ackTracker.FlushAsync(getState())
+            do! ackTracker.FlushAsync(getState())
+
+            Expect.equal "" 1 payloads.Count
+
+            ackTracker.Close()
+        }
+
+        testTask "Multi-ack message ids are flushed in sorted order" {
+            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let payloads = ResizeArray<byte[]>()
+            let sendPayload _cnx payload =
+                task {
+                    payloads.Add(writeSendTask payload)
+                    return true
+                }
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            let messageId ledgerId entryId =
+                { LedgerId = %ledgerId; EntryId = %entryId; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+
+            ackTracker.AddAcknowledgment(messageId 2L 2L, Individual, EmptyProperties)
+            ackTracker.AddAcknowledgment(messageId 1L 3L, Individual, EmptyProperties)
+            ackTracker.AddAcknowledgment(messageId 2L 1L, Individual, EmptyProperties)
+            ackTracker.AddAcknowledgment(messageId 1L 1L, Individual, EmptyProperties)
+            do! ackTracker.FlushAsync(getState())
+
+            Expect.equal "" 1 payloads.Count
+            Expect.equal "" [ (1UL, 1UL); (1UL, 3UL); (2UL, 1UL); (2UL, 2UL) ] (readAckMessageIds payloads[0])
+
+            ackTracker.Close()
+        }
+
+        testTask "Batch multi-ack message ids are flushed in sorted order" {
+            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let payloads = ResizeArray<byte[]>()
+            let sendPayload _cnx payload =
+                task {
+                    payloads.Add(writeSendTask payload)
+                    return true
+                }
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            let batchMessageId ledgerId entryId =
+                let acker = BatchMessageAcker(1)
+                acker.AckIndividual(%0) |> ignore
+                { LedgerId = %ledgerId; EntryId = %entryId; Type = MessageIdType.Batch(%0, acker); Partition = 0; TopicName = %""; ChunkMessageIds = None }
+
+            ackTracker.AddBatchIndexAcknowledgment(batchMessageId 2L 2L, Individual, EmptyProperties)
+            ackTracker.AddBatchIndexAcknowledgment(batchMessageId 1L 3L, Individual, EmptyProperties)
+            ackTracker.AddBatchIndexAcknowledgment(batchMessageId 2L 1L, Individual, EmptyProperties)
+            ackTracker.AddBatchIndexAcknowledgment(batchMessageId 1L 1L, Individual, EmptyProperties)
+            do! ackTracker.FlushAsync(getState())
+
+            Expect.equal "" 1 payloads.Count
+            Expect.equal "" [ (1UL, 1UL); (1UL, 3UL); (2UL, 1UL); (2UL, 2UL) ] (readAckMessageIds payloads[0])
+
+            ackTracker.Close()
         }
     ]
