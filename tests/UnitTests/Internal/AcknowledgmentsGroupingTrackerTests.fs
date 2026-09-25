@@ -174,7 +174,7 @@ let tests =
                     return payloads.Count > 1
                 }
             let messageId = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
-            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.MaxValue, getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
 
             ackTracker.AddAcknowledgment(messageId, Individual, EmptyProperties)
             do! ackTracker.FlushAsync(getState())
@@ -199,7 +199,7 @@ let tests =
             acker.AckIndividual(%1) |> ignore
             let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Batch(%0, acker); Partition = 0; TopicName = %""; ChunkMessageIds = None }
             let message2 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Batch(%1, acker); Partition = 0; TopicName = %""; ChunkMessageIds = None }
-            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.MaxValue, getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
 
             ackTracker.AddBatchIndexAcknowledgment(message1, Individual, EmptyProperties)
             ackTracker.AddBatchIndexAcknowledgment(message2, Individual, EmptyProperties)
@@ -221,7 +221,7 @@ let tests =
                     return true
                 }
             let messageId = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
-            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.MaxValue, getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
 
             ackTracker.AddAcknowledgment(messageId, Individual, EmptyProperties)
             do! ackTracker.FlushAsync(getState())
@@ -245,7 +245,7 @@ let tests =
             acker.AckIndividual(%1) |> ignore
             let message1 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Batch(%0, acker); Partition = 0; TopicName = %""; ChunkMessageIds = None }
             let message2 = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Batch(%1, acker); Partition = 0; TopicName = %""; ChunkMessageIds = None }
-            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.MaxValue, getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
 
             ackTracker.AddBatchIndexAcknowledgment(message1, Individual, EmptyProperties)
             ackTracker.AddBatchIndexAcknowledgment(message2, Individual, EmptyProperties)
@@ -265,7 +265,7 @@ let tests =
                     payloads.Add(writeSendTask payload)
                     return true
                 }
-            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.MaxValue, getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             let messageId ledgerId entryId =
                 { LedgerId = %ledgerId; EntryId = %entryId; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
 
@@ -289,7 +289,7 @@ let tests =
                     payloads.Add(writeSendTask payload)
                     return true
                 }
-            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.MaxValue, getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
             let batchMessageId ledgerId entryId =
                 let acker = BatchMessageAcker(1)
                 acker.AckIndividual(%0) |> ignore
