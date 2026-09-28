@@ -216,6 +216,24 @@ let tests =
             tracker.GetContext(metadata2) |> Expect.isError ""
         }
 
+        test "In-order chunk id equal to the original chunk count is rejected" {
+            let tracker = ChunkedMessageTracker("ChunkedMessageTracker_9", 2, true, TimeSpan.Zero, fun _ _ -> ())
+            let metadata0 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 3; Uuid = %"1" }
+            let msgId0 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessage0 = { testRawMessage with MessageId = msgId0; Metadata = metadata0; Payload = new MemoryStream [| 1uy |] }
+            match tracker.GetContext(metadata0) with
+            | Ok ctx -> tracker.MessageReceived(rawMessage0, msgId0, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            let metadata1 = { testMetadata with NumChunks = 4; TotalChunkMsgSize = 3; Uuid = %"1"; ChunkId = %1 }
+            let msgId1 = { EntryId = %2L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 2uy |] }
+            match tracker.GetContext(metadata1) with
+            | Ok ctx -> tracker.MessageReceived(rawMessage1, msgId1, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            let metadata2 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 3; Uuid = %"1"; ChunkId = %2 }
+            tracker.GetContext(metadata2) |> Expect.isError ""
+        }
+
         test "Wrong chunk order handled as expected" {
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_5", 2, true, TimeSpan.Zero, fun _ _ -> ())
             let metadata1 = { testMetadata with NumChunks = 3; TotalChunkMsgSize = 3 }
