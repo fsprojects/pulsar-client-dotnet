@@ -219,13 +219,13 @@ let tests =
             match tracker.GetContext(metadataB) with
             | Ok ctx -> tracker.MessageReceived(rawMessageB, msgIdB, ctx, testCodec) |> Expect.isNone ""
             | _ -> failwith "No context"
-            do! Task.Delay 70
-            // chunk 0 of A delivered again, A is now younger than B
+            // both messages are expired now
+            do! Task.Delay 150
+            // chunk 0 of A delivered again, A is restarted and no longer expired
             match tracker.GetContext(metadataA) with
             | Ok ctx -> tracker.MessageReceived(rawMessageA, msgIdA, ctx, testCodec) |> Expect.isNone ""
             | _ -> failwith "No context"
-            do! Task.Delay 70
-            // B is expired, A is not
+            // B is expired, A is not; without any wait in between the outcome does not depend on scheduling
             tracker.RemoveExpireIncompleteChunkedMessages()
             Expect.sequenceEqual "" [ msgIdB ] acked
             let metadataA1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"A"; ChunkId = %1 }
