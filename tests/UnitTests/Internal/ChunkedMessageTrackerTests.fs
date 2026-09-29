@@ -71,7 +71,7 @@ let tests =
 
         test "Two-message chunk works" {
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_2", 2, true, TimeSpan.Zero, fun _ _ -> ())
-            let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 1 }
+            let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2 }
             let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
             let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 1uy |] }
             let context = tracker.GetContext(metadata1)
@@ -104,7 +104,7 @@ let tests =
                 xShouldAck <- shouldAck
                 xMsgId <- msgId
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_3", 1, false, TimeSpan.Zero, ackOrTrack) // one pending context allowed
-            let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 1; Uuid = %"1" }
+            let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"1" }
             let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
             let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 1uy |] }
             let context = tracker.GetContext(metadata1)
@@ -138,7 +138,7 @@ let tests =
                 xShouldAck <- shouldAck
                 xMsgId <- msgId
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_4", 2, false, TimeSpan.FromMilliseconds(50.0), ackOrTrack) // one pending context allowed
-            let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 1; Uuid = %"1" }
+            let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"1" }
             let msgId1 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
             let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 1uy |] }
             let context = tracker.GetContext(metadata1)
@@ -310,5 +310,43 @@ let tests =
             let metadata2 = { testMetadata with NumChunks = 3; TotalChunkMsgSize = 3; ChunkId = %2 }
             let context = tracker.GetContext(metadata2)
             Expect.isError "" context
+        }
+
+        test "Chunk with a changed total size is rejected" {
+            let tracker = ChunkedMessageTracker("ChunkedMessageTracker_12", 2, true, TimeSpan.Zero, fun _ _ -> ())
+            let metadata0 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"1" }
+            let msgId0 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessage0 = { testRawMessage with MessageId = msgId0; Metadata = metadata0; Payload = new MemoryStream [| 1uy |] }
+            match tracker.GetContext(metadata0) with
+            | Ok ctx -> tracker.MessageReceived(rawMessage0, msgId0, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 3; Uuid = %"1"; ChunkId = %1 }
+            tracker.GetContext(metadata1) |> Expect.isError ""
+            // the message is dropped and the uuid can start over
+            tracker.GetContext(metadata0) |> Expect.isOk ""
+        }
+
+        test "Chunk exceeding the declared total size is discarded" {
+            let tracked = ResizeArray<MessageId * bool>()
+            let tracker = ChunkedMessageTracker("ChunkedMessageTracker_13", 2, true, TimeSpan.Zero, fun msgId autoAck -> tracked.Add (msgId, autoAck))
+            // 16 bytes is the smallest array the pool hands out, so the buffer has no slack
+            let metadata0 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 16; Uuid = %"1" }
+            let msgId0 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessage0 = { testRawMessage with MessageId = msgId0; Metadata = metadata0; Payload = new MemoryStream (Array.create 16 1uy) }
+            match tracker.GetContext(metadata0) with
+            | Ok ctx -> tracker.MessageReceived(rawMessage0, msgId0, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 16; Uuid = %"1"; ChunkId = %1 }
+            let msgId1 = { EntryId = %2L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 2uy |] }
+            match tracker.GetContext(metadata1) with
+            | Ok ctx -> tracker.MessageReceived(rawMessage1, msgId1, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            // the offending chunk is handed back for tracking, the message is dropped and the uuid can start over
+            Expect.sequenceEqual "" [ msgId1, false ] tracked
+            match tracker.GetContext(metadata1) with
+            | Ok _ -> failwith "Context survived the overrun"
+            | Error _ -> ()
+            tracker.GetContext(metadata0) |> Expect.isOk ""
         }
     ]

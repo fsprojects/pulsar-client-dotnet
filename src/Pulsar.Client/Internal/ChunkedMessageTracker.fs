@@ -25,6 +25,8 @@ type internal ChunkedMessageCtx(totalChunksCount: int, totalChunksSize: int) =
             lastChunkId <- msg.Metadata.ChunkId
         member this.LastChunkId = lastChunkId
         member this.TotalChunksCount = totalChunksCount
+        member this.TotalChunksSize = totalChunksSize
+        member this.CurrentBufferLength = currentBufferLength
         member this.ChunkedMessageIds = chunkedMessageIds
         member this.Decompress (uncompressedSize, codec: ICompressionCodec) =
             codec.Decode(uncompressedSize, chunkedMsgBuffer, currentBufferLength)
@@ -71,27 +73,39 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
         else
             match chunkedMessagesMap.TryGetValue(metadata.Uuid) with
             | true, ctx ->
-                if metadata.NumChunks <> ctx.TotalChunksCount || metadata.ChunkId <> ctx.LastChunkId + %1 || %metadata.ChunkId >= ctx.TotalChunksCount then
+                if metadata.NumChunks <> ctx.TotalChunksCount || metadata.TotalChunkMsgSize <> ctx.TotalChunksSize
+                   || metadata.ChunkId <> ctx.LastChunkId + %1 || %metadata.ChunkId >= ctx.TotalChunksCount then
                     ctx.Dispose()
                     chunkedMessagesMap.Remove(metadata.Uuid) |> ignore
                     pendingChunkedMessageUuidQueue.Remove(metadata.Uuid) |> ignore
-                    Error <| $"Received unexpected chunk uuid = {metadata.Uuid}, last-chunk-id = {ctx.LastChunkId}, chunkId = {metadata.ChunkId}, total-chunks = {metadata.NumChunks}, expected-total-chunks = {ctx.TotalChunksCount}"
+                    Error <| $"Received unexpected chunk uuid = {metadata.Uuid}, last-chunk-id = {ctx.LastChunkId}, chunkId = {metadata.ChunkId}, total-chunks = {metadata.NumChunks}, expected-total-chunks = {ctx.TotalChunksCount}, total-chunk-msg-size = {metadata.TotalChunkMsgSize}, expected-total-chunk-msg-size = {ctx.TotalChunksSize}"
                 else
                     Ok ctx
             | _ ->
                 Error <| $"Received unexpected chunk uuid = %A{metadata.Uuid}, chunkId = %A{metadata.ChunkId}, total-chunks = %A{metadata.NumChunks}"
-    member this.MessageReceived (rawMessage, msgId: MessageId, ctx: ChunkedMessageCtx, codec: ICompressionCodec) =
-        ctx.MessageReceived rawMessage
-        // if final chunk is not received yet then release payload and return
-        if %rawMessage.Metadata.ChunkId = rawMessage.Metadata.NumChunks - 1 then
+    member this.MessageReceived (rawMessage: RawMessage, msgId: MessageId, ctx: ChunkedMessageCtx, codec: ICompressionCodec) =
+        let payloadLength = int rawMessage.Payload.Length
+        if ctx.CurrentBufferLength + payloadLength > ctx.TotalChunksSize then
+            // the chunks add up to more than the declared size, the message is malformed and would overrun the buffer
+            Log.Logger.LogWarning("{0} Discarding chunked message uuid = {1}, chunkId = {2} with {3} bytes exceeds total-chunk-msg-size = {4} after {5} bytes, msgId = {6}",
+                                  prefix, rawMessage.Metadata.Uuid, rawMessage.Metadata.ChunkId, payloadLength, ctx.TotalChunksSize, ctx.CurrentBufferLength, msgId)
             chunkedMessagesMap.Remove rawMessage.Metadata.Uuid |> ignore
             pendingChunkedMessageUuidQueue.Remove rawMessage.Metadata.Uuid |> ignore
-            let decompressedPayload = ctx.Decompress(rawMessage.Metadata.UncompressedMessageSize, codec)
-            let chunkMsgIds = Some ctx.ChunkedMessageIds
             ctx.Dispose()
-            Some (decompressedPayload, { msgId with ChunkMessageIds = chunkMsgIds } )
-        else
+            ackOrTrack msgId false
             None
+        else
+            ctx.MessageReceived rawMessage
+            // if final chunk is not received yet then release payload and return
+            if %rawMessage.Metadata.ChunkId = rawMessage.Metadata.NumChunks - 1 then
+                chunkedMessagesMap.Remove rawMessage.Metadata.Uuid |> ignore
+                pendingChunkedMessageUuidQueue.Remove rawMessage.Metadata.Uuid |> ignore
+                let decompressedPayload = ctx.Decompress(rawMessage.Metadata.UncompressedMessageSize, codec)
+                let chunkMsgIds = Some ctx.ChunkedMessageIds
+                ctx.Dispose()
+                Some (decompressedPayload, { msgId with ChunkMessageIds = chunkMsgIds } )
+            else
+                None
 
     member this.RemoveExpireIncompleteChunkedMessages() =
         if pendingChunkedMessageUuidQueue.Count > 0 then
