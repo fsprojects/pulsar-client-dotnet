@@ -24,6 +24,7 @@ type internal ChunkedMessageCtx(totalChunksCount: int, totalChunksSize: int) =
             currentBufferLength <- currentBufferLength + int msg.Payload.Length
             lastChunkId <- msg.Metadata.ChunkId
         member this.LastChunkId = lastChunkId
+        member this.TotalChunksCount = totalChunksCount
         member this.ChunkedMessageIds = chunkedMessageIds
         member this.Decompress (uncompressedSize, codec: ICompressionCodec) =
             codec.Decode(uncompressedSize, chunkedMsgBuffer, currentBufferLength)
@@ -69,11 +70,11 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
         else
             match chunkedMessagesMap.TryGetValue(metadata.Uuid) with
             | true, ctx ->
-                if metadata.ChunkId <> ctx.LastChunkId + %1 || %metadata.ChunkId >= metadata.NumChunks then
+                if metadata.NumChunks <> ctx.TotalChunksCount || metadata.ChunkId <> ctx.LastChunkId + %1 || %metadata.ChunkId >= ctx.TotalChunksCount then
                     ctx.Dispose()
                     chunkedMessagesMap.Remove(metadata.Uuid) |> ignore
                     pendingChunkedMessageUuidQueue.Remove(metadata.Uuid) |> ignore
-                    Error <| $"Received unexpected chunk uuid = {metadata.Uuid}, last-chunk-id = {ctx.LastChunkId}, chunkId = {metadata.ChunkId}, total-chunks = {metadata.NumChunks}"
+                    Error <| $"Received unexpected chunk uuid = {metadata.Uuid}, last-chunk-id = {ctx.LastChunkId}, chunkId = {metadata.ChunkId}, total-chunks = {metadata.NumChunks}, expected-total-chunks = {ctx.TotalChunksCount}"
                 else
                     Ok ctx
             | _ ->
