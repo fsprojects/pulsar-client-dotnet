@@ -204,6 +204,68 @@ let tests =
             Expect.isEmpty "" acked
         }
 
+        testTask "Restarted message does not hide an older expired message behind it" {
+            let acked = ResizeArray<MessageId>()
+            let tracker = ChunkedMessageTracker("ChunkedMessageTracker_10", 0, false, TimeSpan.FromMilliseconds(100.0), fun msgId _ -> acked.Add msgId)
+            let metadataA = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"A" }
+            let msgIdA = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessageA = { testRawMessage with MessageId = msgIdA; Metadata = metadataA; Payload = new MemoryStream [| 1uy |] }
+            match tracker.GetContext(metadataA) with
+            | Ok ctx -> tracker.MessageReceived(rawMessageA, msgIdA, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            let metadataB = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"B" }
+            let msgIdB = { EntryId = %2L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessageB = { testRawMessage with MessageId = msgIdB; Metadata = metadataB; Payload = new MemoryStream [| 1uy |] }
+            match tracker.GetContext(metadataB) with
+            | Ok ctx -> tracker.MessageReceived(rawMessageB, msgIdB, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            do! Task.Delay 70
+            // chunk 0 of A delivered again, A is now younger than B
+            match tracker.GetContext(metadataA) with
+            | Ok ctx -> tracker.MessageReceived(rawMessageA, msgIdA, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            do! Task.Delay 70
+            // B is expired, A is not
+            tracker.RemoveExpireIncompleteChunkedMessages()
+            Expect.sequenceEqual "" [ msgIdB ] acked
+            let metadataA1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"A"; ChunkId = %1 }
+            tracker.GetContext(metadataA1) |> Expect.isOk ""
+        }
+
+        test "Overflow evicts the oldest message, not a restarted one" {
+            let acked = ResizeArray<MessageId>()
+            let tracker = ChunkedMessageTracker("ChunkedMessageTracker_11", 2, false, TimeSpan.Zero, fun msgId _ -> acked.Add msgId)
+            let metadataA = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"A" }
+            let msgIdA = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessageA = { testRawMessage with MessageId = msgIdA; Metadata = metadataA; Payload = new MemoryStream [| 1uy |] }
+            match tracker.GetContext(metadataA) with
+            | Ok ctx -> tracker.MessageReceived(rawMessageA, msgIdA, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            let metadataB = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"B" }
+            let msgIdB = { EntryId = %2L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessageB = { testRawMessage with MessageId = msgIdB; Metadata = metadataB; Payload = new MemoryStream [| 1uy |] }
+            match tracker.GetContext(metadataB) with
+            | Ok ctx -> tracker.MessageReceived(rawMessageB, msgIdB, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            // chunk 0 of A delivered again, A is now younger than B
+            match tracker.GetContext(metadataA) with
+            | Ok ctx -> tracker.MessageReceived(rawMessageA, msgIdA, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            // a third message overflows the queue, B must go
+            let metadataC = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"C" }
+            tracker.GetContext(metadataC) |> Expect.isOk ""
+            Expect.sequenceEqual "" [ msgIdB ] acked
+            let metadataA1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"A"; ChunkId = %1 }
+            let msgIdA1 = { EntryId = %3L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessageA1 = { testRawMessage with MessageId = msgIdA1; Metadata = metadataA1; Payload = new MemoryStream [| 2uy |] }
+            match tracker.GetContext(metadataA1) with
+            | Ok ctx ->
+                match tracker.MessageReceived(rawMessageA1, msgIdA1, ctx, testCodec) with
+                | Some (bytes, _) -> Expect.sequenceEqual "" [| 1uy; 2uy |] bytes
+                | None -> failwith "No Message received"
+            | _ -> failwith "No context"
+        }
+
         test "Chunk id equal to the chunk count is rejected" {
             let tracker = ChunkedMessageTracker("ChunkedMessageTracker_8", 2, true, TimeSpan.Zero, fun _ _ -> ())
             let metadata1 = { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"1" }

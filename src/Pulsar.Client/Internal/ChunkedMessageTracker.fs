@@ -58,12 +58,13 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
         if metadata.ChunkId = %0 then
             match chunkedMessagesMap.TryGetValue(metadata.Uuid) with
             | true, oldCtx ->
-                // redelivered first chunk restarts the message, the uuid is already pending
+                // redelivered first chunk restarts the message, it becomes the youngest pending message
                 oldCtx.Dispose()
+                pendingChunkedMessageUuidQueue.Remove(metadata.Uuid) |> ignore
             | _ ->
                 if maxPendingChunkedMessage > 0 && (pendingChunkedMessageUuidQueue.Count + 1) > maxPendingChunkedMessage then
                     removeOldestPendingChunkedMessage()
-                pendingChunkedMessageUuidQueue.AddLast(metadata.Uuid) |> ignore
+            pendingChunkedMessageUuidQueue.AddLast(metadata.Uuid) |> ignore
             let ctx = ChunkedMessageCtx(metadata.NumChunks, metadata.TotalChunkMsgSize)
             chunkedMessagesMap[metadata.Uuid] <- ctx
             Ok ctx
