@@ -75,10 +75,11 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
             | true, ctx ->
                 if metadata.NumChunks <> ctx.TotalChunksCount || metadata.TotalChunkMsgSize <> ctx.TotalChunksSize
                    || metadata.ChunkId <> ctx.LastChunkId + %1 || %metadata.ChunkId >= ctx.TotalChunksCount then
-                    ctx.Dispose()
-                    chunkedMessagesMap.Remove(metadata.Uuid) |> ignore
+                    let error = $"Received unexpected chunk uuid = {metadata.Uuid}, last-chunk-id = {ctx.LastChunkId}, chunkId = {metadata.ChunkId}, total-chunks = {metadata.NumChunks}, expected-total-chunks = {ctx.TotalChunksCount}, total-chunk-msg-size = {metadata.TotalChunkMsgSize}, expected-total-chunk-msg-size = {ctx.TotalChunksSize}"
+                    // the chunks received so far go to the unacked tracker, the caller deals with the current chunk
                     pendingChunkedMessageUuidQueue.Remove(metadata.Uuid) |> ignore
-                    Error <| $"Received unexpected chunk uuid = {metadata.Uuid}, last-chunk-id = {ctx.LastChunkId}, chunkId = {metadata.ChunkId}, total-chunks = {metadata.NumChunks}, expected-total-chunks = {ctx.TotalChunksCount}, total-chunk-msg-size = {metadata.TotalChunkMsgSize}, expected-total-chunk-msg-size = {ctx.TotalChunksSize}"
+                    removeChunkMessage metadata.Uuid ctx false
+                    Error error
                 else
                     Ok ctx
             | _ ->
@@ -89,9 +90,9 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
             // the chunks add up to more than the declared size, the message is malformed and would overrun the buffer
             Log.Logger.LogWarning("{0} Discarding chunked message uuid = {1}, chunkId = {2} with {3} bytes exceeds total-chunk-msg-size = {4} after {5} bytes, msgId = {6}",
                                   prefix, rawMessage.Metadata.Uuid, rawMessage.Metadata.ChunkId, payloadLength, ctx.TotalChunksSize, ctx.CurrentBufferLength, msgId)
-            chunkedMessagesMap.Remove rawMessage.Metadata.Uuid |> ignore
+            // the chunks received so far and the current chunk go to the unacked tracker
             pendingChunkedMessageUuidQueue.Remove rawMessage.Metadata.Uuid |> ignore
-            ctx.Dispose()
+            removeChunkMessage rawMessage.Metadata.Uuid ctx false
             ackOrTrack msgId false
             None
         else

@@ -342,11 +342,33 @@ let tests =
             match tracker.GetContext(metadata1) with
             | Ok ctx -> tracker.MessageReceived(rawMessage1, msgId1, ctx, testCodec) |> Expect.isNone ""
             | _ -> failwith "No context"
-            // the offending chunk is handed back for tracking, the message is dropped and the uuid can start over
-            Expect.sequenceEqual "" [ msgId1, false ] tracked
+            // the received chunks and the offending chunk are handed back for tracking, the message is dropped and the uuid can start over
+            Expect.sequenceEqual "" [ msgId0, false; msgId1, false ] tracked
             match tracker.GetContext(metadata1) with
             | Ok _ -> failwith "Context survived the overrun"
             | Error _ -> ()
+            tracker.GetContext(metadata0) |> Expect.isOk ""
+        }
+
+        test "Rejected chunk hands the received chunks back for tracking" {
+            let tracked = ResizeArray<MessageId * bool>()
+            let tracker = ChunkedMessageTracker("ChunkedMessageTracker_14", 2, true, TimeSpan.Zero, fun msgId autoAck -> tracked.Add (msgId, autoAck))
+            let metadata0 = { testMetadata with NumChunks = 3; TotalChunkMsgSize = 3; Uuid = %"1" }
+            let msgId0 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessage0 = { testRawMessage with MessageId = msgId0; Metadata = metadata0; Payload = new MemoryStream [| 1uy |] }
+            match tracker.GetContext(metadata0) with
+            | Ok ctx -> tracker.MessageReceived(rawMessage0, msgId0, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            let metadata1 = { testMetadata with NumChunks = 3; TotalChunkMsgSize = 3; Uuid = %"1"; ChunkId = %1 }
+            let msgId1 = { EntryId = %2L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None  }
+            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 2uy |] }
+            match tracker.GetContext(metadata1) with
+            | Ok ctx -> tracker.MessageReceived(rawMessage1, msgId1, ctx, testCodec) |> Expect.isNone ""
+            | _ -> failwith "No context"
+            // chunk 1 again instead of chunk 2 is out of order, the caller deals with that chunk itself
+            tracker.GetContext(metadata1) |> Expect.isError ""
+            // the chunks received so far must not be forgotten, they go to the unacked tracker for redelivery
+            Expect.sequenceEqual "" [ msgId0, false; msgId1, false ] tracked
             tracker.GetContext(metadata0) |> Expect.isOk ""
         }
     ]
