@@ -507,10 +507,60 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     }
 
     let mb = Channel.CreateUnbounded<ProducerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mutable currentMessage : ProducerMessage<'T> option = None
+    let mutable mailboxFailed = false
+
+    let failOutstandingRequest (msg: ProducerMessage<'T>) (ex: exn) =
+        match msg with
+        | BeginSendMessage sendRequest ->
+            let struct (_, channel, _) = sendRequest
+            channel.TrySetException(ex) |> ignore
+        | Flush channel ->
+            channel.TrySetException(ex) |> ignore
+        | Close channel ->
+            channel.TrySetResult(Error ex) |> ignore
+        | GetStats channel ->
+            channel.TrySetException(ex) |> ignore
+        | _ -> ()
+
+    let failMailbox (ex: exn) =
+        if not mailboxFailed then
+            mailboxFailed <- true
+            Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+            try
+                match connectionHandler.ConnectionState with
+                | Ready clientCnx ->
+                    // release the producer at the broker, otherwise its name stays registered until the connection drops
+                    clientCnx.SendAndForget(Commands.newCloseProducer producerId (Generators.getNextRequestId()))
+                    clientCnx.RemoveProducer producerId
+                | _ ->
+                    ()
+            with closeEx ->
+                Log.Logger.LogWarning(closeEx, "{0} failed to close producer at the broker after mailbox failure", prefix)
+            connectionHandler.Failed()
+            try
+                failPendingMessages ex
+            with pendingEx ->
+                Log.Logger.LogWarning(pendingEx, "{0} failed to fail pending sends after mailbox failure", prefix)
+            currentMessage |> Option.iter (fun msg -> failOutstandingRequest msg ex)
+            producerCreatedTsc.TrySetException(ex) |> ignore
+            stopProducer()
+            // sends that passed the active check just before the failure are still posted here
+            backgroundTask {
+                try
+                    while true do
+                        let! msg = mb.Reader.ReadAsync()
+                        failOutstandingRequest msg ex
+                with _ ->
+                    ()
+            } |> ignore
+
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-            match! mb.Reader.ReadAsync() with
+            let! msg = mb.Reader.ReadAsync()
+            currentMessage <- Some msg
+            match msg with
             | ProducerMessage.ConnectionOpened epoch ->
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
@@ -827,9 +877,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             }:> Task).ContinueWith(fun t ->
                 if t.IsFaulted then
                     let (Flatten ex) = t.Exception
-                    Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
-                    connectionHandler.Failed()
-                    stopProducer()
+                    failMailbox ex
                 else
                     Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
@@ -994,7 +1042,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
         member this.DisposeAsync() =
             match connectionHandler.ConnectionState with
-            | Closing | Closed ->
+            | Closing | Closed | Failed ->
                 ValueTask()
             | _ ->
                 backgroundTask {

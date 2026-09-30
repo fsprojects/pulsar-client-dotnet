@@ -66,6 +66,66 @@ let tests =
             Log.Debug("Finished Consumer is closed at the broker when its mailbox fails")
         }
 
+        testTask "Producer is closed at the broker when its mailbox fails" {
+
+            Log.Debug("Started Producer is closed at the broker when its mailbox fails")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let producerName = "failingMailbox"
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .CreateAsync()
+
+            let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
+            // a null message crashes the producer mailbox while handling the send
+            post (producer :?> ProducerImpl<byte[]>).Mb
+                (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
+
+            let crashed =
+                task {
+                    try
+                        let! _ = crashingSend.Task
+                        return false
+                    with _ ->
+                        return true
+                }
+            let! sendFailed = crashed.WaitAsync(TimeSpan.FromSeconds(5.0))
+            if not sendFailed then
+                failwith "Crashing send did not fail within 5 seconds"
+
+            let deadline = DateTime.UtcNow.AddSeconds 5.0
+            let mutable connected = true
+            while connected do
+                if DateTime.UtcNow >= deadline then
+                    failwith "Producer did not fail within 5 seconds"
+                let! isConnected = producer.IsConnected()
+                if isConnected then
+                    do! Task.Delay 100
+                connected <- isConnected
+
+            try
+                let! _ = producer.SendAsync([| 1uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
+                failwith "SendAsync succeeded after mailbox failure"
+            with :? NotConnectedException ->
+                ()
+
+            do! producer.DisposeAsync()
+
+            // the producer name must be free for a replacement
+            let! (producer2 : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .CreateAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(15.0))
+            do! producer2.DisposeAsync()
+
+            Log.Debug("Finished Producer is closed at the broker when its mailbox fails")
+        }
+
         testTask "Sent message/messageId should be equal to received message/messageId" {
 
             Log.Debug("Started Sent messageId should be equal to received messageId")
