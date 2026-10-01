@@ -265,6 +265,57 @@ let tests =
             Log.Debug("Finished Batched sends fault when the producer mailbox fails")
         }
 
+        testTask "All key batches fault when a later batch crashes the producer mailbox" {
+
+            Log.Debug("Started All key batches fault when a later batch crashes the producer mailbox")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let failureMessage = "replication clusters enumeration failed"
+            let failingReplicationClusters =
+                seq {
+                    raise (InvalidOperationException failureMessage)
+                    yield ""
+                }
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .EnableBatching(true)
+                    .BatchBuilder(BatchBuilder.KeyBased)
+                    .BatchingMaxMessages(10)
+                    .BatchingMaxPublishDelay(TimeSpan.FromMinutes(1.0))
+                    .CreateAsync()
+
+            let firstSend = producer.SendAsync(producer.NewMessage([| 1uy |], key = "first"))
+            let secondMessage =
+                producer.NewMessage([| 2uy |], key = "second")
+                    .WithReplicateTo(failingReplicationClusters)
+            let secondSend = producer.SendAsync(secondMessage)
+
+            // Key batches are processed by increasing sequence id. The first is added to
+            // pendingMessages, then enumerating the second batch's replication clusters throws.
+            // Both callbacks still remain in the uncleared key-batch container at that point.
+            let flush = producer.FlushAsync()
+
+            let assertBatchFailure (work: Task<'T>) = task {
+                try
+                    let! _ = work.WaitAsync(TimeSpan.FromSeconds(5.0))
+                    failwith "Task completed successfully after the key batch crashed the mailbox"
+                with ex ->
+                    match unwrap ex with
+                    | :? InvalidOperationException as failure when failure.Message = failureMessage -> ()
+                    | :? TimeoutException -> failwith "Task did not fault within 5 seconds"
+                    | other -> failwith $"Expected the key batch exception but got {other.GetType().Name}: {other.Message}"
+            }
+
+            do! assertBatchFailure firstSend
+            do! assertBatchFailure secondSend
+            do! assertBatchFailure flush
+            do! producer.DisposeAsync()
+
+            Log.Debug("Finished All key batches fault when a later batch crashes the producer mailbox")
+        }
+
         testTask "BlockIfQueueFull sends fault when the producer mailbox fails" {
 
             Log.Debug("Started BlockIfQueueFull sends fault when the producer mailbox fails")

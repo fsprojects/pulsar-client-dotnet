@@ -102,7 +102,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let failMessage (message: MessageBuilder<'T>) (tcs: TaskCompletionSource<MessageId> option) (ex: exn) =
         interceptors.OnSendAcknowledgement(this, message, Unchecked.defaultof<MessageId>, ex)
         stats.IncrementSendFailed()
-        tcs |> Option.iter _.SetException(ex)
+        tcs |> Option.iter (fun tcs -> tcs.TrySetException(ex) |> ignore)
 
     let failPendingMessage msg (ex: exn) =
         match msg.Callback with
@@ -125,7 +125,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             failPendingMessage msg ex
         while blockedRequests.Count > 0 do
             let struct(_, channel, _) = blockedRequests.Dequeue()
-            channel.SetException ex
+            channel.TrySetException(ex) |> ignore
         if producerConfig.BatchingEnabled then
             failPendingBatchMessages ex
 
