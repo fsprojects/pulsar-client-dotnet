@@ -2,6 +2,7 @@
 
 open System
 open System.Text
+open System.Text.Json
 open Expecto
 
 open System.Threading.Tasks
@@ -121,6 +122,18 @@ let consumeMessagesAndCheckEncryption (consumer: IConsumer<byte[]>) number consu
     }
 
 
+let getBrokerConsumerStats (topicName: string) (subscription: string) =
+    task {
+        let! (response : string) = commonHttpClient.GetStringAsync($"{pulsarHttpAddress}/admin/v2/persistent/{topicName}/stats")
+        let consumer =
+            JsonDocument.Parse(response).RootElement
+                .GetProperty("subscriptions").GetProperty(subscription)
+                .GetProperty("consumers").[0]
+        return struct (consumer.GetProperty("msgOutCounter").GetInt64(),
+                       consumer.GetProperty("unackedMessages").GetInt64(),
+                       consumer.GetProperty("availablePermits").GetInt32())
+    }
+
 [<Tests>]
 let tests =
     testList "MessageCrypto" [
@@ -172,6 +185,58 @@ let tests =
             do! encryptedProducer.DisposeAsync()
             do! plainProducer.DisposeAsync()
             Log.Debug("Ended Discarded undecryptable messages return flow permits")
+        }
+
+        testTask "Discarded undecryptable batch returns a permit for every message in it" {
+            Log.Debug("Started Discarded undecryptable batch returns a permit for every message in it")
+            let client = getClient ()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let subscriptionName = "test-subscription"
+            let receiverQueueSize = 4
+            let batchSize = 3
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("discardBatchConsumer")
+                    .SubscriptionName(subscriptionName)
+                    .ReceiverQueueSize(receiverQueueSize)
+                    .CryptoFailureAction(ConsumerCryptoFailureAction.DISCARD)
+                    .SubscribeAsync()
+
+            let! (encryptedProducer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .EnableBatching(true)
+                    .BatchingMaxMessages(batchSize)
+                    .BatchingMaxPublishDelay(TimeSpan.FromSeconds(10.0))
+                    .MessageEncryptor(MessageEncryptor([|"Rsa1024key1"|], ProducerKeyReader()))
+                    .CreateAsync()
+
+            let! (messageIds : MessageId[]) =
+                [| for i in 1..batchSize -> encryptedProducer.SendAsync(Encoding.UTF8.GetBytes $"encrypted {i}") |]
+                |> Task.WhenAll
+            let entries = messageIds |> Array.distinctBy (fun id -> id.LedgerId, id.EntryId)
+            Expect.hasLength entries 1 "all messages should be published in a single batch"
+
+            // the broker charges one permit per message in the batch; once the batch has been
+            // dispatched and discarded (acked) every permit has to be back at the broker
+            let dispatchedAndDiscarded (struct (msgOut, unacked, _)) = msgOut >= int64 batchSize && unacked = 0L
+            let mutable stats = struct (0L, 0L, 0)
+            let mutable attempts = 0
+            while not (dispatchedAndDiscarded stats) && attempts < 50 do
+                do! Task.Delay 100
+                let! (current : struct (int64 * int64 * int)) = getBrokerConsumerStats topicName subscriptionName
+                stats <- current
+                attempts <- attempts + 1
+            let struct (msgOut, unacked, permits) = stats
+            Expect.equal msgOut (int64 batchSize) "messages dispatched to the consumer"
+            Expect.equal unacked 0L "discarded batch should be acked"
+            Expect.equal permits receiverQueueSize "available permits at the broker"
+
+            do! consumer.UnsubscribeAsync()
+            do! encryptedProducer.DisposeAsync()
+            Log.Debug("Ended Discarded undecryptable batch returns a permit for every message in it")
         }
 
         testTask "Simple encryption send message" {
