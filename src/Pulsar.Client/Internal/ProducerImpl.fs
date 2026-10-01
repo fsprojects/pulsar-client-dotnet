@@ -530,9 +530,21 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             try
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
-                    // release the producer at the broker, otherwise its name stays registered until the connection drops
-                    clientCnx.SendAndForget(Commands.newCloseProducer producerId (Generators.getNextRequestId()))
-                    clientCnx.RemoveProducer producerId
+                    // release the producer at the broker, otherwise its name stays registered until the connection drops.
+                    // the mailbox can no longer wait inline; register the request so the broker Success completes it
+                    // instead of being logged as a non-existent request, and drop the local producer even if that reply fails
+                    let requestId = Generators.getNextRequestId()
+                    let payload = Commands.newCloseProducer producerId requestId
+                    backgroundTask {
+                        try
+                            try
+                                let! response = clientCnx.SendAndWaitForReply requestId payload
+                                response |> PulsarResponseType.GetEmpty
+                            with Flatten closeEx ->
+                                Log.Logger.LogWarning(closeEx, "{0} failed to close producer at the broker after mailbox failure", prefix)
+                        finally
+                            clientCnx.RemoveProducer producerId
+                    } |> ignore
                 | _ ->
                     ()
             with closeEx ->
@@ -542,7 +554,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 failPendingMessages ex
             with pendingEx ->
                 Log.Logger.LogWarning(pendingEx, "{0} failed to fail pending sends after mailbox failure", prefix)
-            currentMessage |> Option.iter (fun msg -> failOutstandingRequest msg ex)
+            try
+                currentMessage |> Option.iter (fun msg -> failOutstandingRequest msg ex)
+            with currentEx ->
+                Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
             producerCreatedTsc.TrySetException(ex) |> ignore
             stopProducer()
             // sends that passed the active check just before the failure are still posted here
