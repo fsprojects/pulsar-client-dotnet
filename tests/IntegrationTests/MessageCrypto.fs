@@ -1,8 +1,11 @@
 ﻿module Pulsar.Client.IntegrationTests.MessageCrypto
 
 open System
+open System.IO
 open System.Text
+open System.Text.Json
 open Expecto
+open ProtoBuf
 
 open System.Threading.Tasks
 open Pulsar.Client.Api
@@ -94,6 +97,21 @@ type Consumer2KeyReader() =
         member this.GetPrivateKey(keyName, _) =
             { Key = Encoding.UTF8.GetBytes(privateKeysConsumer2.Item keyName); Metadata = null }
 
+[<ProtoContract>]
+type BatchItemMetadata() =
+    [<ProtoMember(3)>]
+    member val PayloadSize = 0 with get, set
+
+/// Decrypts a batch and cuts it right after its first item, so the second item cannot be deserialized
+type FirstItemOnlyBatchDecryptor(inner: IMessageDecryptor) =
+    interface IMessageDecryptor with
+        member this.Decrypt(encryptedPayload) =
+            let batch = inner.Decrypt encryptedPayload
+            use stream = new MemoryStream(batch)
+            let firstItem = Serializer.DeserializeWithLengthPrefix<BatchItemMetadata>(stream, PrefixStyle.Fixed32BigEndian)
+            // keep a partial length prefix of the second item
+            Array.sub batch 0 (int stream.Position + firstItem.PayloadSize + 2)
+
 
 let consumeMessagesAndCheckEncryption (consumer: IConsumer<byte[]>) number consumerName =
     task {
@@ -121,9 +139,180 @@ let consumeMessagesAndCheckEncryption (consumer: IConsumer<byte[]>) number consu
     }
 
 
+let getBrokerConsumerStats (topicName: string) (subscription: string) =
+    task {
+        let! (response : string) = commonHttpClient.GetStringAsync($"{pulsarHttpAddress}/admin/v2/persistent/{topicName}/stats")
+        let consumer =
+            JsonDocument.Parse(response).RootElement
+                .GetProperty("subscriptions").GetProperty(subscription)
+                .GetProperty("consumers").[0]
+        return struct (consumer.GetProperty("msgOutCounter").GetInt64(),
+                       consumer.GetProperty("unackedMessages").GetInt64(),
+                       consumer.GetProperty("availablePermits").GetInt32())
+    }
+
+/// Polls the broker until the consumer stats (msgOutCounter, unackedMessages, availablePermits) match, returns the last observed stats
+let waitForBrokerConsumerStats topicName subscription (expected: struct (int64 * int64 * int)) =
+    task {
+        let mutable stats = struct (0L, 0L, 0)
+        let mutable attempts = 0
+        while stats <> expected && attempts < 50 do
+            do! Task.Delay 100
+            let! (current : struct (int64 * int64 * int)) = getBrokerConsumerStats topicName subscription
+            stats <- current
+            attempts <- attempts + 1
+        return stats
+    }
+
 [<Tests>]
 let tests =
     testList "MessageCrypto" [
+        testTask "Discarded undecryptable messages return flow permits" {
+            Log.Debug("Started Discarded undecryptable messages return flow permits")
+            let client = getClient ()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("discardConsumer")
+                    .SubscriptionName("test-subscription")
+                    .ReceiverQueueSize(2)
+                    .CryptoFailureAction(ConsumerCryptoFailureAction.DISCARD)
+                    .SubscribeAsync()
+
+            let! (encryptedProducer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .EnableBatching(false)
+                    .MessageEncryptor(MessageEncryptor([|"Rsa1024key1"|], ProducerKeyReader()))
+                    .CreateAsync()
+
+            let! (plainProducer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+
+            // as many undecryptable messages as the consumer has permits, then one it can read
+            let! (_ : MessageId) = encryptedProducer.SendAsync(Encoding.UTF8.GetBytes "encrypted 1")
+            let! (_ : MessageId) = encryptedProducer.SendAsync(Encoding.UTF8.GetBytes "encrypted 2")
+            let! (_ : MessageId) = plainProducer.SendAsync(Encoding.UTF8.GetBytes "plain")
+
+            let cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10.0))
+            let! (message : Message<byte[]>) =
+                task {
+                    try
+                        return! consumer.ReceiveAsync(cts.Token)
+                    with :? OperationCanceledException ->
+                        return failwith "Plain message was not delivered after the undecryptable ones were discarded"
+                }
+            cts.Dispose()
+            Expect.equal (Encoding.UTF8.GetString message.Data) "plain" "payload"
+            do! consumer.AcknowledgeAsync(message.MessageId)
+
+            do! consumer.UnsubscribeAsync()
+            do! encryptedProducer.DisposeAsync()
+            do! plainProducer.DisposeAsync()
+            Log.Debug("Ended Discarded undecryptable messages return flow permits")
+        }
+
+        testTask "Discarded undecryptable batch returns a permit for every message in it" {
+            Log.Debug("Started Discarded undecryptable batch returns a permit for every message in it")
+            let client = getClient ()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let subscriptionName = "test-subscription"
+            let receiverQueueSize = 4
+            let batchSize = 3
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("discardBatchConsumer")
+                    .SubscriptionName(subscriptionName)
+                    .ReceiverQueueSize(receiverQueueSize)
+                    .CryptoFailureAction(ConsumerCryptoFailureAction.DISCARD)
+                    .SubscribeAsync()
+
+            let! (encryptedProducer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .EnableBatching(true)
+                    .BatchingMaxMessages(batchSize)
+                    .BatchingMaxPublishDelay(TimeSpan.FromSeconds(10.0))
+                    .MessageEncryptor(MessageEncryptor([|"Rsa1024key1"|], ProducerKeyReader()))
+                    .CreateAsync()
+
+            let! (messageIds : MessageId[]) =
+                [| for i in 1..batchSize -> encryptedProducer.SendAsync(Encoding.UTF8.GetBytes $"encrypted {i}") |]
+                |> Task.WhenAll
+            let entries = messageIds |> Array.distinctBy (fun id -> id.LedgerId, id.EntryId)
+            Expect.hasLength entries 1 "all messages should be published in a single batch"
+
+            // the broker charges one permit per message in the batch; once the batch has been
+            // dispatched and discarded (acked) every permit has to be back at the broker
+            let expected = struct (int64 batchSize, 0L, receiverQueueSize)
+            let! (stats : struct (int64 * int64 * int)) = waitForBrokerConsumerStats topicName subscriptionName expected
+            Expect.equal stats expected "broker consumer stats (msgOut, unacked, availablePermits) after the discard"
+
+            do! consumer.UnsubscribeAsync()
+            do! encryptedProducer.DisposeAsync()
+            Log.Debug("Ended Discarded undecryptable batch returns a permit for every message in it")
+        }
+
+        testTask "Malformed batch returns only the permits of the messages it lost" {
+            Log.Debug("Started Malformed batch returns only the permits of the messages it lost")
+            let client = getClient ()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let subscriptionName = "test-subscription"
+            let receiverQueueSize = 4
+            let batchSize = 3
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("malformedBatchConsumer")
+                    .SubscriptionName(subscriptionName)
+                    .ReceiverQueueSize(receiverQueueSize)
+                    .MessageDecryptor(FirstItemOnlyBatchDecryptor(MessageDecryptor(Consumer1KeyReader())))
+                    .SubscribeAsync()
+
+            let! (encryptedProducer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .EnableBatching(true)
+                    .BatchingMaxMessages(batchSize)
+                    .BatchingMaxPublishDelay(TimeSpan.FromSeconds(10.0))
+                    .MessageEncryptor(MessageEncryptor([|"Rsa1024key1"|], ProducerKeyReader()))
+                    .CreateAsync()
+
+            let! (messageIds : MessageId[]) =
+                [| for i in 1..batchSize -> encryptedProducer.SendAsync(Encoding.UTF8.GetBytes $"encrypted {i}") |]
+                |> Task.WhenAll
+            let entries = messageIds |> Array.distinctBy (fun id -> id.LedgerId, id.EntryId)
+            Expect.hasLength entries 1 "all messages should be published in a single batch"
+
+            // the first item is queued for the application before the batch breaks, so only the
+            // permits of the two lost items come back with the discard
+            let afterDiscard = struct (int64 batchSize, 0L, receiverQueueSize - 1)
+            let! (stats : struct (int64 * int64 * int)) = waitForBrokerConsumerStats topicName subscriptionName afterDiscard
+            Expect.equal stats afterDiscard "broker consumer stats (msgOut, unacked, availablePermits) after the discard"
+
+            let cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10.0))
+            let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
+            cts.Dispose()
+            Expect.equal (Encoding.UTF8.GetString message.Data) "encrypted 1" "the item queued before the batch broke"
+
+            // consuming the queued item returns its own permit, nothing more
+            let afterConsume = struct (int64 batchSize, 0L, receiverQueueSize)
+            let! (stats : struct (int64 * int64 * int)) = waitForBrokerConsumerStats topicName subscriptionName afterConsume
+            Expect.equal stats afterConsume "broker consumer stats (msgOut, unacked, availablePermits) after consuming the queued item"
+
+            do! consumer.UnsubscribeAsync()
+            do! encryptedProducer.DisposeAsync()
+            Log.Debug("Ended Malformed batch returns only the permits of the messages it lost")
+        }
+
         testTask "Simple encryption send message" {
             Log.Debug("Started Simple encryption send message")
             let client = getClient ()

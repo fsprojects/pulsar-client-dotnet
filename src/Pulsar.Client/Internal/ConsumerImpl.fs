@@ -621,7 +621,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 Log.Logger.LogError(ex, "{0} Decompression exception {1}", prefix, rawMessage.MessageId)
                 Error ex
 
-    let discardCorruptedMessage (msgId: MessageId) (clientCnx: ClientCnx) err =
+    let discardCorruptedMessage (msgId: MessageId) (clientCnx: ClientCnx) permits err =
+        increaseAvailablePermits permits
         backgroundTask {
             let command = Commands.newAck consumerId msgId.LedgerId msgId.EntryId Individual
                             EmptyProperties null (Some err) None None None
@@ -759,6 +760,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         isMessageUndecryptable decoder
             elif rawMessage.Metadata.NumMessages > 0 then
                 // handle batch message enqueuing; uncompressed payload has all messages in batch
+                let queuedBefore = incomingMessages.Count
                 match wrapException (fun () ->
                     this.ReceiveIndividualMessagesFromBatch rawMessage decoder isMessageUndecryptable) with
                 | Ok () ->
@@ -771,7 +773,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         replyWithBatch ch
                 | Error ex ->
                     Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
-                    do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.BatchDeSerializeError
+                    // messages already enqueued from this batch return their permits when consumed
+                    let lostMessages = rawMessage.Metadata.NumMessages - (incomingMessages.Count - queuedBefore)
+                    do! discardCorruptedMessage msgId clientCnx lostMessages CommandAck.ValidationError.BatchDeSerializeError
             else
                 Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
         }
@@ -976,10 +980,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                             isChunked decoder
                                 | Error _ ->
                                     decryptedMessage.Payload.Dispose()
-                                    do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecompressionError
+                                    do! discardCorruptedMessage msgId clientCnx rawMessage.Metadata.NumMessages
+                                            CommandAck.ValidationError.DecompressionError
                             else
                                 decryptedMessage.Payload.Dispose()
-                                do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.UncompressedSizeCorruption
+                                do! discardCorruptedMessage msgId clientCnx rawMessage.Metadata.NumMessages
+                                        CommandAck.ValidationError.UncompressedSizeCorruption
                         | Error _ ->
                             use _ = rawMessage.Payload
                             match consumerConfig.ConsumerCryptoFailureAction with
@@ -992,7 +998,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             | ConsumerCryptoFailureAction.DISCARD ->
                                 Log.Logger.LogWarning("{0} {1}. Decryption failed. Discarding encrypted message.",
                                                         prefix, msgId)
-                                do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.DecryptionError
+                                do! discardCorruptedMessage msgId clientCnx rawMessage.Metadata.NumMessages
+                                        CommandAck.ValidationError.DecryptionError
                             | ConsumerCryptoFailureAction.FAIL ->
                                 Log.Logger.LogError("{0} {1}. Decryption failed. Failing encrypted message.",
                                                         prefix, msgId)
@@ -1005,7 +1012,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         increaseAvailablePermits rawMessage.Metadata.NumMessages
                 else
                     rawMessage.Payload.Dispose()
-                    do! discardCorruptedMessage msgId clientCnx CommandAck.ValidationError.ChecksumMismatch
+                    // the metadata of a message that failed its checksum cannot be trusted for the batch size
+                    do! discardCorruptedMessage msgId clientCnx 1 CommandAck.ValidationError.ChecksumMismatch
 
             | ConsumerMessage.Receive receiveCallback ->
 
