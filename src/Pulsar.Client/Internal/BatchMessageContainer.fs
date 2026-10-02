@@ -144,8 +144,12 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
         this.CurrentTxnId <- None
     override this.IsMultiBatches = false
     override this.Discard ex =
-        batchItems |> Seq.iter(fun batchItem -> batchItem.Tcs |> Option.iter (fun tcs -> tcs.SetException ex))
-        this.Clear()
+        try
+            batchItems
+            |> Seq.iter (fun batchItem ->
+                batchItem.Tcs |> Option.iter (fun tcs -> tcs.TrySetException(ex) |> ignore))
+        finally
+            this.Clear()
 
 type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: ProducerConfiguration) =
     inherit MessageContainer<'T>(config)
@@ -212,8 +216,11 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
         this.NumMessagesInBatch <- 0
     override this.IsMultiBatches = true
     override this.Discard ex =
-        keyBatchItems.Values |> Seq.iter(fun batchItems ->
-            batchItems |> Seq.iter (fun batchItem ->
-                batchItem.Tcs |> Option.iter (fun tcs -> tcs.SetException ex)
-            ))
-        this.Clear()
+        try
+            keyBatchItems.Values
+            |> Seq.iter (fun batchItems ->
+                batchItems
+                |> Seq.iter (fun batchItem ->
+                    batchItem.Tcs |> Option.iter (fun tcs -> tcs.TrySetException(ex) |> ignore)))
+        finally
+            this.Clear()
