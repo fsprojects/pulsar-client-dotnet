@@ -40,6 +40,7 @@ type internal BatchAddResponse<'T> =
 
 type internal MultiTopicConsumerMessage<'T> =
     | Init
+    | PollerFailed of exn
     | Receive of ReceiveCallback<'T>
     | BatchReceive of ReceiveCallbacks<'T>
     | MessageReceived of ResultOrException<Message<'T>> * TaskCompletionSource<unit>
@@ -85,6 +86,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let consumerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let pollerCts = new CancellationTokenSource()
     let mutable connectionState = MultiTopicConnectionState.Uninitialized
+    let mutable mailboxStopped = false
     let mutable currentStream = Unchecked.defaultof<TaskSeq<ResultOrException<Message<'T>>>>
     let partitionedTopics = Dictionary<TopicName, ConsumerInitInfo<'T>>()
     let allTopics = HashSet()
@@ -626,11 +628,70 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 if t.IsFaulted then
                     let (Flatten ex) = t.Exception
                     Log.Logger.LogCritical(ex, "{0} poller failure", prefix)
+                    post this.Mb (PollerFailed ex)
                 else
                     Log.Logger.LogInformation("{0} poller has stopped normally", prefix)
             )
 
     let mb = Channel.CreateUnbounded<MultiTopicConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+
+    let replyFromStoppedMailbox (msg: MultiTopicConsumerMessage<'T>) =
+        let ex = AlreadyClosedException "Consumer is already closed"
+        match msg with
+        | Receive receiveCallback ->
+            receiveCallback.MessageChannel.TrySetException ex |> ignore
+        | BatchReceive receiveCallbacks ->
+            receiveCallbacks.MessagesChannel.TrySetException ex |> ignore
+        | MessageReceived (_, pollerChannel) ->
+            pollerChannel.TrySetException ex |> ignore
+        | Acknowledge (channel, _, _)
+        | NegativeAcknowledge (channel, _)
+        | AcknowledgeCumulative (channel, _, _)
+        | Unsubscribe channel
+        | Seek (_, channel)
+        | SeekWithResolver (_, channel)
+        | ReconsumeLater (_, _, channel)
+        | ReconsumeLaterCumulative (_, _, channel) ->
+            channel.TrySetException ex |> ignore
+        | RedeliverAllUnacknowledged (Some channel) ->
+            channel.TrySetException ex |> ignore
+        | HasReachedEndOfTheTopic channel
+        | HasMessageAvailable channel ->
+            channel.TrySetException ex |> ignore
+        | GetStats channel ->
+            channel.TrySetException ex |> ignore
+        | LastDisconnectedTimestamp channel ->
+            channel.TrySetException ex |> ignore
+        | IsConnected channel ->
+            channel.TrySetResult false |> ignore
+        | Close channel ->
+            // the child consumers outlive a failed mailbox, so they still have to be closed
+            backgroundTask {
+                try
+                    let! _ =
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.DisposeAsync().AsTask())
+                        |> Task.WhenAll
+                    ()
+                with Flatten closeEx ->
+                    Log.Logger.LogError(closeEx, "{0} could not close all child consumers properly", prefix)
+                this.ConnectionState <- Closed
+                channel.TrySetResult() |> ignore
+            } |> ignore
+        | _ ->
+            ()
+
+    // requests posted after the mailbox exits would otherwise never be completed
+    let drainStoppedMailbox () =
+        backgroundTask {
+            while true do
+                let! msg = mb.Reader.ReadAsync()
+                try
+                    replyFromStoppedMailbox msg
+                with ex ->
+                    Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
+        } |> ignore
+
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
@@ -668,6 +729,12 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
                 if this.ConnectionState = Failed then
                     continueLoop <- false
+
+            | PollerFailed ex ->
+                Log.Logger.LogError(ex, "{0} stopping because its poller failed", prefix)
+                this.ConnectionState <- Failed
+                stopConsumer()
+                continueLoop <- false
 
             | MessageReceived (message, pollerChannel) ->
 
@@ -1022,13 +1089,17 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         channel.SetException ex
                         continueLoop <- true
         }:> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
-                this.ConnectionState <- Failed
-                stopConsumer()
-            else
-                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+            try
+                if t.IsFaulted then
+                    let (Flatten ex) = t.Exception
+                    Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                    this.ConnectionState <- Failed
+                    stopConsumer()
+                else
+                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
+            finally
+                Volatile.Write(&mailboxStopped, true)
+                drainStoppedMailbox())
     |> ignore
 
     do
@@ -1047,6 +1118,11 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
 
     member private this.Mb with get(): Channel<MultiTopicConsumerMessage<'T>> = mb
+
+    member internal this.Consumers =
+        consumers.Values |> Seq.map fst |> Seq.toArray
+
+    member internal _.MailboxStopped = Volatile.Read(&mailboxStopped)
 
     member this.ConsumerId with get() = consumerId
 

@@ -66,6 +66,82 @@ let tests =
             Log.Debug("Finished Consumer is closed at the broker when its mailbox fails")
         }
 
+        testTask "Requests posted after a consumer mailbox fails are completed" {
+
+            Log.Debug("Started Requests posted after a consumer mailbox fails are completed")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("failingMailboxRequests")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+
+            post (consumer :?> ConsumerImpl<byte[]>).Mb
+                (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
+
+            let deadline = DateTime.UtcNow.AddSeconds 5.0
+            let mutable connected = true
+            while connected do
+                if DateTime.UtcNow >= deadline then
+                    failwith "Consumer did not fail within 5 seconds"
+                let! isConnected = consumer.IsConnected()
+                if isConnected then
+                    do! Task.Delay 100
+                connected <- isConnected
+
+            // GetStats still posts to the mailbox once the consumer has failed, so this only
+            // returns if the stopped mailbox replies
+            Expect.throwsT2<AlreadyClosedException> (fun () ->
+                consumer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            // Receive checks the connection before posting, and must fail rather than wait
+            Expect.throwsT2<NotConnectedException> (fun () ->
+                consumer.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Requests posted after a consumer mailbox fails are completed")
+        }
+
+        testTask "Multi-topic consumer completes requests after a child mailbox fails" {
+
+            Log.Debug("Started Multi-topic consumer completes requests after a child mailbox fails")
+            let client = getClient()
+            let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topics([| topicName1; topicName2 |])
+                    .ConsumerName("failingChildMailbox")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            let child = multiConsumer.Consumers |> Array.head :?> ConsumerImpl<byte[]>
+            post child.Mb
+                (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
+
+            let deadline = DateTime.UtcNow.AddSeconds 15.0
+            let mutable stopped = false
+            while not stopped do
+                if DateTime.UtcNow >= deadline then
+                    failwith "Multi-topic consumer mailbox did not stop within 15 seconds"
+                if multiConsumer.MailboxStopped then
+                    stopped <- true
+                else
+                    do! Task.Delay 100
+
+            Expect.throwsT2<AlreadyClosedException> (fun () ->
+                consumer.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Multi-topic consumer completes requests after a child mailbox fails")
+        }
+
         testTask "Sent message/messageId should be equal to received message/messageId" {
 
             Log.Debug("Started Sent messageId should be equal to received messageId")

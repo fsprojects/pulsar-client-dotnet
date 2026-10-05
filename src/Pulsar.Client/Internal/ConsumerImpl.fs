@@ -857,6 +857,47 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     }
 
     let mb = Channel.CreateUnbounded<ConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+
+    let replyFromStoppedMailbox (msg: ConsumerMessage<'T>) =
+        let ex = AlreadyClosedException "Consumer is already closed"
+        match msg with
+        | Receive receiveCallback ->
+            receiveCallback.MessageChannel.TrySetException ex |> ignore
+        | BatchReceive receiveCallbacks ->
+            receiveCallbacks.MessagesChannel.TrySetException ex |> ignore
+        | Acknowledge (struct(_, _, Some (_, channel))) ->
+            channel.TrySetException ex |> ignore
+        | RedeliverAllUnacknowledged (Some channel) ->
+            channel.TrySetException ex |> ignore
+        | SeekAsync (_, channel) ->
+            channel.TrySetException ex |> ignore
+        | HasMessageAvailable channel ->
+            channel.TrySetException ex |> ignore
+        | GetStats channel ->
+            channel.TrySetException ex |> ignore
+        | ReconsumeLater (_, _, _, channel) ->
+            channel.TrySetException ex |> ignore
+        | ClearIncomingMessagesAndGetMessageNumber channel ->
+            channel.TrySetException ex |> ignore
+        | Unsubscribe channel ->
+            channel.TrySetException ex |> ignore
+        | Close channel ->
+            // the consumer was already stopped when the mailbox exited, so there is nothing left to close
+            channel.TrySetResult() |> ignore
+        | _ ->
+            ()
+
+    // requests posted after the mailbox exits would otherwise never be completed
+    let drainStoppedMailbox () =
+        backgroundTask {
+            while true do
+                let! msg = mb.Reader.ReadAsync()
+                try
+                    replyFromStoppedMailbox msg
+                with ex ->
+                    Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
+        } |> ignore
+
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
@@ -1384,20 +1425,23 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
                     NotConnectedException "Not connected to broker" |> channel.SetException
         } :> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
-                match connectionHandler.ConnectionState with
-                | Ready clientCnx ->
-                    // release the consumer at the broker, otherwise it stays attached to the subscription
-                    clientCnx.SendAndForget(Commands.newCloseConsumer consumerId (Generators.getNextRequestId()))
-                    clientCnx.RemoveConsumer consumerId
-                | _ ->
-                    ()
-                connectionHandler.Failed()
-                stopConsumer()
-            else
-                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+            try
+                if t.IsFaulted then
+                    let (Flatten ex) = t.Exception
+                    Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        // release the consumer at the broker, otherwise it stays attached to the subscription
+                        clientCnx.SendAndForget(Commands.newCloseConsumer consumerId (Generators.getNextRequestId()))
+                        clientCnx.RemoveConsumer consumerId
+                    | _ ->
+                        ()
+                    connectionHandler.Failed()
+                    stopConsumer()
+                else
+                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
+            finally
+                drainStoppedMailbox())
     |> ignore
 
     do startStatTimer()
