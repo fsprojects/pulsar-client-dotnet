@@ -761,21 +761,24 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             elif rawMessage.Metadata.NumMessages > 0 then
                 // handle batch message enqueuing; uncompressed payload has all messages in batch
                 let queuedBefore = incomingMessages.Count
-                match wrapException (fun () ->
-                    this.ReceiveIndividualMessagesFromBatch rawMessage decoder isMessageUndecryptable) with
-                | Ok () ->
-                    // try respond to channel
-                    if hasWaitingChannel && incomingMessages.Count > 0 then
-                        let waitingChannel = waiters |> dequeueWaiter
-                        replyWithMessage waitingChannel <| dequeueMessage()
-                    elif hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
-                        let ch = batchWaiters |> dequeueBatchWaiter
-                        replyWithBatch ch
+                let batchResult =
+                    wrapException (fun () -> this.ReceiveIndividualMessagesFromBatch rawMessage decoder isMessageUndecryptable)
+                // items queued before a failure are still delivered, so count them before a waiter dequeues them
+                let queuedFromBatch = incomingMessages.Count - queuedBefore
+                // try respond to channel
+                if hasWaitingChannel && incomingMessages.Count > 0 then
+                    let waitingChannel = waiters |> dequeueWaiter
+                    replyWithMessage waitingChannel <| dequeueMessage()
+                elif hasWaitingBatchChannel && hasEnoughMessagesForBatchReceive() then
+                    let ch = batchWaiters |> dequeueBatchWaiter
+                    replyWithBatch ch
+                match batchResult with
+                | Ok () -> ()
                 | Error ex ->
                     Log.Logger.LogError(ex, "{0} Batch reading exception {1}", prefix, msgId)
-                    // messages already enqueued from this batch return their permits when consumed
-                    let lostMessages = rawMessage.Metadata.NumMessages - (incomingMessages.Count - queuedBefore)
-                    do! discardCorruptedMessage msgId clientCnx lostMessages CommandAck.ValidationError.BatchDeSerializeError
+                    // the queued items return their permits when consumed
+                    do! discardCorruptedMessage msgId clientCnx (rawMessage.Metadata.NumMessages - queuedFromBatch)
+                            CommandAck.ValidationError.BatchDeSerializeError
             else
                 Log.Logger.LogWarning("{0} Received message with nonpositive numMessages: {1}", prefix, rawMessage.Metadata.NumMessages)
         }

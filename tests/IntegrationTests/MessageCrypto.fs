@@ -313,6 +313,63 @@ let tests =
             Log.Debug("Ended Malformed batch returns only the permits of the messages it lost")
         }
 
+        testTask "Pending receive gets the item that survived a malformed batch" {
+            Log.Debug("Started Pending receive gets the item that survived a malformed batch")
+            let client = getClient ()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let subscriptionName = "test-subscription"
+            let receiverQueueSize = 4
+            let batchSize = 3
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("pendingReceiveMalformedBatchConsumer")
+                    .SubscriptionName(subscriptionName)
+                    .ReceiverQueueSize(receiverQueueSize)
+                    .MessageDecryptor(FirstItemOnlyBatchDecryptor(MessageDecryptor(Consumer1KeyReader())))
+                    .SubscribeAsync()
+
+            let! (encryptedProducer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .EnableBatching(true)
+                    .BatchingMaxMessages(batchSize)
+                    .BatchingMaxPublishDelay(TimeSpan.FromSeconds(10.0))
+                    .MessageEncryptor(MessageEncryptor([|"Rsa1024key1"|], ProducerKeyReader()))
+                    .CreateAsync()
+
+            // the receive is already waiting when the malformed batch arrives
+            let cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10.0))
+            let receiveTask = consumer.ReceiveAsync(cts.Token)
+            do! Task.Delay 200
+
+            let! (messageIds : MessageId[]) =
+                [| for i in 1..batchSize -> encryptedProducer.SendAsync(Encoding.UTF8.GetBytes $"encrypted {i}") |]
+                |> Task.WhenAll
+            let entries = messageIds |> Array.distinctBy (fun id -> id.LedgerId, id.EntryId)
+            Expect.hasLength entries 1 "all messages should be published in a single batch"
+
+            let! (message : Message<byte[]>) =
+                task {
+                    try
+                        return! receiveTask
+                    with :? OperationCanceledException ->
+                        return failwith "The pending receive never got the item that survived the malformed batch"
+                }
+            cts.Dispose()
+            Expect.equal (Encoding.UTF8.GetString message.Data) "encrypted 1" "the item queued before the batch broke"
+
+            // the delivered item returned its permit, the two lost ones came back with the discard
+            let expected = struct (int64 batchSize, 0L, receiverQueueSize)
+            let! (stats : struct (int64 * int64 * int)) = waitForBrokerConsumerStats topicName subscriptionName expected
+            Expect.equal stats expected "broker consumer stats (msgOut, unacked, availablePermits) after the delivery"
+
+            do! consumer.UnsubscribeAsync()
+            do! encryptedProducer.DisposeAsync()
+            Log.Debug("Ended Pending receive gets the item that survived a malformed batch")
+        }
+
         testTask "Simple encryption send message" {
             Log.Debug("Started Simple encryption send message")
             let client = getClient ()
