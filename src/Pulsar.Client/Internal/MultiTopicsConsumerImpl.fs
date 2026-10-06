@@ -636,7 +636,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let mb = Channel.CreateUnbounded<MultiTopicConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
 
     let replyFromStoppedMailbox (msg: MultiTopicConsumerMessage<'T>) =
-        let ex = AlreadyClosedException "Consumer is already closed"
+        let ex : exn =
+            match this.ConnectionState with
+            | Closing | Closed -> AlreadyClosedException(prefix + " already closed")
+            | _ -> NotConnectedException(prefix + " not connected")
         match msg with
         | Receive receiveCallback ->
             receiveCallback.MessageChannel.TrySetException ex |> ignore

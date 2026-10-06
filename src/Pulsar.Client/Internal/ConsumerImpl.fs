@@ -859,7 +859,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mb = Channel.CreateUnbounded<ConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
 
     let replyFromStoppedMailbox (msg: ConsumerMessage<'T>) =
-        let ex = AlreadyClosedException "Consumer is already closed"
+        let ex : exn =
+            match connectionHandler.ConnectionState with
+            | Closing | Closed | Terminated -> AlreadyClosedException(prefix + " already closed")
+            | _ -> NotConnectedException(prefix + " not connected")
         match msg with
         | Receive receiveCallback ->
             receiveCallback.MessageChannel.TrySetException ex |> ignore

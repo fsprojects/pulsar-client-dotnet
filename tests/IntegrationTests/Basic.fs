@@ -140,7 +140,7 @@ let tests =
 
             // GetStats still posts to the mailbox once the consumer has failed, so this only
             // returns if the stopped mailbox replies
-            Expect.throwsT2<AlreadyClosedException> (fun () ->
+            Expect.throwsT2<NotConnectedException> (fun () ->
                 consumer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
             // Receive checks the connection before posting, and must fail rather than wait
             Expect.throwsT2<NotConnectedException> (fun () ->
@@ -167,6 +167,9 @@ let tests =
 
             let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
             let child = multiConsumer.Consumers |> Array.head :?> ConsumerImpl<byte[]>
+            // queued before the poller stops, so stopConsumer fails this waiter directly
+            let pendingReceive = consumer.ReceiveAsync()
+            do! Task.Delay 200
             post child.Mb
                 (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
 
@@ -181,6 +184,8 @@ let tests =
                     do! Task.Delay 100
 
             Expect.throwsT2<AlreadyClosedException> (fun () ->
+                pendingReceive.WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            Expect.throwsT2<NotConnectedException> (fun () ->
                 consumer.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
             do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
