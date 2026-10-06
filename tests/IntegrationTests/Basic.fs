@@ -161,6 +161,50 @@ let tests =
             Log.Debug("Finished Requests posted after a consumer mailbox fails are completed")
         }
 
+        testTask "Queued messages release their payloads when the consumer mailbox fails" {
+
+            Log.Debug("Started Queued messages release their payloads when the consumer mailbox fails")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("failingMailboxPayload")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+
+            let payload = new System.IO.MemoryStream([| 1uy |])
+            let queuedMessage =
+                {
+                    MessageId = MessageId.Earliest
+                    ConsumerEpoch = Nullable()
+                    Metadata = Unchecked.defaultof<_>
+                    RedeliveryCount = 0
+                    Payload = payload
+                    MessageKey = null
+                    IsKeyBase64Encoded = false
+                    CheckSumValid = false
+                    Properties = null
+                    AckSet = null
+                }
+            let consumerImpl = consumer :?> ConsumerImpl<byte[]>
+            // the first message crashes the mailbox; the second is left for the drain
+            post consumerImpl.Mb
+                (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
+            post consumerImpl.Mb
+                (ConsumerMessage.MessageReceived(struct (queuedMessage, Unchecked.defaultof<ClientCnx>)))
+
+            // GetStats is behind the queued message, so the payload has been discarded once this returns
+            Expect.throwsT2<NotConnectedException> (fun () ->
+                consumer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            Expect.isFalse "Queued message payload should be disposed when the mailbox stops" payload.CanRead
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Queued messages release their payloads when the consumer mailbox fails")
+        }
+
         testTask "Multi-topic consumer completes requests after a child mailbox fails" {
 
             Log.Debug("Started Multi-topic consumer completes requests after a child mailbox fails")
@@ -198,6 +242,15 @@ let tests =
                 pendingReceive.WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
             Expect.throwsT2<NotConnectedException> (fun () ->
                 consumer.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            // these still post to the stopped mailbox, so they only return if the drain replies
+            Expect.throwsT2<NotConnectedException> (fun () ->
+                consumer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            Expect.throwsT2<NotConnectedException> (fun () ->
+                consumer.LastDisconnectedTimestamp().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            Expect.throwsT2<NotConnectedException> (fun () ->
+                consumer.HasReachedEndOfTopic().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            let! connected = consumer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse "Multi-topic consumer should report disconnected after its mailbox stops" connected
             do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
             Log.Debug("Finished Multi-topic consumer completes requests after a child mailbox fails")
@@ -485,6 +538,47 @@ let tests =
 
             do! producer.DisposeAsync()
             Log.Debug("Finished Requests posted as the producer mailbox fails are faulted")
+        }
+
+        testTask "Partitioned producer completes the request that faults its mailbox" {
+
+            Log.Debug("Started Partitioned producer completes the request that faults its mailbox")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            do! task {
+                use http = new HttpClient(new HttpClientHandler(UseProxy = false))
+                http.BaseAddress <- Uri(pulsarHttpAddress)
+                http.Timeout <- TimeSpan.FromSeconds(15.0)
+                use partitions = new StringContent("2", Encoding.UTF8, "application/json")
+                let! created = http.PutAsync($"/admin/v2/persistent/{topicName}/partitions", partitions)
+                created.EnsureSuccessStatusCode() |> ignore
+            }
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName("failingPartitionStats")
+                    .CreateAsync()
+
+            let partitioned = producer :?> PartitionedProducerImpl<byte[]>
+            let child = partitioned.Producers |> Array.head :?> ProducerImpl<byte[]>
+            let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
+            // a null message crashes one partition mailbox. The parent GetStats awaits that child and faults with it
+            post child.Mb
+                (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
+            do! assertMailboxException crashingSend.Task
+
+            // this call is the message the parent mailbox is handling when it faults, so the drain cannot see it
+            do! assertNotConnected (producer.GetStats())
+            // later calls are answered by the drain
+            do! assertNotConnected (producer.GetStats())
+            do! assertNotConnected (producer.LastSequenceId())
+            do! assertNotConnected (producer.LastDisconnectedTimestamp())
+            let! connected = producer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse "Partitioned producer should report disconnected after its mailbox stops" connected
+            do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Partitioned producer completes the request that faults its mailbox")
         }
 
         testTask "Sent message/messageId should be equal to received message/messageId" {

@@ -184,10 +184,29 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
         } |> ignore
 
+    let mutable currentMessage : PartitionedProducerMessage option = None
+
+    let failOutstandingRequest (msg: PartitionedProducerMessage) (ex: exn) =
+        match msg with
+        | LastSequenceId channel ->
+            channel.TrySetException ex |> ignore
+        | GetStats channel ->
+            channel.TrySetException ex |> ignore
+        | LastDisconnectedTimestamp channel ->
+            channel.TrySetException ex |> ignore
+        | IsConnected channel ->
+            channel.TrySetException ex |> ignore
+        | Close channel ->
+            channel.TrySetResult(Error ex) |> ignore
+        | Init | TickTime ->
+            ()
+
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-            match! mb.Reader.ReadAsync() with
+            let! msg = mb.Reader.ReadAsync()
+            currentMessage <- Some msg
+            match msg with
             | Init ->
                 let producerTasks =
                     Seq.init numPartitions (fun partitionIndex ->
@@ -333,6 +352,11 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     let (Flatten ex) = t.Exception
                     Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
                     this.ConnectionState <- Failed
+                    try
+                        currentMessage |> Option.iter (fun msg -> failOutstandingRequest msg ex)
+                    with currentEx ->
+                        Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
+                    producerCreatedTsc.TrySetException(ex) |> ignore
                     stopProducer()
                 else
                     Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
@@ -351,6 +375,9 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         producerId = (producer :?> IProducer<'T>).ProducerId
 
     override this.GetHashCode () = int producerId
+
+    member internal this.Producers =
+        producers.ToArray()
 
     member private this.ChoosePartitionIfActive (message: MessageBuilder<'T>) =
         match this.ConnectionState with
