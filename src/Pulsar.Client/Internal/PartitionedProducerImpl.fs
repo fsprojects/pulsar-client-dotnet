@@ -156,18 +156,19 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         | IsConnected channel ->
             channel.TrySetResult false |> ignore
         | Close channel ->
-            // the partition producers outlive a failed mailbox, so they still have to be closed
+            // the partition producers outlive a failed mailbox, so they still have to be closed.
             backgroundTask {
                 try
                     let! _ =
                         producers
                         |> Seq.map (fun producer -> producer.DisposeAsync().AsTask())
                         |> Task.WhenAll
-                    ()
+                    this.ConnectionState <- Closed
+                    channel.TrySetResult(Ok ()) |> ignore
                 with Flatten closeEx ->
                     Log.Logger.LogError(closeEx, "{0} could not close all partition producers properly", prefix)
-                this.ConnectionState <- Closed
-                channel.TrySetResult(Ok ()) |> ignore
+                    this.ConnectionState <- Closed
+                    channel.TrySetResult(Error closeEx) |> ignore
             } |> ignore
         | _ ->
             ()
