@@ -887,6 +887,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         | Close channel ->
             // the consumer was already stopped when the mailbox exited, so there is nothing left to close
             channel.TrySetResult() |> ignore
+        | MessageReceived (rawMessage, _) ->
+            // these payloads come from the pool and are otherwise discarded with the message
+            rawMessage.Payload.Dispose()
         | _ ->
             ()
 
