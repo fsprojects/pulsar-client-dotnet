@@ -140,6 +140,49 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let mb = Channel.CreateUnbounded<PartitionedProducerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+
+    let replyFromStoppedMailbox (msg: PartitionedProducerMessage) =
+        let ex : exn =
+            match this.ConnectionState with
+            | Closing | Closed -> AlreadyClosedException(prefix + " already closed")
+            | _ -> NotConnectedException(prefix + " not connected")
+        match msg with
+        | LastSequenceId channel ->
+            channel.TrySetException ex |> ignore
+        | GetStats channel ->
+            channel.TrySetException ex |> ignore
+        | LastDisconnectedTimestamp channel ->
+            channel.TrySetException ex |> ignore
+        | IsConnected channel ->
+            channel.TrySetResult false |> ignore
+        | Close channel ->
+            // the partition producers outlive a failed mailbox, so they still have to be closed
+            backgroundTask {
+                try
+                    let! _ =
+                        producers
+                        |> Seq.map (fun producer -> producer.DisposeAsync().AsTask())
+                        |> Task.WhenAll
+                    ()
+                with Flatten closeEx ->
+                    Log.Logger.LogError(closeEx, "{0} could not close all partition producers properly", prefix)
+                this.ConnectionState <- Closed
+                channel.TrySetResult(Ok ()) |> ignore
+            } |> ignore
+        | _ ->
+            ()
+
+    // requests posted after the mailbox exits would otherwise never be completed
+    let drainStoppedMailbox () =
+        backgroundTask {
+            while true do
+                let! msg = mb.Reader.ReadAsync()
+                try
+                    replyFromStoppedMailbox msg
+                with ex ->
+                    Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
+        } |> ignore
+
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
@@ -284,13 +327,16 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     |> Task.WhenAll
                 channel.SetResult(statsReduce stats)
         }:> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
-                this.ConnectionState <- Failed
-                stopProducer()
-            else
-                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+            try
+                if t.IsFaulted then
+                    let (Flatten ex) = t.Exception
+                    Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                    this.ConnectionState <- Failed
+                    stopProducer()
+                else
+                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
+            finally
+                drainStoppedMailbox())
     |> ignore
 
     do

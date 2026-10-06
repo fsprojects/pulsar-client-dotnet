@@ -560,15 +560,35 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
             producerCreatedTsc.TrySetException(ex) |> ignore
             stopProducer()
-            // sends that passed the active check just before the failure are still posted here
-            backgroundTask {
+
+    let replyFromStoppedMailbox (msg: ProducerMessage<'T>) =
+        let ex : exn =
+            match connectionHandler.ConnectionState with
+            | Closing | Closed | Terminated -> AlreadyClosedException(prefix + " already closed")
+            | _ -> NotConnectedException(prefix + " not connected")
+        match msg with
+        | BeginSendMessage struct (_, channel, _) ->
+            channel.TrySetException ex |> ignore
+        | Flush channel ->
+            channel.TrySetException ex |> ignore
+        | GetStats channel ->
+            channel.TrySetException ex |> ignore
+        | Close channel ->
+            // the producer was already stopped when the mailbox exited, so there is nothing left to close
+            channel.TrySetResult(Ok ()) |> ignore
+        | _ ->
+            ()
+
+    // requests posted after the mailbox exits would otherwise never be completed
+    let drainStoppedMailbox () =
+        backgroundTask {
+            while true do
+                let! msg = mb.Reader.ReadAsync()
                 try
-                    while true do
-                        let! msg = mb.Reader.ReadAsync()
-                        failOutstandingRequest msg ex
-                with _ ->
-                    ()
-            } |> ignore
+                    replyFromStoppedMailbox msg
+                with ex ->
+                    Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
+        } |> ignore
 
     do (backgroundTask {
         let mutable continueLoop = true
@@ -890,11 +910,14 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                 continueLoop <- false
             }:> Task).ContinueWith(fun t ->
-                if t.IsFaulted then
-                    let (Flatten ex) = t.Exception
-                    failMailbox ex
-                else
-                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+                try
+                    if t.IsFaulted then
+                        let (Flatten ex) = t.Exception
+                        failMailbox ex
+                    else
+                        Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
+                finally
+                    drainStoppedMailbox())
     |> ignore
 
     do startSendTimeoutTimer()

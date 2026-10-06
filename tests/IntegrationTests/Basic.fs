@@ -37,6 +37,17 @@ let assertMailboxException (work: Task<'T>) = task {
         | other -> failwith $"Expected the mailbox NullReferenceException but got {other.GetType().Name}: {other.Message}"
 }
 
+let assertNotConnected (work: Task<'T>) = task {
+    try
+        let! _ = work.WaitAsync(TimeSpan.FromSeconds(5.0))
+        failwith "Task completed successfully after mailbox failure"
+    with ex ->
+        match unwrap ex with
+        | :? NotConnectedException -> ()
+        | :? TimeoutException -> failwith "Task did not fault within 5 seconds"
+        | other -> failwith $"Expected NotConnectedException but got {other.GetType().Name}: {other.Message}"
+}
+
 // Swapping the process-wide logger has to be serialized. The observer forwards every
 // message, and IsEnabled stays true so debug connection lines are still delivered to it.
 let private loggerGate = new SemaphoreSlim(1, 1)
@@ -256,6 +267,10 @@ let tests =
                         with :? NotConnectedException ->
                             ()
 
+                        // GetStats still posts once the producer has failed, so this only returns if the stopped mailbox replies
+                        Expect.throwsT2<NotConnectedException> (fun () ->
+                            producer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+
                         do! producer.DisposeAsync()
 
                         // the producer name must be free for a replacement. That reply is the broker Success
@@ -459,14 +474,14 @@ let tests =
             post producerImpl.Mb (ProducerMessage.GetStats stats)
 
             do! assertMailboxException crashingSend.Task
-            do! assertMailboxException lateSend.Task
-            do! assertMailboxException flush.Task
-            do! assertMailboxException stats.Task
+            // these were still in the mailbox when it stopped, so the drain completes them
+            do! assertNotConnected lateSend.Task
+            do! assertNotConnected flush.Task
+            do! assertNotConnected stats.Task
             let! (closeResult: Result<unit, exn>) = close.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
             match closeResult with
-            | Error (:? NullReferenceException) -> ()
-            | Error other -> failwith $"Close failed with {other.GetType().Name}: {other.Message}"
-            | Ok () -> failwith "Close completed after mailbox failure"
+            | Ok () -> ()
+            | Error other -> failwith $"Close failed after mailbox failure with {other.GetType().Name}: {other.Message}"
 
             do! producer.DisposeAsync()
             Log.Debug("Finished Requests posted as the producer mailbox fails are faulted")
