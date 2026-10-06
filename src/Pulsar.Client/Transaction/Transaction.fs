@@ -122,7 +122,7 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
     member this.Id = txnId
 
     member private this.CommitInner() =
-        let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
+        let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
         this.State <- COMMITTING
         backgroundTask {
             try
@@ -142,7 +142,7 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
         }
 
     member private this.AbortInner() =
-        let tcs = TaskCompletionSource(TaskContinuationOptions.RunContinuationsAsynchronously)
+        let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
         this.State <- ABORTING
         backgroundTask {
             try

@@ -2,6 +2,8 @@ module Pulsar.Client.UnitTests.Common.ToolsTests
 
 open System
 open System.Collections
+open System.Threading
+open System.Threading.Channels
 open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
@@ -73,6 +75,22 @@ let tests =
             do! Task.Delay 100
             Console.WriteLine(x)
             Expect.isTrue "" x
+        }
+
+        test "postAndAsyncReply runs continuations asynchronously" {
+            let channel = Channel.CreateUnbounded<TaskCompletionSource<int>>()
+            let task = postAndAsyncReply channel id
+            let tcs = channel.Reader.ReadAsync().AsTask().Result
+            let replyThread = Thread.CurrentThread.ManagedThreadId
+            let continuationThread = ref replyThread
+            use continued = new ManualResetEventSlim()
+            task.ContinueWith((fun (_: Task<int>) ->
+                continuationThread.Value <- Thread.CurrentThread.ManagedThreadId
+                continued.Set()), TaskContinuationOptions.ExecuteSynchronously) |> ignore
+            tcs.SetResult 1
+            continued.Wait()
+            Expect.notEqual "" replyThread continuationThread.Value
+            Expect.equal "" TaskCreationOptions.RunContinuationsAsynchronously task.CreationOptions
         }
     ]
     
