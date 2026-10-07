@@ -43,7 +43,7 @@ type internal TokenExchangeResult =
     | OAuthError of TokenError
     | HttpError of string
 
-type internal TokenClient (tokenUrl: Uri, client: HttpClient) =
+type internal TokenClient (tokenUrl: Uri, client: HttpClient, getTimestamp: unit -> int64) =
 
     member this.ExchangeClientCredentials(clientId:string, clientSecret:string, audience:string, scope: string)=
         backgroundTask {
@@ -63,13 +63,15 @@ type internal TokenClient (tokenUrl: Uri, client: HttpClient) =
 
             request.Content <- new FormUrlEncodedContent(body)
 
+            // The issuer computes `exp` before responding, so expiry must be measured from before the request.
+            let requestTime = getTimestamp()
             use! response = client.SendAsync request
             use! resultContent = response.Content.ReadAsStreamAsync()
 
             match response.StatusCode with
             | HttpStatusCode.OK ->
                 let! result = JsonSerializer.DeserializeAsync<TokenResult>(resultContent)
-                return TokenExchangeResult.Result (result, %Stopwatch.GetTimestamp())
+                return TokenExchangeResult.Result (result, %requestTime)
             | HttpStatusCode.BadRequest
             | HttpStatusCode.Unauthorized ->
                 let! resultContent = response.Content.ReadAsStreamAsync()

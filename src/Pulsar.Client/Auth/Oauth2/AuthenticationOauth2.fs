@@ -50,12 +50,12 @@ type Credentials =
         IssuerUrl : string
     }
 
-type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, credentialsUrl: Uri, scope: string) =
+type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, credentialsUrl: Uri, scope: string,
+                                   httpHandler: HttpMessageHandler, getTimestamp: unit -> int64) =
     inherit Authentication()
 
     let mutable token : Option<TokenResult * TimeStamp> = None
-    // https://learn.microsoft.com/en-us/dotnet/fundamentals/networking/http/httpclient-guidelines
-    let httpClient = new HttpClient(new SocketsHttpHandler(PooledConnectionLifetime = TimeSpan.FromMinutes(2)))
+    let httpClient = new HttpClient(httpHandler)
 
     //Gets a well-known metadata URL for the given OAuth issuer URL.
     //https://tools.ietf.org/id/draft-ietf-oauth-discovery-08.html#ASConfig
@@ -71,7 +71,7 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, credentials
     let getTokenClient() =
         backgroundTask {
             let! metadata = getMetadata httpClient issuerUrl
-            return TokenClient(Uri(metadata.TokenEndpoint), httpClient)
+            return TokenClient(Uri(metadata.TokenEndpoint), httpClient, getTimestamp)
         }
 
     let getCredsFromFile (credentialsUrl: Uri) =
@@ -100,47 +100,59 @@ type internal AuthenticationOauth2(issuerUrl: Uri, audience: string, credentials
         | _ ->
             raise <| NotSupportedException($"Scheme '{credentialsUrl.Scheme}' is not supported.")
 
+    // Brokers allow no clock skew, so a token must be replaced before `exp`, not at it.
+    let earlyRefreshRatio = 0.9
+    let tokenLock = obj()
+
     //https://datatracker.ietf.org/doc/html/rfc6749#section-4.2.2
     let tryGetToken()  =
         token
         |> Option.bind (fun (tokenResult, issuedTime) ->
-            let tokenDuration = TimeSpan.FromSeconds(float tokenResult.ExpiresIn)
-            if Stopwatch.GetElapsedTime(%issuedTime) < tokenDuration then
+            let refreshAfter = TimeSpan.FromSeconds(float tokenResult.ExpiresIn * earlyRefreshRatio)
+            if Stopwatch.GetElapsedTime(%issuedTime, getTimestamp()) < refreshAfter then
                 Some tokenResult
             else
                 None
             )
 
+    let fetchToken() =
+        let newToken =
+            (backgroundTask {
+                let! credentials = deserializeCreds credentialsUrl
+                let! tokenClient = getTokenClient()
+                return!
+                    tokenClient.ExchangeClientCredentials(
+                        credentials.ClientId,
+                        credentials.ClientSecret,
+                        audience,
+                        scope
+                    )
+            }).GetAwaiter().GetResult()
+        match newToken with
+        | Result (tokenResult, issuedTime) ->
+            token <- Some(tokenResult, issuedTime)
+            tokenResult
+        | OAuthError e ->
+            raise <| TokenExchangeException $"{e.Error}{Environment.NewLine} {e.ErrorDescription} {Environment.NewLine}{e.ErrorUri}"
+        | HttpError e ->
+            raise <| Exception e
 
     override this.GetAuthMethodName() =
         "token"
     override this.GetAuthData() =
+        // Many connections are challenged at the same moment; the lock makes them share a single token request.
+        let tokenResult =
+            lock tokenLock (fun () ->
+                match tryGetToken() with
+                | Some tokenResult -> tokenResult
+                | None -> fetchToken())
+        upcast AuthenticationDataToken(fun () -> tokenResult.AccessToken)
 
-        match tryGetToken() with
-        | None ->
-            let newToken =
-                (backgroundTask {
-                    let! credentials = deserializeCreds credentialsUrl
-                    let! tokenClient = getTokenClient()
-                    return!
-                        tokenClient.ExchangeClientCredentials(
-                            credentials.ClientId,
-                            credentials.ClientSecret,
-                            audience,
-                            scope
-                        )
-                }).GetAwaiter().GetResult()
-            match newToken with
-            | Result (tokenResult, issuedTime) ->
-                token <- Some(tokenResult, issuedTime)
-                upcast AuthenticationDataToken(fun () -> tokenResult.AccessToken)
-            | OAuthError e ->
-                raise <| TokenExchangeException $"{e.Error}{Environment.NewLine} {e.ErrorDescription} {Environment.NewLine}{e.ErrorUri}"
-            | HttpError e ->
-                raise <| Exception e
-
-        | Some tokenResult ->
-            upcast AuthenticationDataToken(fun () -> tokenResult.AccessToken)
+    // https://learn.microsoft.com/en-us/dotnet/fundamentals/networking/http/httpclient-guidelines
+    new(issuerUrl: Uri, audience: string, credentialsUrl: Uri, scope: string) =
+        new AuthenticationOauth2(issuerUrl, audience, credentialsUrl, scope,
+                                 new SocketsHttpHandler(PooledConnectionLifetime = TimeSpan.FromMinutes(2)),
+                                 Stopwatch.GetTimestamp)
 
     override this.Dispose() =
         httpClient.Dispose()
