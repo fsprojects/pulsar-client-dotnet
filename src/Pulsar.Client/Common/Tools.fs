@@ -164,6 +164,14 @@ let postAndAsyncReply (channel: Channel<'T>) f =
     (f tcs) |> channel.Writer.TryWrite |> ignore
     tcs.Task
 
+let runContinuationsAsynchronously (task: Task<'T>) =
+    let tcs = TaskCompletionSource<'T>(TaskCreationOptions.RunContinuationsAsynchronously)
+    task.ContinueWith((fun (t: Task<'T>) ->
+        if t.IsFaulted then tcs.SetException t.Exception.InnerExceptions
+        elif t.IsCanceled then tcs.SetCanceled()
+        else tcs.SetResult t.Result), TaskContinuationOptions.ExecuteSynchronously) |> ignore
+    tcs.Task
+
 let post (channel: Channel<'T>) msg =
     channel.Writer.TryWrite msg |> ignore
 

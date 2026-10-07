@@ -122,27 +122,23 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
     member this.Id = txnId
 
     member private this.CommitInner() =
-        let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
         this.State <- COMMITTING
         backgroundTask {
             try
                 do! allOpComplete()
             with Flatten ex ->
                 do! this.AbortInner()
-                tcs.SetException ex
+                reraize ex
             try
                 do! txnOperations.Commit(txnId)
                 this.State <- COMMITTED
-                tcs.SetResult ()
             with Flatten ex ->
                 if (ex :? TransactionNotFoundException) || (ex :? InvalidTxnStatusException) then
                     this.State <- ERROR
-                tcs.SetException ex
-            return! tcs.Task
-        }
+                reraize ex
+        } |> runContinuationsAsynchronously
 
     member private this.AbortInner() =
-        let tcs = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
         this.State <- ABORTING
         backgroundTask {
             try
@@ -161,16 +157,14 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
                 try
                     do! txnOperations.Abort(txnId)
                     this.State <- ABORTED
-                    tcs.SetResult ()
                 with Flatten ex ->
                     if (ex :? TransactionNotFoundException) || (ex :? InvalidTxnStatusException) then
                         this.State <- ERROR
-                    tcs.SetException ex
             finally
                 for consumer, permits in cumulativeConsumersData do
                     consumer.IncreaseAvailablePermits permits
                 cumulativeAckConsumers.Clear()
-        }
+        } |> runContinuationsAsynchronously
 
     member this.Commit() : Task<unit> =
         checkIfOpen (fun () ->
