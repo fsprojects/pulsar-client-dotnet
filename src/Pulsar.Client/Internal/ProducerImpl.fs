@@ -510,18 +510,24 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let mutable currentMessage : ProducerMessage<'T> option = None
     let mutable mailboxFailed = false
 
-    let failOutstandingRequest (msg: ProducerMessage<'T>) (ex: exn) =
+    let replyFromStoppedMailbox (ex: exn) (msg: ProducerMessage<'T>) =
         match msg with
-        | BeginSendMessage sendRequest ->
-            let struct (_, channel, _) = sendRequest
-            channel.TrySetException(ex) |> ignore
+        | BeginSendMessage struct (_, channel, _) ->
+            channel.TrySetException ex |> ignore
         | Flush channel ->
-            channel.TrySetException(ex) |> ignore
-        | Close channel ->
-            channel.TrySetResult(Error ex) |> ignore
+            channel.TrySetException ex |> ignore
         | GetStats channel ->
-            channel.TrySetException(ex) |> ignore
-        | _ -> ()
+            channel.TrySetException ex |> ignore
+        | Close channel ->
+            // the producer is stopped before this runs, so there is nothing left to close
+            channel.TrySetResult(Ok ()) |> ignore
+        | _ ->
+            ()
+
+    let stoppedMailboxException () =
+        match connectionHandler.ConnectionState with
+        | Closing | Closed | Terminated -> AlreadyClosedException(prefix + " already closed") :> exn
+        | _ -> NotConnectedException(prefix + " not connected") :> exn
 
     let failMailbox (ex: exn) =
         if not mailboxFailed then
@@ -554,30 +560,12 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 failPendingMessages ex
             with pendingEx ->
                 Log.Logger.LogWarning(pendingEx, "{0} failed to fail pending sends after mailbox failure", prefix)
+            stopProducer()
             try
-                currentMessage |> Option.iter (fun msg -> failOutstandingRequest msg ex)
+                currentMessage |> Option.iter (replyFromStoppedMailbox ex)
             with currentEx ->
                 Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
             producerCreatedTsc.TrySetException(ex) |> ignore
-            stopProducer()
-
-    let replyFromStoppedMailbox (msg: ProducerMessage<'T>) =
-        let ex : exn =
-            match connectionHandler.ConnectionState with
-            | Closing | Closed | Terminated -> AlreadyClosedException(prefix + " already closed")
-            | _ -> NotConnectedException(prefix + " not connected")
-        match msg with
-        | BeginSendMessage struct (_, channel, _) ->
-            channel.TrySetException ex |> ignore
-        | Flush channel ->
-            channel.TrySetException ex |> ignore
-        | GetStats channel ->
-            channel.TrySetException ex |> ignore
-        | Close channel ->
-            // the producer was already stopped when the mailbox exited, so there is nothing left to close
-            channel.TrySetResult(Ok ()) |> ignore
-        | _ ->
-            ()
 
     // requests posted after the mailbox exits would otherwise never be completed
     let drainStoppedMailbox () =
@@ -585,7 +573,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             while true do
                 let! msg = mb.Reader.ReadAsync()
                 try
-                    replyFromStoppedMailbox msg
+                    replyFromStoppedMailbox (stoppedMailboxException ()) msg
                 with ex ->
                     Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
         } |> ignore
@@ -910,14 +898,12 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                 continueLoop <- false
             }:> Task).ContinueWith(fun t ->
-                try
-                    if t.IsFaulted then
-                        let (Flatten ex) = t.Exception
-                        failMailbox ex
-                    else
-                        Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
-                finally
-                    drainStoppedMailbox())
+                drainStoppedMailbox()
+                if t.IsFaulted then
+                    let (Flatten ex) = t.Exception
+                    failMailbox ex
+                else
+                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
 
     do startSendTimeoutTimer()

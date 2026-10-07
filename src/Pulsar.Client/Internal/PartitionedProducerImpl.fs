@@ -141,11 +141,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
     let mb = Channel.CreateUnbounded<PartitionedProducerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
 
-    let replyFromStoppedMailbox (msg: PartitionedProducerMessage) =
-        let ex : exn =
-            match this.ConnectionState with
-            | Closing | Closed -> AlreadyClosedException(prefix + " already closed")
-            | _ -> NotConnectedException(prefix + " not connected")
+    let replyFromStoppedMailbox (ex: exn) (msg: PartitionedProducerMessage) =
         match msg with
         | LastSequenceId channel ->
             channel.TrySetException ex |> ignore
@@ -170,8 +166,13 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     this.ConnectionState <- Closed
                     channel.TrySetResult(Error closeEx) |> ignore
             } |> ignore
-        | _ ->
+        | Init | TickTime ->
             ()
+
+    let stoppedMailboxException () =
+        match this.ConnectionState with
+        | Closing | Closed -> AlreadyClosedException(prefix + " already closed") :> exn
+        | _ -> NotConnectedException(prefix + " not connected") :> exn
 
     // requests posted after the mailbox exits would otherwise never be completed
     let drainStoppedMailbox () =
@@ -179,27 +180,12 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
             while true do
                 let! msg = mb.Reader.ReadAsync()
                 try
-                    replyFromStoppedMailbox msg
+                    replyFromStoppedMailbox (stoppedMailboxException ()) msg
                 with ex ->
                     Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
         } |> ignore
 
     let mutable currentMessage : PartitionedProducerMessage option = None
-
-    let failOutstandingRequest (msg: PartitionedProducerMessage) (ex: exn) =
-        match msg with
-        | LastSequenceId channel ->
-            channel.TrySetException ex |> ignore
-        | GetStats channel ->
-            channel.TrySetException ex |> ignore
-        | LastDisconnectedTimestamp channel ->
-            channel.TrySetException ex |> ignore
-        | IsConnected channel ->
-            channel.TrySetException ex |> ignore
-        | Close channel ->
-            channel.TrySetResult(Error ex) |> ignore
-        | Init | TickTime ->
-            ()
 
     do (backgroundTask {
         let mutable continueLoop = true
@@ -347,21 +333,19 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     |> Task.WhenAll
                 channel.SetResult(statsReduce stats)
         }:> Task).ContinueWith(fun t ->
-            try
-                if t.IsFaulted then
-                    let (Flatten ex) = t.Exception
-                    Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
-                    this.ConnectionState <- Failed
-                    try
-                        currentMessage |> Option.iter (fun msg -> failOutstandingRequest msg ex)
-                    with currentEx ->
-                        Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
-                    producerCreatedTsc.TrySetException(ex) |> ignore
-                    stopProducer()
-                else
-                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
-            finally
-                drainStoppedMailbox())
+            drainStoppedMailbox()
+            if t.IsFaulted then
+                let (Flatten ex) = t.Exception
+                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                this.ConnectionState <- Failed
+                stopProducer()
+                try
+                    currentMessage |> Option.iter (replyFromStoppedMailbox ex)
+                with currentEx ->
+                    Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
+                producerCreatedTsc.TrySetException(ex) |> ignore
+            else
+                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
 
     do
