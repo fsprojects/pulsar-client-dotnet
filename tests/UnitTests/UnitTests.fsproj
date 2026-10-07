@@ -25,6 +25,7 @@
     <Compile Include="Api\ProducerBuilderTests.fs" />
     <Compile Include="Api\PulsarClientBuilderTests.fs" />
     <Compile Include="Api\AutoClusterFailoverTests.fs" />
+    <Compile Include="Auth\AuthenticationOauth2Tests.fs" />
     <Compile Include="Internal\EndPointResolverTests.fs" />
     <Compile Include="Internal\ConnectionPoolTests.fs" />
     <Compile Include="Internal\BatchMessageContainerTests.fs" />
