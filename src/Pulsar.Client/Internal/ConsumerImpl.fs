@@ -128,7 +128,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let connectionHandler =
         ConnectionHandler(prefix,
-                          connectionPool,
+                          (fun (broker, maxMessageSize) ->
+                              backgroundTask {
+                                  let! cnx = connectionPool.GetConnection(broker, maxMessageSize)
+                                  return cnx :> IClientCnx
+                              }),
                           lookup,
                           topicName.CompleteTopicName,
                           (fun _ -> post this.Mb ConsumerMessage.ConnectionOpened),
@@ -260,7 +264,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let negativeAcksTracker = NegativeAcksTracker(prefix, consumerConfig.NegativeAckRedeliveryDelay, negativeAcksRedeliver)
 
     let getConnectionState() = connectionHandler.ConnectionState
-    let sendAckPayload (cnx: ClientCnx) payload = cnx.Send payload
+    let sendAckPayload (cnx: IClientCnx) payload = cnx.Send payload
 
     let acksGroupingTracker =
         if topicName.IsPersistent then
@@ -1313,7 +1317,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             | ConsumerMessage.ConnectionClosed clientCnx ->
 
                 Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
-                connectionHandler.ConnectionClosed clientCnx
+                connectionHandler.ConnectionClosed (clientCnx :> IClientCnx)
 
             | ConsumerMessage.ConnectionFailed ex ->
 
@@ -1389,8 +1393,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
                         channel.SetException ex
 
-                    if connectionHandler.ConnectionState = Closed then
-                        continueLoop <- false
+                    match connectionHandler.ConnectionState with
+                    | Closed -> continueLoop <- false
+                    | _ -> ()
                 | _ ->
                     Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
                     NotConnectedException "Not connected to broker" |> channel.SetException

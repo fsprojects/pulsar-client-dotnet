@@ -34,7 +34,7 @@ let tests =
     testList "AcknowledgmentsGroupingTracker" [
 
         testTask "Immediate ack is sent if ackGroupTime is zero" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let mutable sendPayloadCalled = false
             let sendPayload cnx payload =
                 task {
@@ -48,7 +48,7 @@ let tests =
         }
 
         testTask "Immediate ack is not sent if ackGroupTime is not zero" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let mutable sendPayloadCalled = false
             let sendPayload cnx payload =
                 task {
@@ -62,7 +62,7 @@ let tests =
         }
 
         testTask "Ack is eventually sent if ackGroupTime is not zero" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let mutable sendPayloadCalled = false
             let sendPayload cnx payload =
                 task {
@@ -76,7 +76,7 @@ let tests =
         }
 
         testTask "Cumulative ack works correctly" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
                 task {
@@ -95,7 +95,7 @@ let tests =
         }
 
         testTask "Multiple messages get multiacked" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
                 task {
@@ -117,7 +117,7 @@ let tests =
         }
 
         testTask "AddBatchIndexAcknowledgment works" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
                 task {
@@ -139,7 +139,7 @@ let tests =
         }
 
         testTask "MixedAcknowledgment works" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let mutable sendPayloadCalledCount = 0
             let sendPayload cnx payload =
                 task {
@@ -166,7 +166,7 @@ let tests =
         }
 
         testTask "Individual acks are retried after failed flush" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let payloads = ResizeArray<byte[]>()
             let sendPayload _cnx payload =
                 task {
@@ -187,7 +187,7 @@ let tests =
         }
 
         testTask "Batch acks are retried after failed flush" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let payloads = ResizeArray<byte[]>()
             let sendPayload _cnx payload =
                 task {
@@ -213,7 +213,7 @@ let tests =
         }
 
         testTask "Individual acks are not retried after successful flush" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let payloads = ResizeArray<byte[]>()
             let sendPayload _cnx payload =
                 task {
@@ -233,7 +233,7 @@ let tests =
         }
 
         testTask "Batch acks are not retried after successful flush" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let payloads = ResizeArray<byte[]>()
             let sendPayload _cnx payload =
                 task {
@@ -258,7 +258,7 @@ let tests =
         }
 
         testTask "Multi-ack message ids are flushed in sorted order" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let payloads = ResizeArray<byte[]>()
             let sendPayload _cnx payload =
                 task {
@@ -282,7 +282,7 @@ let tests =
         }
 
         testTask "Batch multi-ack message ids are flushed in sorted order" {
-            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let getState() = ConnectionState.Ready Unchecked.defaultof<IClientCnx>
             let payloads = ResizeArray<byte[]>()
             let sendPayload _cnx payload =
                 task {

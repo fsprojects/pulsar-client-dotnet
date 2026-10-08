@@ -59,7 +59,11 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
 
     let connectionHandler =
         ConnectionHandler(prefix,
-                      connectionPool,
+                      (fun (broker, maxMessageSize) ->
+                          backgroundTask {
+                              let! cnx = connectionPool.GetConnection(broker, maxMessageSize)
+                              return cnx :> IClientCnx
+                          }),
                       lookup,
                       completeTopicName,
                       (fun _ -> post this.Mb TransactionMetaStoreMessage.ConnectionOpened),
@@ -76,7 +80,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
         ConnectionClosed = fun clientCnx -> post this.Mb (TransactionMetaStoreMessage.ConnectionClosed clientCnx)
     }
 
-    let startRequest (clientCnx: ClientCnx) requestId msg command =
+    let startRequest (clientCnx: IClientCnx) requestId msg command =
         if operationsLeft > 0 then
             let tcs = TaskCompletionSource<TxnRequest>(TaskCreationOptions.RunContinuationsAsynchronously)
             clientCnx.SendAndForget command
@@ -166,7 +170,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
             | TransactionMetaStoreMessage.ConnectionClosed clientCnx ->
 
                 Log.Logger.LogDebug("{0} connection closed", prefix)
-                connectionHandler.ConnectionClosed clientCnx
+                connectionHandler.ConnectionClosed (clientCnx :> IClientCnx)
 
             | TransactionMetaStoreMessage.NewTransaction (ttl, channel) ->
 

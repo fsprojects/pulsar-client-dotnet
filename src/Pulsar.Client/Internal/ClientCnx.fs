@@ -110,6 +110,20 @@ and internal SocketMessage =
     | SocketRequestMessageWithReply of RequestId * SendTask * TaskCompletionSource<PulsarResponseType>
     | Stop
 
+and internal IClientCnx =
+    abstract MaxMessageSize: int
+    abstract ClientCnxId: ClientCnxId
+    abstract RemoteEndpointProtocolVersion: ProtocolVersion
+    abstract Send: SendTask -> Task<bool>
+    abstract SendAndForget: SendTask -> unit
+    abstract SendAndWaitForReply: RequestId -> SendTask -> Task<PulsarResponseType>
+    abstract AddProducer: ProducerId * ProducerOperations -> unit
+    abstract RemoveProducer: ProducerId -> unit
+    abstract AddConsumer: ConsumerId * ConsumerOperations -> unit
+    abstract RemoveConsumer: ConsumerId -> unit
+    abstract AddTransactionMetaStoreHandler: TransactionCoordinatorId * TransactionMetaStoreOperations -> unit
+    abstract Dispose: unit -> unit
+
 and internal ClientCnx (config: PulsarClientConfiguration,
                 broker: Broker,
                 connection: Connection,
@@ -929,3 +943,18 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     override this.ToString() =
         prefix
+
+    interface IClientCnx with
+        member _.MaxMessageSize = this.MaxMessageSize
+        member _.ClientCnxId = this.ClientCnxId
+        member _.RemoteEndpointProtocolVersion = this.RemoteEndpointProtocolVersion
+        member _.Send payload = this.Send payload
+        member _.SendAndForget payload = this.SendAndForget payload
+        member _.SendAndWaitForReply requestId payload = this.SendAndWaitForReply requestId payload
+        member _.AddProducer (producerId, producerOperations) = this.AddProducer(producerId, producerOperations)
+        member _.RemoveProducer producerId = this.RemoveProducer producerId
+        member _.AddConsumer (consumerId, consumerOperations) = this.AddConsumer(consumerId, consumerOperations)
+        member _.RemoveConsumer consumerId = this.RemoveConsumer consumerId
+        member _.AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations) =
+            this.AddTransactionMetaStoreHandler(transactionMetaStoreId, transactionMetaStoreOperations)
+        member _.Dispose() = this.Dispose()

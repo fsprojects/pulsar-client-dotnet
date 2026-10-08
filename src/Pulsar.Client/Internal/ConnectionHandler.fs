@@ -13,11 +13,11 @@ open System.Threading.Tasks
 type internal ConnectionHandlerMessage =
     | GrabCnx
     | ReconnectLater of exn
-    | ConnectionClosed of ClientCnx
+    | ConnectionClosed of IClientCnx
     | Close
 
 type internal ConnectionState =
-    | Ready of ClientCnx
+    | Ready of IClientCnx
     | Connecting
     | Closing
     | Closed
@@ -26,7 +26,7 @@ type internal ConnectionState =
     | Uninitialized
 
 type internal ConnectionHandler( parentPrefix: string,
-                        connectionPool: ConnectionPool,
+                        getConnection: Broker * int -> Task<IClientCnx>,
                         lookup: ILookupService,
                         topic: CompleteTopicName,
                         connectionOpened: Epoch -> unit,
@@ -59,7 +59,7 @@ type internal ConnectionHandler( parentPrefix: string,
                         try
                             Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic)
                             let! broker = lookup.GetBroker(topic)
-                            let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize)
+                            let! clientCnx = getConnection(broker, maxMessageSize)
                             this.ConnectionState <- Ready clientCnx
                             Log.Logger.LogDebug("{0} Successfully reconnected to {1}, {2}", prefix, topic, clientCnx)
                             connectionOpened epoch
@@ -87,7 +87,7 @@ type internal ConnectionHandler( parentPrefix: string,
 
                 this.LastDisconnectedTimestamp <- %DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 match this.ConnectionState with
-                | Ready cnx when cnx <> clientCnx ->
+                | Ready cnx when not (Object.ReferenceEquals(cnx, clientCnx)) ->
                     Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
                 | _ ->
                     if isValidStateForReconnection() then
@@ -131,7 +131,7 @@ type internal ConnectionHandler( parentPrefix: string,
     member this.SetReady connection =
         this.ConnectionState <- Ready connection
 
-    member this.ConnectionClosed (clientCnx: ClientCnx) =
+    member this.ConnectionClosed (clientCnx: IClientCnx) =
         post mb (ConnectionClosed clientCnx)
 
     member this.ReconnectLater ex =

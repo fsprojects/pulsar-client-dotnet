@@ -42,7 +42,8 @@ type internal ProducerMessage<'T> =
     | GetStats of TaskCompletionSource<ProducerStats>
     | Flush of TaskCompletionSource<unit>
 
-type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration,
+                           getConnection: Broker * int -> Task<IClientCnx>,
                            partitionIndex: int, lookup: ILookupService, schema: ISchema<'T>,
                            interceptors: ProducerInterceptors<'T>, cleanup: ProducerImpl<'T> -> unit) as this =
     let _this = this :> IProducer<'T>
@@ -81,7 +82,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             ProducerStatsImpl(prefix) :> IProducerStatsRecorder
     let connectionHandler =
         ConnectionHandler(prefix,
-                          connectionPool,
+                          getConnection,
                           lookup,
                           producerConfig.Topic.CompleteTopicName,
                           (fun epoch -> post this.Mb (ProducerMessage.ConnectionOpened epoch)),
@@ -212,7 +213,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         pendingMessages.Dequeue() |> ignore
         pendingMessage.Payload.Dispose()
 
-    let resendMessages (clientCnx: ClientCnx) =
+    let resendMessages (clientCnx: IClientCnx) =
         if pendingMessages.Count > 0 then
             Log.Logger.LogInformation("{0} resending {1} pending messages", prefix, pendingMessages.Count)
             for pendingMessage in pendingMessages do
@@ -645,13 +646,14 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 | _ ->
                     Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
 
-                if connectionHandler.ConnectionState = Failed then
-                    continueLoop <- false
+                match connectionHandler.ConnectionState with
+                | Failed -> continueLoop <- false
+                | _ -> ()
 
             | ProducerMessage.ConnectionClosed clientCnx ->
 
                 Log.Logger.LogDebug("{0} ConnectionClosed", prefix)
-                connectionHandler.ConnectionClosed clientCnx
+                connectionHandler.ConnectionClosed (clientCnx :> IClientCnx)
 
             | ProducerMessage.ConnectionFailed ex ->
 
@@ -925,15 +927,26 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
            return! producerCreatedTsc.Task
        }
 
-    static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+    static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration,
+                       getConnection: Broker * int -> Task<IClientCnx>,
                        partitionIndex: int, lookup: ILookupService, schema: ISchema<'T>,
                        interceptors: ProducerInterceptors<'T>, cleanup: ProducerImpl<'T> -> unit) =
         backgroundTask {
-            let producer = ProducerImpl(producerConfig, clientConfig, connectionPool, partitionIndex, lookup, schema,
+            let producer = ProducerImpl(producerConfig, clientConfig, getConnection, partitionIndex, lookup, schema,
                                         interceptors, cleanup)
             do! producer.InitInternal()
             return producer
         }
+
+    static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                       partitionIndex: int, lookup: ILookupService, schema: ISchema<'T>,
+                       interceptors: ProducerInterceptors<'T>, cleanup: ProducerImpl<'T> -> unit) =
+        let getConnection (broker, maxMessageSize) =
+            backgroundTask {
+                let! cnx = connectionPool.GetConnection(broker, maxMessageSize)
+                return cnx :> IClientCnx
+            }
+        ProducerImpl.Init(producerConfig, clientConfig, getConnection, partitionIndex, lookup, schema, interceptors, cleanup)
     static member NewMessage<'T> (keyValueProcessor: IKeyValueProcessor option, schema: ISchema<'T>,
             value:'T,
             key:string,
