@@ -127,7 +127,10 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
             try
                 do! allOpComplete()
             with Flatten ex ->
-                do! this.AbortInner()
+                try
+                    do! this.AbortInner()
+                with abortEx ->
+                    Log.Logger.LogError(abortEx, "Error during abort txnId={0}", txnId)
                 reraize ex
             try
                 do! txnOperations.Commit(txnId)
@@ -160,6 +163,7 @@ type Transaction internal (timeout: TimeSpan, txnOperations: TxnOperations, txnI
                 with Flatten ex ->
                     if (ex :? TransactionNotFoundException) || (ex :? InvalidTxnStatusException) then
                         this.State <- ERROR
+                    reraize ex
             finally
                 for consumer, permits in cumulativeConsumersData do
                     consumer.IncreaseAvailablePermits permits

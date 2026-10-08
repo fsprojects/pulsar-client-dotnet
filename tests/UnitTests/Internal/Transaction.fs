@@ -333,4 +333,20 @@ let tests =
             Expect.isFalse "" committed.Value
             Expect.equal "" ABORTED ts.State
         }
+
+        test "Abort fails with the abort exception" {
+            let operations = { operations with Abort = fun _ -> Task.FromException<unit>(TimeoutException()) }
+            let ts = Transaction(TimeSpan.FromMinutes(1.0), operations, txnId)
+            Expect.throwsT<TimeoutException> "" (fun () -> ts.Abort().GetAwaiter().GetResult())
+        }
+
+        test "Commit fails with the operation exception when abort fails" {
+            let operations = { operations with Abort = fun _ -> Task.FromException<unit>(InvalidOperationException()) }
+            let tcs = TaskCompletionSource<Unit>()
+            let ts = Transaction(TimeSpan.FromMinutes(1.0), operations, txnId)
+            ts.RegisterAckOp(tcs.Task)
+            let commitTask = ts.Commit()
+            tcs.SetException(TimeoutException())
+            Expect.throwsT<TimeoutException> "" (fun () -> commitTask.GetAwaiter().GetResult())
+        }
     ]
