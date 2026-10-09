@@ -49,5 +49,21 @@ jobs:
     - name: Run Integration Tests
       timeout-minutes: 3
       run: |
+        dotnet tool install --tool-path "$RUNNER_TEMP/pulsar-diagnostics" dotnet-stack
         cd tests/IntegrationTests
-        dotnet run -c Release --no-build --no-spinner --debug
+        dotnet bin/Release/net10.0/IntegrationTests.dll --no-spinner --debug &
+        test_pid=$!
+        (
+          sleep 75
+          if kill -0 "$test_pid" 2>/dev/null; then
+            echo "Integration tests are still running; collecting managed thread stacks."
+            timeout 30s "$RUNNER_TEMP/pulsar-diagnostics/dotnet-stack" report --process-id "$test_pid"
+          fi
+        ) &
+        watchdog_pid=$!
+        set +e
+        wait "$test_pid"
+        test_exit=$?
+        kill "$watchdog_pid" 2>/dev/null
+        wait "$watchdog_pid" 2>/dev/null
+        exit "$test_exit"
