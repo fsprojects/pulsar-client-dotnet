@@ -26,7 +26,7 @@ type internal ConnectionState =
     | Uninitialized
 
 type internal ConnectionHandler( parentPrefix: string,
-                        connectionPool: ConnectionPool,
+                        getConnection: Broker * int -> Task<ClientCnx>,
                         lookup: ILookupService,
                         topic: CompleteTopicName,
                         connectionOpened: Epoch -> unit,
@@ -59,7 +59,7 @@ type internal ConnectionHandler( parentPrefix: string,
                         try
                             Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic)
                             let! broker = lookup.GetBroker(topic)
-                            let! clientCnx = connectionPool.GetConnection(broker, maxMessageSize)
+                            let! clientCnx = getConnection(broker, maxMessageSize)
                             this.ConnectionState <- Ready clientCnx
                             Log.Logger.LogDebug("{0} Successfully reconnected to {1}, {2}", prefix, topic, clientCnx)
                             connectionOpened epoch
@@ -110,6 +110,9 @@ type internal ConnectionHandler( parentPrefix: string,
             else
                 Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
+
+    new(parentPrefix, connectionPool: ConnectionPool, lookup, topic, connectionOpened, connectionFailed, backoff) =
+        ConnectionHandler(parentPrefix, connectionPool.GetConnection, lookup, topic, connectionOpened, connectionFailed, backoff)
 
     member private _.Mb with get() : Channel<ConnectionHandlerMessage> = mb
 
