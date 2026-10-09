@@ -38,12 +38,14 @@ type internal BatchAddResponse<'T> =
     | BatchReady of Messages<'T>
     | Success
 
+type internal PolledMessage<'T> = (struct (CancellationToken * ResultOrException<Message<'T>>))
+
 type internal MultiTopicConsumerMessage<'T> =
     | Init
     | PollerFailed of exn
     | Receive of ReceiveCallback<'T>
     | BatchReceive of ReceiveCallbacks<'T>
-    | MessageReceived of ResultOrException<Message<'T>> * TaskCompletionSource<unit>
+    | MessageReceived of PolledMessage<'T> * TaskCompletionSource<unit>
     | SendBatchByTimeout
     | Acknowledge of TaskCompletionSource<unit> * MessageId * Transaction option
     | NegativeAcknowledge of TaskCompletionSource<unit> * MessageId
@@ -82,11 +84,14 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let consumerId = Generators.getNextConsumerId()
     let consumerName = getConsumerName consumerConfig.ConsumerName
     let prefix = $"mt/consumer({consumerId}, {consumerName})"
-    let consumers = Dictionary<CompleteTopicName,IConsumer<'T> * TaskGenerator<ResultOrException<Message<'T>>>>()
+    let consumers = Dictionary<CompleteTopicName,IConsumer<'T> * TaskGenerator<PolledMessage<'T>>>()
     let consumerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let pollerCts = new CancellationTokenSource()
+    let mutable receiveCts = new CancellationTokenSource()
+    // Late poller completions can restart a generator after shutdown disposes the source.
+    let mutable receiveToken = receiveCts.Token
     let mutable connectionState = MultiTopicConnectionState.Uninitialized
-    let mutable currentStream = Unchecked.defaultof<TaskSeq<ResultOrException<Message<'T>>>>
+    let mutable currentStream = Unchecked.defaultof<TaskSeq<PolledMessage<'T>>>
     let partitionedTopics = Dictionary<TopicName, ConsumerInitInfo<'T>>()
     let allTopics = HashSet()
     let mutable incomingMessagesSize = 0L
@@ -179,22 +184,48 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         Log.Logger.LogDebug("{0} getStream", topic)
         let consumerImp = consumer :> IConsumer<'T>
         fun () ->
+            let cancellationToken = receiveToken
             backgroundTask {
-                let! hasReachedEndOfTopic = consumerImp.HasReachedEndOfTopic()
-                if hasReachedEndOfTopic then
-                    Log.Logger.LogWarning("{0} topic was terminated", topic)
-                    do! Task.Delay(Timeout.Infinite) // infinite delay for terminated topic
-                let! message = consumer.ReceiveWrappedAsync(CancellationToken.None)
-                match message with
-                | Error ex when (ex :? AlreadyClosedException) || (ex :? NotConnectedException) ->
-                    // Stop the poller before a terminal child failure can be buffered as a message.
-                    return reraize ex
-                | _ ->
-                    return message |> Result.map (fun msg ->
-                        let newMessageId = { msg.MessageId with TopicName = topic }
-                        msg.WithMessageId(newMessageId)
-                    )
+                try
+                    cancellationToken.ThrowIfCancellationRequested()
+                    let! hasReachedEndOfTopic = consumerImp.HasReachedEndOfTopic()
+                    if hasReachedEndOfTopic then
+                        Log.Logger.LogWarning("{0} topic was terminated", topic)
+                        do! Task.Delay(Timeout.Infinite, cancellationToken)
+                    let! message = consumer.ReceiveWrappedAsync(cancellationToken)
+                    match message with
+                    | Error ex when (ex :? AlreadyClosedException) || (ex :? NotConnectedException) ->
+                        // Stop the poller before a terminal child failure can be buffered as a message.
+                        return reraize ex
+                    | _ ->
+                        let message = message |> Result.map (fun msg ->
+                            let newMessageId = { msg.MessageId with TopicName = topic }
+                            msg.WithMessageId(newMessageId)
+                        )
+                        return struct (cancellationToken, message)
+                with :? OperationCanceledException as ex when cancellationToken.IsCancellationRequested ->
+                    return struct (cancellationToken, Error ex)
             }
+
+    let resetStreams (action: IConsumer<'T> -> Task<unit>) =
+        backgroundTask {
+            let children = consumers.Values |> Seq.toArray
+            for _, stream in children do
+                do! currentStream.RemoveGenerator stream
+            // Stop prefetch before moving any cursor, including reads whose results are already queued.
+            receiveCts.Cancel()
+            try
+                let! _ =
+                    children
+                    |> Array.map (fun (consumer, _) -> backgroundTask { do! action consumer })
+                    |> Task.WhenAll
+                ()
+            finally
+                receiveCts.Dispose()
+                receiveCts <- new CancellationTokenSource()
+                receiveToken <- receiveCts.Token
+                currentStream.AddGenerators (children |> Array.map snd)
+        }
 
     let stopConsumer() =
         cleanup(this)
@@ -203,6 +234,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         unAckedMessageTracker.Close()
         pollerCts.Cancel()
         pollerCts.Dispose()
+        receiveCts.Cancel()
+        receiveCts.Dispose()
         while waiters.Count > 0 do
             let waitingChannel = waiters |> dequeueWaiter
             AlreadyClosedException "Consumer is already closed" |> waitingChannel.TrySetException |> ignore
@@ -744,7 +777,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 stopConsumer()
                 continueLoop <- false
 
-            | MessageReceived (message, pollerChannel) ->
+            | MessageReceived (struct (cancellationToken, message), pollerChannel) ->
 
                 let hasWaitingChannel = waiters.Count > 0
                 let hasWaitingBatchChannel = batchWaiters.Count > 0
@@ -752,6 +785,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     prefix, incomingMessages.Count, hasWaitingChannel, hasWaitingBatchChannel)
                 // handle message
                 match message with
+                | _ when cancellationToken.IsCancellationRequested ->
+                    Log.Logger.LogDebug("{0} discarded a message from before the cursor reset", prefix)
                 | Ok rawMessage when isInvalidConsumerEpoch rawMessage.ConsumerEpoch currentConsumerEpoch ->
                     Log.Logger.LogWarning("{0} Consumer filter old epoch message {1}, messageConsumerEpoch={2}, consumerEpoch={3}",
                         prefix, rawMessage.MessageId, rawMessage.ConsumerEpoch, currentConsumerEpoch)
@@ -847,11 +882,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         unAckedMessageTracker.Clear()
                         if isConsumerEpochSupported then
                             currentConsumerEpoch <- currentConsumerEpoch + %1UL
-                        let! _ =
-                            consumers
-                            |> Seq.map(fun (KeyValue(_, (consumer, _))) -> consumer.RedeliverUnacknowledgedMessagesAsync())
-                            |> Task.WhenAll
-                        currentStream.RestartCompletedTasks()
+                        do! resetStreams (fun consumer -> consumer.RedeliverUnacknowledgedMessagesAsync())
                         channel |> Option.map _.SetResult() |> ignore
                     with ex ->
                         Log.Logger.LogError(ex, "{0} RedeliverUnacknowledgedMessages failed", prefix)
@@ -935,14 +966,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     clearIncomingMessages()
                     if isConsumerEpochSupported then
                         currentConsumerEpoch <- currentConsumerEpoch + %1UL
-                    let! _ =
-                        consumers
-                        |> Seq.map (fun (KeyValue(_, (consumer, _))) ->
-                            match seekData with
-                            | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
-                            | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
-                        |> Task.WhenAll
-                    currentStream.RestartCompletedTasks()
+                    do! resetStreams (fun consumer ->
+                        match seekData with
+                        | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
+                        | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
                     channel.SetResult()
                 with Flatten ex ->
                     channel.SetException ex
@@ -955,11 +982,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     clearIncomingMessages()
                     if isConsumerEpochSupported then
                         currentConsumerEpoch <- currentConsumerEpoch + %1UL
-                    let! _ =
-                        consumers
-                        |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.SeekAsync(resolver))
-                        |> Task.WhenAll
-                    currentStream.RestartCompletedTasks()
+                    do! resetStreams (fun consumer -> consumer.SeekAsync(resolver))
                     channel.SetResult()
                 with Flatten ex ->
                     channel.SetException ex

@@ -16,7 +16,6 @@ type internal TaskSeqMessage<'T> =
     | NextComplete of Task<'T>
     | AddGenerators of TaskGenerator<'T> seq
     | RemoveGenerator of TaskGenerator<'T> * TaskCompletionSource<unit>
-    | RestartCompletedTasks
 
 type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
     let tasks = ResizeArray<Task<'T>>()
@@ -97,13 +96,6 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 else
                     nextWaiting <- false
 
-            | RestartCompletedTasks ->
-
-                Log.Logger.LogTrace("TaskSeq.RestartCompleted nextWaiting:{0}", nextWaiting)
-                for index in 0..tasks.Count-1 do
-                    if tasks[index].IsCompleted then
-                        tasks[index] <- generators[index]()
-
             | AddGenerators newGenerators ->
 
                 Log.Logger.LogTrace("TaskSeq.AddGenerators nextWaiting:{0}", nextWaiting)
@@ -176,6 +168,3 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
 
     member this.RemoveGenerator generator =
         postAndAsyncReply mb (fun channel -> RemoveGenerator (generator, channel))
-
-    member this.RestartCompletedTasks() =
-        post mb RestartCompletedTasks

@@ -71,6 +71,9 @@ Pop-Location
 The `Multitopic.Pattern topic removal keeps remaining consumers active` test covers intentional child disposal during pattern refresh.
 Select it with `--filter-test-case "Pattern topic removal"` instead of the mailbox filter above.
 
+Multi-topic seek regressions stagger child seeks, check every message after the reset, and verify recovery after a rejected resolver.
+They also cover buffered reads and explicit redelivery with Shared and Exclusive subscriptions. Select them with `--filter-test-case "Multi-topic seek"`.
+
 You can run the integration tests from the command line. From the root of the repository, run the following command:
 ```bash
 cd pulsar-client-dotnet/tests/IntegrationTests
