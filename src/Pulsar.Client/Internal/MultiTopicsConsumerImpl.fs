@@ -40,6 +40,7 @@ type internal BatchAddResponse<'T> =
 
 type internal MultiTopicConsumerMessage<'T> =
     | Init
+    | PollerFailed of exn
     | Receive of ReceiveCallback<'T>
     | BatchReceive of ReceiveCallbacks<'T>
     | MessageReceived of ResultOrException<Message<'T>> * TaskCompletionSource<unit>
@@ -626,15 +627,86 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 if t.IsFaulted then
                     let (Flatten ex) = t.Exception
                     Log.Logger.LogCritical(ex, "{0} poller failure", prefix)
+                    post this.Mb (PollerFailed ex)
                 else
                     Log.Logger.LogInformation("{0} poller has stopped normally", prefix)
             )
 
     let mb = Channel.CreateUnbounded<MultiTopicConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+
+    let replyFromStoppedMailbox (ex: exn) (msg: MultiTopicConsumerMessage<'T>) =
+        match msg with
+        | Receive receiveCallback ->
+            receiveCallback.MessageChannel.TrySetException ex |> ignore
+        | BatchReceive receiveCallbacks ->
+            receiveCallbacks.MessagesChannel.TrySetException ex |> ignore
+        | MessageReceived (_, pollerChannel) ->
+            pollerChannel.TrySetException ex |> ignore
+        | Acknowledge (channel, _, _)
+        | NegativeAcknowledge (channel, _)
+        | AcknowledgeCumulative (channel, _, _)
+        | Unsubscribe channel
+        | Seek (_, channel)
+        | SeekWithResolver (_, channel)
+        | ReconsumeLater (_, _, channel)
+        | ReconsumeLaterCumulative (_, _, channel) ->
+            channel.TrySetException ex |> ignore
+        | RedeliverAllUnacknowledged (Some channel) ->
+            channel.TrySetException ex |> ignore
+        | HasReachedEndOfTheTopic channel
+        | HasMessageAvailable channel ->
+            channel.TrySetException ex |> ignore
+        | GetStats channel ->
+            channel.TrySetException ex |> ignore
+        | LastDisconnectedTimestamp channel ->
+            channel.TrySetException ex |> ignore
+        | IsConnected channel ->
+            channel.TrySetResult false |> ignore
+        | CancelWaiter (struct (_, channel)) ->
+            channel.TrySetCanceled() |> ignore
+        | CancelBatchWaiter (struct (_, _, channel)) ->
+            channel.TrySetCanceled() |> ignore
+        | Close channel ->
+            // the child consumers outlive a failed mailbox, so they still have to be closed
+            backgroundTask {
+                try
+                    let! _ =
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, (consumer, _))) -> consumer.DisposeAsync().AsTask())
+                        |> Task.WhenAll
+                    ()
+                with Flatten closeEx ->
+                    Log.Logger.LogError(closeEx, "{0} could not close all child consumers properly", prefix)
+                this.ConnectionState <- Closed
+                channel.TrySetResult() |> ignore
+            } |> ignore
+        | _ ->
+            ()
+
+    let stoppedMailboxException () =
+        match this.ConnectionState with
+        | Closing | Closed -> AlreadyClosedException(prefix + " already closed") :> exn
+        | _ -> NotConnectedException(prefix + " not connected") :> exn
+
+    // requests posted after the mailbox exits would otherwise never be completed
+    let drainStoppedMailbox () =
+        backgroundTask {
+            while true do
+                let! msg = mb.Reader.ReadAsync()
+                try
+                    replyFromStoppedMailbox (stoppedMailboxException ()) msg
+                with ex ->
+                    Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
+        } |> ignore
+
+    let mutable currentMessage : MultiTopicConsumerMessage<'T> option = None
+
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-            match! mb.Reader.ReadAsync() with
+            let! msg = mb.Reader.ReadAsync()
+            currentMessage <- Some msg
+            match msg with
             | Init ->
 
                 Log.Logger.LogDebug("{0} Init", prefix)
@@ -668,6 +740,12 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
                 if this.ConnectionState = Failed then
                     continueLoop <- false
+
+            | PollerFailed ex ->
+                Log.Logger.LogError(ex, "{0} stopping because its poller failed", prefix)
+                this.ConnectionState <- Failed
+                stopConsumer()
+                continueLoop <- false
 
             | MessageReceived (message, pollerChannel) ->
 
@@ -1022,13 +1100,22 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         channel.SetException ex
                         continueLoop <- true
         }:> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
-                this.ConnectionState <- Failed
-                stopConsumer()
-            else
-                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+            try
+                if t.IsFaulted then
+                    let (Flatten ex) = t.Exception
+                    Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                    this.ConnectionState <- Failed
+                    try
+                        currentMessage |> Option.iter (replyFromStoppedMailbox ex)
+                    with currentEx ->
+                        Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
+                    stopConsumer()
+                    consumerCreatedTsc.TrySetException(ex) |> ignore
+                else
+                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
+            finally
+                // only after the Failed transition and cleanup, so a queued Close can't race with them
+                drainStoppedMailbox())
     |> ignore
 
     do
@@ -1046,7 +1133,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         | _ -> ()
 
 
-    member private this.Mb with get(): Channel<MultiTopicConsumerMessage<'T>> = mb
+    member internal this.Mb with get(): Channel<MultiTopicConsumerMessage<'T>> = mb
+
+    member internal this.Consumers =
+        consumers.Values |> Seq.map fst |> Seq.toArray
 
     member this.ConsumerId with get() = consumerId
 
