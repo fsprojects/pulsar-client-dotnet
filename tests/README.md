@@ -15,10 +15,13 @@ On JetBrains Rider, you can right-click on the `UnitTests` project and select `R
 
 ### From the command line
 You can run the unit tests from the command line. From the root of the repository, run the following command:
-```bash
-cd pulsar-client-dotnet/tests/UnitTests
-dotnet test tests/UnitTests.csproj
+```powershell
+dotnet build tests\UnitTests\UnitTests.fsproj -c Release
+dotnet run -c Release --project tests\UnitTests\UnitTests.fsproj --no-build
 ```
+
+Producer disposal regression tests use a concrete connection backed by in-memory pipes, so they do not require a broker.
+To run only these tests, append `-- --filter-test-list ProducerImpl` to the `dotnet run` command.
 
 ## Integration Tests
 

@@ -42,7 +42,8 @@ type internal ProducerMessage<'T> =
     | GetStats of TaskCompletionSource<ProducerStats>
     | Flush of TaskCompletionSource<unit>
 
-type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration,
+                           getConnection: Broker * int -> Task<ClientCnx>,
                            partitionIndex: int, lookup: ILookupService, schema: ISchema<'T>,
                            interceptors: ProducerInterceptors<'T>, cleanup: ProducerImpl<'T> -> unit) as this =
     let _this = this :> IProducer<'T>
@@ -81,7 +82,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             ProducerStatsImpl(prefix) :> IProducerStatsRecorder
     let connectionHandler =
         ConnectionHandler(prefix,
-                          connectionPool,
+                          getConnection,
                           lookup,
                           producerConfig.Topic.CompleteTopicName,
                           (fun epoch -> post this.Mb (ProducerMessage.ConnectionOpened epoch)),
@@ -492,6 +493,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let stopProducer() =
         sendTimeoutTimer.Stop()
         batchTimer.Stop()
+        cryptoTimer.Stop()
         connectionHandler.Close()
         interceptors.Close()
         statTimer.Stop()
@@ -888,6 +890,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         channel.SetResult <| Ok()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed to close", prefix)
+                        clientCnx.RemoveProducer(producerId)
+                        connectionHandler.Closed()
+                        stopProducer()
+                        failPendingMessages ex
                         channel.SetResult <| Error ex
                 | _ ->
                     Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
@@ -937,15 +943,22 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
            return! producerCreatedTsc.Task
        }
 
-    static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+    static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration,
+                       getConnection: Broker * int -> Task<ClientCnx>,
                        partitionIndex: int, lookup: ILookupService, schema: ISchema<'T>,
                        interceptors: ProducerInterceptors<'T>, cleanup: ProducerImpl<'T> -> unit) =
         backgroundTask {
-            let producer = ProducerImpl(producerConfig, clientConfig, connectionPool, partitionIndex, lookup, schema,
+            let producer = ProducerImpl(producerConfig, clientConfig, getConnection, partitionIndex, lookup, schema,
                                         interceptors, cleanup)
             do! producer.InitInternal()
             return producer
         }
+
+    static member Init(producerConfig: ProducerConfiguration, clientConfig: PulsarClientConfiguration, connectionPool: ConnectionPool,
+                       partitionIndex: int, lookup: ILookupService, schema: ISchema<'T>,
+                       interceptors: ProducerInterceptors<'T>, cleanup: ProducerImpl<'T> -> unit) =
+        ProducerImpl.Init(producerConfig, clientConfig, connectionPool.GetConnection, partitionIndex, lookup, schema, interceptors, cleanup)
+
     static member NewMessage<'T> (keyValueProcessor: IKeyValueProcessor option, schema: ISchema<'T>,
             value:'T,
             key:string,
