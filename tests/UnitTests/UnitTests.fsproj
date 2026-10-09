@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Include="Expect.fs" />
     <Compile Include="ManualInvokeScheduler.fs" />
+    <Compile Include="Defaults.fs" />
     <Compile Include="Common\Properties.fs" />
     <Compile Include="Common\HashTests.fs" />
     <Compile Include="Common\TopicNameTests.fs" />
@@ -28,6 +29,7 @@
     <Compile Include="Auth\AuthenticationOauth2Tests.fs" />
     <Compile Include="Internal\EndPointResolverTests.fs" />
     <Compile Include="Internal\ConnectionPoolTests.fs" />
+    <Compile Include="Internal\ProducerImplTests.fs" />
     <Compile Include="Internal\BatchMessageContainerTests.fs" />
     <Compile Include="Internal\CompressionCodecTests.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTrackerTests.fs" />
