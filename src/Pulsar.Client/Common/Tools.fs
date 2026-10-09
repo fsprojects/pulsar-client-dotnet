@@ -8,6 +8,7 @@ open System.Threading.Tasks
 open Microsoft.IO
 open System.Runtime.ExceptionServices
 open System.Collections.Generic
+open System.Threading
 open Microsoft.Extensions.Logging
 open System.Threading.Channels
 
@@ -160,8 +161,16 @@ type Result<'T, 'TError> with
         | Error err -> $"Error {err}"
 
 let postAndAsyncReply (channel: Channel<'T>) f =
-    let tcs = TaskCompletionSource<_>(TaskContinuationOptions.RunContinuationsAsynchronously)
+    let tcs = TaskCompletionSource<_>(TaskCreationOptions.RunContinuationsAsynchronously)
     (f tcs) |> channel.Writer.TryWrite |> ignore
+    tcs.Task
+
+let runContinuationsAsynchronously (task: Task<'T>) =
+    let tcs = TaskCompletionSource<'T>(TaskCreationOptions.RunContinuationsAsynchronously)
+    task.ContinueWith((fun (t: Task<'T>) ->
+        if t.IsFaulted then tcs.SetException t.Exception.InnerExceptions
+        elif t.IsCanceled then tcs.SetCanceled()
+        else tcs.SetResult t.Result), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default) |> ignore
     tcs.Task
 
 let post (channel: Channel<'T>) msg =

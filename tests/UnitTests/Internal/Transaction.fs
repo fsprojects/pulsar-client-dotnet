@@ -1,6 +1,7 @@
 module Pulsar.Client.UnitTests.Internal.Transaction
 
 open System
+open System.Threading
 open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
@@ -286,5 +287,66 @@ let tests =
             do! ts.Abort() 
             
             Expect.equal "" msgToClearNum increased
+        }
+
+        let operations =
+            {
+                AddPublishPartitionToTxn = fun (_, _) -> Task.FromResult()
+                AddSubscriptionToTxn = fun (_, _, _) -> Task.FromResult()
+                Commit = fun _ -> Task.FromResult()
+                Abort = fun _ -> Task.FromResult()
+            }
+        let txnId = { LeastSigBits = 1UL; MostSigBits = 2UL }
+
+        let continuationThread (finish: Transaction -> Task<unit>) =
+            let tcs = TaskCompletionSource<Unit>()
+            let ts = Transaction(TimeSpan.FromMinutes(1.0), operations, txnId)
+            ts.RegisterAckOp(tcs.Task)
+            let continuationThread = ref 0
+            use continued = new ManualResetEventSlim()
+            (finish ts).ContinueWith((fun (_: Task<unit>) ->
+                continuationThread.Value <- Thread.CurrentThread.ManagedThreadId
+                continued.Set()), TaskContinuationOptions.ExecuteSynchronously) |> ignore
+            tcs.SetResult()
+            continued.Wait()
+            continuationThread.Value
+
+        test "Commit continuations run asynchronously" {
+            let thread = continuationThread (fun ts -> ts.Commit())
+            Expect.notEqual "" Thread.CurrentThread.ManagedThreadId thread
+        }
+
+        test "Abort continuations run asynchronously" {
+            let thread = continuationThread (fun ts -> ts.Abort())
+            Expect.notEqual "" Thread.CurrentThread.ManagedThreadId thread
+        }
+
+        test "Commit fails with the operation exception and aborts" {
+            let committed = ref false
+            let operations = { operations with Commit = fun _ -> committed.Value <- true; Task.FromResult() }
+            let tcs = TaskCompletionSource<Unit>()
+            let ts = Transaction(TimeSpan.FromMinutes(1.0), operations, txnId)
+            ts.RegisterAckOp(tcs.Task)
+            let commitTask = ts.Commit()
+            tcs.SetException(TimeoutException())
+            Expect.throwsT<TimeoutException> "" (fun () -> commitTask.GetAwaiter().GetResult())
+            Expect.isFalse "" committed.Value
+            Expect.equal "" ABORTED ts.State
+        }
+
+        test "Abort fails with the abort exception" {
+            let operations = { operations with Abort = fun _ -> Task.FromException<unit>(TimeoutException()) }
+            let ts = Transaction(TimeSpan.FromMinutes(1.0), operations, txnId)
+            Expect.throwsT<TimeoutException> "" (fun () -> ts.Abort().GetAwaiter().GetResult())
+        }
+
+        test "Commit fails with the operation exception when abort fails" {
+            let operations = { operations with Abort = fun _ -> Task.FromException<unit>(InvalidOperationException()) }
+            let tcs = TaskCompletionSource<Unit>()
+            let ts = Transaction(TimeSpan.FromMinutes(1.0), operations, txnId)
+            ts.RegisterAckOp(tcs.Task)
+            let commitTask = ts.Commit()
+            tcs.SetException(TimeoutException())
+            Expect.throwsT<TimeoutException> "" (fun () -> commitTask.GetAwaiter().GetResult())
         }
     ]
