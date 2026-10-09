@@ -59,6 +59,18 @@ let assertAlreadyClosed (work: Task<'T>) = task {
         | other -> failwith $"Expected AlreadyClosedException but got {other.GetType().Name}: {other.Message}"
 }
 
+// Runs `queue` inside the mailbox loop while it is still handling the request that completes `trigger`,
+// so everything it posts is queued and read only after that request returns.
+// `trigger` must not be created with RunContinuationsAsynchronously.
+let queueBehind (trigger: TaskCompletionSource<'T>) (queue: unit -> unit) =
+    trigger.Task.ContinueWith(Action<Task<'T>>(fun _ -> queue ()), TaskContinuationOptions.ExecuteSynchronously)
+    |> ignore
+
+// Takes `snapshot` on the thread that completes `request`, before that thread can do anything else.
+// `request` must not be created with RunContinuationsAsynchronously.
+let snapshotOnCompletion (request: TaskCompletionSource<'T>) (snapshot: unit -> 'S) =
+    request.Task.ContinueWith(Func<Task<'T>, 'S>(fun _ -> snapshot ()), TaskContinuationOptions.ExecuteSynchronously)
+
 // Swapping the process-wide logger has to be serialized. The observer forwards every
 // message, and IsEnabled stays true so debug connection lines are still delivered to it.
 let private loggerGate = new SemaphoreSlim(1, 1)
@@ -244,6 +256,50 @@ let tests =
             Log.Debug("Finished Consumer completes the request that faults its mailbox")
         }
 
+        testTask "Close queued behind a consumer mailbox failure completes only after cleanup" {
+
+            Log.Debug("Started Close queued behind a consumer mailbox failure completes only after cleanup")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .ConsumerName("failingQueuedClose")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+
+            let consumerImpl = consumer :?> ConsumerImpl<byte[]>
+            // the topic is empty, so this stays a receive waiter until stopConsumer fails it
+            let pendingReceive = TaskCompletionSource<Message<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously)
+            post consumerImpl.Mb
+                (ConsumerMessage.Receive { CancellationToken = CancellationToken.None; MessageChannel = pendingReceive })
+
+            let trigger = TaskCompletionSource<ConsumerStats>()
+            let seek = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let close = TaskCompletionSource<unit>()
+            // queued while the trigger is being handled: the seek faults the mailbox and the Close is left for the drain
+            queueBehind trigger (fun () ->
+                let badSeekId = { MessageId.Earliest with ChunkMessageIds = Some null }
+                post consumerImpl.Mb (ConsumerMessage.SeekAsync(SeekType.MessageId badSeekId, seek))
+                post consumerImpl.Mb (ConsumerMessage.Close close))
+            let atClose =
+                snapshotOnCompletion close (fun () ->
+                    consumer.IsConnected().Result, seek.Task.IsCompleted, pendingReceive.Task.IsCompleted)
+            post consumerImpl.Mb (ConsumerMessage.GetStats trigger)
+
+            let! (connected, seekCompleted, receiveCompleted) = atClose.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse "Consumer should be failed before the queued Close completes" connected
+            Expect.isTrue "In-flight request should be failed before the queued Close completes" seekCompleted
+            Expect.isTrue "Receive waiter should be failed before the queued Close completes" receiveCompleted
+            do! assertMailboxException seek.Task
+            do! assertAlreadyClosed pendingReceive.Task
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Close queued behind a consumer mailbox failure completes only after cleanup")
+        }
+
         testTask "In-flight message payload is disposed when the consumer mailbox fails" {
 
             Log.Debug("Started In-flight message payload is disposed when the consumer mailbox fails")
@@ -414,6 +470,58 @@ let tests =
             do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
             Log.Debug("Finished Multi-topic consumer completes the request that faults its mailbox")
+        }
+
+        testTask "Close queued behind a multi-topic consumer mailbox failure completes only after cleanup" {
+
+            Log.Debug("Started Close queued behind a multi-topic consumer mailbox failure completes only after cleanup")
+            let client = getClient()
+            // nothing matches, so there are no child consumers and the drain completes Close as soon as it reads it
+            let pattern = "public/default/topic-" + Guid.NewGuid().ToString("N") + "-.*"
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .TopicsPattern(pattern)
+                    .ConsumerName("failingQueuedMultiClose")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            // nothing can arrive, so this stays a receive waiter until stopConsumer fails it
+            let pendingReceive = TaskCompletionSource<Message<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously)
+            post multiConsumer.Mb
+                (MultiTopicConsumerMessage.Receive { CancellationToken = CancellationToken.None; MessageChannel = pendingReceive })
+
+            let trigger = TaskCompletionSource<bool>()
+            let ack = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let close = TaskCompletionSource<unit>()
+            // queued while the trigger is being handled: the topic lookup for the ack faults the mailbox
+            // and the Close is left for the drain
+            queueBehind trigger (fun () ->
+                let bogusId = { MessageId.Earliest with TopicName = %"missing-topic" }
+                post multiConsumer.Mb (MultiTopicConsumerMessage.Acknowledge(ack, bogusId, None))
+                post multiConsumer.Mb (MultiTopicConsumerMessage.Close close))
+            let atClose =
+                snapshotOnCompletion close (fun () -> ack.Task.IsCompleted, pendingReceive.Task.IsCompleted)
+            post multiConsumer.Mb (MultiTopicConsumerMessage.IsConnected trigger)
+
+            let! (ackCompleted, receiveCompleted) = atClose.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isTrue "In-flight request should be failed before the queued Close completes" ackCompleted
+            Expect.isTrue "Receive waiter should be failed before the queued Close completes" receiveCompleted
+            try
+                do! ack.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+                failwith "Acknowledge completed successfully after faulting the mailbox"
+            with ex ->
+                match unwrap ex with
+                | :? System.Collections.Generic.KeyNotFoundException -> ()
+                | other -> failwith $"Expected KeyNotFoundException but got {other.GetType().Name}: {other.Message}"
+            do! assertAlreadyClosed pendingReceive.Task
+            // a Failed transition after the drain's Close would overwrite Closed and make this NotConnectedException
+            do! assertAlreadyClosed (consumer.GetStats())
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Close queued behind a multi-topic consumer mailbox failure completes only after cleanup")
         }
 
         testTask "Multi-topic consumer is closed at the broker when a child mailbox fails" {
@@ -767,6 +875,43 @@ let tests =
             Log.Debug("Finished Requests posted as the producer mailbox fails are faulted")
         }
 
+        testTask "Close queued behind a producer mailbox failure completes only after cleanup" {
+
+            Log.Debug("Started Close queued behind a producer mailbox failure completes only after cleanup")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+
+            let producerImpl = producer :?> ProducerImpl<byte[]>
+            let trigger = TaskCompletionSource<ProducerStats>()
+            let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let close = TaskCompletionSource<Result<unit, exn>>()
+            // queued while the trigger is being handled: the null send faults the mailbox and the Close is left for the drain
+            queueBehind trigger (fun () ->
+                post producerImpl.Mb
+                    (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
+                post producerImpl.Mb (ProducerMessage.Close close))
+            let atClose =
+                snapshotOnCompletion close (fun () -> producer.IsConnected().Result, crashingSend.Task.IsCompleted)
+            post producerImpl.Mb (ProducerMessage.GetStats trigger)
+
+            let! (connected, sendCompleted) = atClose.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse "Producer should be failed before the queued Close completes" connected
+            Expect.isTrue "In-flight request should be failed before the queued Close completes" sendCompleted
+            do! assertMailboxException crashingSend.Task
+            match close.Task.Result with
+            | Ok () -> ()
+            | Error other -> failwith $"Close failed after mailbox failure with {other.GetType().Name}: {other.Message}"
+            do! producer.DisposeAsync()
+
+            Log.Debug("Finished Close queued behind a producer mailbox failure completes only after cleanup")
+        }
+
         testTask "Partitioned producer completes the request that faults its mailbox" {
 
             Log.Debug("Started Partitioned producer completes the request that faults its mailbox")
@@ -815,6 +960,54 @@ let tests =
             do! producer2.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
             Log.Debug("Finished Partitioned producer completes the request that faults its mailbox")
+        }
+
+        testTask "Close queued behind a partitioned producer mailbox failure completes only after cleanup" {
+
+            Log.Debug("Started Close queued behind a partitioned producer mailbox failure completes only after cleanup")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            do! task {
+                use http = new HttpClient(new HttpClientHandler(UseProxy = false))
+                http.BaseAddress <- Uri(pulsarHttpAddress)
+                http.Timeout <- TimeSpan.FromSeconds(15.0)
+                use partitions = new StringContent("2", Encoding.UTF8, "application/json")
+                let! created = http.PutAsync($"/admin/v2/persistent/{topicName}/partitions", partitions)
+                created.EnsureSuccessStatusCode() |> ignore
+            }
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .CreateAsync()
+
+            let partitioned = producer :?> PartitionedProducerImpl<byte[]>
+            // closed partitions stay in the list and answer GetStats with AlreadyClosedException, which faults
+            // the parent mailbox. Disposing them again completes at once, so the drain's Close does not wait
+            for child in partitioned.Producers do
+                do! child.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            let trigger = TaskCompletionSource<bool>()
+            let crashingStats = TaskCompletionSource<ProducerStats>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let close = TaskCompletionSource<Result<unit, exn>>()
+            // queued while the trigger is being handled: GetStats faults the mailbox and the Close is left for the drain
+            queueBehind trigger (fun () ->
+                post partitioned.Mb (PartitionedProducerMessage.GetStats crashingStats)
+                post partitioned.Mb (PartitionedProducerMessage.Close close))
+            let atClose = snapshotOnCompletion close (fun () -> crashingStats.Task.IsCompleted)
+            post partitioned.Mb (PartitionedProducerMessage.IsConnected trigger)
+
+            let! statsCompleted = atClose.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isTrue "In-flight request should be failed before the queued Close completes" statsCompleted
+            do! assertAlreadyClosed crashingStats.Task
+            match close.Task.Result with
+            | Ok () -> ()
+            | Error other -> failwith $"Close failed after mailbox failure with {other.GetType().Name}: {other.Message}"
+            // a Failed transition after the drain's Close would overwrite Closed and make this NotConnectedException
+            do! assertAlreadyClosed (producer.GetStats())
+            do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Close queued behind a partitioned producer mailbox failure completes only after cleanup")
         }
 
         testTask "Sent message/messageId should be equal to received message/messageId" {

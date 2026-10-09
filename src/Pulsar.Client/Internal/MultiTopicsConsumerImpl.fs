@@ -1100,19 +1100,22 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         channel.SetException ex
                         continueLoop <- true
         }:> Task).ContinueWith(fun t ->
-            drainStoppedMailbox()
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
-                this.ConnectionState <- Failed
-                try
-                    currentMessage |> Option.iter (replyFromStoppedMailbox ex)
-                with currentEx ->
-                    Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
-                stopConsumer()
-                consumerCreatedTsc.TrySetException(ex) |> ignore
-            else
-                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+            try
+                if t.IsFaulted then
+                    let (Flatten ex) = t.Exception
+                    Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                    this.ConnectionState <- Failed
+                    try
+                        currentMessage |> Option.iter (replyFromStoppedMailbox ex)
+                    with currentEx ->
+                        Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
+                    stopConsumer()
+                    consumerCreatedTsc.TrySetException(ex) |> ignore
+                else
+                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
+            finally
+                // only after the Failed transition and cleanup, so a queued Close can't race with them
+                drainStoppedMailbox())
     |> ignore
 
     do
@@ -1130,7 +1133,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         | _ -> ()
 
 
-    member private this.Mb with get(): Channel<MultiTopicConsumerMessage<'T>> = mb
+    member internal this.Mb with get(): Channel<MultiTopicConsumerMessage<'T>> = mb
 
     member internal this.Consumers =
         consumers.Values |> Seq.map fst |> Seq.toArray

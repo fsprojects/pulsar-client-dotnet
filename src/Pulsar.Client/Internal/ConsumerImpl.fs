@@ -1440,26 +1440,29 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
                     NotConnectedException "Not connected to broker" |> channel.SetException
         } :> Task).ContinueWith(fun t ->
-            drainStoppedMailbox()
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
-                match connectionHandler.ConnectionState with
-                | Ready clientCnx ->
-                    // release the consumer at the broker, otherwise it stays attached to the subscription
-                    clientCnx.SendAndForget(Commands.newCloseConsumer consumerId (Generators.getNextRequestId()))
-                    clientCnx.RemoveConsumer consumerId
-                | _ ->
-                    ()
-                connectionHandler.Failed()
-                try
-                    currentMessage |> Option.iter (replyFromStoppedMailbox ex)
-                with currentEx ->
-                    Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
-                stopConsumer()
-                subscribeTsc.TrySetException(ex) |> ignore
-            else
-                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+            try
+                if t.IsFaulted then
+                    let (Flatten ex) = t.Exception
+                    Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                    match connectionHandler.ConnectionState with
+                    | Ready clientCnx ->
+                        // release the consumer at the broker, otherwise it stays attached to the subscription
+                        clientCnx.SendAndForget(Commands.newCloseConsumer consumerId (Generators.getNextRequestId()))
+                        clientCnx.RemoveConsumer consumerId
+                    | _ ->
+                        ()
+                    connectionHandler.Failed()
+                    try
+                        currentMessage |> Option.iter (replyFromStoppedMailbox ex)
+                    with currentEx ->
+                        Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
+                    stopConsumer()
+                    subscribeTsc.TrySetException(ex) |> ignore
+                else
+                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
+            finally
+                // only after cleanup, so a queued Close can't complete before the consumer has stopped
+                drainStoppedMailbox())
     |> ignore
 
     do startStatTimer()

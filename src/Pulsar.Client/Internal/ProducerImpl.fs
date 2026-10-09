@@ -898,12 +898,15 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                 continueLoop <- false
             }:> Task).ContinueWith(fun t ->
-                drainStoppedMailbox()
-                if t.IsFaulted then
-                    let (Flatten ex) = t.Exception
-                    failMailbox ex
-                else
-                    Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+                try
+                    if t.IsFaulted then
+                        let (Flatten ex) = t.Exception
+                        failMailbox ex
+                    else
+                        Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
+                finally
+                    // only after cleanup, so a queued Close can't complete before the producer has stopped
+                    drainStoppedMailbox())
     |> ignore
 
     do startSendTimeoutTimer()
