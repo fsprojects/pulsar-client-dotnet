@@ -343,34 +343,27 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             else
                                 %t)
                     |> Seq.map(fun (KeyValue(topic, (consumer, stream))) -> backgroundTask {
+                        do! currentStream.RemoveGenerator stream
                         do! consumer.DisposeAsync()
-                        return topicToRemove, topic, stream
+                        return topicToRemove, topic
                     })
                 )
             |> Seq.cache
         backgroundTask {
-            try
-                let! allRemovedTopics =
-                    consumersTasks |> Task.WhenAll
-                return
-                    allRemovedTopics
-                    |> Seq.map (fun (removedTopic, removedTopicPartition, stream) ->
-                        consumers.Remove(removedTopicPartition) |> ignore
-                        allTopics.Remove(removedTopic) |> ignore
-                        partitionedTopics.Remove(removedTopic) |> ignore
-                        stream)
-                    |> Seq.cache
-            with Flatten ex ->
-                Log.Logger.LogError(ex, "{0} could not processRemovedTopics fully", prefix)
-                return consumersTasks
-                    |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
-                    |> Seq.map _.Result
-                    |> Seq.map (fun (removedTopic, removedTopicPartition, stream) ->
-                        consumers.Remove(removedTopicPartition) |> ignore
-                        allTopics.Remove(removedTopic) |> ignore
-                        partitionedTopics.Remove(removedTopic) |> ignore
-                        stream)
-                    |> Seq.cache
+            let! removedTopics = backgroundTask {
+                try
+                    return! consumersTasks |> Task.WhenAll
+                with Flatten ex ->
+                    Log.Logger.LogError(ex, "{0} could not processRemovedTopics fully", prefix)
+                    return consumersTasks
+                        |> Seq.filter (fun t -> t.Status = TaskStatus.RanToCompletion)
+                        |> Seq.map _.Result
+                        |> Seq.toArray
+            }
+            for removedTopic, removedTopicPartition in removedTopics do
+                consumers.Remove(removedTopicPartition) |> ignore
+                allTopics.Remove(removedTopic) |> ignore
+                partitionedTopics.Remove(removedTopic) |> ignore
         }
 
     let isPollingAllowed() =
@@ -988,9 +981,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             currentStream.AddGenerators(streams)
                         if removedTopics.Count > 0 then
                             Log.Logger.LogInformation("{0} removing subscription to {1} old topics", prefix, removedTopics.Count)
-                            let! streams = processRemovedTopics removedTopics
-                            streams
-                            |> Seq.iter (fun stream -> currentStream.RemoveGenerator stream)
+                            do! processRemovedTopics removedTopics
                     | _ ->
                         Log.Logger.LogWarning("{0} PatternTickTime is not expected to be called for other multitopics types.", prefix)
                 with ex ->

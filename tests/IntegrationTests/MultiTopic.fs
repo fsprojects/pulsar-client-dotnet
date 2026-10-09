@@ -8,6 +8,7 @@ open Expecto
 open System.Threading.Tasks
 open Pulsar.Client.Api
 open Pulsar.Client.Common
+open Pulsar.Client.Internal
 open Pulsar.Client.IntegrationTests.Common
 open Serilog
 open FSharp.UMX
@@ -137,6 +138,61 @@ let tests =
 
             Log.Debug("Finished Two producers and one multiconsumer work fine")
 
+        }
+
+        testTask "Pattern topic removal keeps remaining consumers active" {
+            let timeout = TimeSpan.FromSeconds(5.0)
+            let topicPrefix = $"persistent://public/default/pattern-removal-{Guid.NewGuid():N}-"
+            let removedTopic = TopicName(topicPrefix + "removed")
+            let remainingTopic = TopicName(topicPrefix + "remaining")
+            let client = getClient()
+            use! (removedProducer: IProducer<byte[]>) =
+                client.NewProducer().Topic(removedTopic.ToString()).EnableBatching(false).CreateAsync()
+            use! (remainingProducer: IProducer<byte[]>) =
+                client.NewProducer().Topic(remainingTopic.ToString()).EnableBatching(false).CreateAsync()
+
+            let config = { PulsarClientConfiguration.Default with ServiceAddresses = [| Uri(pulsarAddress) |] }
+            let pool = ConnectionPool(config)
+            let lookup = new BinaryLookupService(config, pool) :> ILookupService
+            use poolCleanup =
+                { new IAsyncDisposable with
+                    member _.DisposeAsync() =
+                        lookup.Dispose()
+                        ValueTask(pool.CloseAllConnections()) }
+            let consumerInfo topic : ConsumerInitInfo<byte[]> =
+                { TopicName = topic; Schema = Schema.BYTES(); SchemaProvider = None; Metadata = { Partitions = 0 } }
+            // Keep both broker topics alive so only discovery-driven disposal ends the removed child's receive.
+            let patternInfo =
+                { InitialTopics = [| consumerInfo removedTopic; consumerInfo remainingTopic |]
+                  GetTopics = fun () -> Task.FromResult [| remainingTopic |]
+                  GetConsumerInfo = consumerInfo >> Task.FromResult }
+            let consumerConfig =
+                { ConsumerConfiguration<byte[]>.Default with
+                    TopicsPattern = topicPrefix + ".*"
+                    SubscriptionName = %"pattern-removal"
+                    PatternAutoDiscoveryPeriod = TimeSpan.FromHours(1.0) }
+            use! (consumer: MultiTopicsConsumerImpl<byte[]>) =
+                MultiTopicsConsumerImpl.InitPattern(consumerConfig, config, pool, patternInfo, lookup,
+                                                    ConsumerInterceptors<byte[]>.Empty, ignore)
+            let publicConsumer = consumer :> IConsumer<byte[]>
+
+            for producer in [ removedProducer; remainingProducer ] do
+                let! _ = producer.SendAsync [| 1uy |]
+                let! (message: Message<byte[]>) = publicConsumer.ReceiveAsync().WaitAsync(timeout)
+                do! publicConsumer.AcknowledgeAsync(message.MessageId)
+
+            let pending = publicConsumer.ReceiveAsync()
+            post consumer.Mb MultiTopicConsumerMessage.PatternTickTime
+            let! connected = publicConsumer.IsConnected().WaitAsync(timeout)
+            Expect.isTrue connected "Pattern refresh must leave the parent ready"
+            Expect.equal consumer.Consumers.Length 1 "Only the discovered child should remain"
+
+            let! _ = remainingProducer.SendAsync [| 2uy |]
+            let! (message: Message<byte[]>) = pending.WaitAsync(timeout)
+            Expect.equal message.Data [| 2uy |] "Pending receives should continue on the remaining topic"
+            do! publicConsumer.AcknowledgeAsync(message.MessageId)
+            let! stillConnected = publicConsumer.IsConnected().WaitAsync(timeout)
+            Expect.isTrue stillConnected "Intentional child removal must not fail the parent poller"
         }
 
         ptestTask "Eternal loop to test cluster modifications removal/addition" {
