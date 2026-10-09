@@ -864,6 +864,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     }
 
     let mb = Channel.CreateUnbounded<ConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mutable currentMessage : ConsumerMessage<'T> option = None
 
     let replyFromStoppedMailbox (ex: exn) (msg: ConsumerMessage<'T>) =
         match msg with
@@ -905,6 +906,36 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         | Closing | Closed | Terminated -> AlreadyClosedException(prefix + " already closed") :> exn
         | _ -> NotConnectedException(prefix + " not connected") :> exn
 
+    let failMailbox (ex: exn) =
+        Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+        try
+            match connectionHandler.ConnectionState with
+            | Ready clientCnx ->
+                // Register the close reply without blocking local cleanup on the broker.
+                let requestId = Generators.getNextRequestId()
+                let payload = Commands.newCloseConsumer consumerId requestId
+                backgroundTask {
+                    try
+                        try
+                            let! response = clientCnx.SendAndWaitForReply requestId payload
+                            response |> PulsarResponseType.GetEmpty
+                        with Flatten closeEx ->
+                            Log.Logger.LogWarning(closeEx, "{0} failed to close consumer at the broker after mailbox failure", prefix)
+                    finally
+                        clientCnx.RemoveConsumer consumerId
+                } |> ignore
+            | _ ->
+                ()
+        with closeEx ->
+            Log.Logger.LogWarning(closeEx, "{0} failed to close consumer at the broker after mailbox failure", prefix)
+        connectionHandler.Failed()
+        stopConsumer()
+        try
+            currentMessage |> Option.iter (replyFromStoppedMailbox ex)
+        with currentEx ->
+            Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
+        subscribeTsc.TrySetException(ex) |> ignore
+
     // requests posted after the mailbox exits would otherwise never be completed
     let drainStoppedMailbox () =
         backgroundTask {
@@ -915,8 +946,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 with ex ->
                     Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
         } |> ignore
-
-    let mutable currentMessage : ConsumerMessage<'T> option = None
 
     do (backgroundTask {
         let mutable continueLoop = true
@@ -1454,21 +1483,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             try
                 if t.IsFaulted then
                     let (Flatten ex) = t.Exception
-                    Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
-                    match connectionHandler.ConnectionState with
-                    | Ready clientCnx ->
-                        // release the consumer at the broker, otherwise it stays attached to the subscription
-                        clientCnx.SendAndForget(Commands.newCloseConsumer consumerId (Generators.getNextRequestId()))
-                        clientCnx.RemoveConsumer consumerId
-                    | _ ->
-                        ()
-                    connectionHandler.Failed()
-                    try
-                        currentMessage |> Option.iter (replyFromStoppedMailbox ex)
-                    with currentEx ->
-                        Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
-                    stopConsumer()
-                    subscribeTsc.TrySetException(ex) |> ignore
+                    failMailbox ex
                 else
                     Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
             finally

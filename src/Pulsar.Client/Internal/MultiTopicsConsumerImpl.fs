@@ -185,8 +185,12 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     Log.Logger.LogWarning("{0} topic was terminated", topic)
                     do! Task.Delay(Timeout.Infinite) // infinite delay for terminated topic
                 let! message = consumer.ReceiveWrappedAsync(CancellationToken.None)
-                return
-                    message |> Result.map (fun msg ->
+                match message with
+                | Error ex when (ex :? AlreadyClosedException) || (ex :? NotConnectedException) ->
+                    // Stop the poller before a terminal child failure can be buffered as a message.
+                    return reraize ex
+                | _ ->
+                    return message |> Result.map (fun msg ->
                         let newMessageId = { msg.MessageId with TopicName = topic }
                         msg.WithMessageId(newMessageId)
                     )

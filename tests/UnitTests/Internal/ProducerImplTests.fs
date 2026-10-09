@@ -172,6 +172,40 @@ let private expectTimersStopped producer =
 [<Tests>]
 let tests =
     testList "ProducerImpl" [
+        testTask "Mailbox failure does not write disposed payloads to the shared connection" {
+            use broker = new BrokerConnection(clientConfig)
+            let config = { producerConfig with BatchingEnabled = false; SendTimeout = TimeSpan.Zero }
+            let! producer = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
+            let writing = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let release = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let write _ =
+                writing.TrySetResult() |> ignore
+                release.Task :> Task
+            let blockedWrite = broker.Connection.Send(struct(write, BaseCommand.Type.Ping))
+            do! writing.Task.WaitAsync(testTimeout)
+
+            try
+                let sending = enqueueMessage producer [| 1uy |]
+                let crashing =
+                    postAndAsyncReply producer.Mb (fun reply ->
+                        BeginSendMessage(struct(Unchecked.defaultof<MessageBuilder<byte[]>>, reply, false)))
+                let! _ = expectFailure<NullReferenceException> sending
+                let! _ = expectFailure<NullReferenceException> crashing
+                expectTimersStopped producer
+            finally
+                release.TrySetResult() |> ignore
+
+            let! sent = blockedWrite.WaitAsync(testTimeout)
+            Expect.isTrue sent "The shared writer should resume normally"
+            let! (command: BaseCommand) = broker.ReadCommand()
+            Expect.equal command.``type`` BaseCommand.Type.CloseProducer "Discard the failed send and close the producer"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = command.CloseProducer.RequestId)))
+            Expect.isTrue broker.Connection.IsActive "Failed producer cleanup must preserve the shared connection"
+        }
+
         testTask "Failed close stops all timers and cleans up once" {
             use broker = new BrokerConnection(clientConfig)
             let encryptor =

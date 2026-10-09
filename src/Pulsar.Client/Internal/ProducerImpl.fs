@@ -119,10 +119,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         if batchMessageContainer.NumMessagesInBatch > 0 then
             batchMessageContainer.Discard ex
 
+    let disposePendingPayload (msg: PendingMessage<'T>) =
+        lock msg.Payload (fun () -> msg.Payload.Dispose())
+
     let failPendingMessages (ex: exn) =
         while pendingMessages.Count > 0 do
             let msg = pendingMessages.Dequeue()
-            msg.Payload.Dispose()
+            disposePendingPayload msg
             failPendingMessage msg ex
         while blockedRequests.Count > 0 do
             let struct(_, channel, _) = blockedRequests.Dequeue()
@@ -188,13 +191,25 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             Log.Logger.LogDebug("{0} CryptoKeyReader not present, encryption not possible", prefix)
             Ok payload
 
+    let sendPendingMessage (clientCnx: ClientCnx) (pendingMessage: PendingMessage<'T>) =
+        let struct(writePayload, commandType) = pendingMessage.SendTask
+        let writeIfPending output =
+            lock pendingMessage.Payload (fun () ->
+                if pendingMessage.Payload.CanRead then
+                    // Serialization copies the payload synchronously before the asynchronous socket write.
+                    writePayload output
+                else
+                    Log.Logger.LogDebug("{0} skipping queued send of completed message {1}", prefix, pendingMessage.SequenceId)
+                    Task.CompletedTask)
+        clientCnx.SendAndForget(struct(writeIfPending, commandType))
+
     let sendMessage (pendingMessage: PendingMessage<'T>) =
         if Log.Logger.IsEnabled LogLevel.Debug then
             Log.Logger.LogDebug("{0} sendMessage sequenceId={1}", prefix, %pendingMessage.SequenceId)
         pendingMessages.Enqueue(pendingMessage)
         match connectionHandler.ConnectionState with
         | Ready clientCnx ->
-            clientCnx.SendAndForget pendingMessage.SendTask
+            sendPendingMessage clientCnx pendingMessage
         | _ ->
             Log.Logger.LogWarning("{0} not connected, skipping send", prefix)
 
@@ -211,13 +226,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 |> post this.Mb
                 i <- i - 1
         pendingMessages.Dequeue() |> ignore
-        pendingMessage.Payload.Dispose()
+        disposePendingPayload pendingMessage
 
     let resendMessages (clientCnx: ClientCnx) =
         if pendingMessages.Count > 0 then
             Log.Logger.LogInformation("{0} resending {1} pending messages", prefix, pendingMessages.Count)
             for pendingMessage in pendingMessages do
-                clientCnx.SendAndForget pendingMessage.SendTask
+                sendPendingMessage clientCnx pendingMessage
         else
             Log.Logger.LogDebug("{0} No pending messages to resend", prefix)
             producerCreatedTsc.TrySetResult() |> ignore
@@ -1091,5 +1106,4 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     | Ok () -> ()
                     | Error ex -> reraize ex
                 } |> ValueTask
-
 
