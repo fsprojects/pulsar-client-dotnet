@@ -882,6 +882,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         channel.SetResult <| Ok()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed to close", prefix)
+                        clientCnx.RemoveProducer(producerId)
+                        stopProducer()
                         channel.SetResult <| Error ex
                 | _ ->
                     Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
