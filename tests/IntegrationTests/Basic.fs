@@ -106,41 +106,53 @@ let tests =
         testTask "Consumer is closed at the broker when its mailbox fails" {
 
             Log.Debug("Started Consumer is closed at the broker when its mailbox fails")
-            let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let observed = obj()
+            let mutable consumerId = ""
+            let mutable cnxPrefix = ""
+            let mutable expectedCloseReply = ""
+            let closeReply = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            do! runWithLogger (fun text ->
+                lock observed (fun () ->
+                    if consumerId = "" && text.Contains(topicName) && text.Contains("starting subscribe") then
+                        let matched = System.Text.RegularExpressions.Regex.Match(text, @"consumer\((\d+),")
+                        if matched.Success then
+                            consumerId <- matched.Groups[1].Value
+                    if cnxPrefix = "" && consumerId <> "" && text.EndsWith(" adding consumer " + consumerId) then
+                        let marker = " adding consumer " + consumerId
+                        cnxPrefix <- text.Substring(0, text.Length - marker.Length)
+                    if cnxPrefix <> "" && text.StartsWith(cnxPrefix + " add request ") && text.EndsWith("type CloseConsumer") then
+                        expectedCloseReply <- text.Replace(" add request ", " complete request ").Replace("type CloseConsumer", "type Success")
+                    if expectedCloseReply <> "" && text = expectedCloseReply then
+                        closeReply.TrySetResult() |> ignore)) (fun () -> task {
+                    let client = getNewClient()
+                    try
+                        let! (consumer : IConsumer<byte[]>) =
+                            client.NewConsumer()
+                                .Topic(topicName)
+                                .ConsumerName("failingMailbox")
+                                .SubscriptionName("test-subscription")
+                                .SubscriptionType(SubscriptionType.Exclusive)
+                                .SubscribeAsync()
 
-            let! (consumer : IConsumer<byte[]>) =
-                client.NewConsumer()
-                    .Topic(topicName)
-                    .ConsumerName("failingMailbox")
-                    .SubscriptionName("test-subscription")
-                    .SubscriptionType(SubscriptionType.Exclusive)
-                    .SubscribeAsync()
+                        post (consumer :?> ConsumerImpl<byte[]>).Mb
+                            (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
+                        do! assertNotConnected (consumer.GetStats())
+                        // A broker Success must complete a registered request, not be discarded as an unknown reply.
+                        do! closeReply.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
 
-            // a malformed message crashes the consumer mailbox
-            post (consumer :?> ConsumerImpl<byte[]>).Mb
-                (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
-            
-            let deadline = DateTime.UtcNow.AddSeconds 5.0
-            let mutable connected = true
-            while connected do
-                if DateTime.UtcNow >= deadline then
-                    failwith "Consumer did not fail within 5 seconds"
-                let! isConnected = consumer.IsConnected()
-                if isConnected then
-                    do! Task.Delay 100
-                connected <- isConnected            
-
-            // the exclusive subscription must be free for another consumer
-            let! (consumer2 : IConsumer<byte[]>) =
-                client.NewConsumer()
-                    .Topic(topicName)
-                    .ConsumerName("replacement")
-                    .SubscriptionName("test-subscription")
-                    .SubscriptionType(SubscriptionType.Exclusive)
-                    .SubscribeAsync()
-                    .WaitAsync(TimeSpan.FromSeconds(15.0))
-            do! consumer2.UnsubscribeAsync()
+                        let! (consumer2 : IConsumer<byte[]>) =
+                            client.NewConsumer()
+                                .Topic(topicName)
+                                .ConsumerName("replacement")
+                                .SubscriptionName("test-subscription")
+                                .SubscriptionType(SubscriptionType.Exclusive)
+                                .SubscribeAsync()
+                                .WaitAsync(TimeSpan.FromSeconds(15.0))
+                        do! consumer2.UnsubscribeAsync()
+                    finally
+                        client.CloseAsync().GetAwaiter().GetResult()
+                })
 
             Log.Debug("Finished Consumer is closed at the broker when its mailbox fails")
         }
@@ -472,6 +484,33 @@ let tests =
             Log.Debug("Finished Multi-topic consumer completes the request that faults its mailbox")
         }
 
+        testTask "Child mailbox failure stops a multi-topic consumer with a pending batch" {
+            let client = getClient()
+            let topics =
+                [| "public/default/topic-" + Guid.NewGuid().ToString("N")
+                   "public/default/topic-" + Guid.NewGuid().ToString("N") |]
+            use! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topics(topics)
+                    .SubscriptionName("test-subscription")
+                    .ReceiverQueueSize(1)
+                    .BatchReceivePolicy(BatchReceivePolicy(-1, 1024L, TimeSpan.FromMinutes(1.0)))
+                    .SubscribeAsync()
+
+            let child = (consumer :?> MultiTopicsConsumerImpl<byte[]>).Consumers |> Array.head :?> ConsumerImpl<byte[]>
+            let pendingBatch = consumer.BatchReceiveAsync()
+            do! Task.Delay 200
+            post child.Mb
+                (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
+
+            // Buffering the close error fills the receive queue and pauses the poller before it can fail.
+            do! assertAlreadyClosed pendingBatch
+            do! assertNotConnected (consumer.ReceiveAsync())
+            do! assertNotConnected (consumer.BatchReceiveAsync())
+            let! connected = consumer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse "Parent must stop before completing pending receives" connected
+        }
+
         testTask "Close queued behind a multi-topic consumer mailbox failure completes only after cleanup" {
 
             Log.Debug("Started Close queued behind a multi-topic consumer mailbox failure completes only after cleanup")
@@ -595,8 +634,7 @@ let tests =
 
             Log.Debug("Started Producer is closed at the broker when its mailbox fails")
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            // This client has its own connection. Other tests close consumers with SendAndForget and
-            // log the same warning on the shared client, so only this connection counts.
+            // Only this client's connection should count towards the close-reply assertion.
             let observed = obj()
             let mutable producerId = ""
             let mutable cnxPrefix = ""

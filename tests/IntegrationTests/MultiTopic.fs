@@ -6,8 +6,10 @@ open System.Text
 open Expecto
 
 open System.Threading.Tasks
+open System.Threading
 open Pulsar.Client.Api
 open Pulsar.Client.Common
+open Pulsar.Client.Internal
 open Pulsar.Client.IntegrationTests.Common
 open Serilog
 open FSharp.UMX
@@ -137,6 +139,61 @@ let tests =
 
             Log.Debug("Finished Two producers and one multiconsumer work fine")
 
+        }
+
+        testTask "Pattern topic removal keeps remaining consumers active" {
+            let timeout = TimeSpan.FromSeconds(5.0)
+            let topicPrefix = $"persistent://public/default/pattern-removal-{Guid.NewGuid():N}-"
+            let removedTopic = TopicName(topicPrefix + "removed")
+            let remainingTopic = TopicName(topicPrefix + "remaining")
+            let client = getClient()
+            use! (removedProducer: IProducer<byte[]>) =
+                client.NewProducer().Topic(removedTopic.ToString()).EnableBatching(false).CreateAsync()
+            use! (remainingProducer: IProducer<byte[]>) =
+                client.NewProducer().Topic(remainingTopic.ToString()).EnableBatching(false).CreateAsync()
+
+            let config = { PulsarClientConfiguration.Default with ServiceAddresses = [| Uri(pulsarAddress) |] }
+            let pool = ConnectionPool(config)
+            let lookup = new BinaryLookupService(config, pool) :> ILookupService
+            use poolCleanup =
+                { new IAsyncDisposable with
+                    member _.DisposeAsync() =
+                        lookup.Dispose()
+                        ValueTask(pool.CloseAllConnections()) }
+            let consumerInfo topic : ConsumerInitInfo<byte[]> =
+                { TopicName = topic; Schema = Schema.BYTES(); SchemaProvider = None; Metadata = { Partitions = 0 } }
+            // Keep both broker topics alive so only discovery-driven disposal ends the removed child's receive.
+            let patternInfo =
+                { InitialTopics = [| consumerInfo removedTopic; consumerInfo remainingTopic |]
+                  GetTopics = fun () -> Task.FromResult [| remainingTopic |]
+                  GetConsumerInfo = consumerInfo >> Task.FromResult }
+            let consumerConfig =
+                { ConsumerConfiguration<byte[]>.Default with
+                    TopicsPattern = topicPrefix + ".*"
+                    SubscriptionName = %"pattern-removal"
+                    PatternAutoDiscoveryPeriod = TimeSpan.FromHours(1.0) }
+            use! (consumer: MultiTopicsConsumerImpl<byte[]>) =
+                MultiTopicsConsumerImpl.InitPattern(consumerConfig, config, pool, patternInfo, lookup,
+                                                    ConsumerInterceptors<byte[]>.Empty, ignore)
+            let publicConsumer = consumer :> IConsumer<byte[]>
+
+            for producer in [ removedProducer; remainingProducer ] do
+                let! _ = producer.SendAsync [| 1uy |]
+                let! (message: Message<byte[]>) = publicConsumer.ReceiveAsync().WaitAsync(timeout)
+                do! publicConsumer.AcknowledgeAsync(message.MessageId)
+
+            let pending = publicConsumer.ReceiveAsync()
+            post consumer.Mb MultiTopicConsumerMessage.PatternTickTime
+            let! connected = publicConsumer.IsConnected().WaitAsync(timeout)
+            Expect.isTrue connected "Pattern refresh must leave the parent ready"
+            Expect.equal consumer.Consumers.Length 1 "Only the discovered child should remain"
+
+            let! _ = remainingProducer.SendAsync [| 2uy |]
+            let! (message: Message<byte[]>) = pending.WaitAsync(timeout)
+            Expect.equal message.Data [| 2uy |] "Pending receives should continue on the remaining topic"
+            do! publicConsumer.AcknowledgeAsync(message.MessageId)
+            let! stillConnected = publicConsumer.IsConnected().WaitAsync(timeout)
+            Expect.isTrue stillConnected "Intentional child removal must not fail the parent poller"
         }
 
         ptestTask "Eternal loop to test cluster modifications removal/addition" {
@@ -312,6 +369,105 @@ let tests =
 
             Log.Debug("Finished 2К of topics")
         }
+
+        testTask "Multi-topic seek preserves messages from a faster child" {
+            let timeout = TimeSpan.FromSeconds(5.0)
+            let prefix = $"persistent://public/default/seek-prefetch-{Guid.NewGuid():N}-"
+            let topic1 = prefix + "1"
+            let topic2 = prefix + "2"
+            let client = getStatsClient()
+            use clientCleanup =
+                { new IAsyncDisposable with
+                    member _.DisposeAsync() = ValueTask(client.CloseAsync()) }
+            use! (producer1: IProducer<byte[]>) = client.NewProducer().Topic(topic1).EnableBatching(false).CreateAsync()
+            use! (producer2: IProducer<byte[]>) = client.NewProducer().Topic(topic2).EnableBatching(false).CreateAsync()
+            use! (consumer: IConsumer<byte[]>) =
+                client.NewConsumer().Topics([topic1; topic2]).SubscriptionName("seek-prefetch")
+                    .SubscriptionType(SubscriptionType.Shared).SubscribeAsync()
+            let ids1 = ResizeArray<MessageId>()
+            let ids2 = ResizeArray<MessageId>()
+            for index in 0..9 do
+                let! id1 = producer1.SendAsync [| byte index |]
+                ids1.Add id1
+                let! id2 = producer2.SendAsync [| byte index |]
+                ids2.Add id2
+            for _ in 1..20 do
+                let! _ = consumer.ReceiveAsync().WaitAsync(timeout)
+                ()
+
+            let pending = consumer.ReceiveAsync()
+            try
+                do! consumer.SeekAsync(fun _ -> raise (InvalidOperationException("Rejected seek")))
+                failwith "The invalid resolver should have failed"
+            with :? InvalidOperationException as ex ->
+                Expect.equal ex.Message "Rejected seek" "The resolver error should reach the caller"
+            let! nextId = producer1.SendAsync [| 10uy |]
+            ids1.Add nextId
+            let! (nextMessage: Message<byte[]>) = pending.WaitAsync(timeout)
+            Expect.equal nextMessage.MessageId nextId "A failed seek must resume pending receives"
+
+            let fastChild = (consumer :?> MultiTopicsConsumerImpl<byte[]>).Consumers[0]
+            let ids = dict [topic1, ids1; topic2, ids2]
+            do! Task.Run<unit>(fun () -> consumer.SeekAsync(fun topic ->
+                if topic <> fastChild.Topic then
+                    // Let the first child refill before the second child starts its seek.
+                    let waitForPrefetch = task {
+                        use cts = new CancellationTokenSource(timeout)
+                        let mutable ready = false
+                        while not ready do
+                            let! stats = fastChild.GetStats().WaitAsync(cts.Token)
+                            ready <- stats.IncomingMsgs >= 4
+                            if not ready then
+                                do! Task.Delay(5, cts.Token)
+                    }
+                    waitForPrefetch.GetAwaiter().GetResult()
+                SeekType.MessageId ids.[topic].[3]))
+
+            let expected = dict [topic1, Queue(ids1 |> Seq.skip 4); topic2, Queue(ids2 |> Seq.skip 4)]
+            for _ in 1..(ids1.Count + ids2.Count - 8) do
+                let! (message: Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(timeout)
+                let topic = %message.MessageId.TopicName
+                let remaining = expected[topic]
+                Expect.isGreaterThan remaining.Count 0 $"Unexpected duplicate from {topic}"
+                Expect.equal message.MessageId (remaining.Dequeue()) $"Seek must preserve every message from {topic}"
+                do! consumer.AcknowledgeAsync(message.MessageId)
+        }
+
+        for subscriptionType in [SubscriptionType.Shared; SubscriptionType.Exclusive] do
+            testTask $"Multi-topic seek clears buffered messages for {subscriptionType}" {
+                let timeout = TimeSpan.FromSeconds(5.0)
+                let prefix = $"persistent://public/default/seek-buffered-{Guid.NewGuid():N}-"
+                let topic1 = prefix + "1"
+                let topic2 = prefix + "2"
+                let client = getClient()
+                use! (producer1: IProducer<byte[]>) = client.NewProducer().Topic(topic1).EnableBatching(false).CreateAsync()
+                use! (producer2: IProducer<byte[]>) = client.NewProducer().Topic(topic2).EnableBatching(false).CreateAsync()
+                use! (consumer: IConsumer<byte[]>) =
+                    client.NewConsumer().Topics([topic1; topic2]).SubscriptionName("seek-buffered")
+                        .SubscriptionType(subscriptionType).ReceiverQueueSize(1).SubscribeAsync()
+                for index in 0..9 do
+                    let! _ = producer1.SendAsync [| byte index |]
+                    let! _ = producer2.SendAsync [| byte index |]
+                    ()
+                let! _ = consumer.ReceiveAsync().WaitAsync(timeout)
+
+                do! consumer.SeekAsync(MessageId.Earliest).WaitAsync(timeout)
+                for redeliver in [false; true] do
+                    if redeliver then
+                        do! consumer.RedeliverUnacknowledgedMessagesAsync().WaitAsync(timeout)
+                    let expected = Dictionary<string, int>()
+                    expected.Add(topic1, 0)
+                    expected.Add(topic2, 0)
+                    for _ in 1..20 do
+                        let! (message: Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(timeout)
+                        let topic = %message.MessageId.TopicName
+                        Expect.equal (int message.Data.[0]) expected.[topic] $"Cursor resets must not lose or duplicate messages from {topic}"
+                        expected[topic] <- expected[topic] + 1
+                        if redeliver then
+                            do! consumer.AcknowledgeAsync(message.MessageId)
+                    Expect.equal expected.[topic1] 10 "Every message from the first topic must arrive"
+                    Expect.equal expected.[topic2] 10 "Every message from the second topic must arrive"
+            }
 
         testTask "Multiple topic seek by function" {
             let prefix = $"persistent://public/default/topic-seektest-{Guid.NewGuid():N}-"

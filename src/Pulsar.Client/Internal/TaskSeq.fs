@@ -15,8 +15,7 @@ type internal TaskSeqMessage<'T> =
     | Next of TaskCompletionSource<Task<'T>>
     | NextComplete of Task<'T>
     | AddGenerators of TaskGenerator<'T> seq
-    | RemoveGenerator of TaskGenerator<'T>
-    | RestartCompletedTasks
+    | RemoveGenerator of TaskGenerator<'T> * TaskCompletionSource<unit>
 
 type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
     let tasks = ResizeArray<Task<'T>>()
@@ -26,6 +25,12 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
     let waitingQueue = Queue()
     let mutable resetWhenAnyTcs = TaskCompletionSource<'T>()
     let random = Random()
+
+    let resetWhenAny () =
+        let previous = resetWhenAnyTcs
+        resetWhenAnyTcs <- TaskCompletionSource<'T>()
+        tasks[0] <- resetWhenAnyTcs.Task
+        previous.SetCanceled()
 
     let whenAnyTask () =
         let tasksCount = tasks.Count
@@ -91,13 +96,6 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 else
                     nextWaiting <- false
 
-            | RestartCompletedTasks ->
-
-                Log.Logger.LogTrace("TaskSeq.RestartCompleted nextWaiting:{0}", nextWaiting)
-                for index in 0..tasks.Count-1 do
-                    if tasks[index].IsCompleted then
-                        tasks[index] <- generators[index]()
-
             | AddGenerators newGenerators ->
 
                 Log.Logger.LogTrace("TaskSeq.AddGenerators nextWaiting:{0}", nextWaiting)
@@ -112,20 +110,24 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                     let channel = waitingQueue.Dequeue()
                     whenAnyTaskToChannel channel
                 else
-                    resetWhenAnyTcs.SetCanceled()
-                    resetWhenAnyTcs <- TaskCompletionSource<'T>()
-                    tasks[0] <- resetWhenAnyTcs.Task
+                    resetWhenAny()
 
-            | RemoveGenerator generator ->
+            | RemoveGenerator (generator, channel) ->
 
                 Log.Logger.LogTrace("TaskSeq.RemoveGenerator nextWaiting:{0}", nextWaiting)
                 let index = generators.IndexOf(generator)
                 if index > 0 then
                     generators.RemoveAt(index)
                     if started then
+                        tasks[index].ContinueWith((fun (t: Task<'T>) ->
+                            Log.Logger.LogDebug(t.Exception, "TaskSeq: removed generator task failed")),
+                            TaskContinuationOptions.OnlyOnFaulted ||| TaskContinuationOptions.ExecuteSynchronously)
+                        |> ignore
                         tasks.RemoveAt(index)
+                        resetWhenAny()
                 else
                     Log.Logger.LogWarning("TaskSeq: trying to remove non-existing generator")
+                channel.SetResult()
         }:> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
@@ -165,7 +167,4 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
         post mb (AddGenerators generators)
 
     member this.RemoveGenerator generator =
-        post mb (RemoveGenerator generator)
-
-    member this.RestartCompletedTasks() =
-        post mb RestartCompletedTasks
+        postAndAsyncReply mb (fun channel -> RemoveGenerator (generator, channel))

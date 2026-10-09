@@ -99,13 +99,51 @@ let tests =
             ts.AddGenerators([gen1; gen2])
             let! result2 = ts.Next() 
             let! result3 = ts.Next() 
-            ts.RemoveGenerator(gen2)
+            do! ts.RemoveGenerator(gen2)
             let! result4 = ts.Next() 
             
             Expect.equal "" 40 result1Task.Result
             Expect.equal "" 40 result2
             Expect.equal "" 100 result3
             Expect.equal "" 100 result4
+        }
+
+        testTask "Removing a pending generator excludes its later failure" {
+            let started = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let removed = TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let remaining = TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let removedGenerator () =
+                started.TrySetResult() |> ignore
+                removed.Task
+            let ts = TaskSeq([removedGenerator; fun () -> remaining.Task])
+            let pending = ts.Next()
+            do! started.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            do! ts.RemoveGenerator removedGenerator
+            removed.SetException(AlreadyClosedException "Removed child was disposed")
+            remaining.SetResult 42
+
+            let! result = pending.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "A removed child's failure must not escape the pending Next" 42 result
+        }
+
+        testTask "Removing the last generator preserves waiters for later additions" {
+            let started = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let removed = TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let removedGenerator () =
+                started.TrySetResult() |> ignore
+                removed.Task
+            let ts = TaskSeq([removedGenerator])
+            let first = ts.Next()
+            let second = ts.Next()
+            do! started.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            do! ts.RemoveGenerator removedGenerator
+            removed.SetException(AlreadyClosedException "Last child was disposed")
+            ts.AddGenerators([fun () -> Task.FromResult 42])
+
+            let! results = Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "Queued Next calls must resume from the new generator" [|42; 42|] results
         }
         
         testTask "Adding generator resets waitAny" {

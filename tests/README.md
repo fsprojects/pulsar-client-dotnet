@@ -20,8 +20,11 @@ dotnet build tests\UnitTests\UnitTests.fsproj -c Release
 dotnet run -c Release --project tests\UnitTests\UnitTests.fsproj --no-build
 ```
 
-Producer disposal regression tests use a concrete connection backed by in-memory pipes, so they do not require a broker.
+Producer disposal and queued-payload lifetime regression tests use a concrete connection backed by in-memory pipes, so they do not require a broker.
 To run only these tests, append `-- --filter-test-list ProducerImpl` to the `dotnet run` command.
+
+TaskSeq regression tests cover generator removal during pending reads and resuming queued reads after all generators have been replaced.
+Select them with `-- --filter-test-list TaskSeq`.
 
 ## Integration Tests
 
@@ -56,6 +59,21 @@ You can run a Pulsar cluster locally using minikube.
 Make sure that you update the `pulsarAddress` in `Common.fs` to point to your Pulsar cluster.
 
 ### Running the tests
+Mailbox failure regressions cover broker close replies, pending receives, and multi-topic poller shutdown.
+Run this subset against the local broker from the repository root:
+```powershell
+dotnet build tests\IntegrationTests\IntegrationTests.fsproj -c Release
+Push-Location tests\IntegrationTests
+dotnet run -c Release --no-build -- --filter-test-case mailbox --no-spinner
+Pop-Location
+```
+
+The `Multitopic.Pattern topic removal keeps remaining consumers active` test covers intentional child disposal during pattern refresh.
+Select it with `--filter-test-case "Pattern topic removal"` instead of the mailbox filter above.
+
+Multi-topic seek regressions stagger child seeks, check every message after the reset, and verify recovery after a rejected resolver.
+They also cover buffered reads and explicit redelivery with Shared and Exclusive subscriptions. Select them with `--filter-test-case "Multi-topic seek"`.
+
 You can run the integration tests from the command line. From the root of the repository, run the following command:
 ```bash
 cd pulsar-client-dotnet/tests/IntegrationTests
