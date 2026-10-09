@@ -8,6 +8,7 @@ open System.Threading.Tasks
 open Microsoft.IO
 open System.Runtime.ExceptionServices
 open System.Collections.Generic
+open System.Threading
 open Microsoft.Extensions.Logging
 open System.Threading.Channels
 
@@ -169,7 +170,7 @@ let runContinuationsAsynchronously (task: Task<'T>) =
     task.ContinueWith((fun (t: Task<'T>) ->
         if t.IsFaulted then tcs.SetException t.Exception.InnerExceptions
         elif t.IsCanceled then tcs.SetCanceled()
-        else tcs.SetResult t.Result), TaskContinuationOptions.ExecuteSynchronously) |> ignore
+        else tcs.SetResult t.Result), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default) |> ignore
     tcs.Task
 
 let post (channel: Channel<'T>) msg =

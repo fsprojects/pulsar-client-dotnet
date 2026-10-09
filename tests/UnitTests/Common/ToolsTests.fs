@@ -2,12 +2,24 @@ module Pulsar.Client.UnitTests.Common.ToolsTests
 
 open System
 open System.Collections
+open System.Collections.Concurrent
 open System.Threading
 open System.Threading.Channels
 open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Common
+
+type private QueueScheduler() =
+    inherit TaskScheduler()
+    let queue = ConcurrentQueue<Task>()
+    member this.RunQueued() =
+        let mutable task = null
+        while queue.TryDequeue(&task) do
+            this.TryExecuteTask task |> ignore
+    override _.GetScheduledTasks() = queue :> seq<Task>
+    override _.QueueTask task = queue.Enqueue task
+    override _.TryExecuteTaskInline(_, _) = false
 
 [<Tests>]
 let tests =
@@ -91,6 +103,15 @@ let tests =
             continued.Wait()
             Expect.notEqual "" replyThread continuationThread.Value
             Expect.equal "" TaskCreationOptions.RunContinuationsAsynchronously task.CreationOptions
+        }
+
+        test "runContinuationsAsynchronously does not depend on the caller's scheduler" {
+            let scheduler = QueueScheduler()
+            let tcs = TaskCompletionSource<int>()
+            let mirrored = Task.Factory.StartNew((fun () -> runContinuationsAsynchronously tcs.Task), CancellationToken.None, TaskCreationOptions.None, scheduler)
+            scheduler.RunQueued()
+            tcs.SetResult 1
+            Expect.isTrue "" (mirrored.Result.Wait(TimeSpan.FromSeconds 5.0))
         }
     ]
     
