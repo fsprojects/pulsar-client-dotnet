@@ -36,11 +36,6 @@ module internal SocketFactory =
         | family ->
             new Socket(family, SocketType.Stream, ProtocolType.Tcp)
 
-    let createSslStream (socket: Socket) (validationCallback: RemoteCertificateValidationCallback) : SslStream =
-        // NetworkStream must own the socket, so that disposing the SslStream closes it (as SocketConnection.Dispose does for plain TCP).
-        // Otherwise a pending read is never aborted and the dead connection is not detected until the OS TCP timeout (see #380).
-        new SslStream(new NetworkStream(socket, true), false, validationCallback)
-
 type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
 
     let mutable config = initialConfig
@@ -165,7 +160,7 @@ type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
                     backgroundTask {
                         if config.UseTls then
                             Log.Logger.LogDebug("Configuring ssl for {0}", physicalAddress)
-                            let sslStream = SocketFactory.createSslStream socket (RemoteCertificateValidationCallback(remoteCertificateValidationCallback))
+                            let sslStream = new SslStream(new NetworkStream(socket, ownsSocket = true), false, RemoteCertificateValidationCallback(remoteCertificateValidationCallback))
                             let authData = config.Authentication.GetAuthData(physicalAddress.Host)
                             let clientCertificates =
                                 if authData.HasDataForTls() then
