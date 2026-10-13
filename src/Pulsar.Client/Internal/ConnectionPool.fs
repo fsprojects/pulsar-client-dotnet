@@ -160,7 +160,7 @@ type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
                     backgroundTask {
                         if config.UseTls then
                             Log.Logger.LogDebug("Configuring ssl for {0}", physicalAddress)
-                            let sslStream = new SslStream(new NetworkStream(socket), false, RemoteCertificateValidationCallback(remoteCertificateValidationCallback))
+                            let sslStream = new SslStream(new NetworkStream(socket, ownsSocket = true), false, RemoteCertificateValidationCallback(remoteCertificateValidationCallback))
                             let authData = config.Authentication.GetAuthData(physicalAddress.Host)
                             let clientCertificates =
                                 if authData.HasDataForTls() then
