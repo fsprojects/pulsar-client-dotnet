@@ -3,7 +3,6 @@ module Pulsar.Client.IntegrationTests.Partitions
 open System
 open System.Collections.Generic
 open System.Diagnostics
-open System.Text.Json
 open Expecto
 open Expecto.Flip
 open Pulsar.Client.Api
@@ -311,6 +310,182 @@ let tests =
             Log.Debug("Finished Auto schema works fine with partitioned topic")
         }        
         
+        testTask "Batch receive reaches MaxNumMessages on a partitioned topic" {
+
+            Log.Debug("Started Batch receive reaches MaxNumMessages on a partitioned topic")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            do! createPartitionedTopic topicName 1
+            let consumerName = "PartitionedConsumerBatchMax"
+            let producerName = "PartitionedProducerBatchMax"
+            let receiverQueueSize = 10
+            let maxNumMessages = receiverQueueSize
+            let batchTimeout = TimeSpan.FromSeconds(5.0)
+            let numberOfMessages = maxNumMessages
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName(producerName)
+                    .EnableBatching(false)
+                    .CreateAsync()
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription-" + Guid.NewGuid().ToString("N"))
+                    .ConsumerName(consumerName)
+                    .ReceiverQueueSize(receiverQueueSize)
+                    .BatchReceivePolicy(BatchReceivePolicy(maxNumMessages, -1L, batchTimeout))
+                    .SubscribeAsync()
+
+            let producerTask =
+                Task.Run(fun () ->
+                    task {
+                        do! produceMessages producer numberOfMessages producerName
+                    } :> Task)
+
+            let consumerTask =
+                Task.Run(fun () ->
+                    task {
+                        let sw = Stopwatch()
+                        sw.Start()
+                        let! messagesBatch = consumer.BatchReceiveAsync()
+                        let elapsed = sw.Elapsed
+                        if messagesBatch.Count <> maxNumMessages then
+                            failwith <| sprintf "Expected full batch of %i before timeout but got %i after %f ms (timeout %f ms) consumer %s"
+                                maxNumMessages messagesBatch.Count elapsed.TotalMilliseconds batchTimeout.TotalMilliseconds consumerName
+                        if elapsed >= batchTimeout - TimeSpan.FromMilliseconds(500.0) then
+                            failwith <| sprintf "BatchReceive waited for policy timeout (%f ms) instead of returning when MaxNumMessages was reachable; elapsed %f ms consumer %s"
+                                batchTimeout.TotalMilliseconds elapsed.TotalMilliseconds consumerName
+                        do! consumer.AcknowledgeAsync(messagesBatch)
+                    } :> Task)
+
+            do! Task.WhenAll(producerTask, consumerTask)
+
+            Log.Debug("Finished Batch receive reaches MaxNumMessages on a partitioned topic")
+        }
+
+        testTask "Multi-topic poller keeps fairness across partitions when the shared queue fills" {
+
+            Log.Debug("Started Multi-topic poller keeps fairness across partitions when the shared queue fills")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            do! createPartitionedTopic topicName 2
+
+            let receiverQueueSize = 10
+            let messagesPerPartition = receiverQueueSize
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName("PartitionedProducerFairness")
+                    .EnableBatching(false)
+                    .CreateAsync()
+
+            let! key0, key1 =
+                task {
+                    let mutable found0 = None
+                    let mutable found1 = None
+                    let mutable i = 0
+                    while found0.IsNone || found1.IsNone do
+                        let key = "fairness-key-" + string i
+                        let payload = Encoding.UTF8.GetBytes("probe")
+                        let! messageId = producer.NewMessage(payload, key) |> producer.SendAsync
+                        if messageId.Partition = 0 && found0.IsNone then found0 <- Some key
+                        elif messageId.Partition = 1 && found1.IsNone then found1 <- Some key
+                        i <- i + 1
+                        if i > 1000 then
+                            failwith "Could not find keys for both partitions"
+                    return found0.Value, found1.Value
+                }
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription-" + Guid.NewGuid().ToString("N"))
+                    .ConsumerName("PartitionedConsumerFairness")
+                    .ReceiverQueueSize(receiverQueueSize)
+                    .SubscribeAsync()
+
+            for _ in 1..messagesPerPartition do
+                let! _ = producer.NewMessage(Encoding.UTF8.GetBytes("p0"), key0) |> producer.SendAsync
+                let! _ = producer.NewMessage(Encoding.UTF8.GetBytes("p1"), key1) |> producer.SendAsync
+                ()
+
+            do! Task.Delay(200)
+
+            let mutable partition0Count = 0
+            let mutable partition1Count = 0
+            for _ in 1..receiverQueueSize do
+                let! (message : Message<byte[]>) = consumer.ReceiveAsync()
+                match message.MessageId.Partition with
+                | 0 -> partition0Count <- partition0Count + 1
+                | 1 -> partition1Count <- partition1Count + 1
+                | p -> failwith <| sprintf "Unexpected partition %i" p
+                do! consumer.AcknowledgeAsync(message.MessageId)
+
+            let expectedPerPartition = receiverQueueSize / 2
+            let maxDeviation = 2
+            if abs (partition0Count - expectedPerPartition) > maxDeviation
+               || abs (partition1Count - expectedPerPartition) > maxDeviation then
+                failwith <| sprintf "Expected about %i messages per partition in first %i receives, got partition0=%i partition1=%i"
+                    expectedPerPartition receiverQueueSize partition0Count partition1Count
+
+            Log.Debug("Finished Multi-topic poller keeps fairness across partitions when the shared queue fills")
+        }
+
+        testTask "Producer batch larger than ReceiverQueueSize is fully consumed on a partitioned topic" {
+
+            Log.Debug("Started Producer batch larger than ReceiverQueueSize is fully consumed on a partitioned topic")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            do! createPartitionedTopic topicName 1
+
+            let receiverQueueSize = 5
+            let messagesInProducerBatch = 20
+            let consumeTimeout = TimeSpan.FromSeconds(5.0)
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription-" + Guid.NewGuid().ToString("N"))
+                    .ConsumerName("PartitionedConsumerLargeBatch")
+                    .ReceiverQueueSize(receiverQueueSize)
+                    .SubscribeAsync()
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName("PartitionedProducerLargeBatch")
+                    .EnableBatching(true)
+                    .BatchingMaxMessages(messagesInProducerBatch)
+                    .BatchingMaxPublishDelay(TimeSpan.FromSeconds(1.0))
+                    .CreateAsync()
+
+            do! fastProduceMessages producer messagesInProducerBatch "PartitionedProducerLargeBatch"
+            do! producer.FlushAsync()
+
+            let sw = Stopwatch()
+            sw.Start()
+            do! task {
+                for i in 1..messagesInProducerBatch do
+                    use cts = new Threading.CancellationTokenSource(consumeTimeout - sw.Elapsed)
+                    try
+                        let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
+                        do! consumer.AcknowledgeAsync(message.MessageId)
+                    with :? OperationCanceledException ->
+                        failwith <| sprintf "Timed out after %i/%i messages with ReceiverQueueSize %i (elapsed %f ms)"
+                            (i - 1) messagesInProducerBatch receiverQueueSize sw.Elapsed.TotalMilliseconds
+            }
+
+            if sw.Elapsed >= consumeTimeout then
+                failwith <| sprintf "Consuming a producer batch of %i with ReceiverQueueSize %i took too long (%f ms)"
+                    messagesInProducerBatch receiverQueueSize sw.Elapsed.TotalMilliseconds
+
+            Log.Debug("Finished Producer batch larger than ReceiverQueueSize is fully consumed on a partitioned topic")
+        }
+
         testTask "Deduplication works with partitions" {
 
             Log.Debug("Started Deduplication works with partitions")

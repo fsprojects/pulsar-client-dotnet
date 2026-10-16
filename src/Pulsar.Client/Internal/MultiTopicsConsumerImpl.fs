@@ -103,7 +103,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let incomingMessages = Queue<ResultOrException<Message<'T>>>()
     let partitionsTimer = new Timer(consumerConfig.AutoUpdatePartitionsInterval.TotalMilliseconds)
     let patternTimer = new Timer(consumerConfig.PatternAutoDiscoveryPeriod.TotalMilliseconds)
-    let sharedQueueResumeThreshold = consumerConfig.ReceiverQueueSize / 2
     let dummyTopicName = "MultiTopicsConsumer-" + Generators.getRandomName()
 
     let redeliverMessages messages =
@@ -400,7 +399,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         }
 
     let isPollingAllowed() =
-        incomingMessages.Count <= sharedQueueResumeThreshold
+        incomingMessages.Count < consumerConfig.ReceiverQueueSize
 
     let isInvalidConsumerEpoch = isInvalidConsumerEpoch consumerConfig.SubscriptionType
     let isConsumerEpochSupported = isConsumerEpochSupported consumerConfig.SubscriptionType
@@ -807,7 +806,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 if isPollingAllowed() then
                     pollerChannel.SetResult()
                 else
-                    Log.Logger.LogDebug("{0} paused poller, incomingMessages={1}, sharedQueueResumeThreshold={2}", prefix, incomingMessages.Count, sharedQueueResumeThreshold)
+                    Log.Logger.LogDebug("{0} paused poller, incomingMessages={1}, receiverQueueSize={2}", prefix, incomingMessages.Count, consumerConfig.ReceiverQueueSize)
                     waitingPoller <- pollerChannel
 
             | Receive receiveCallback ->

@@ -129,6 +129,16 @@ let getTxnClient() =
         .EnableTransaction(true)
         .BuildAsync().Result
 
+let createPartitionedTopic (topicName: string) (numPartitions: int) =
+    task {
+        use http = new HttpClient(new HttpClientHandler(UseProxy = false))
+        http.BaseAddress <- Uri(pulsarHttpAddress)
+        http.Timeout <- TimeSpan.FromSeconds(15.0)
+        use partitions = new StringContent(string numPartitions, Encoding.UTF8, "application/json")
+        let! created = http.PutAsync($"/admin/v2/persistent/{topicName}/partitions", partitions)
+        created.EnsureSuccessStatusCode() |> ignore
+    }
+
 let produceMessages (producer: IProducer<byte[]>) number producerName =
     task {
         for i in 1..number do
