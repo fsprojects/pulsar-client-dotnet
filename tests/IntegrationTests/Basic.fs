@@ -955,14 +955,7 @@ let tests =
             Log.Debug("Started Partitioned producer completes the request that faults its mailbox")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            do! task {
-                use http = new HttpClient(new HttpClientHandler(UseProxy = false))
-                http.BaseAddress <- Uri(pulsarHttpAddress)
-                http.Timeout <- TimeSpan.FromSeconds(15.0)
-                use partitions = new StringContent("2", Encoding.UTF8, "application/json")
-                let! created = http.PutAsync($"/admin/v2/persistent/{topicName}/partitions", partitions)
-                created.EnsureSuccessStatusCode() |> ignore
-            }
+            do! createPartitionedTopic topicName 2
 
             let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
@@ -1005,14 +998,7 @@ let tests =
             Log.Debug("Started Close queued behind a partitioned producer mailbox failure completes only after cleanup")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            do! task {
-                use http = new HttpClient(new HttpClientHandler(UseProxy = false))
-                http.BaseAddress <- Uri(pulsarHttpAddress)
-                http.Timeout <- TimeSpan.FromSeconds(15.0)
-                use partitions = new StringContent("2", Encoding.UTF8, "application/json")
-                let! created = http.PutAsync($"/admin/v2/persistent/{topicName}/partitions", partitions)
-                created.EnsureSuccessStatusCode() |> ignore
-            }
+            do! createPartitionedTopic topicName 2
 
             let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
