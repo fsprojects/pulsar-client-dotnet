@@ -321,7 +321,8 @@ let tests =
             let receiverQueueSize = 10
             let maxNumMessages = receiverQueueSize
             let batchTimeout = TimeSpan.FromSeconds(5.0)
-            let numberOfMessages = maxNumMessages
+            let consecutiveBatches = 2
+            let numberOfMessages = maxNumMessages * consecutiveBatches
 
             let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
@@ -348,17 +349,18 @@ let tests =
             let consumerTask =
                 Task.Run(fun () ->
                     task {
-                        let sw = Stopwatch()
-                        sw.Start()
-                        let! messagesBatch = consumer.BatchReceiveAsync()
-                        let elapsed = sw.Elapsed
-                        if messagesBatch.Count <> maxNumMessages then
-                            failwith <| sprintf "Expected full batch of %i before timeout but got %i after %f ms (timeout %f ms) consumer %s"
-                                maxNumMessages messagesBatch.Count elapsed.TotalMilliseconds batchTimeout.TotalMilliseconds consumerName
-                        if elapsed >= batchTimeout - TimeSpan.FromMilliseconds(500.0) then
-                            failwith <| sprintf "BatchReceive waited for policy timeout (%f ms) instead of returning when MaxNumMessages was reachable; elapsed %f ms consumer %s"
-                                batchTimeout.TotalMilliseconds elapsed.TotalMilliseconds consumerName
-                        do! consumer.AcknowledgeAsync(messagesBatch)
+                        for batchIndex in 1..consecutiveBatches do
+                            let sw = Stopwatch()
+                            sw.Start()
+                            let! messagesBatch = consumer.BatchReceiveAsync()
+                            let elapsed = sw.Elapsed
+                            if messagesBatch.Count <> maxNumMessages then
+                                failwith <| sprintf "Expected full batch of %i before timeout but got %i after %f ms (timeout %f ms) on batch %i/%i consumer %s"
+                                    maxNumMessages messagesBatch.Count elapsed.TotalMilliseconds batchTimeout.TotalMilliseconds batchIndex consecutiveBatches consumerName
+                            if elapsed >= batchTimeout - TimeSpan.FromMilliseconds(500.0) then
+                                failwith <| sprintf "BatchReceive waited for policy timeout (%f ms) instead of returning when MaxNumMessages was reachable; elapsed %f ms on batch %i/%i consumer %s"
+                                    batchTimeout.TotalMilliseconds elapsed.TotalMilliseconds batchIndex consecutiveBatches consumerName
+                            do! consumer.AcknowledgeAsync(messagesBatch)
                     } :> Task)
 
             do! Task.WhenAll(producerTask, consumerTask)
