@@ -352,7 +352,8 @@ let tests =
                         for batchIndex in 1..consecutiveBatches do
                             let sw = Stopwatch()
                             sw.Start()
-                            let! messagesBatch = consumer.BatchReceiveAsync()
+                            use cts = new Threading.CancellationTokenSource(batchTimeout + TimeSpan.FromSeconds(1.0))
+                            let! messagesBatch = consumer.BatchReceiveAsync(cts.Token)
                             let elapsed = sw.Elapsed
                             if messagesBatch.Count <> maxNumMessages then
                                 failwith <| sprintf "Expected full batch of %i before timeout but got %i after %f ms (timeout %f ms) on batch %i/%i consumer %s"
@@ -364,6 +365,8 @@ let tests =
                     } :> Task)
 
             do! Task.WhenAll(producerTask, consumerTask)
+            do! producer.DisposeAsync().AsTask()
+            do! consumer.DisposeAsync().AsTask()
 
             Log.Debug("Finished Batch receive reaches MaxNumMessages on a partitioned topic")
         }
@@ -437,6 +440,9 @@ let tests =
             if partition0Count <> messagesPerPartition || partition1Count <> messagesPerPartition then
                 failwith <| sprintf "Expected %i messages from each partition after pause/resume, got partition0=%i partition1=%i"
                     messagesPerPartition partition0Count partition1Count
+
+            do! producer.DisposeAsync().AsTask()
+            do! consumer.DisposeAsync().AsTask()
 
             Log.Debug("Finished Multi-topic poller resumes after shared queue drains")
         }
@@ -528,6 +534,9 @@ let tests =
                 failwith <| sprintf "Expected hot=%i cold=%i, got hot=%i cold=%i"
                     hotPartitionMessages coldPartitionMessages hotCount coldCount
 
+            do! producer.DisposeAsync().AsTask()
+            do! consumer.DisposeAsync().AsTask()
+
             Log.Debug("Finished Multi-topic poller does not starve a cold partition behind a hot partition")
         }
 
@@ -597,6 +606,9 @@ let tests =
             if receivedEntries.[0].LedgerId <> sentEntries.[0].LedgerId
                || receivedEntries.[0].EntryId <> sentEntries.[0].EntryId then
                 failwith "Received batch LedgerId/EntryId did not match the published producer batch"
+
+            do! producer.DisposeAsync().AsTask()
+            do! consumer.DisposeAsync().AsTask()
 
             Log.Debug("Finished Producer batch larger than ReceiverQueueSize is fully consumed on a partitioned topic")
         }
