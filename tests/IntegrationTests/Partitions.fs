@@ -541,6 +541,7 @@ let tests =
             let receiverQueueSize = 5
             let messagesInProducerBatch = 20
             let consumeTimeout = TimeSpan.FromSeconds(5.0)
+            let producerName = "PartitionedProducerLargeBatch"
 
             let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
@@ -553,15 +554,23 @@ let tests =
             let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
-                    .ProducerName("PartitionedProducerLargeBatch")
+                    .ProducerName(producerName)
                     .EnableBatching(true)
                     .BatchingMaxMessages(messagesInProducerBatch)
-                    .BatchingMaxPublishDelay(TimeSpan.FromSeconds(1.0))
+                    .BatchingMaxPublishDelay(TimeSpan.FromSeconds(10.0))
                     .CreateAsync()
 
-            do! fastProduceMessages producer messagesInProducerBatch "PartitionedProducerLargeBatch"
-            do! producer.FlushAsync()
+            let! (sentMessageIds : MessageId[]) =
+                [| for i in 1..messagesInProducerBatch ->
+                    let payload = Encoding.UTF8.GetBytes(sprintf "Message #%i Sent from %s" i producerName)
+                    producer.SendAsync(payload) |]
+                |> Task.WhenAll
+            let sentEntries = sentMessageIds |> Array.distinctBy (fun id -> id.LedgerId, id.EntryId)
+            if sentEntries.Length <> 1 then
+                failwith <| sprintf "Expected one producer batch entry, got %i distinct LedgerId/EntryId pairs"
+                    sentEntries.Length
 
+            let receivedMessageIds = ResizeArray<MessageId>(messagesInProducerBatch)
             let sw = Stopwatch()
             sw.Start()
             do! task {
@@ -569,6 +578,7 @@ let tests =
                     use cts = new Threading.CancellationTokenSource(consumeTimeout - sw.Elapsed)
                     try
                         let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
+                        receivedMessageIds.Add(message.MessageId)
                         do! consumer.AcknowledgeAsync(message.MessageId)
                     with :? OperationCanceledException ->
                         failwith <| sprintf "Timed out after %i/%i messages with ReceiverQueueSize %i (elapsed %f ms)"
@@ -578,6 +588,15 @@ let tests =
             if sw.Elapsed >= consumeTimeout then
                 failwith <| sprintf "Consuming a producer batch of %i with ReceiverQueueSize %i took too long (%f ms)"
                     messagesInProducerBatch receiverQueueSize sw.Elapsed.TotalMilliseconds
+
+            let receivedEntries =
+                receivedMessageIds.ToArray() |> Array.distinctBy (fun id -> id.LedgerId, id.EntryId)
+            if receivedEntries.Length <> 1 then
+                failwith <| sprintf "Expected all received messages from one producer batch, got %i distinct LedgerId/EntryId pairs"
+                    receivedEntries.Length
+            if receivedEntries.[0].LedgerId <> sentEntries.[0].LedgerId
+               || receivedEntries.[0].EntryId <> sentEntries.[0].EntryId then
+                failwith "Received batch LedgerId/EntryId did not match the published producer batch"
 
             Log.Debug("Finished Producer batch larger than ReceiverQueueSize is fully consumed on a partitioned topic")
         }
