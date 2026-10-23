@@ -368,20 +368,22 @@ let tests =
             Log.Debug("Finished Batch receive reaches MaxNumMessages on a partitioned topic")
         }
 
-        testTask "Multi-topic poller keeps fairness across partitions when the shared queue fills" {
+        testTask "Multi-topic poller resumes after shared queue drains" {
 
-            Log.Debug("Started Multi-topic poller keeps fairness across partitions when the shared queue fills")
+            Log.Debug("Started Multi-topic poller resumes after shared queue drains")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             do! createPartitionedTopic topicName 2
 
             let receiverQueueSize = 10
             let messagesPerPartition = receiverQueueSize
+            let totalMessages = messagesPerPartition * 2
+            let receiveTimeout = TimeSpan.FromSeconds(5.0)
 
             let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
-                    .ProducerName("PartitionedProducerFairness")
+                    .ProducerName("PartitionedProducerPauseResume")
                     .EnableBatching(false)
                     .CreateAsync()
 
@@ -391,7 +393,7 @@ let tests =
                     let mutable found1 = None
                     let mutable i = 0
                     while found0.IsNone || found1.IsNone do
-                        let key = "fairness-key-" + string i
+                        let key = "pause-resume-key-" + string i
                         let payload = Encoding.UTF8.GetBytes("probe")
                         let! messageId = producer.NewMessage(payload, key) |> producer.SendAsync
                         if messageId.Partition = 0 && found0.IsNone then found0 <- Some key
@@ -406,7 +408,7 @@ let tests =
                 client.NewConsumer()
                     .Topic(topicName)
                     .SubscriptionName("test-subscription-" + Guid.NewGuid().ToString("N"))
-                    .ConsumerName("PartitionedConsumerFairness")
+                    .ConsumerName("PartitionedConsumerPauseResume")
                     .ReceiverQueueSize(receiverQueueSize)
                     .SubscribeAsync()
 
@@ -415,26 +417,118 @@ let tests =
                 let! _ = producer.NewMessage(Encoding.UTF8.GetBytes("p1"), key1) |> producer.SendAsync
                 ()
 
-            do! Task.Delay(200)
-
             let mutable partition0Count = 0
             let mutable partition1Count = 0
-            for _ in 1..receiverQueueSize do
-                let! (message : Message<byte[]>) = consumer.ReceiveAsync()
-                match message.MessageId.Partition with
-                | 0 -> partition0Count <- partition0Count + 1
-                | 1 -> partition1Count <- partition1Count + 1
-                | p -> failwith <| sprintf "Unexpected partition %i" p
-                do! consumer.AcknowledgeAsync(message.MessageId)
+            let sw = Stopwatch()
+            sw.Start()
+            for i in 1..totalMessages do
+                use cts = new Threading.CancellationTokenSource(receiveTimeout - sw.Elapsed)
+                try
+                    let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
+                    match message.MessageId.Partition with
+                    | 0 -> partition0Count <- partition0Count + 1
+                    | 1 -> partition1Count <- partition1Count + 1
+                    | p -> failwith <| sprintf "Unexpected partition %i" p
+                    do! consumer.AcknowledgeAsync(message.MessageId)
+                with :? OperationCanceledException ->
+                    failwith <| sprintf "Timed out after %i/%i messages while draining past shared-queue pause (elapsed %f ms); partition0=%i partition1=%i"
+                        (i - 1) totalMessages sw.Elapsed.TotalMilliseconds partition0Count partition1Count
 
-            let expectedPerPartition = receiverQueueSize / 2
-            let maxDeviation = 2
-            if abs (partition0Count - expectedPerPartition) > maxDeviation
-               || abs (partition1Count - expectedPerPartition) > maxDeviation then
-                failwith <| sprintf "Expected about %i messages per partition in first %i receives, got partition0=%i partition1=%i"
-                    expectedPerPartition receiverQueueSize partition0Count partition1Count
+            if partition0Count <> messagesPerPartition || partition1Count <> messagesPerPartition then
+                failwith <| sprintf "Expected %i messages from each partition after pause/resume, got partition0=%i partition1=%i"
+                    messagesPerPartition partition0Count partition1Count
 
-            Log.Debug("Finished Multi-topic poller keeps fairness across partitions when the shared queue fills")
+            Log.Debug("Finished Multi-topic poller resumes after shared queue drains")
+        }
+
+        testTask "Multi-topic poller does not starve a cold partition behind a hot partition" {
+
+            Log.Debug("Started Multi-topic poller does not starve a cold partition behind a hot partition")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            do! createPartitionedTopic topicName 2
+
+            let receiverQueueSize = 10
+            let hotPartitionMessages = 150
+            let coldPartitionMessages = 10
+            let totalMessages = hotPartitionMessages + coldPartitionMessages
+            let receiveTimeout = TimeSpan.FromSeconds(30.0)
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName("PartitionedProducerAntiStarvation")
+                    .EnableBatching(false)
+                    .CreateAsync()
+
+            let! hotKey, coldKey =
+                task {
+                    let mutable found0 = None
+                    let mutable found1 = None
+                    let mutable i = 0
+                    while found0.IsNone || found1.IsNone do
+                        let key = "anti-starvation-key-" + string i
+                        let payload = Encoding.UTF8.GetBytes("probe")
+                        let! messageId = producer.NewMessage(payload, key) |> producer.SendAsync
+                        if messageId.Partition = 0 && found0.IsNone then found0 <- Some key
+                        elif messageId.Partition = 1 && found1.IsNone then found1 <- Some key
+                        i <- i + 1
+                        if i > 1000 then
+                            failwith "Could not find keys for both partitions"
+                    return found0.Value, found1.Value
+                }
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .SubscriptionName("test-subscription-" + Guid.NewGuid().ToString("N"))
+                    .ConsumerName("PartitionedConsumerAntiStarvation")
+                    .ReceiverQueueSize(receiverQueueSize)
+                    .SubscribeAsync()
+
+            for _ in 1..hotPartitionMessages do
+                let! _ = producer.NewMessage(Encoding.UTF8.GetBytes("hot"), hotKey) |> producer.SendAsync
+                ()
+            for _ in 1..coldPartitionMessages do
+                let! _ = producer.NewMessage(Encoding.UTF8.GetBytes("cold"), coldKey) |> producer.SendAsync
+                ()
+
+            let mutable hotCount = 0
+            let mutable coldCount = 0
+            let mutable hotCountWhenColdDone = None
+            let sw = Stopwatch()
+            sw.Start()
+            for i in 1..totalMessages do
+                use cts = new Threading.CancellationTokenSource(receiveTimeout - sw.Elapsed)
+                try
+                    let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
+                    match message.MessageId.Partition with
+                    | 0 -> hotCount <- hotCount + 1
+                    | 1 ->
+                        coldCount <- coldCount + 1
+                        if coldCount = coldPartitionMessages && hotCountWhenColdDone.IsNone then
+                            hotCountWhenColdDone <- Some hotCount
+                    | p -> failwith <| sprintf "Unexpected partition %i" p
+                    do! consumer.AcknowledgeAsync(message.MessageId)
+                with :? OperationCanceledException ->
+                    failwith <| sprintf "Timed out after %i/%i messages (elapsed %f ms); hot=%i cold=%i"
+                        (i - 1) totalMessages sw.Elapsed.TotalMilliseconds hotCount coldCount
+
+            match hotCountWhenColdDone with
+            | None ->
+                failwith <| sprintf "Cold partition never fully delivered; hot=%i cold=%i"
+                    hotCount coldCount
+            | Some hotWhenColdDone when hotWhenColdDone >= hotPartitionMessages ->
+                failwith <| sprintf "Cold partition was starved until hot partition drained; hot count when cold finished=%i (hot total=%i)"
+                    hotWhenColdDone hotPartitionMessages
+            | Some _ ->
+                ()
+
+            if hotCount <> hotPartitionMessages || coldCount <> coldPartitionMessages then
+                failwith <| sprintf "Expected hot=%i cold=%i, got hot=%i cold=%i"
+                    hotPartitionMessages coldPartitionMessages hotCount coldCount
+
+            Log.Debug("Finished Multi-topic poller does not starve a cold partition behind a hot partition")
         }
 
         testTask "Producer batch larger than ReceiverQueueSize is fully consumed on a partitioned topic" {
