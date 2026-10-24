@@ -139,10 +139,11 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
     let timer = new Timer(producerConfig.AutoUpdatePartitionsInterval.TotalMilliseconds)
 
+    // the interceptors are closed separately, once the partition producers that use them are closed:
+    // they keep running after the mailbox fails, until Close
     let stopProducer() =
         cleanup(this)
         timer.Close()
-        interceptors.Close()
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let mb = Channel.CreateUnbounded<PartitionedProducerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
@@ -166,10 +167,12 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         |> Seq.map (fun producer -> producer.DisposeAsync().AsTask())
                         |> Task.WhenAll
                     this.ConnectionState <- Closed
+                    interceptors.Close()
                     channel.TrySetResult(Ok ()) |> ignore
                 with Flatten closeEx ->
                     Log.Logger.LogError(closeEx, "{0} could not close all partition producers properly", prefix)
                     this.ConnectionState <- Closed
+                    interceptors.Close()
                     channel.TrySetResult(Error closeEx) |> ignore
             } |> ignore
         | Init | TickTime ->
@@ -239,6 +242,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     this.ConnectionState <- Failed
                     producerCreatedTsc.SetException(ex)
                     stopProducer()
+                    interceptors.Close()
 
                 if this.ConnectionState = Failed then
                     continueLoop <- false
@@ -280,6 +284,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         this.ConnectionState <- Closed
                         Log.Logger.LogInformation("{0} closed", prefix)
                         stopProducer()
+                        interceptors.Close()
                         channel.SetResult(Ok())
                         continueLoop <- false
                     with Flatten ex ->

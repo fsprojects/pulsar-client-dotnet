@@ -273,6 +273,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 currentStream.AddGenerators (children |> Array.map _.Stream)
         }
 
+    // the interceptors are closed separately, once the child consumers that use them are closed:
+    // they keep running after the mailbox or the poller fails, until Close
     let stopConsumer() =
         cleanup(this)
         partitionsTimer.Close()
@@ -282,7 +284,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         pollerCts.Dispose()
         receiveCts.Cancel()
         receiveCts.Dispose()
-        interceptors.Close()
         let closedException = AlreadyClosedException("Consumer is already closed", terminalError)
         while waiters.Count > 0 do
             let waitingChannel = waiters |> dequeueWaiter
@@ -709,6 +710,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 with Flatten closeEx ->
                     Log.Logger.LogError(closeEx, "{0} could not close all child consumers properly", prefix)
                 this.ConnectionState <- Closed
+                interceptors.Close()
                 channel.TrySetResult() |> ignore
             } |> ignore
         | _ ->
@@ -764,6 +766,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     Log.Logger.LogError(ex, "{0} could not create", prefix)
                     do! disposeCreatedChildren consumersTasks
                     failConsumer ex
+                    interceptors.Close()
                     consumerCreatedTsc.SetException(ex)
 
                 if this.ConnectionState = Failed then
@@ -1115,11 +1118,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         do! closeChildren()
                         this.ConnectionState <- Closed
                         stopConsumer()
+                        interceptors.Close()
                         channel.SetResult()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not close all child consumers properly", prefix)
                         this.ConnectionState <- Closed
                         stopConsumer()
+                        interceptors.Close()
                         channel.SetResult()
                 continueLoop <- false
 
@@ -1142,6 +1147,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         this.ConnectionState <- Closed
                         Log.Logger.LogInformation("{0} unsubscribed", prefix)
                         stopConsumer()
+                        interceptors.Close()
                         channel.SetResult()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not unsubscribe", prefix)
