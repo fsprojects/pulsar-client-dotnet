@@ -196,6 +196,110 @@ let tests =
             Expect.isTrue stillConnected "Intentional child removal must not fail the parent poller"
         }
 
+        testTask "Acknowledging a message from a removed pattern topic fails only that request" {
+            let timeout = TimeSpan.FromSeconds(5.0)
+            let topicPrefix = $"persistent://public/default/pattern-removed-ack-{Guid.NewGuid():N}-"
+            let removedTopic = TopicName(topicPrefix + "removed")
+            let remainingTopic = TopicName(topicPrefix + "remaining")
+            let client = getClient()
+            use! (removedProducer: IProducer<byte[]>) =
+                client.NewProducer().Topic(removedTopic.ToString()).EnableBatching(false).CreateAsync()
+            use! (remainingProducer: IProducer<byte[]>) =
+                client.NewProducer().Topic(remainingTopic.ToString()).EnableBatching(false).CreateAsync()
+
+            let config = { PulsarClientConfiguration.Default with ServiceAddresses = [| Uri(pulsarAddress) |] }
+            let pool = ConnectionPool(config)
+            let lookup = new BinaryLookupService(config, pool) :> ILookupService
+            use poolCleanup =
+                { new IAsyncDisposable with
+                    member _.DisposeAsync() =
+                        lookup.Dispose()
+                        ValueTask(pool.CloseAllConnections()) }
+            let consumerInfo topic : ConsumerInitInfo<byte[]> =
+                { TopicName = topic; Schema = Schema.BYTES(); SchemaProvider = None; Metadata = { Partitions = 0 } }
+            let patternInfo =
+                { InitialTopics = [| consumerInfo removedTopic; consumerInfo remainingTopic |]
+                  GetTopics = fun () -> Task.FromResult [| remainingTopic |]
+                  GetConsumerInfo = consumerInfo >> Task.FromResult }
+            let consumerConfig =
+                { ConsumerConfiguration<byte[]>.Default with
+                    TopicsPattern = topicPrefix + ".*"
+                    SubscriptionName = %"pattern-removed-ack"
+                    PatternAutoDiscoveryPeriod = TimeSpan.FromHours(1.0) }
+            use! (consumer: MultiTopicsConsumerImpl<byte[]>) =
+                MultiTopicsConsumerImpl.InitPattern(consumerConfig, config, pool, patternInfo, lookup,
+                                                    ConsumerInterceptors<byte[]>.Empty, ignore)
+            let publicConsumer = consumer :> IConsumer<byte[]>
+
+            let! _ = removedProducer.SendAsync [| 1uy |]
+            let! (removedMessage: Message<byte[]>) = publicConsumer.ReceiveAsync().WaitAsync(timeout)
+            post consumer.Mb MultiTopicConsumerMessage.PatternTickTime
+            // answered after the discovery has been handled
+            let! _ = publicConsumer.IsConnected().WaitAsync(timeout)
+            Expect.equal consumer.Consumers.Length 1 "Only the discovered child should remain"
+
+            // the application still holds a message from the removed topic
+            do! assertNotConnected (publicConsumer.AcknowledgeAsync(removedMessage.MessageId))
+            do! assertNotConnected (publicConsumer.NegativeAcknowledge(removedMessage.MessageId))
+            let! connected = publicConsumer.IsConnected().WaitAsync(timeout)
+            Expect.isTrue connected "Acknowledging a removed topic's message must not fail the parent"
+
+            let! _ = remainingProducer.SendAsync [| 2uy |]
+            let! (message: Message<byte[]>) = publicConsumer.ReceiveAsync().WaitAsync(timeout)
+            Expect.equal message.Data [| 2uy |] "The remaining topic should still be consumed"
+            do! publicConsumer.AcknowledgeAsync(message.MessageId).WaitAsync(timeout)
+        }
+
+        testTask "Pattern consumer keeps running after a matched topic is deleted" {
+            let timeout = TimeSpan.FromSeconds(10.0)
+            let topicPrefix = $"public/default/pattern-deleted-{Guid.NewGuid():N}-"
+            let deletedTopic = topicPrefix + "deleted"
+            let remainingTopic = topicPrefix + "remaining"
+            let client = getClient()
+            let! (deletedProducer: IProducer<byte[]>) =
+                client.NewProducer().Topic(deletedTopic).EnableBatching(false).CreateAsync()
+            use! (remainingProducer: IProducer<byte[]>) =
+                client.NewProducer().Topic(remainingTopic).EnableBatching(false).CreateAsync()
+            use! (consumer: IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .TopicsPattern(topicPrefix + ".*")
+                    .SubscriptionName("pattern-deleted")
+                    .PatternAutoDiscoveryPeriod(TimeSpan.FromHours(1.0))
+                    .SubscribeAsync()
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            Expect.equal multiConsumer.Consumers.Length 2 "Both topics should be subscribed"
+            do! deletedProducer.DisposeAsync().AsTask()
+
+            // pattern children never create topics, so the deleted topic's child can't subscribe again and stops
+            let! (response: Net.Http.HttpResponseMessage) = commonHttpClient.DeleteAsync($"{pulsarHttpAddress}/admin/v2/persistent/{deletedTopic}?force=true")
+            response.EnsureSuccessStatusCode() |> ignore
+            do! waitUntil "the deleted topic's child is detached" (fun () -> Task.FromResult(multiConsumer.Consumers.Length = 1))
+
+            // restarting every child stream used to reach the stopped child and fail the whole consumer
+            do! consumer.RedeliverUnacknowledgedMessagesAsync().WaitAsync(timeout)
+            // the topic stays pending until discovery removes it, so these would skip it
+            let! connected = consumer.IsConnected().WaitAsync(timeout)
+            Expect.isFalse connected "The deleted topic's child is not consuming"
+            do! assertNotConnected (consumer.SeekAsync(MessageId.Earliest))
+            do! assertNotConnected (consumer.UnsubscribeAsync())
+            let! _ = remainingProducer.SendAsync [| 1uy |]
+            let! (message: Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(timeout)
+            Expect.equal message.Data [| 1uy |] "The remaining topic should still be consumed"
+            do! consumer.AcknowledgeAsync(message.MessageId).WaitAsync(timeout)
+
+            // once the topic exists again, the pending child is recreated without waiting for discovery
+            use! (recreatedProducer: IProducer<byte[]>) =
+                client.NewProducer().Topic(deletedTopic).EnableBatching(false).CreateAsync()
+            do! waitUntil "the recreated topic is subscribed again" (fun () -> task {
+                let! connected = consumer.IsConnected()
+                return connected && multiConsumer.Consumers.Length = 2
+            })
+            let! _ = recreatedProducer.SendAsync [| 2uy |]
+            let! (message: Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(timeout)
+            Expect.equal message.Data [| 2uy |] "The recreated topic should be consumed"
+            do! consumer.AcknowledgeAsync(message.MessageId).WaitAsync(timeout)
+        }
+
         ptestTask "Eternal loop to test cluster modifications removal/addition" {
 
             Log.Debug("Started Eternal loop to test cluster modifications removal/addition")

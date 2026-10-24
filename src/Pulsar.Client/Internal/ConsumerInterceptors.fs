@@ -5,9 +5,14 @@ open Microsoft.Extensions.Logging
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
-type internal ConsumerInterceptors<'T>(interceptors: IConsumerInterceptor<'T> array) =
+type internal ConsumerInterceptors<'T>(interceptors: IConsumerInterceptor<'T> array, ownsInterceptors: bool) =
+     new(interceptors: IConsumerInterceptor<'T> array) = ConsumerInterceptors<'T>(interceptors, true)
      member this.Interceptors = interceptors
      static member Empty with get() = ConsumerInterceptors<'T>([||])
+
+     // the same interceptors for a consumer that doesn't own them, e.g. a child of a multi-topic consumer,
+     // which can stop and be replaced while the owner keeps using them
+     member this.Borrow() = ConsumerInterceptors<'T>(interceptors, false)
      
      member this.BeforeConsume (consumer: IConsumer<'T>, msg: Message<'T>) =
           let mutable interceptorMessage = msg         
@@ -50,8 +55,9 @@ type internal ConsumerInterceptors<'T>(interceptors: IConsumerInterceptor<'T> ar
                          Log.Logger.LogWarning(e, "Error executing interceptor OnAckTimeoutSend callback");
           
      member this.Close() =
-          for interceptor in interceptors do
-               try
-                    interceptor.Dispose()
-               with e ->
-                    Log.Logger.LogWarning(e, "Fail to close consumer interceptor");
+          if ownsInterceptors then
+               for interceptor in interceptors do
+                    try
+                         interceptor.Dispose()
+                    with e ->
+                         Log.Logger.LogWarning(e, "Fail to close consumer interceptor");
