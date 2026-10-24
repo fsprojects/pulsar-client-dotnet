@@ -547,6 +547,54 @@ let tests =
             Log.Debug("Finished Non-durable multi-topic consumer stops with the cause when a child mailbox fails")
         }
 
+        testTask "Multi-topic consumer stops when a child stops after a failed unsubscribe" {
+
+            Log.Debug("Started Multi-topic consumer stops when a child stops after a failed unsubscribe")
+            let client = getClient()
+            let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topics([| topicName1; topicName2 |])
+                    .ConsumerName("failedUnsubscribe")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            // unsubscribed after the other child, which succeeds
+            let crashed = multiConsumer.Consumers |> Array.last :?> ConsumerImpl<byte[]>
+            // nothing is produced, so this stays a receive waiter
+            let pendingReceive = consumer.ReceiveAsync()
+            do! Task.Delay 200
+            let trigger = TaskCompletionSource<bool>()
+            let unsubscribe = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            // Queued while the trigger is handled: Unsubscribe is read before any child stop is reported, and the
+            // crashed child has failed by the time Unsubscribe reaches it.
+            queueBehind trigger (fun () ->
+                post multiConsumer.Mb (MultiTopicConsumerMessage.Unsubscribe unsubscribe)
+                crashChildMailbox crashed)
+            post multiConsumer.Mb (MultiTopicConsumerMessage.IsConnected trigger)
+
+            let! (unsubscribeError : exn) = task {
+                try
+                    do! unsubscribe.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+                    return null
+                with ex ->
+                    return unwrap ex
+            }
+            match unsubscribeError with
+            | null -> failwith "Unsubscribe should fail for the crashed child"
+            | :? TimeoutException -> failwith "Unsubscribe did not complete within 5 seconds"
+            | _ -> ()
+            // the stopped children may have been unsubscribed, so they can't be recreated and the consumer stops
+            do! assertAlreadyClosed pendingReceive
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Multi-topic consumer stops when a child stops after a failed unsubscribe")
+        }
+
         testTask "Multi-topic consumer completes the request that faults its mailbox" {
 
             Log.Debug("Started Multi-topic consumer completes the request that faults its mailbox")

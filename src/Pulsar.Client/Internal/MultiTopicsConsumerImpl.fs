@@ -813,10 +813,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
             | ChildStopped (childTopic, consumer, ex, detached) ->
 
-                match this.ConnectionState with
-                | Ready ->
-                    match consumers.TryGetValue childTopic with
-                    | true, child when Object.ReferenceEquals(child.Consumer, consumer) ->
+                match consumers.TryGetValue childTopic with
+                | true, child when Object.ReferenceEquals(child.Consumer, consumer) ->
+                    match this.ConnectionState with
+                    | Ready ->
                         Log.Logger.LogWarning(ex, "{0} consumer for {1} has stopped", prefix, childTopic)
                         do! currentStream.RemoveGenerator child.Stream
                         consumers.Remove(childTopic) |> ignore
@@ -837,13 +837,21 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             // removes it. Seek and Unsubscribe refuse until then instead of skipping the topic.
                             pendingChildren[childTopic] <- child.Info
                             scheduleChildRecreation child.Info (createChildBackoff())
+                        // the child's generator has been removed, so its parked read can finish
+                        detached.TrySetResult() |> ignore
+                    | Failed ->
+                        // Only a failed Unsubscribe leaves the mailbox running in this state. It may have unsubscribed
+                        // this child already, so the child can't be recreated; stopping cancels its parked read.
+                        Log.Logger.LogError(ex, "{0} stopping because the consumer for {1} has stopped after a failed unsubscribe", prefix, childTopic)
+                        failConsumer ex
+                        continueLoop <- false
                     | _ ->
-                        Log.Logger.LogDebug("{0} ignored the stopped consumer for {1}", prefix, childTopic)
-                    // the child's generator has been removed either way, so its parked read can finish
-                    detached.TrySetResult() |> ignore
+                        // stopping the consumer cancels the parked read
+                        Log.Logger.LogDebug("{0} ignored the stopped consumer for {1} in state {2}", prefix, childTopic, this.ConnectionState)
                 | _ ->
-                    // the generator may still be registered, stopping the consumer cancels the parked read
-                    Log.Logger.LogDebug("{0} ignored the stopped consumer for {1} in state {2}", prefix, childTopic, this.ConnectionState)
+                    Log.Logger.LogDebug("{0} ignored the stopped consumer for {1}", prefix, childTopic)
+                    // its generator has already been removed, so its parked read can finish
+                    detached.TrySetResult() |> ignore
 
             | RecreateChild (info, backoff) ->
 
