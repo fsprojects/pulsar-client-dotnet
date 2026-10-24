@@ -103,6 +103,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let pendingChildren = Dictionary<CompleteTopicName, ChildConsumerInfo<'T>>()
     // creations of those children that are still running; ChildRecreated takes them over, unless Close does first
     let recreatingChildren = HashSet<Task<ConsumerImpl<'T>>>()
+    // children being disposed without the mailbox waiting for them
+    let childDisposals = ResizeArray<Task>()
     // children stop and are replaced while the parent keeps running, so only the parent disposes the interceptors
     let childInterceptors = interceptors.Borrow()
     let consumerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
@@ -316,13 +318,17 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         let topics = String.Join(", ", pendingChildren.Keys)
         NotConnectedException($"{prefix} can't {operation} while the consumers for {topics} are being recreated") :> exn
 
+    // doesn't block the mailbox, but Close still waits for it in closeChildren
     let disposeChild (consumer: IConsumer<'T>) =
-        backgroundTask {
-            try
-                do! consumer.DisposeAsync()
-            with Flatten ex ->
-                Log.Logger.LogWarning(ex, "{0} could not dispose a child consumer", prefix)
-        } |> ignore
+        childDisposals.RemoveAll(fun disposal -> disposal.IsCompleted) |> ignore
+        let disposal =
+            backgroundTask {
+                try
+                    do! consumer.DisposeAsync()
+                with Flatten ex ->
+                    Log.Logger.LogWarning(ex, "{0} could not dispose a child consumer", prefix)
+            }
+        childDisposals.Add disposal
 
     let disposeCreatedChildren (consumersTasks: Task<ConsumerImpl<'T>> seq) =
         consumersTasks
@@ -338,13 +344,17 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 do! (createTask.Result :> IConsumer<'T>).DisposeAsync()
         } :> Task
 
-    // also waits for the children still being recreated, otherwise they could stay subscribed after Close completes
+    // Also waits for the children still being recreated or disposed, otherwise they could stay subscribed after
+    // Close completes.
     let closeChildren () =
         let recreating = recreatingChildren |> Seq.toArray
         recreatingChildren.Clear()
+        let disposals = childDisposals.ToArray()
+        childDisposals.Clear()
         consumers.Values
         |> Seq.map (fun child -> child.Consumer.DisposeAsync().AsTask())
         |> Seq.append (recreating |> Array.map disposeRecreatingChild)
+        |> Seq.append disposals
         |> Task.WhenAll
 
     let createChildBackoff () =
@@ -812,9 +822,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         consumers.Remove(childTopic) |> ignore
                         disposeChild child.Consumer
                         match multiConsumerType with
-                        | Pattern _ when not child.Info.IsPartitioned ->
-                            // The next discovery subscribes again if the topic still matches the pattern. Discovery
-                            // decides which topics belong to a pattern consumer, also for non-durable subscriptions.
+                        | Pattern _ when consumerConfig.SubscriptionMode = SubscriptionMode.NonDurable
+                                         && not child.Info.IsPartitioned ->
+                            // A recreated child would start again from the initial position, like any topic that
+                            // discovery adds, so the next discovery subscribes again if the topic still matches.
                             allTopics.Remove(child.Info.TopicName) |> ignore
                         | _ when consumerConfig.SubscriptionMode = SubscriptionMode.NonDurable ->
                             // a recreated child would start again from the initial position, so it can't take over
@@ -822,6 +833,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             failConsumer ex
                             continueLoop <- false
                         | _ ->
+                            // A deleted pattern topic can't be subscribed again, so it stays pending until discovery
+                            // removes it. Seek and Unsubscribe refuse until then instead of skipping the topic.
                             pendingChildren[childTopic] <- child.Info
                             scheduleChildRecreation child.Info (createChildBackoff())
                     | _ ->

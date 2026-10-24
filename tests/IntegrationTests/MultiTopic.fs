@@ -277,18 +277,23 @@ let tests =
 
             // restarting every child stream used to reach the stopped child and fail the whole consumer
             do! consumer.RedeliverUnacknowledgedMessagesAsync().WaitAsync(timeout)
+            // the topic stays pending until discovery removes it, so these would skip it
             let! connected = consumer.IsConnected().WaitAsync(timeout)
-            Expect.isTrue connected "A deleted topic must not fail the pattern consumer"
+            Expect.isFalse connected "The deleted topic's child is not consuming"
+            do! assertNotConnected (consumer.SeekAsync(MessageId.Earliest))
+            do! assertNotConnected (consumer.UnsubscribeAsync())
             let! _ = remainingProducer.SendAsync [| 1uy |]
             let! (message: Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(timeout)
             Expect.equal message.Data [| 1uy |] "The remaining topic should still be consumed"
             do! consumer.AcknowledgeAsync(message.MessageId).WaitAsync(timeout)
 
-            // once the topic exists again, the next discovery subscribes to it
+            // once the topic exists again, the pending child is recreated without waiting for discovery
             use! (recreatedProducer: IProducer<byte[]>) =
                 client.NewProducer().Topic(deletedTopic).EnableBatching(false).CreateAsync()
-            post multiConsumer.Mb MultiTopicConsumerMessage.PatternTickTime
-            do! waitUntil "the recreated topic is subscribed again" (fun () -> Task.FromResult(multiConsumer.Consumers.Length = 2))
+            do! waitUntil "the recreated topic is subscribed again" (fun () -> task {
+                let! connected = consumer.IsConnected()
+                return connected && multiConsumer.Consumers.Length = 2
+            })
             let! _ = recreatedProducer.SendAsync [| 2uy |]
             let! (message: Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(timeout)
             Expect.equal message.Data [| 2uy |] "The recreated topic should be consumed"

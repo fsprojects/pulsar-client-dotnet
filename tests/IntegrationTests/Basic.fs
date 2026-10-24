@@ -773,6 +773,65 @@ let tests =
             Log.Debug("Finished Closing a multi-topic consumer waits for a child that is being recreated")
         }
 
+        testTask "A child recreated across a redelivery is created again at the new epoch" {
+
+            Log.Debug("Started A child recreated across a redelivery is created again at the new epoch")
+            let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let subscriptionName = "test-subscription"
+            let config = { PulsarClientConfiguration.Default with ServiceAddresses = [| Uri(pulsarAddress) |] }
+            let pool = ConnectionPool(config)
+            let lookup = new HeldLookup(new BinaryLookupService(config, pool))
+            use _ = closePool pool lookup
+
+            let! (multiConsumer : MultiTopicsConsumerImpl<byte[]>) =
+                createMultiTopicConsumer config pool lookup "staleRecreatedChild" subscriptionName [| topicName1; topicName2 |]
+            let consumer = multiConsumer :> IConsumer<byte[]>
+            let crashed = multiConsumer.Consumers |> Array.head :?> ConsumerImpl<byte[]>
+            let crashedTopic = (crashed :> IConsumer<byte[]>).Topic
+            let firstLookup = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let releaseFirst = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            lookup.Hold(%crashedTopic, firstLookup, releaseFirst.Task)
+            crashChildMailbox crashed
+            do! firstLookup.Task.WaitAsync(TimeSpan.FromSeconds(15.0))
+
+            // the child being created subscribes at the old epoch, so its messages would be discarded
+            do! consumer.RedeliverUnacknowledgedMessagesAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+            let secondLookup = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let releaseSecond = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            lookup.Hold(%crashedTopic, secondLookup, releaseSecond.Task)
+            releaseFirst.SetResult()
+            // the stale child was discarded, and the child is being created again
+            do! secondLookup.Task.WaitAsync(TimeSpan.FromSeconds(15.0))
+            releaseSecond.SetResult()
+            do! waitForRecreatedChild multiConsumer crashed 2
+
+            let! (producer : IProducer<byte[]>) =
+                getClient().NewProducer()
+                    .Topic(crashedTopic)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            let! _ = producer.SendAsync([| 1uy |])
+            let! (message : Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The child created at the new epoch should deliver the topic's messages" [| 1uy |] (message.GetValue())
+            do! consumer.AcknowledgeAsync(message.MessageId).WaitAsync(TimeSpan.FromSeconds(5.0))
+            do! producer.DisposeAsync().AsTask()
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            // neither the discarded child nor its replacement is still subscribed
+            let! (consumer2 : IConsumer<byte[]>) =
+                getClient().NewConsumer()
+                    .Topic(crashedTopic)
+                    .ConsumerName("replacement")
+                    .SubscriptionName(subscriptionName)
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(15.0))
+            do! consumer2.UnsubscribeAsync()
+
+            Log.Debug("Finished A child recreated across a redelivery is created again at the new epoch")
+        }
+
         testTask "Multi-topic consumer refuses to seek or unsubscribe while a child is being recreated" {
 
             Log.Debug("Started Multi-topic consumer refuses to seek or unsubscribe while a child is being recreated")
