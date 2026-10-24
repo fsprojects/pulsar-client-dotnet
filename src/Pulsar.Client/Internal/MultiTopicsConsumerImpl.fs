@@ -273,10 +273,9 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 currentStream.AddGenerators (children |> Array.map _.Stream)
         }
 
-    // the interceptors are closed separately, once the child consumers that use them are closed:
-    // they keep running after the mailbox or the poller fails, until Close
+    // the child consumers keep running after the mailbox or the poller fails, until Close, so the rest of the cleanup
+    // waits for completeClose
     let stopConsumer() =
-        cleanup(this)
         partitionsTimer.Close()
         patternTimer.Close()
         unAckedMessageTracker.Close()
@@ -292,6 +291,12 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             let batchWaitingChannel = batchWaiters |> dequeueBatchWaiter
             closedException |> batchWaitingChannel.TrySetException |> ignore
         Log.Logger.LogInformation("{0} stopped", prefix)
+
+    // once the child consumers, which use the interceptors, are closed. Until then the consumer stays registered,
+    // as in the Java client, so closing the client still closes it after its mailbox or poller fails
+    let completeClose() =
+        interceptors.Close()
+        cleanup(this)
 
     let failConsumer (ex: exn) =
         terminalError <- ex
@@ -717,7 +722,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     with Flatten closeEx ->
                         Log.Logger.LogError(closeEx, "{0} could not close all child consumers properly", prefix)
                     this.ConnectionState <- Closed
-                    interceptors.Close()
+                    completeClose()
                     channel.TrySetResult() |> ignore
                 } |> ignore
         | _ ->
@@ -773,7 +778,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     Log.Logger.LogError(ex, "{0} could not create", prefix)
                     do! disposeCreatedChildren consumersTasks
                     failConsumer ex
-                    interceptors.Close()
+                    completeClose()
                     consumerCreatedTsc.SetException(ex)
 
                 if this.ConnectionState = Failed then
@@ -1125,13 +1130,13 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         do! closeChildren()
                         this.ConnectionState <- Closed
                         stopConsumer()
-                        interceptors.Close()
+                        completeClose()
                         channel.SetResult()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not close all child consumers properly", prefix)
                         this.ConnectionState <- Closed
                         stopConsumer()
-                        interceptors.Close()
+                        completeClose()
                         channel.SetResult()
                 continueLoop <- false
 
@@ -1154,7 +1159,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         this.ConnectionState <- Closed
                         Log.Logger.LogInformation("{0} unsubscribed", prefix)
                         stopConsumer()
-                        interceptors.Close()
+                        completeClose()
                         channel.SetResult()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not unsubscribe", prefix)

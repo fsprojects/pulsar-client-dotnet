@@ -853,6 +853,40 @@ let tests =
             Log.Debug("Finished Multi-topic consumer keeps its interceptors until its children are closed after its mailbox fails")
         }
 
+        testTask "Closing the client closes a multi-topic consumer whose mailbox failed" {
+
+            Log.Debug("Started Closing the client closes a multi-topic consumer whose mailbox failed")
+            let! (client : PulsarClient) = PulsarClientBuilder().ServiceUrl(pulsarAddress).BuildAsync()
+            let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let interceptor = new CountingInterceptor()
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topics([| topicName1; topicName2 |])
+                    .ConsumerName("failedParentClientClose")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .Intercept(interceptor)
+                    .SubscribeAsync()
+
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            let pollerReply = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            crashMultiTopicMailbox multiConsumer pollerReply
+            do! assertMailboxException pollerReply.Task
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (consumer.GetStats())
+
+            // as in the Java client, the failed consumer stays registered until it is closed, so closing the client
+            // closes its children and disposes the interceptors
+            do! client.CloseAsync().WaitAsync(TimeSpan.FromSeconds(10.0))
+            for child in multiConsumer.Consumers do
+                do! assertAlreadyClosed (child.GetStats())
+            Expect.equal "Closing the client should dispose the interceptors" 1 interceptor.Disposed
+            do! assertAlreadyClosed (consumer.GetStats())
+
+            Log.Debug("Finished Closing the client closes a multi-topic consumer whose mailbox failed")
+        }
+
         testTask "Removing a pattern topic ends the reads of its failed consumer" {
 
             Log.Debug("Started Removing a pattern topic ends the reads of its failed consumer")
@@ -901,6 +935,8 @@ let tests =
                     // discovery removes the topic, which ends the read instead of leaving it to retry
                     post multiConsumer.Mb MultiTopicConsumerMessage.PatternTickTime
                     do! readEnded.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+                    // the read ends before discovery has removed the child, so wait for the mailbox to finish discovery
+                    let! _ = consumer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
                     Expect.equal "Only the remaining topic's consumer should be left" 1 multiConsumer.Consumers.Length
                     do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
                 finally
@@ -1380,6 +1416,35 @@ let tests =
             do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
             Log.Debug("Finished Partitioned producer keeps its interceptors until its partitions are closed after its mailbox fails")
+        }
+
+        testTask "Closing the client closes a partitioned producer whose mailbox failed" {
+
+            Log.Debug("Started Closing the client closes a partitioned producer whose mailbox failed")
+            let! (client : PulsarClient) = PulsarClientBuilder().ServiceUrl(pulsarAddress).BuildAsync()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            do! createPartitionedTopic topicName 2
+            let interceptor = new CountingProducerInterceptor()
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .Intercept(interceptor)
+                    .CreateAsync()
+
+            let partitioned = producer :?> PartitionedProducerImpl<byte[]>
+            crashPartitionedProducerMailbox partitioned
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
+
+            // as in the Java client, the failed producer stays registered until it is closed, so closing the client
+            // closes its partitions and disposes the interceptors
+            do! client.CloseAsync().WaitAsync(TimeSpan.FromSeconds(10.0))
+            for child in partitioned.Producers do
+                do! assertAlreadyClosed (child.GetStats())
+            Expect.equal "Closing the client should dispose the interceptors" 1 interceptor.Disposed
+            do! assertAlreadyClosed (producer.GetStats())
+
+            Log.Debug("Finished Closing the client closes a partitioned producer whose mailbox failed")
         }
 
         testTask "Close queued behind a partitioned producer mailbox failure completes only after cleanup" {

@@ -117,7 +117,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
     let failPendingBatchMessages (ex: exn) =
         if batchMessageContainer.NumMessagesInBatch > 0 then
-            batchMessageContainer.Discard ex
+            batchMessageContainer.Discard(fun batchItem -> failMessage batchItem.Message batchItem.Tcs ex)
 
     let disposePendingPayload (msg: PendingMessage<'T>) =
         lock msg.Payload (fun () -> msg.Payload.Dispose())
@@ -127,9 +127,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             let msg = pendingMessages.Dequeue()
             disposePendingPayload msg
             failPendingMessage msg ex
+        // as in the Java client, every message that went through the interceptors hears how its send ended,
+        // including those still waiting for room in the queue or in the batch
         while blockedRequests.Count > 0 do
-            let struct(_, channel, _) = blockedRequests.Dequeue()
-            channel.TrySetException(ex) |> ignore
+            let struct(message, channel, _) = blockedRequests.Dequeue()
+            failMessage message (Some channel) ex
         if producerConfig.BatchingEnabled then
             failPendingBatchMessages ex
 
