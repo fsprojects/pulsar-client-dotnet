@@ -355,6 +355,34 @@ let tests =
             do! registered.Task.WaitAsync(testTimeout)
         }
 
+        testTask "Close fails the batched sends through the interceptors" {
+            for batchBuilder in [ BatchBuilder.Default; BatchBuilder.KeyBased ] do
+                use broker = new BrokerConnection(clientConfig)
+                let config =
+                    { producerConfig with
+                        BatchingEnabled = true
+                        BatchingMaxPublishDelay = TimeSpan.FromHours(1.0)
+                        BatchBuilder = batchBuilder
+                        SendTimeout = TimeSpan.Zero }
+                let interceptor = new RecordingInterceptor()
+                let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>([| interceptor |]), ignore)
+                let batched = enqueueMessage producer [| 1uy |]
+                let! _ = (producer :> IProducer<byte[]>).GetStats().WaitAsync(testTimeout)
+                Expect.isFalse batched.IsCompleted $"{batchBuilder}: the send should wait in the batch"
+
+                let closing = (producer :> IProducer<byte[]>).DisposeAsync().AsTask()
+                let! (command: BaseCommand) = broker.ReadCommand()
+                Expect.equal command.``type`` BaseCommand.Type.CloseProducer $"{batchBuilder}: expected close request"
+                do! broker.Reply(
+                    BaseCommand(
+                        ``type`` = BaseCommand.Type.Success,
+                        Success = CommandSuccess(RequestId = command.CloseProducer.RequestId)))
+                do! closing.WaitAsync(testTimeout)
+                let! _ = expectFailure<AlreadyClosedException> batched
+                // as in the Java client, discarding the batch fails each of its sends through the interceptors
+                Expect.sequenceEqual interceptor.Events [ "failed"; "disposed" ] $"{batchBuilder}: the batched send should reach the interceptors"
+        }
+
         testTask "Timed out close still stops the producer" {
             use broker = new BrokerConnection({ clientConfig with OperationTimeout = TimeSpan.FromSeconds(1.0) })
             let mutable cleaned = false
@@ -408,33 +436,5 @@ let tests =
             expectTimersStopped producer
             Expect.equal cleaned 1 "Successful close must clean up once"
             Expect.isTrue broker.Connection.IsActive "Successful close must preserve the shared connection"
-        }
-
-        testTask "Close fails the batched sends through the interceptors" {
-            for batchBuilder in [ BatchBuilder.Default; BatchBuilder.KeyBased ] do
-                use broker = new BrokerConnection(clientConfig)
-                let config =
-                    { producerConfig with
-                        BatchingEnabled = true
-                        BatchingMaxPublishDelay = TimeSpan.FromHours(1.0)
-                        BatchBuilder = batchBuilder
-                        SendTimeout = TimeSpan.Zero }
-                let interceptor = new RecordingInterceptor()
-                let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>([| interceptor |]), ignore)
-                let batched = enqueueMessage producer [| 1uy |]
-                let! _ = (producer :> IProducer<byte[]>).GetStats().WaitAsync(testTimeout)
-                Expect.isFalse batched.IsCompleted $"{batchBuilder}: the send should wait in the batch"
-
-                let closing = (producer :> IProducer<byte[]>).DisposeAsync().AsTask()
-                let! (command: BaseCommand) = broker.ReadCommand()
-                Expect.equal command.``type`` BaseCommand.Type.CloseProducer $"{batchBuilder}: expected close request"
-                do! broker.Reply(
-                    BaseCommand(
-                        ``type`` = BaseCommand.Type.Success,
-                        Success = CommandSuccess(RequestId = command.CloseProducer.RequestId)))
-                do! closing.WaitAsync(testTimeout)
-                let! _ = expectFailure<AlreadyClosedException> batched
-                // as in the Java client, discarding the batch fails each of its sends through the interceptors
-                Expect.sequenceEqual interceptor.Events [ "failed"; "disposed" ] $"{batchBuilder}: the batched send should reach the interceptors"
         }
     ]
