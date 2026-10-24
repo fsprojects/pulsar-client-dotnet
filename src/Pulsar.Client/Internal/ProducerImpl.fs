@@ -510,9 +510,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         batchTimer.Stop()
         cryptoTimer.Stop()
         connectionHandler.Close()
-        interceptors.Close()
         statTimer.Stop()
         cleanup(this)
+        // last, as in the Java client; pending messages have to be failed before, so the interceptors hear about them
+        interceptors.Close()
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let producerOperations = {
@@ -589,8 +590,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let closeWhenReceivedUnrecoverableError (ex: exn) =
         Log.Logger.LogWarning("{0} Closed producer because topic does not exist anymore. {1}", prefix, ex.Message)
         connectionHandler.Closed()
-        stopProducer()
         failPendingMessages <| AlreadyClosedException("Producer was closed because its topic does not exist anymore", ex)
+        stopProducer()
         producerCreatedTsc.TrySetException(ex) |> ignore
 
     // requests posted after the mailbox exits would otherwise never be completed
@@ -910,21 +911,21 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         response |> PulsarResponseType.GetEmpty
                         clientCnx.RemoveProducer(producerId)
                         connectionHandler.Closed()
-                        stopProducer()
                         failPendingMessages <| AlreadyClosedException "Producer was already closed"
+                        stopProducer()
                         channel.SetResult <| Ok()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed to close", prefix)
                         clientCnx.RemoveProducer(producerId)
                         connectionHandler.Closed()
-                        stopProducer()
                         failPendingMessages ex
+                        stopProducer()
                         channel.SetResult <| Error ex
                 | _ ->
                     Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
                     connectionHandler.Closed()
-                    stopProducer()
                     failPendingMessages <| AlreadyClosedException "Producer was already closed"
+                    stopProducer()
                     channel.SetResult <| Ok()
 
                 continueLoop <- false

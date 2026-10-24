@@ -150,6 +150,21 @@ type private BrokerConnection(clientConfig: PulsarClientConfiguration) =
             lookup.Dispose()
             ValueTask()
 
+type private RecordingInterceptor() =
+    let events = ResizeArray<string>()
+    let disposed = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+    member _.Events = lock events (fun () -> List.ofSeq events)
+    member _.Disposed = disposed.Task
+    interface IProducerInterceptor<byte[]> with
+        member _.Eligible _ = true
+        member _.BeforeSend(_, message) = message
+        member _.OnSendAcknowledgement(_, _, _, exn) =
+            if not (isNull exn) then
+                lock events (fun () -> events.Add "failed")
+        member _.Dispose() =
+            lock events (fun () -> events.Add "disposed")
+            disposed.TrySetResult() |> ignore
+
 let private clientConfig =
     { PulsarClientConfiguration.Default with
         StatsInterval = TimeSpan.FromMinutes(1.0)
@@ -236,7 +251,8 @@ let tests =
         testTask "Producer closes itself when its topic no longer exists" {
             use broker = new BrokerConnection(clientConfig)
             let config = { producerConfig with BatchingEnabled = false; SendTimeout = TimeSpan.Zero }
-            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
+            let interceptor = new RecordingInterceptor()
+            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>([| interceptor |]), ignore)
             let sending = enqueueMessage producer [| 1uy |]
             let! (send: BaseCommand) = broker.ReadCommand()
             Expect.equal send.``type`` BaseCommand.Type.Send "Expected the message to be sent"
@@ -261,6 +277,9 @@ let tests =
             Expect.isTrue (pendingError.InnerException :? TopicDoesNotExistException) "A pending send should report why the producer closed"
             let! _ =
                 expectFailure<AlreadyClosedException> (task { return! (producer :> IProducer<byte[]>).SendAsync([| 2uy |]) })
+            // the interceptors hear about the failed send before they are disposed, which is the last cleanup step
+            do! interceptor.Disposed.WaitAsync(testTimeout)
+            Expect.sequenceEqual interceptor.Events [ "failed"; "disposed" ] "Interceptors should be disposed after the pending send fails"
             expectTimersStopped producer
         }
 
