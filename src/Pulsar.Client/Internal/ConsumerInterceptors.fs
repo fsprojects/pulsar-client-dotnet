@@ -11,7 +11,7 @@ type internal ConsumerInterceptors<'T>(interceptors: IConsumerInterceptor<'T> ar
      static member Empty with get() = ConsumerInterceptors<'T>([||])
 
      // the same interceptors for a consumer that doesn't own them, e.g. a child of a multi-topic consumer,
-     // which can stop and be replaced while the owner keeps using them
+     // which can stop while the owner keeps using them
      member this.Borrow() = ConsumerInterceptors<'T>(interceptors, false)
      
      member this.BeforeConsume (consumer: IConsumer<'T>, msg: Message<'T>) =

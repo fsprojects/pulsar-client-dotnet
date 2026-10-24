@@ -5,9 +5,14 @@ open Microsoft.Extensions.Logging
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
-type internal ProducerInterceptors<'T>(interceptors: IProducerInterceptor<'T> array) =
+type internal ProducerInterceptors<'T>(interceptors: IProducerInterceptor<'T> array, ownsInterceptors: bool) =
+     new(interceptors: IProducerInterceptor<'T> array) = ProducerInterceptors<'T>(interceptors, true)
      member this.Interceptors = interceptors
      static member Empty with get() = ProducerInterceptors<'T>([||])
+
+     // the same interceptors for a producer that doesn't own them, e.g. a partition of a partitioned producer,
+     // which can stop while the owner keeps using them
+     member this.Borrow() = ProducerInterceptors<'T>(interceptors, false)
      
      member this.BeforeSend (producer: IProducer<'T>, message: MessageBuilder<'T>) =
           let mutable interceptorMessage = message         
@@ -28,8 +33,9 @@ type internal ProducerInterceptors<'T>(interceptors: IProducerInterceptor<'T> ar
                          Log.Logger.LogWarning(e, "Error executing interceptor onSendAcknowledgement callback topic: {0}", producer.Topic);
           
      member this.Close() =
-          for interceptor in interceptors do
-               try
-                    interceptor.Dispose()
-               with e ->
-                    Log.Logger.LogWarning(e, "Fail to close producer interceptor");
+          if ownsInterceptors then
+               for interceptor in interceptors do
+                    try
+                         interceptor.Dispose()
+                    with e ->
+                         Log.Logger.LogWarning(e, "Fail to close producer interceptor");

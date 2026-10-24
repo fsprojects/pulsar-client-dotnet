@@ -55,6 +55,8 @@ type internal ChildConsumer<'T> =
         Info: ChildConsumerInfo<'T>
         Consumer: IConsumer<'T>
         Stream: TaskGenerator<PolledMessage<'T>>
+        // ends a read that is waiting on the child once the child is removed
+        Removed: CancellationTokenSource
     }
 
 type internal MultiTopicConsumerMessage<'T> =
@@ -200,20 +202,27 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
 
     // As in the Java client, a child never fails the parent: a closed child is no longer read, and any other
     // receive failure is retried later. Neither is buffered as a message.
-    let getStream (topic: CompleteTopicName) (consumer: ConsumerImpl<'T>) =
+    let getStream (topic: CompleteTopicName) (consumer: ConsumerImpl<'T>) (removed: CancellationToken) =
         Log.Logger.LogDebug("{0} getStream", topic)
         let consumerImp = consumer :> IConsumer<'T>
         fun () ->
             let cancellationToken = receiveToken
+            // ended by a reset of the reads, by the parent stopping, or by the child's removal
+            let wait (delay: TimeSpan) =
+                backgroundTask {
+                    use waitCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, removed)
+                    do! Task.Delay(delay, waitCts.Token)
+                }
             backgroundTask {
                 try
                     let mutable result = None
                     while result.IsNone do
                         cancellationToken.ThrowIfCancellationRequested()
+                        removed.ThrowIfCancellationRequested()
                         let! hasReachedEndOfTopic = consumerImp.HasReachedEndOfTopic()
                         if hasReachedEndOfTopic then
                             Log.Logger.LogWarning("{0} topic was terminated", topic)
-                            do! Task.Delay(Timeout.Infinite, cancellationToken)
+                            do! wait Timeout.InfiniteTimeSpan
                         let! message =
                             try
                                 consumer.ReceiveWrappedAsync(cancellationToken)
@@ -226,17 +235,22 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         | Error (:? AlreadyClosedException) ->
                             // it stays registered until the parent closes or discovery removes its topic
                             Log.Logger.LogDebug("{0} stopped reading the closed consumer for {1}", prefix, topic)
-                            do! Task.Delay(Timeout.Infinite, cancellationToken)
+                            do! wait Timeout.InfiniteTimeSpan
                         | Error ex ->
                             Log.Logger.LogError(ex, "{0} receive failed on the consumer for {1}, retrying in {2}",
                                                 prefix, topic, childReceiveRetryDelay)
-                            do! Task.Delay(childReceiveRetryDelay, cancellationToken)
+                            do! wait childReceiveRetryDelay
                         | Ok msg ->
                             let newMessageId = { msg.MessageId with TopicName = topic }
                             result <- Some (Ok (msg.WithMessageId(newMessageId)))
                     return struct (cancellationToken, result.Value)
-                with :? OperationCanceledException as ex when cancellationToken.IsCancellationRequested ->
+                with
+                | :? OperationCanceledException as ex when cancellationToken.IsCancellationRequested ->
                     return struct (cancellationToken, Error ex)
+                | :? OperationCanceledException as ex when removed.IsCancellationRequested ->
+                    Log.Logger.LogDebug("{0} stopped reading the removed consumer for {1}", prefix, topic)
+                    // nothing polls a removed child, and its cancelled token would discard this anyway
+                    return struct (removed, Error ex)
             }
 
     let resetStreams (action: IConsumer<'T> -> Task<unit>) =
@@ -301,8 +315,9 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     // only called from the mailbox, so the children are never changed concurrently
     let registerChild (info: ChildConsumerInfo<'T>) (consumer: ConsumerImpl<'T>) =
         let childTopic = info.ChildTopicName.CompleteTopicName
-        let stream = getStream childTopic consumer
-        consumers.Add(childTopic, { Info = info; Consumer = consumer :> IConsumer<'T>; Stream = stream })
+        let removed = new CancellationTokenSource()
+        let stream = getStream childTopic consumer removed.Token
+        consumers.Add(childTopic, { Info = info; Consumer = consumer :> IConsumer<'T>; Stream = stream; Removed = removed })
         stream
 
     // the topic was removed
@@ -393,6 +408,9 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 |> Seq.toArray
             for KeyValue(childTopic, child) in removedChildren do
                 do! currentStream.RemoveGenerator child.Stream
+                // otherwise a read waiting on a closed child, or retrying a failed one, would outlive it
+                child.Removed.Cancel()
+                child.Removed.Dispose()
                 consumers.Remove(childTopic) |> ignore
             for removedTopic in topicsToRemove do
                 allTopics.Remove(removedTopic) |> ignore

@@ -62,6 +62,32 @@ let private waitForStoppedChild (child: ConsumerImpl<byte[]>) =
             return true
     })
 
+// A null reply channel faults the partitioned producer mailbox
+let private crashPartitionedProducerMailbox (producer: PartitionedProducerImpl<byte[]>) =
+    post producer.Mb (PartitionedProducerMessage.LastSequenceId Unchecked.defaultof<TaskCompletionSource<SequenceId>>)
+
+let private createPartitionedTopic (topicName: string) (partitions: int) = task {
+    use http = new HttpClient(new HttpClientHandler(UseProxy = false))
+    http.BaseAddress <- Uri(pulsarHttpAddress)
+    http.Timeout <- TimeSpan.FromSeconds(15.0)
+    use content = new StringContent(string partitions, Encoding.UTF8, "application/json")
+    let! created = http.PutAsync($"/admin/v2/persistent/{topicName}/partitions", content)
+    created.EnsureSuccessStatusCode() |> ignore
+}
+
+type private CountingProducerInterceptor() =
+    let mutable sent = 0
+    let mutable disposed = 0
+    member _.Sent = Volatile.Read(&sent)
+    member _.Disposed = Volatile.Read(&disposed)
+    interface IProducerInterceptor<byte[]> with
+        member _.Dispose() = Interlocked.Increment(&disposed) |> ignore
+        member _.Eligible _ = true
+        member _.BeforeSend(_, message) =
+            Interlocked.Increment(&sent) |> ignore
+            message
+        member _.OnSendAcknowledgement(_, _, _, _) = ()
+
 type private CountingInterceptor() =
     let mutable consumed = 0
     let mutable disposed = 0
@@ -775,6 +801,64 @@ let tests =
             Log.Debug("Finished A stopped child doesn't dispose the multi-topic consumer's interceptors")
         }
 
+        testTask "Removing a pattern topic ends the reads of its failed consumer" {
+
+            Log.Debug("Started Removing a pattern topic ends the reads of its failed consumer")
+            let topicPrefix = $"persistent://public/default/removed-failed-child-{Guid.NewGuid():N}-"
+            let removedTopic = TopicName(topicPrefix + "removed")
+            let remainingTopic = TopicName(topicPrefix + "remaining")
+            let removedName : string = %removedTopic.CompleteTopicName
+            // pattern children never create topics
+            for topic in [ removedTopic; remainingTopic ] do
+                let! (producer : IProducer<byte[]>) = getClient().NewProducer().Topic(topic.ToString()).CreateAsync()
+                do! producer.DisposeAsync().AsTask()
+            let retrying = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let readEnded = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            do! runWithLogger (fun text ->
+                    if text.Contains("receive failed on the consumer for " + removedName) then
+                        retrying.TrySetResult() |> ignore
+                    if text.Contains("stopped reading the removed consumer for " + removedName) then
+                        readEnded.TrySetResult() |> ignore) (fun () -> task {
+                let config = { PulsarClientConfiguration.Default with ServiceAddresses = [| Uri(pulsarAddress) |] }
+                let pool = ConnectionPool(config)
+                let lookup = new BinaryLookupService(config, pool) :> ILookupService
+                try
+                    let consumerInfo topic : ConsumerInitInfo<byte[]> =
+                        { TopicName = topic; Schema = Schema.BYTES(); SchemaProvider = None; Metadata = { Partitions = 0 } }
+                    let patternInfo =
+                        { InitialTopics = [| consumerInfo removedTopic; consumerInfo remainingTopic |]
+                          GetTopics = fun () -> Task.FromResult [| remainingTopic |]
+                          GetConsumerInfo = consumerInfo >> Task.FromResult }
+                    let consumerConfig =
+                        { ConsumerConfiguration<byte[]>.Default with
+                            TopicsPattern = topicPrefix + ".*"
+                            SubscriptionName = %"removed-failed-child"
+                            PatternAutoDiscoveryPeriod = TimeSpan.FromHours(1.0) }
+                    let! (multiConsumer : MultiTopicsConsumerImpl<byte[]>) =
+                        MultiTopicsConsumerImpl.InitPattern(consumerConfig, config, pool, patternInfo, lookup,
+                                                            ConsumerInterceptors<byte[]>.Empty, ignore)
+                    let consumer = multiConsumer :> IConsumer<byte[]>
+                    let failed =
+                        multiConsumer.Consumers |> Array.find (fun child -> child.Topic = removedName) :?> ConsumerImpl<byte[]>
+                    crashChildMailbox failed
+                    do! waitForStoppedChild failed
+                    // restarts every child's reads, so the failed child's read is retried every 10 seconds
+                    do! consumer.RedeliverUnacknowledgedMessagesAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+                    do! retrying.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+
+                    // discovery removes the topic, which ends the read instead of leaving it to retry
+                    post multiConsumer.Mb MultiTopicConsumerMessage.PatternTickTime
+                    do! readEnded.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+                    Expect.equal "Only the remaining topic's consumer should be left" 1 multiConsumer.Consumers.Length
+                    do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+                finally
+                    lookup.Dispose()
+                    pool.CloseAllConnections().GetAwaiter().GetResult()
+            })
+
+            Log.Debug("Finished Removing a pattern topic ends the reads of its failed consumer")
+        }
+
         testTask "Requests posted after the multi-topic consumer is closed are already closed" {
 
             Log.Debug("Started Requests posted after the multi-topic consumer is closed are already closed")
@@ -1114,38 +1198,71 @@ let tests =
             Log.Debug("Finished Close queued behind a producer mailbox failure completes only after cleanup")
         }
 
-        testTask "Partitioned producer completes the request that faults its mailbox" {
+        testTask "Partitioned producer keeps sending to the other partitions when a partition producer fails" {
 
-            Log.Debug("Started Partitioned producer completes the request that faults its mailbox")
+            Log.Debug("Started Partitioned producer keeps sending to the other partitions when a partition producer fails")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            do! task {
-                use http = new HttpClient(new HttpClientHandler(UseProxy = false))
-                http.BaseAddress <- Uri(pulsarHttpAddress)
-                http.Timeout <- TimeSpan.FromSeconds(15.0)
-                use partitions = new StringContent("2", Encoding.UTF8, "application/json")
-                let! created = http.PutAsync($"/admin/v2/persistent/{topicName}/partitions", partitions)
-                created.EnsureSuccessStatusCode() |> ignore
-            }
+            do! createPartitionedTopic topicName 2
+            let interceptor = new CountingProducerInterceptor()
+            // every message goes to the partition that keeps working
+            let router = { new IMessageRouter with member _.ChoosePartition(_, _) = 1 }
 
             let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
-                    .ProducerName("failingPartitionStats")
+                    .ProducerName("failingPartition")
+                    .MessageRoutingMode(MessageRoutingMode.CustomPartition)
+                    .CustomMessageRouter(router)
+                    .Intercept(interceptor)
                     .CreateAsync()
 
             let partitioned = producer :?> PartitionedProducerImpl<byte[]>
-            let child = partitioned.Producers |> Array.head :?> ProducerImpl<byte[]>
+            let failed = partitioned.Producers |> Array.head :?> ProducerImpl<byte[]>
             let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
-            // a null message crashes one partition mailbox. The parent GetStats awaits that child and faults with it
-            post child.Mb
+            // a null message crashes one partition mailbox
+            post failed.Mb
                 (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
             do! assertMailboxException crashingSend.Task
 
-            // this call is the message the parent mailbox is handling when it faults, so the drain cannot see it.
-            // every failure keeps the child's crash as its cause
+            // as in the Java client, a failed partition doesn't stop the others
             do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
-            // later calls are answered by the drain
+            let! (_ : SequenceId) = producer.LastSequenceId().WaitAsync(TimeSpan.FromSeconds(5.0))
+            let! connected = producer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse "The failed partition is not connected" connected
+            let! (_ : MessageId) = producer.SendAsync([| 1uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The failed partition must not dispose the interceptors the others still use" 0 interceptor.Disposed
+            Expect.equal "The remaining partition should still run the interceptors" 1 interceptor.Sent
+            do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "Closing the partitioned producer should dispose the interceptors once" 1 interceptor.Disposed
+
+            // the partition producers were closed, so the producer name is free
+            let! (producer2 : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName("failingPartition")
+                    .CreateAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(15.0))
+            do! producer2.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Partitioned producer keeps sending to the other partitions when a partition producer fails")
+        }
+
+        testTask "Partitioned producer reports why its mailbox failed" {
+
+            Log.Debug("Started Partitioned producer reports why its mailbox failed")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            do! createPartitionedTopic topicName 2
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName("failingPartitionedMailbox")
+                    .CreateAsync()
+
+            crashPartitionedProducerMailbox (producer :?> PartitionedProducerImpl<byte[]>)
+            // answered by the drain, with the failure as the cause
             do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
             do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.LastSequenceId())
             do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.LastDisconnectedTimestamp())
@@ -1155,16 +1272,16 @@ let tests =
             Expect.isFalse "Partitioned producer should report disconnected after its mailbox stops" connected
             do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
-            // the child producers were closed, so the producer name is free
+            // the partition producers outlive the mailbox and were closed by Close, so the producer name is free
             let! (producer2 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
-                    .ProducerName("failingPartitionStats")
+                    .ProducerName("failingPartitionedMailbox")
                     .CreateAsync()
                     .WaitAsync(TimeSpan.FromSeconds(15.0))
             do! producer2.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
-            Log.Debug("Finished Partitioned producer completes the request that faults its mailbox")
+            Log.Debug("Finished Partitioned producer reports why its mailbox failed")
         }
 
         testTask "Close queued behind a partitioned producer mailbox failure completes only after cleanup" {
@@ -1172,14 +1289,7 @@ let tests =
             Log.Debug("Started Close queued behind a partitioned producer mailbox failure completes only after cleanup")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
-            do! task {
-                use http = new HttpClient(new HttpClientHandler(UseProxy = false))
-                http.BaseAddress <- Uri(pulsarHttpAddress)
-                http.Timeout <- TimeSpan.FromSeconds(15.0)
-                use partitions = new StringContent("2", Encoding.UTF8, "application/json")
-                let! created = http.PutAsync($"/admin/v2/persistent/{topicName}/partitions", partitions)
-                created.EnsureSuccessStatusCode() |> ignore
-            }
+            do! createPartitionedTopic topicName 2
 
             let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
@@ -1187,29 +1297,23 @@ let tests =
                     .CreateAsync()
 
             let partitioned = producer :?> PartitionedProducerImpl<byte[]>
-            // closed partitions stay in the list and answer GetStats with AlreadyClosedException, which faults
-            // the parent mailbox. Disposing them again completes at once, so the drain's Close does not wait
-            for child in partitioned.Producers do
-                do! child.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
-
             let trigger = TaskCompletionSource<bool>()
-            let crashingStats = TaskCompletionSource<ProducerStats>(TaskCreationOptions.RunContinuationsAsynchronously)
             let close = TaskCompletionSource<Result<unit, exn>>()
-            // queued while the trigger is being handled: GetStats faults the mailbox and the Close is left for the drain
+            // queued while the trigger is being handled: the first request faults the mailbox and the Close is left
+            // for the drain
             queueBehind trigger (fun () ->
-                post partitioned.Mb (PartitionedProducerMessage.GetStats crashingStats)
+                crashPartitionedProducerMailbox partitioned
                 post partitioned.Mb (PartitionedProducerMessage.Close close))
-            let atClose = snapshotOnCompletion close (fun () -> crashingStats.Task.IsCompleted)
             post partitioned.Mb (PartitionedProducerMessage.IsConnected trigger)
 
-            let! statsCompleted = atClose.WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.isTrue "In-flight request should be failed before the queued Close completes" statsCompleted
-            do! assertAlreadyClosed crashingStats.Task
-            match close.Task.Result with
+            let! (closeResult : Result<unit, exn>) = close.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+            match closeResult with
             | Ok () -> ()
             | Error other -> failwith $"Close failed after mailbox failure with {other.GetType().Name}: {other.Message}"
             // a Failed transition after the drain's Close would overwrite Closed and make this NotConnectedException
             do! assertAlreadyClosed (producer.GetStats())
+            for child in partitioned.Producers do
+                do! assertAlreadyClosed (child.GetStats())
             do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
             Log.Debug("Finished Close queued behind a partitioned producer mailbox failure completes only after cleanup")

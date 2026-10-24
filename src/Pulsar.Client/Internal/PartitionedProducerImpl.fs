@@ -41,6 +41,9 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
     let keyValueProcessor: IKeyValueProcessor option = KeyValueProcessor.GetInstance schema
 
     let producers = ResizeArray<IProducer<'T>>(numPartitions)
+    // as in the Java client, partitions stop while the others keep running, e.g. when their topic is deleted,
+    // so only the parent disposes the interceptors
+    let childInterceptors = interceptors.Borrow()
     let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let maxPendingMessages = Math.Min(producerConfig.MaxPendingMessages, producerConfig.MaxPendingMessagesAcrossPartitions / numPartitions)
     let mutable connectionState = PartitionedConnectionState.Uninitialized
@@ -139,6 +142,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
     let stopProducer() =
         cleanup(this)
         timer.Close()
+        interceptors.Close()
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let mb = Channel.CreateUnbounded<PartitionedProducerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
@@ -210,7 +214,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                                                     Topic = partitionedTopic }
                         backgroundTask {
                             let! producer = ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup,
-                                                schema, interceptors, fun _ -> ())
+                                                schema, childInterceptors, fun _ -> ())
                             return producer :> IProducer<'T>
                         })
                 // we mark success if all the partitions are created
@@ -306,7 +310,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                                                                 Topic = partitionedTopic }
                                     backgroundTask {
                                         let! producer = ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup,
-                                                            schema, interceptors, fun _ -> ())
+                                                            schema, childInterceptors, fun _ -> ())
                                         return producer :> IProducer<'T>
                                     })
                             try
@@ -335,11 +339,16 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
             | GetStats channel ->
 
-                let! stats =
-                    producers
-                    |> Seq.map _.GetStats()
-                    |> Task.WhenAll
-                channel.SetResult(statsReduce stats)
+                try
+                    let! stats =
+                        producers
+                        |> Seq.map _.GetStats()
+                        |> Task.WhenAll
+                    channel.SetResult(statsReduce stats)
+                with Flatten ex ->
+                    // a partition producer that has stopped, e.g. because its topic was deleted, fails only this
+                    // request, so the other partitions keep working
+                    channel.SetException ex
         }:> Task).ContinueWith(fun t ->
             try
                 if t.IsFaulted then
