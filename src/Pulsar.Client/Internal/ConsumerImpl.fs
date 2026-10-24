@@ -1022,19 +1022,17 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             subscribeTsc.SetException(ex)
                             stopConsumer()
                             continueLoop <- false
-                        | :? TopicDoesNotExistException ->
+                        | _ when PulsarClientException.isUnrecoverableError ex ->
                             // The topic was deleted after the consumer was created, and we're
                             // not allowed to recreate the topic. This can happen in few cases:
                             //  * Regex consumer getting error after topic gets deleted
                             //  * Regular consumer after topic is manually delete and with
                             //    auto-topic-creation set to false
-                            // No more retries are needed in this case.
-                            connectionHandler.Failed(ex)
-                            closeConsumerTasks()
-                            // pending receives would otherwise wait forever, and a multi-topic parent
-                            // only learns that this child has stopped when its receive completes
-                            failWaiters <| NotConnectedException(prefix + " topic does not exist anymore", ex)
+                            // No more retries are needed in this case. As in the Java client, pending receives
+                            // fail with AlreadyClosedException, so a multi-topic parent stops reading this consumer.
                             Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
+                            connectionHandler.Failed(ex)
+                            stopConsumer()
                             continueLoop <- false
                         | _ ->
                             // consumer was subscribed and connected, but we got some error, keep trying
@@ -1412,6 +1410,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 if ((nonRetriableError || timeout) && subscribeTsc.TrySetException(ex)) then
                     Log.Logger.LogInformation("{0} creation failed {1}", prefix,
                                                 if nonRetriableError then "with unretriableError" else "after timeout")
+                    connectionHandler.Failed(ex)
+                    stopConsumer()
+                    continueLoop <- false
+                elif PulsarClientException.isUnrecoverableError ex then
+                    // the topic was deleted after the consumer was created, as when subscribing fails
+                    Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
                     connectionHandler.Failed(ex)
                     stopConsumer()
                     continueLoop <- false

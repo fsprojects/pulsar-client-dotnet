@@ -233,6 +233,37 @@ let tests =
             Expect.isTrue (statsError.InnerException :? NullReferenceException) "The stopped mailbox should report why the producer failed"
         }
 
+        testTask "Producer closes itself when its topic no longer exists" {
+            use broker = new BrokerConnection(clientConfig)
+            let config = { producerConfig with BatchingEnabled = false; SendTimeout = TimeSpan.Zero }
+            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
+            let sending = enqueueMessage producer [| 1uy |]
+            let! (send: BaseCommand) = broker.ReadCommand()
+            Expect.equal send.``type`` BaseCommand.Type.Send "Expected the message to be sent"
+
+            // the topic was deleted, so the broker drops the producer and rejects it when it registers again
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.CloseProducer,
+                    CloseProducer = CommandCloseProducer(ProducerId = %(producer :> IProducer<byte[]>).ProducerId, RequestId = 0UL)))
+            let! (command: BaseCommand) = broker.ReadCommand()
+            Expect.equal command.``type`` BaseCommand.Type.Producer "Expected the producer to register again"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Error,
+                    Error = CommandError(
+                        RequestId = command.Producer.RequestId,
+                        Error = ServerError.TopicNotFound,
+                        Message = "Topic does not exist")))
+
+            // as in the Java client, it closes instead of reconnecting
+            let! (pendingError: AlreadyClosedException) = expectFailure<AlreadyClosedException> sending
+            Expect.isTrue (pendingError.InnerException :? TopicDoesNotExistException) "A pending send should report why the producer closed"
+            let! _ =
+                expectFailure<AlreadyClosedException> (task { return! (producer :> IProducer<byte[]>).SendAsync([| 2uy |]) })
+            expectTimersStopped producer
+        }
+
         testTask "Failed close stops all timers and cleans up once" {
             use broker = new BrokerConnection(clientConfig)
             let encryptor =

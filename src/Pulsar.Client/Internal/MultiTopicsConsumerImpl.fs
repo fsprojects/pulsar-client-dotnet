@@ -46,7 +46,6 @@ type internal ChildConsumerInfo<'T> =
         TopicName: TopicName
         // the partition for partitioned topics, otherwise the topic itself
         ChildTopicName: TopicName
-        IsPartitioned: bool
         // takes the parent's consumer epoch, otherwise the parent discards the new child's messages as stale
         Create: ConsumerEpoch -> Task<ConsumerImpl<'T>>
     }
@@ -61,9 +60,6 @@ type internal ChildConsumer<'T> =
 type internal MultiTopicConsumerMessage<'T> =
     | Init
     | PollerFailed of exn
-    | ChildStopped of CompleteTopicName * IConsumer<'T> * exn * detached: TaskCompletionSource<unit>
-    | RecreateChild of ChildConsumerInfo<'T> * Backoff
-    | ChildRecreated of ChildConsumerInfo<'T> * Task<ConsumerImpl<'T>> * ConsumerEpoch * Backoff
     | Receive of ReceiveCallback<'T>
     | BatchReceive of ReceiveCallbacks<'T>
     | MessageReceived of PolledMessage<'T> * TaskCompletionSource<unit>
@@ -99,13 +95,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let consumerName = getConsumerName consumerConfig.ConsumerName
     let prefix = $"mt/consumer({consumerId}, {consumerName})"
     let consumers = Dictionary<CompleteTopicName, ChildConsumer<'T>>()
-    // children that stopped on their own and are waiting to be recreated
-    let pendingChildren = Dictionary<CompleteTopicName, ChildConsumerInfo<'T>>()
-    // creations of those children that are still running; ChildRecreated takes them over, unless Close does first
-    let recreatingChildren = HashSet<Task<ConsumerImpl<'T>>>()
-    // children being disposed without the mailbox waiting for them
-    let childDisposals = ResizeArray<Task>()
-    // children stop and are replaced while the parent keeps running, so only the parent disposes the interceptors
+    // children are closed while the parent keeps running, e.g. when discovery removes their topic,
+    // so only the parent disposes the interceptors
     let childInterceptors = interceptors.Borrow()
     let consumerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let pollerCts = new CancellationTokenSource()
@@ -204,6 +195,11 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             IncomingMsgs = incomingMsgs
         }
 
+    // as in the Java client
+    let childReceiveRetryDelay = TimeSpan.FromSeconds(10.0)
+
+    // As in the Java client, a child never fails the parent: a closed child is no longer read, and any other
+    // receive failure is retried later. Neither is buffered as a message.
     let getStream (topic: CompleteTopicName) (consumer: ConsumerImpl<'T>) =
         Log.Logger.LogDebug("{0} getStream", topic)
         let consumerImp = consumer :> IConsumer<'T>
@@ -211,32 +207,34 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             let cancellationToken = receiveToken
             backgroundTask {
                 try
-                    cancellationToken.ThrowIfCancellationRequested()
-                    let! hasReachedEndOfTopic = consumerImp.HasReachedEndOfTopic()
-                    if hasReachedEndOfTopic then
-                        Log.Logger.LogWarning("{0} topic was terminated", topic)
-                        do! Task.Delay(Timeout.Infinite, cancellationToken)
-                    let! message =
-                        try
-                            consumer.ReceiveWrappedAsync(cancellationToken)
-                        with ex ->
-                            // a stopped child throws before it posts the receive
-                            Task.FromResult(Error ex)
-                    match message with
-                    | Error ex when (ex :? AlreadyClosedException) || (ex :? NotConnectedException) ->
-                        // A stopped child can't deliver anything else. The parent detaches it instead of buffering
-                        // the error as a message or failing the poller, and releases this read once its generator
-                        // is gone, so the result is never polled.
-                        let detached = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
-                        post this.Mb (ChildStopped (topic, consumerImp, ex, detached))
-                        do! detached.Task.WaitAsync(cancellationToken)
-                        return struct (cancellationToken, Error ex)
-                    | _ ->
-                        let message = message |> Result.map (fun msg ->
+                    let mutable result = None
+                    while result.IsNone do
+                        cancellationToken.ThrowIfCancellationRequested()
+                        let! hasReachedEndOfTopic = consumerImp.HasReachedEndOfTopic()
+                        if hasReachedEndOfTopic then
+                            Log.Logger.LogWarning("{0} topic was terminated", topic)
+                            do! Task.Delay(Timeout.Infinite, cancellationToken)
+                        let! message =
+                            try
+                                consumer.ReceiveWrappedAsync(cancellationToken)
+                            with ex ->
+                                // a stopped child throws before it posts the receive
+                                Task.FromResult(Error ex)
+                        match message with
+                        | Error _ when cancellationToken.IsCancellationRequested ->
+                            result <- Some message
+                        | Error (:? AlreadyClosedException) ->
+                            // it stays registered until the parent closes or discovery removes its topic
+                            Log.Logger.LogDebug("{0} stopped reading the closed consumer for {1}", prefix, topic)
+                            do! Task.Delay(Timeout.Infinite, cancellationToken)
+                        | Error ex ->
+                            Log.Logger.LogError(ex, "{0} receive failed on the consumer for {1}, retrying in {2}",
+                                                prefix, topic, childReceiveRetryDelay)
+                            do! Task.Delay(childReceiveRetryDelay, cancellationToken)
+                        | Ok msg ->
                             let newMessageId = { msg.MessageId with TopicName = topic }
-                            msg.WithMessageId(newMessageId)
-                        )
-                        return struct (cancellationToken, message)
+                            result <- Some (Ok (msg.WithMessageId(newMessageId)))
+                    return struct (cancellationToken, result.Value)
                 with :? OperationCanceledException as ex when cancellationToken.IsCancellationRequested ->
                     return struct (cancellationToken, Error ex)
             }
@@ -293,7 +291,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         {
             TopicName = consumerInitInfo.TopicName
             ChildTopicName = childTopic
-            IsPartitioned = partitionIndex >= 0
             Create = fun consumerEpoch ->
                 ConsumerImpl.Init(childConfig, clientConfig, childConfig.SingleTopic,
                                   connectionPool, partitionIndex, true, startMessageId, startMessageRollbackDuration,
@@ -308,27 +305,9 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         consumers.Add(childTopic, { Info = info; Consumer = consumer :> IConsumer<'T>; Stream = stream })
         stream
 
-    // the topic was removed, or its consumer stopped and hasn't been recreated yet
+    // the topic was removed
     let noChildException (topic: CompleteTopicName) =
         NotConnectedException($"{prefix} has no consumer for {topic}") :> exn
-
-    // Seeking or unsubscribing now would silently skip the children being recreated: they would keep their old
-    // position, or their subscription.
-    let pendingChildrenException (operation: string) =
-        let topics = String.Join(", ", pendingChildren.Keys)
-        NotConnectedException($"{prefix} can't {operation} while the consumers for {topics} are being recreated") :> exn
-
-    // doesn't block the mailbox, but Close still waits for it in closeChildren
-    let disposeChild (consumer: IConsumer<'T>) =
-        childDisposals.RemoveAll(fun disposal -> disposal.IsCompleted) |> ignore
-        let disposal =
-            backgroundTask {
-                try
-                    do! consumer.DisposeAsync()
-                with Flatten ex ->
-                    Log.Logger.LogWarning(ex, "{0} could not dispose a child consumer", prefix)
-            }
-        childDisposals.Add disposal
 
     let disposeCreatedChildren (consumersTasks: Task<ConsumerImpl<'T>> seq) =
         consumersTasks
@@ -336,36 +315,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         |> Seq.map (fun t -> (t.Result :> IConsumer<'T>).DisposeAsync().AsTask())
         |> Task.WhenAll
 
-    let disposeRecreatingChild (createTask: Task<ConsumerImpl<'T>>) =
-        backgroundTask {
-            // a failed creation has nothing to close
-            let! created = createTask.ContinueWith(fun (t: Task<ConsumerImpl<'T>>) -> t.IsCompletedSuccessfully)
-            if created then
-                do! (createTask.Result :> IConsumer<'T>).DisposeAsync()
-        } :> Task
-
-    // Also waits for the children still being recreated or disposed, otherwise they could stay subscribed after
-    // Close completes.
     let closeChildren () =
-        let recreating = recreatingChildren |> Seq.toArray
-        recreatingChildren.Clear()
-        let disposals = childDisposals.ToArray()
-        childDisposals.Clear()
         consumers.Values
         |> Seq.map (fun child -> child.Consumer.DisposeAsync().AsTask())
-        |> Seq.append (recreating |> Array.map disposeRecreatingChild)
-        |> Seq.append disposals
         |> Task.WhenAll
-
-    let createChildBackoff () =
-        Backoff { BackoffConfig.Default with
-                    Initial = clientConfig.InitialBackoffInterval
-                    Max = clientConfig.MaxBackoffInterval }
-
-    let scheduleChildRecreation (info: ChildConsumerInfo<'T>) (backoff: Backoff) =
-        let delay = backoff.Next()
-        Log.Logger.LogInformation("{0} will recreate the consumer for {1} in {2} ms", prefix, info.ChildTopicName, delay)
-        asyncDelayMs delay (fun () -> post this.Mb (RecreateChild (info, backoff)))
 
     let singleInit (consumerInitInfo: ConsumerInitInfo<'T>) =
         let topic = consumerInitInfo.TopicName
@@ -441,9 +394,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             for KeyValue(childTopic, child) in removedChildren do
                 do! currentStream.RemoveGenerator child.Stream
                 consumers.Remove(childTopic) |> ignore
-            for KeyValue(childTopic, info) in pendingChildren |> Seq.toArray do
-                if topicsToRemove.Contains info.TopicName then
-                    pendingChildren.Remove(childTopic) |> ignore
             for removedTopic in topicsToRemove do
                 allTopics.Remove(removedTopic) |> ignore
                 partitionedTopics.Remove(removedTopic) |> ignore
@@ -539,8 +489,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             let! newPartitionsOption = getAllPartitions()
             match newPartitionsOption with
             | Some newPartitions ->
-                // children being recreated still count towards the receiver queue split
-                let oldConsumersCount = consumers.Count + pendingChildren.Count
+                let oldConsumersCount = consumers.Count
                 let topicsToUpdate =
                     newPartitions
                     |> Array.filter(fun (topic, partitionedTopicNames) ->
@@ -734,10 +683,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             channel.TrySetCanceled() |> ignore
         | CancelBatchWaiter (struct (_, _, channel)) ->
             channel.TrySetCanceled() |> ignore
-        | ChildRecreated (_, createTask, _, _) ->
-            // unless Close has already taken it over
-            if recreatingChildren.Remove createTask && createTask.IsCompletedSuccessfully then
-                disposeChild createTask.Result
         | Close channel ->
             // the child consumers outlive a failed mailbox, so they still have to be closed
             backgroundTask {
@@ -811,84 +756,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 failConsumer ex
                 continueLoop <- false
 
-            | ChildStopped (childTopic, consumer, ex, detached) ->
-
-                match consumers.TryGetValue childTopic with
-                | true, child when Object.ReferenceEquals(child.Consumer, consumer) ->
-                    match this.ConnectionState with
-                    | Ready ->
-                        Log.Logger.LogWarning(ex, "{0} consumer for {1} has stopped", prefix, childTopic)
-                        do! currentStream.RemoveGenerator child.Stream
-                        consumers.Remove(childTopic) |> ignore
-                        disposeChild child.Consumer
-                        match multiConsumerType with
-                        | Pattern _ when consumerConfig.SubscriptionMode = SubscriptionMode.NonDurable
-                                         && not child.Info.IsPartitioned ->
-                            // A recreated child would start again from the initial position, like any topic that
-                            // discovery adds, so the next discovery subscribes again if the topic still matches.
-                            allTopics.Remove(child.Info.TopicName) |> ignore
-                        | _ when consumerConfig.SubscriptionMode = SubscriptionMode.NonDurable ->
-                            // a recreated child would start again from the initial position, so it can't take over
-                            Log.Logger.LogError(ex, "{0} stopping because the non-durable consumer for {1} has stopped", prefix, childTopic)
-                            failConsumer ex
-                            continueLoop <- false
-                        | _ ->
-                            // A deleted pattern topic can't be subscribed again, so it stays pending until discovery
-                            // removes it. Seek and Unsubscribe refuse until then instead of skipping the topic.
-                            pendingChildren[childTopic] <- child.Info
-                            scheduleChildRecreation child.Info (createChildBackoff())
-                        // the child's generator has been removed, so its parked read can finish
-                        detached.TrySetResult() |> ignore
-                    | Failed ->
-                        // Only a failed Unsubscribe leaves the mailbox running in this state. It may have unsubscribed
-                        // this child already, so the child can't be recreated; stopping cancels its parked read.
-                        Log.Logger.LogError(ex, "{0} stopping because the consumer for {1} has stopped after a failed unsubscribe", prefix, childTopic)
-                        failConsumer ex
-                        continueLoop <- false
-                    | _ ->
-                        // stopping the consumer cancels the parked read
-                        Log.Logger.LogDebug("{0} ignored the stopped consumer for {1} in state {2}", prefix, childTopic, this.ConnectionState)
-                | _ ->
-                    Log.Logger.LogDebug("{0} ignored the stopped consumer for {1}", prefix, childTopic)
-                    // its generator has already been removed, so its parked read can finish
-                    detached.TrySetResult() |> ignore
-
-            | RecreateChild (info, backoff) ->
-
-                let childTopic = info.ChildTopicName.CompleteTopicName
-                if this.ConnectionState = Ready && pendingChildren.ContainsKey childTopic then
-                    Log.Logger.LogInformation("{0} recreating the consumer for {1}", prefix, childTopic)
-                    let consumerEpoch = currentConsumerEpoch
-                    // completes off the mailbox, so other topics keep being served in the meantime
-                    let createTask = info.Create consumerEpoch
-                    recreatingChildren.Add createTask |> ignore
-                    createTask.ContinueWith(fun (_: Task<ConsumerImpl<'T>>) ->
-                        post this.Mb (ChildRecreated (info, createTask, consumerEpoch, backoff))) |> ignore
-
-            | ChildRecreated (info, createTask, consumerEpoch, backoff) ->
-
-                let childTopic = info.ChildTopicName.CompleteTopicName
-                if recreatingChildren.Remove createTask then
-                    if createTask.IsCompletedSuccessfully then
-                        let consumer = createTask.Result
-                        // the topic may have been removed while the child was being created
-                        if this.ConnectionState = Ready && pendingChildren.ContainsKey childTopic && not (consumers.ContainsKey childTopic) then
-                            if consumerEpoch = currentConsumerEpoch then
-                                pendingChildren.Remove(childTopic) |> ignore
-                                let stream = registerChild info consumer
-                                currentStream.AddGenerators [| stream |]
-                                Log.Logger.LogInformation("{0} recreated the consumer for {1}", prefix, childTopic)
-                            else
-                                // redelivery moved the epoch on while the child was created, so its messages would be discarded
-                                disposeChild consumer
-                                scheduleChildRecreation info (createChildBackoff())
-                        else
-                            disposeChild consumer
-                    else
-                        let (Flatten ex) = createTask.Exception
-                        Log.Logger.LogWarning(ex, "{0} could not recreate the consumer for {1}", prefix, childTopic)
-                        scheduleChildRecreation info backoff
-
             | MessageReceived (struct (cancellationToken, message), pollerChannel) ->
 
                 let hasWaitingChannel = waiters.Count > 0
@@ -955,10 +822,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             channel.SetException(ex)
                     } |> ignore
                 | _ ->
-                    // interceptors are told, as by a single-topic consumer, e.g. so tracing ends for the message
-                    let ex = noChildException msgId.TopicName
-                    interceptors.OnAcknowledge(this, msgId, ex)
-                    channel.SetException ex
+                    channel.SetException(noChildException msgId.TopicName)
 
             | NegativeAcknowledge (channel, msgId) ->
 
@@ -994,9 +858,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             channel.SetException ex
                     } |> ignore
                 | _ ->
-                    let ex = noChildException msgId.TopicName
-                    interceptors.OnAcknowledgeCumulative(this, msgId, ex)
-                    channel.SetException ex
+                    channel.SetException(noChildException msgId.TopicName)
 
             | RedeliverAllUnacknowledged channel ->
 
@@ -1008,7 +870,14 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         unAckedMessageTracker.Clear()
                         if isConsumerEpochSupported then
                             currentConsumerEpoch <- currentConsumerEpoch + %1UL
-                        do! resetStreams (fun consumer -> consumer.RedeliverUnacknowledgedMessagesAsync())
+                        do! resetStreams (fun consumer ->
+                            backgroundTask {
+                                try
+                                    do! consumer.RedeliverUnacknowledgedMessagesAsync()
+                                with Flatten ex when (ex :? AlreadyClosedException) || (ex :? NotConnectedException) ->
+                                    // as in the Java client, a stopped child has nothing to redeliver
+                                    Log.Logger.LogDebug(ex, "{0} skipped redelivery for the stopped consumer for {1}", prefix, consumer.Topic)
+                            })
                         channel |> Option.map _.SetResult() |> ignore
                     with ex ->
                         Log.Logger.LogError(ex, "{0} RedeliverUnacknowledgedMessages failed", prefix)
@@ -1033,7 +902,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                                     | true, child ->
                                         msgIds |> RedeliverSet |> (child.Consumer :?> ConsumerImpl<'T>).RedeliverUnacknowledged
                                     | _ ->
-                                        // the broker redelivers them to a recreated consumer anyway
+                                        // the topic was removed
                                         Log.Logger.LogDebug("{0} no consumer to redeliver messages for {1}", prefix, topicName)
                                     )
                         with ex ->
@@ -1069,9 +938,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             | HasReachedEndOfTheTopic channel ->
 
                 Log.Logger.LogDebug("{0} HasReachedEndOfTheTopic", prefix)
-                // a child being recreated hasn't stopped because its topic was terminated
-                (pendingChildren.Count = 0
-                    && consumers |> Seq.forall (fun (KeyValue(_, child)) -> child.Consumer.HasReachedEndOfTopic().Result))
+                consumers
+                |> Seq.forall (fun (KeyValue(_, child)) -> child.Consumer.HasReachedEndOfTopic().Result)
                 |> channel.SetResult
 
             | LastDisconnectedTimestamp channel ->
@@ -1086,44 +954,38 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             | IsConnected channel ->
 
                 Log.Logger.LogDebug("{0} IsConnected", prefix)
-                (pendingChildren.Count = 0
-                    && consumers |> Seq.forall (fun (KeyValue(_, child)) -> child.Consumer.IsConnected().Result))
+                consumers
+                |> Seq.forall (fun (KeyValue(_, child)) -> child.Consumer.IsConnected().Result)
                 |> channel.SetResult
 
             | Seek (seekData, channel) ->
 
                 Log.Logger.LogDebug("{0} Seek {1}", prefix, seekData)
-                if pendingChildren.Count > 0 then
-                    channel.SetException(pendingChildrenException "seek")
-                else
-                    try
-                        unAckedMessageTracker.Clear()
-                        clearIncomingMessages()
-                        if isConsumerEpochSupported then
-                            currentConsumerEpoch <- currentConsumerEpoch + %1UL
-                        do! resetStreams (fun consumer ->
-                            match seekData with
-                            | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
-                            | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
-                        channel.SetResult()
-                    with Flatten ex ->
-                        channel.SetException ex
+                try
+                    unAckedMessageTracker.Clear()
+                    clearIncomingMessages()
+                    if isConsumerEpochSupported then
+                        currentConsumerEpoch <- currentConsumerEpoch + %1UL
+                    do! resetStreams (fun consumer ->
+                        match seekData with
+                        | SeekType.Timestamp ts -> consumer.SeekAsync(ts)
+                        | SeekType.MessageId msgId -> consumer.SeekAsync(msgId))
+                    channel.SetResult()
+                with Flatten ex ->
+                    channel.SetException ex
 
             | SeekWithResolver (resolver, channel) ->
 
                 Log.Logger.LogDebug("{0} Seek with resolver", prefix)
-                if pendingChildren.Count > 0 then
-                    channel.SetException(pendingChildrenException "seek")
-                else
-                    try
-                        unAckedMessageTracker.Clear()
-                        clearIncomingMessages()
-                        if isConsumerEpochSupported then
-                            currentConsumerEpoch <- currentConsumerEpoch + %1UL
-                        do! resetStreams (fun consumer -> consumer.SeekAsync(resolver))
-                        channel.SetResult()
-                    with Flatten ex ->
-                        channel.SetException ex
+                try
+                    unAckedMessageTracker.Clear()
+                    clearIncomingMessages()
+                    if isConsumerEpochSupported then
+                        currentConsumerEpoch <- currentConsumerEpoch + %1UL
+                    do! resetStreams (fun consumer -> consumer.SeekAsync(resolver))
+                    channel.SetResult()
+                with Flatten ex ->
+                    channel.SetException ex
 
             | PatternTickTime ->
 
@@ -1189,9 +1051,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             channel.SetException ex
                     } |> ignore
                 | _ ->
-                    let ex = noChildException msg.MessageId.TopicName
-                    interceptors.OnAcknowledge(this, msg.MessageId, ex)
-                    channel.SetException ex
+                    channel.SetException(noChildException msg.MessageId.TopicName)
 
             | ReconsumeLaterCumulative (msg, delayTime, channel) ->
 
@@ -1207,9 +1067,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             channel.SetException ex
                     } |> ignore
                 | _ ->
-                    let ex = noChildException msg.MessageId.TopicName
-                    interceptors.OnAcknowledgeCumulative(this, msg.MessageId, ex)
-                    channel.SetException ex
+                    channel.SetException(noChildException msg.MessageId.TopicName)
 
             | HasMessageAvailable channel ->
 
@@ -1250,24 +1108,19 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             | Unsubscribe channel ->
 
                 Log.Logger.LogDebug("{0} Unsubscribe", prefix)
+                continueLoop <- false
                 match this.ConnectionState with
                 | Closing | Closed ->
-                    continueLoop <- false
                     channel.SetResult()
-                | _ when pendingChildren.Count > 0 ->
-                    // the consumer keeps running, so the application can unsubscribe once the children are back
-                    channel.SetException(pendingChildrenException "unsubscribe")
                 | _ ->
-                    continueLoop <- false
                     this.ConnectionState <- Closing
-                    let consumerTasks = consumers |> Seq.map(fun (KeyValue(_, child)) -> child.Consumer.UnsubscribeAsync())
+                    // as in the Java client, every child is tried even if a stopped one fails at once
+                    let consumerTasks =
+                        consumers
+                        |> Seq.map (fun (KeyValue(_, child)) -> backgroundTask { do! child.Consumer.UnsubscribeAsync() })
+                        |> Seq.toArray
                     try
                         let! _ = Task.WhenAll consumerTasks
-                        try
-                            // e.g. a child of a topic that discovery removed while it was being recreated
-                            do! closeChildren()
-                        with Flatten ex ->
-                            Log.Logger.LogWarning(ex, "{0} could not close all child consumers properly", prefix)
                         this.ConnectionState <- Closed
                         Log.Logger.LogInformation("{0} unsubscribed", prefix)
                         stopConsumer()

@@ -584,6 +584,15 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
             producerCreatedTsc.TrySetException(ex) |> ignore
 
+    // As in the Java client: the topic was deleted, and the producer may not create it again, so it closes itself
+    // instead of reconnecting.
+    let closeWhenReceivedUnrecoverableError (ex: exn) =
+        Log.Logger.LogWarning("{0} Closed producer because topic does not exist anymore. {1}", prefix, ex.Message)
+        connectionHandler.Closed()
+        stopProducer()
+        failPendingMessages <| AlreadyClosedException("Producer was closed because its topic does not exist anymore", ex)
+        producerCreatedTsc.TrySetException(ex) |> ignore
+
     // requests posted after the mailbox exits would otherwise never be completed
     let drainStoppedMailbox () =
         backgroundTask {
@@ -636,13 +645,6 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         clientCnx.RemoveProducer producerId
                         Log.Logger.LogError(ex, "{0} Failed to create", prefix)
                         match ex with
-                        | :? TopicDoesNotExistException ->
-                            match connectionHandler.ConnectionState with
-                            | Failed ->
-                                Log.Logger.LogWarning("{0} Topic doesn't exist exception {1}", prefix, ex.Message)
-                                let! _ = postAndAsyncReply this.Mb ProducerMessage.Close
-                                producerCreatedTsc.TrySetException(ex) |> ignore
-                            | _ -> ()
                         | :? ProducerBlockedQuotaExceededException ->
                             Log.Logger.LogWarning("{0} Topic backlog quota exceeded. {1}", prefix, ex.Message)
                             failPendingMessages(ex)
@@ -652,6 +654,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             ()
 
                         match ex with
+                        | _ when PulsarClientException.isUnrecoverableError ex ->
+                            closeWhenReceivedUnrecoverableError ex
                         | :? TopicTerminatedException ->
                             Log.Logger.LogWarning("{0} is terminated. {1}", prefix, ex.Message)
                             connectionHandler.Terminate()
@@ -670,8 +674,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 | _ ->
                     Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
 
-                if connectionHandler.ConnectionState = Failed then
+                match connectionHandler.ConnectionState with
+                | Failed | Closed ->
                     continueLoop <- false
+                | _ ->
+                    ()
 
             | ProducerMessage.ConnectionClosed clientCnx ->
 
@@ -688,6 +695,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                                 if nonRetriableError then "with unretriableError" else "after timeout")
                     connectionHandler.Failed(ex)
                     stopProducer()
+                    continueLoop <- false
+                elif PulsarClientException.isUnrecoverableError ex then
+                    closeWhenReceivedUnrecoverableError ex
                     continueLoop <- false
 
             | ProducerMessage.BeginSendMessage sendRequest ->

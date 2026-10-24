@@ -83,3 +83,12 @@ module PulsarClientException =
              -> false
         | _ -> true
 
+    // As in the Java client: the topic was deleted, and the client may not create it again, so a producer or
+    // consumer that was already created closes itself instead of reconnecting.
+    let isUnrecoverableError (ex: exn) =
+        match ex with
+        | :? TopicDoesNotExistException
+        | :? NotFoundException
+             -> true
+        | _ -> false
+
