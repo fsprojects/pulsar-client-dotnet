@@ -1123,15 +1123,11 @@ let tests =
                                 do! Task.Delay 100
                             connected <- isConnected
 
-                        try
-                            let! _ = producer.SendAsync([| 1uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
-                            failwith "SendAsync succeeded after mailbox failure"
-                        with :? NotConnectedException ->
-                            ()
+                        // SendAsync checks the producer state before it posts, and still reports why the producer failed
+                        do! assertNotConnectedBecauseOf typeof<NullReferenceException> (task { return! producer.SendAsync([| 1uy |]) })
 
                         // GetStats still posts once the producer has failed, so this only returns if the stopped mailbox replies
-                        Expect.throwsT2<NotConnectedException> (fun () ->
-                            producer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+                        do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
 
                         do! producer.DisposeAsync()
 
@@ -1414,12 +1410,15 @@ let tests =
                 (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
             do! assertMailboxException crashingSend.Task
 
-            // this call is the message the parent mailbox is handling when it faults, so the drain cannot see it
-            do! assertNotConnected (producer.GetStats())
+            // this call is the message the parent mailbox is handling when it faults, so the drain cannot see it.
+            // every failure keeps the child's crash as its cause
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
             // later calls are answered by the drain
-            do! assertNotConnected (producer.GetStats())
-            do! assertNotConnected (producer.LastSequenceId())
-            do! assertNotConnected (producer.LastDisconnectedTimestamp())
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.LastSequenceId())
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.LastDisconnectedTimestamp())
+            // sends never reach the mailbox, they check the producer state first
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (task { return! producer.SendAsync([| 1uy |]) })
             let! connected = producer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
             Expect.isFalse "Partitioned producer should report disconnected after its mailbox stops" connected
             do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))

@@ -206,6 +206,33 @@ let tests =
             Expect.isTrue broker.Connection.IsActive "Failed producer cleanup must preserve the shared connection"
         }
 
+        testTask "Requests after a mailbox failure keep its cause" {
+            use broker = new BrokerConnection(clientConfig)
+            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(producerConfig, ProducerInterceptors<byte[]>.Empty, ignore)
+            let crashing =
+                postAndAsyncReply producer.Mb (fun reply ->
+                    BeginSendMessage(struct(Unchecked.defaultof<MessageBuilder<byte[]>>, reply, false)))
+            let! _ = expectFailure<NullReferenceException> crashing
+            let! (command: BaseCommand) = broker.ReadCommand()
+            Expect.equal command.``type`` BaseCommand.Type.CloseProducer "The failed producer should be closed at the broker"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = command.CloseProducer.RequestId)))
+
+            let failedProducer = producer :> IProducer<byte[]>
+            // sends and flushes check the producer state before they post
+            let! (sendError: NotConnectedException) =
+                expectFailure<NotConnectedException> (task { return! failedProducer.SendAsync([| 1uy |]) })
+            Expect.isTrue (sendError.InnerException :? NullReferenceException) "A send should report why the producer failed"
+            let! (flushError: NotConnectedException) =
+                expectFailure<NotConnectedException> (task { return! failedProducer.FlushAsync() })
+            Expect.isTrue (flushError.InnerException :? NullReferenceException) "A flush should report why the producer failed"
+            // GetStats still posts, so the stopped mailbox answers it
+            let! (statsError: NotConnectedException) = expectFailure<NotConnectedException> (failedProducer.GetStats())
+            Expect.isTrue (statsError.InnerException :? NullReferenceException) "The stopped mailbox should report why the producer failed"
+        }
+
         testTask "Failed close stops all timers and cleans up once" {
             use broker = new BrokerConnection(clientConfig)
             let encryptor =

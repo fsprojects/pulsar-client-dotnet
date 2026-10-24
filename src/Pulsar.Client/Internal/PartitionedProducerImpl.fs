@@ -44,6 +44,8 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
     let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let maxPendingMessages = Math.Min(producerConfig.MaxPendingMessages, producerConfig.MaxPendingMessagesAcrossPartitions / numPartitions)
     let mutable connectionState = PartitionedConnectionState.Uninitialized
+    // why the mailbox failed, so later requests can report it
+    let mutable terminalError: exn = null
     let mutable numPartitions = numPartitions
     let hashingFunction =
         match producerConfig.HashingScheme with
@@ -169,10 +171,16 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         | Init | TickTime ->
             ()
 
+    let terminalException (cause: exn) =
+        NotConnectedException($"{prefix} has failed and can't recover, it has to be recreated: {cause.Message}", cause) :> exn
+
     let stoppedMailboxException () =
         match this.ConnectionState with
         | Closing | Closed -> AlreadyClosedException(prefix + " already closed") :> exn
-        | _ -> NotConnectedException(prefix + " not connected") :> exn
+        | _ ->
+            match terminalError with
+            | null -> NotConnectedException(prefix + " not connected") :> exn
+            | cause -> terminalException cause
 
     // requests posted after the mailbox exits would otherwise never be completed
     let drainStoppedMailbox () =
@@ -337,6 +345,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                 if t.IsFaulted then
                     let (Flatten ex) = t.Exception
                     Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                    terminalError <- ex
                     this.ConnectionState <- Failed
                     stopProducer()
                     try
@@ -373,7 +382,9 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         | Closing | Closed ->
             raise (AlreadyClosedException(prefix + " already closed"))
         | Uninitialized | Failed ->
-            raise (NotConnectedException(prefix + " Invalid connection state: " + this.ConnectionState.ToString()))
+            match terminalError with
+            | null -> raise (NotConnectedException(prefix + " Invalid connection state: " + this.ConnectionState.ToString()))
+            | cause -> raise (terminalException cause)
         | Ready ->
             let keyString = message.Key |> Option.map _.PartitionKey |> Option.defaultValue %""
             let partition = router.ChoosePartition(keyString, numPartitions)

@@ -544,7 +544,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let stoppedMailboxException () =
         match connectionHandler.ConnectionState with
         | Closing | Closed | Terminated -> AlreadyClosedException(prefix + " already closed") :> exn
-        | _ -> NotConnectedException(prefix + " not connected") :> exn
+        | _ -> NotConnectedException(prefix + " not connected", connectionHandler.FailureCause) :> exn
 
     let failMailbox (ex: exn) =
         if not mailboxFailed then
@@ -572,7 +572,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     ()
             with closeEx ->
                 Log.Logger.LogWarning(closeEx, "{0} failed to close producer at the broker after mailbox failure", prefix)
-            connectionHandler.Failed()
+            connectionHandler.Failed(ex)
             try
                 failPendingMessages ex
             with pendingEx ->
@@ -664,7 +664,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             // still within the initial timeout budget and we are dealing with a retryable error
                             connectionHandler.ReconnectLater ex
                         | _ ->
-                            connectionHandler.Failed()
+                            connectionHandler.Failed(ex)
                             producerCreatedTsc.SetException(ex)
                             stopProducer()
                 | _ ->
@@ -686,7 +686,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 if ((nonRetriableError || timeout) && producerCreatedTsc.TrySetException(ex)) then
                     Log.Logger.LogInformation("{0} connection failed {1}", prefix,
                                                 if nonRetriableError then "with unretriableError" else "after timeout")
-                    connectionHandler.Failed()
+                    connectionHandler.Failed(ex)
                     stopProducer()
                     continueLoop <- false
 
