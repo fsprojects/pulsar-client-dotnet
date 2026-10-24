@@ -955,7 +955,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             channel.SetException(ex)
                     } |> ignore
                 | _ ->
-                    channel.SetException(noChildException msgId.TopicName)
+                    // interceptors are told, as by a single-topic consumer, e.g. so tracing ends for the message
+                    let ex = noChildException msgId.TopicName
+                    interceptors.OnAcknowledge(this, msgId, ex)
+                    channel.SetException ex
 
             | NegativeAcknowledge (channel, msgId) ->
 
@@ -991,7 +994,9 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             channel.SetException ex
                     } |> ignore
                 | _ ->
-                    channel.SetException(noChildException msgId.TopicName)
+                    let ex = noChildException msgId.TopicName
+                    interceptors.OnAcknowledgeCumulative(this, msgId, ex)
+                    channel.SetException ex
 
             | RedeliverAllUnacknowledged channel ->
 
@@ -1184,7 +1189,9 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             channel.SetException ex
                     } |> ignore
                 | _ ->
-                    channel.SetException(noChildException msg.MessageId.TopicName)
+                    let ex = noChildException msg.MessageId.TopicName
+                    interceptors.OnAcknowledge(this, msg.MessageId, ex)
+                    channel.SetException ex
 
             | ReconsumeLaterCumulative (msg, delayTime, channel) ->
 
@@ -1200,7 +1207,9 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             channel.SetException ex
                     } |> ignore
                 | _ ->
-                    channel.SetException(noChildException msg.MessageId.TopicName)
+                    let ex = noChildException msg.MessageId.TopicName
+                    interceptors.OnAcknowledgeCumulative(this, msg.MessageId, ex)
+                    channel.SetException ex
 
             | HasMessageAvailable channel ->
 

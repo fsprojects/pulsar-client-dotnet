@@ -108,15 +108,21 @@ type private HeldLookup(inner: ILookupService) =
 type private CountingInterceptor() =
     let mutable consumed = 0
     let mutable disposed = 0
+    let mutable failedAcks = 0
+    let mutable failedCumulativeAcks = 0
     member _.Consumed = Volatile.Read(&consumed)
     member _.Disposed = Volatile.Read(&disposed)
+    member _.FailedAcks = Volatile.Read(&failedAcks)
+    member _.FailedCumulativeAcks = Volatile.Read(&failedCumulativeAcks)
     interface IConsumerInterceptor<byte[]> with
         member _.Dispose() = Interlocked.Increment(&disposed) |> ignore
         member _.BeforeConsume(_, message) =
             Interlocked.Increment(&consumed) |> ignore
             message
-        member _.OnAcknowledge(_, _, _) = ()
-        member _.OnAcknowledgeCumulative(_, _, _) = ()
+        member _.OnAcknowledge(_, _, exn) =
+            if not (isNull exn) then Interlocked.Increment(&failedAcks) |> ignore
+        member _.OnAcknowledgeCumulative(_, _, exn) =
+            if not (isNull exn) then Interlocked.Increment(&failedCumulativeAcks) |> ignore
         member _.OnNegativeAcksSend(_, _) = ()
         member _.OnAckTimeoutSend(_, _) = ()
 
@@ -630,6 +636,7 @@ let tests =
             let client = getClient()
             let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let interceptor = new CountingInterceptor()
 
             let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
@@ -637,6 +644,7 @@ let tests =
                     .ConsumerName("unknownTopicAck")
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.Exclusive)
+                    .Intercept(interceptor)
                     .SubscribeAsync()
 
             // e.g. a message from a topic that pattern discovery has removed
@@ -644,6 +652,9 @@ let tests =
             do! assertNotConnected (consumer.AcknowledgeAsync(bogusId))
             do! assertNotConnected (consumer.NegativeAcknowledge(bogusId))
             do! assertNotConnected (consumer.AcknowledgeCumulativeAsync(bogusId))
+            // as by a single-topic consumer, e.g. so tracing ends for the message
+            Expect.equal "Interceptors should be told the acknowledgement failed" 1 interceptor.FailedAcks
+            Expect.equal "Interceptors should be told the cumulative acknowledgement failed" 1 interceptor.FailedCumulativeAcks
             let! connected = consumer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
             Expect.isTrue "Multi-topic consumer should stay connected" connected
 
