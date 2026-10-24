@@ -703,16 +703,23 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         | CancelBatchWaiter (struct (_, _, channel)) ->
             channel.TrySetCanceled() |> ignore
         | Close channel ->
-            // the child consumers outlive a failed mailbox, so they still have to be closed
-            backgroundTask {
-                try
-                    do! closeChildren()
-                with Flatten closeEx ->
-                    Log.Logger.LogError(closeEx, "{0} could not close all child consumers properly", prefix)
-                this.ConnectionState <- Closed
-                interceptors.Close()
+            match this.ConnectionState with
+            | Closing | Closed ->
+                // as in the Java client, and in the mailbox, only the first Close closes the child consumers
+                // and then disposes the interceptors
                 channel.TrySetResult() |> ignore
-            } |> ignore
+            | _ ->
+                // the child consumers outlive a failed mailbox, so they still have to be closed
+                this.ConnectionState <- Closing
+                backgroundTask {
+                    try
+                        do! closeChildren()
+                    with Flatten closeEx ->
+                        Log.Logger.LogError(closeEx, "{0} could not close all child consumers properly", prefix)
+                    this.ConnectionState <- Closed
+                    interceptors.Close()
+                    channel.TrySetResult() |> ignore
+                } |> ignore
         | _ ->
             ()
 

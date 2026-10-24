@@ -159,22 +159,29 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         | IsConnected channel ->
             channel.TrySetResult false |> ignore
         | Close channel ->
-            // the partition producers outlive a failed mailbox, so they still have to be closed.
-            backgroundTask {
-                try
-                    let! _ =
-                        producers
-                        |> Seq.map (fun producer -> producer.DisposeAsync().AsTask())
-                        |> Task.WhenAll
-                    this.ConnectionState <- Closed
-                    interceptors.Close()
-                    channel.TrySetResult(Ok ()) |> ignore
-                with Flatten closeEx ->
-                    Log.Logger.LogError(closeEx, "{0} could not close all partition producers properly", prefix)
-                    this.ConnectionState <- Closed
-                    interceptors.Close()
-                    channel.TrySetResult(Error closeEx) |> ignore
-            } |> ignore
+            match this.ConnectionState with
+            | Closing | Closed ->
+                // as in the Java client, and in the mailbox, only the first Close closes the partition producers
+                // and then disposes the interceptors
+                channel.TrySetResult(Ok ()) |> ignore
+            | _ ->
+                // the partition producers outlive a failed mailbox, so they still have to be closed.
+                this.ConnectionState <- Closing
+                backgroundTask {
+                    try
+                        let! _ =
+                            producers
+                            |> Seq.map (fun producer -> producer.DisposeAsync().AsTask())
+                            |> Task.WhenAll
+                        this.ConnectionState <- Closed
+                        interceptors.Close()
+                        channel.TrySetResult(Ok ()) |> ignore
+                    with Flatten closeEx ->
+                        Log.Logger.LogError(closeEx, "{0} could not close all partition producers properly", prefix)
+                        this.ConnectionState <- Closed
+                        interceptors.Close()
+                        channel.TrySetResult(Error closeEx) |> ignore
+                } |> ignore
         | Init | TickTime ->
             ()
 
@@ -290,6 +297,8 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not close", prefix)
                         this.ConnectionState <- Failed
+                        // as in the Java client, once every partition producer has finished closing, even if one failed
+                        interceptors.Close()
                         channel.SetResult(Error ex)
 
             | TickTime  ->

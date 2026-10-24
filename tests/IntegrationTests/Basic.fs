@@ -838,14 +838,17 @@ let tests =
             let! (_ : Message<byte[]>) = child.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
             Expect.equal "The child should still run the interceptors" 1 interceptor.Consumed
             do! producer.DisposeAsync().AsTask()
-            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.equal "Closing the multi-topic consumer should dispose the interceptors" 1 interceptor.Disposed
 
-            // another Close, e.g. from a concurrent dispose, reaches the stopped mailbox too
-            let close = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
-            post multiConsumer.Mb (MultiTopicConsumerMessage.Close close)
-            do! close.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.equal "The interceptors should be disposed only once" 1 interceptor.Disposed
+            // overlapping Closes, e.g. from concurrent disposals: only the first one closes the children
+            // and then disposes the interceptors
+            let closes = Array.init 2 (fun _ -> TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously))
+            for close in closes do
+                post multiConsumer.Mb (MultiTopicConsumerMessage.Close close)
+            let! _ = (closes |> Array.map _.Task |> Task.WhenAll).WaitAsync(TimeSpan.FromSeconds(5.0))
+            for child in multiConsumer.Consumers do
+                do! assertAlreadyClosed (child.GetStats())
+            Expect.equal "Closing the multi-topic consumer should dispose the interceptors once" 1 interceptor.Disposed
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
             Log.Debug("Finished Multi-topic consumer keeps its interceptors until its children are closed after its mailbox fails")
         }
@@ -1358,17 +1361,23 @@ let tests =
             let! (_ : MessageId) = partition.SendAsync([| 1uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
             Expect.equal "The partition should still report its acknowledgements" 1 interceptor.Acknowledged
             Expect.equal "The interceptors should not be disposed before the partitions are closed" 0 interceptor.Disposed
-            do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.equal "Closing the partitioned producer should dispose the interceptors" 1 interceptor.Disposed
 
-            // another Close, e.g. from a concurrent dispose, reaches the stopped mailbox too
-            let close = TaskCompletionSource<Result<unit, exn>>(TaskCreationOptions.RunContinuationsAsynchronously)
-            post partitioned.Mb (PartitionedProducerMessage.Close close)
-            let! (closeResult : Result<unit, exn>) = close.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
-            match closeResult with
-            | Ok () -> ()
-            | Error other -> failwith $"The second Close failed with {other.GetType().Name}: {other.Message}"
-            Expect.equal "The interceptors should be disposed only once" 1 interceptor.Disposed
+            // overlapping Closes, e.g. from concurrent disposals: only the first one closes the partitions
+            // and then disposes the interceptors
+            let closes =
+                Array.init 2 (fun _ -> TaskCompletionSource<Result<unit, exn>>(TaskCreationOptions.RunContinuationsAsynchronously))
+            for close in closes do
+                post partitioned.Mb (PartitionedProducerMessage.Close close)
+            let! (closeResults : Result<unit, exn>[]) =
+                (closes |> Array.map _.Task |> Task.WhenAll).WaitAsync(TimeSpan.FromSeconds(5.0))
+            for closeResult in closeResults do
+                match closeResult with
+                | Ok () -> ()
+                | Error other -> failwith $"Close failed with {other.GetType().Name}: {other.Message}"
+            for child in partitioned.Producers do
+                do! assertAlreadyClosed (child.GetStats())
+            Expect.equal "Closing the partitioned producer should dispose the interceptors once" 1 interceptor.Disposed
+            do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
             Log.Debug("Finished Partitioned producer keeps its interceptors until its partitions are closed after its mailbox fails")
         }
