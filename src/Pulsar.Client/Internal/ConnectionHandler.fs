@@ -34,6 +34,8 @@ type internal ConnectionHandler( parentPrefix: string,
                         backoff: Backoff) as this =
 
     let mutable connectionState = Uninitialized
+    // why the handler moved to Failed, so later requests can report it
+    let mutable failureCause: exn = null
     let mutable lastDisconnectedTimestamp = 0L
     let mutable maxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE
     let mutable epoch = %0UL
@@ -106,7 +108,7 @@ type internal ConnectionHandler( parentPrefix: string,
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
                 Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
-                this.ConnectionState <- Failed
+                this.Failed(ex)
             else
                 Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore
@@ -125,7 +127,8 @@ type internal ConnectionHandler( parentPrefix: string,
     member this.Closed() =
         this.ConnectionState <- Closed
 
-    member this.Failed() =
+    member this.Failed(?cause: exn) =
+        failureCause <- defaultArg cause null
         this.ConnectionState <- Failed
 
     member this.Closing() =
@@ -151,12 +154,15 @@ type internal ConnectionHandler( parentPrefix: string,
         with get() : TimeStamp = %(Volatile.Read(&lastDisconnectedTimestamp))
         and private set(value: TimeStamp) = Volatile.Write(&lastDisconnectedTimestamp, %value)
 
+    member this.FailureCause = failureCause
+
     member this.CheckIfActive() =
         match this.ConnectionState with
         | Ready _ | Connecting -> null
         | Closing | Closed -> AlreadyClosedException(prefix + "already closed") :> exn
         | Terminated -> AlreadyClosedException(prefix + " topic was terminated") :> exn
-        | Failed | Uninitialized -> NotConnectedException(prefix + " not connected") :> exn
+        | Failed -> NotConnectedException(prefix + " not connected", failureCause) :> exn
+        | Uninitialized -> NotConnectedException(prefix + " not connected") :> exn
 
     member this.Close() =
         post mb Close

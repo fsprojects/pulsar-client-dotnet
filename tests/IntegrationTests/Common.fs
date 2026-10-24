@@ -262,3 +262,58 @@ let consumeAndVerifyMessages (consumer: IConsumer<byte[]>) consumerName (expecte
             if expectedMessages |> Array.contains received |> not then
                 failwith <| sprintf "Received unexpected message '%s' consumer %s" received consumerName
     }
+
+let unwrap (ex: exn) =
+    match ex with
+    | :? AggregateException as agg -> agg.GetBaseException()
+    | _ -> ex
+
+let assertNotConnected (work: Task<'T>) = task {
+    try
+        let! _ = work.WaitAsync(TimeSpan.FromSeconds(5.0))
+        failwith "Task completed successfully after mailbox failure"
+    with ex ->
+        match unwrap ex with
+        | :? NotConnectedException -> ()
+        | :? System.TimeoutException -> failwith "Task did not fault within 5 seconds"
+        | other -> failwith $"Expected NotConnectedException but got {other.GetType().Name}: {other.Message}"
+}
+
+// The failure has to keep its cause, so the innermost exception is the one that stopped the consumer.
+let assertNotConnectedBecauseOf (cause: Type) (work: Task<'T>) = task {
+    let mutable error = null
+    try
+        let! _ = work.WaitAsync(TimeSpan.FromSeconds(5.0))
+        ()
+    with ex ->
+        error <- ex
+    match error with
+    | null -> failwith "Task completed successfully after mailbox failure"
+    | ex ->
+        match unwrap ex with
+        | :? NotConnectedException as notConnected when cause.IsInstanceOfType(notConnected.GetBaseException()) -> ()
+        | :? NotConnectedException as notConnected ->
+            failwith $"Expected the failure to be caused by {cause.Name} but got {notConnected.GetBaseException()}"
+        | :? System.TimeoutException -> failwith "Task did not fault within 5 seconds"
+        | other -> failwith $"Expected NotConnectedException but got {other.GetType().Name}: {other.Message}"
+}
+
+// Retries until the condition holds. Internal state read from the test thread can change underneath it,
+// so a failing read is retried too.
+let waitUntil (description: string) (condition: unit -> Task<bool>) = task {
+    let deadline = DateTime.UtcNow.AddSeconds 15.0
+    let mutable satisfied = false
+    while not satisfied do
+        let! result = task {
+            try
+                return! condition()
+            with _ ->
+                return false
+        }
+        if result then
+            satisfied <- true
+        elif DateTime.UtcNow >= deadline then
+            failwith $"Timed out waiting until {description}"
+        else
+            do! Task.Delay 100
+}

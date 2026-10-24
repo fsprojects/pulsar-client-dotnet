@@ -584,7 +584,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let stopConsumer () =
         closeConsumerTasks()
-        failWaiters <| AlreadyClosedException "Consumer is already closed"
+        // a failed consumer passes on why it stopped, e.g. to a multi-topic parent
+        failWaiters <| AlreadyClosedException("Consumer is already closed", connectionHandler.FailureCause)
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let isInvalidConsumerEpoch = isInvalidConsumerEpoch consumerConfig.SubscriptionType
@@ -904,7 +905,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let stoppedMailboxException () =
         match connectionHandler.ConnectionState with
         | Closing | Closed | Terminated -> AlreadyClosedException(prefix + " already closed") :> exn
-        | _ -> NotConnectedException(prefix + " not connected") :> exn
+        | _ -> NotConnectedException(prefix + " not connected", connectionHandler.FailureCause) :> exn
 
     let failMailbox (ex: exn) =
         Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
@@ -928,7 +929,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 ()
         with closeEx ->
             Log.Logger.LogWarning(closeEx, "{0} failed to close consumer at the broker after mailbox failure", prefix)
-        connectionHandler.Failed()
+        connectionHandler.Failed(ex)
         stopConsumer()
         try
             currentMessage |> Option.iter (replyFromStoppedMailbox ex)
@@ -1017,7 +1018,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             connectionHandler.ReconnectLater ex
                         | _ when not subscribeTsc.Task.IsCompleted ->
                             // unable to create new consumer, fail operation
-                            connectionHandler.Failed()
+                            connectionHandler.Failed(ex)
                             subscribeTsc.SetException(ex)
                             stopConsumer()
                             continueLoop <- false
@@ -1028,8 +1029,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             //  * Regular consumer after topic is manually delete and with
                             //    auto-topic-creation set to false
                             // No more retries are needed in this case.
-                            connectionHandler.Failed()
+                            connectionHandler.Failed(ex)
                             closeConsumerTasks()
+                            // pending receives would otherwise wait forever, and a multi-topic parent
+                            // only learns that this child has stopped when its receive completes
+                            failWaiters <| NotConnectedException(prefix + " topic does not exist anymore", ex)
                             Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
                             continueLoop <- false
                         | _ ->
@@ -1408,7 +1412,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 if ((nonRetriableError || timeout) && subscribeTsc.TrySetException(ex)) then
                     Log.Logger.LogInformation("{0} creation failed {1}", prefix,
                                                 if nonRetriableError then "with unretriableError" else "after timeout")
-                    connectionHandler.Failed()
+                    connectionHandler.Failed(ex)
                     stopConsumer()
                     continueLoop <- false
 
@@ -1590,11 +1594,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         connectionHandler.GrabCnx()
         subscribeTsc.Task
 
+    // only before InitInternal, so that the first subscribe already uses it
+    member internal this.SetInitialConsumerEpoch(consumerEpoch: ConsumerEpoch) =
+        currentConsumerEpoch <- consumerEpoch
+
     static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                        topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
                        hasParent: bool, startMessageId: MessageId option, startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
                        createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
-                       interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
+                       interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit, ?consumerEpoch: ConsumerEpoch) =
         backgroundTask {
             let consumer =
                 if consumerConfig.ReceiverQueueSize > 0 then
@@ -1606,6 +1614,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                         startMessageId, lookup, createTopicIfDoesNotExist,
                                         schema, schemaProvider, interceptors, cleanup) :> ConsumerImpl<'T>
 
+            consumerEpoch |> Option.iter (fun epoch -> consumer.SetInitialConsumerEpoch epoch)
             do! consumer.InitInternal()
             return consumer
         }
