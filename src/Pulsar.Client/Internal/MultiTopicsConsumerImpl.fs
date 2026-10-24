@@ -1246,6 +1246,11 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     let consumerTasks = consumers |> Seq.map(fun (KeyValue(_, child)) -> child.Consumer.UnsubscribeAsync())
                     try
                         let! _ = Task.WhenAll consumerTasks
+                        try
+                            // e.g. a child of a topic that discovery removed while it was being recreated
+                            do! closeChildren()
+                        with Flatten ex ->
+                            Log.Logger.LogWarning(ex, "{0} could not close all child consumers properly", prefix)
                         this.ConnectionState <- Closed
                         Log.Logger.LogInformation("{0} unsubscribed", prefix)
                         stopConsumer()

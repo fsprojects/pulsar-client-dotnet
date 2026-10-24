@@ -773,6 +773,72 @@ let tests =
             Log.Debug("Finished Closing a multi-topic consumer waits for a child that is being recreated")
         }
 
+        testTask "Unsubscribing waits for a child that is still being recreated for a removed topic" {
+
+            Log.Debug("Started Unsubscribing waits for a child that is still being recreated for a removed topic")
+            let topicPrefix = $"persistent://public/default/unsubscribe-recreating-{Guid.NewGuid():N}-"
+            let removedTopic = TopicName(topicPrefix + "removed")
+            let remainingTopic = TopicName(topicPrefix + "remaining")
+            let subscriptionName = "test-subscription"
+            // pattern children never create topics
+            for topic in [ removedTopic; remainingTopic ] do
+                let! (producer : IProducer<byte[]>) = getClient().NewProducer().Topic(topic.ToString()).CreateAsync()
+                do! producer.DisposeAsync().AsTask()
+            let config = { PulsarClientConfiguration.Default with ServiceAddresses = [| Uri(pulsarAddress) |] }
+            let pool = ConnectionPool(config)
+            let lookup = new HeldLookup(new BinaryLookupService(config, pool))
+            use _ = closePool pool lookup
+            let consumerInfo topic : ConsumerInitInfo<byte[]> =
+                { TopicName = topic; Schema = Schema.BYTES(); SchemaProvider = None; Metadata = { Partitions = 0 } }
+            let patternInfo =
+                { InitialTopics = [| consumerInfo removedTopic; consumerInfo remainingTopic |]
+                  GetTopics = fun () -> Task.FromResult [| remainingTopic |]
+                  GetConsumerInfo = consumerInfo >> Task.FromResult }
+            let consumerConfig =
+                { ConsumerConfiguration<byte[]>.Default with
+                    TopicsPattern = topicPrefix + ".*"
+                    ConsumerName = "unsubscribeDuringRecreation"
+                    SubscriptionName = %subscriptionName
+                    SubscriptionType = SubscriptionType.Exclusive
+                    PatternAutoDiscoveryPeriod = TimeSpan.FromHours(1.0) }
+
+            let! (multiConsumer : MultiTopicsConsumerImpl<byte[]>) =
+                MultiTopicsConsumerImpl.InitPattern(consumerConfig, config, pool, patternInfo, lookup,
+                                                    ConsumerInterceptors<byte[]>.Empty, ignore)
+            let consumer = multiConsumer :> IConsumer<byte[]>
+            let crashed =
+                multiConsumer.Consumers
+                |> Array.find (fun child -> %child.Topic = removedTopic.CompleteTopicName) :?> ConsumerImpl<byte[]>
+            let lookupReached = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let release = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            lookup.Hold(removedTopic.CompleteTopicName, lookupReached, release.Task)
+            crashChildMailbox crashed
+            do! lookupReached.Task.WaitAsync(TimeSpan.FromSeconds(15.0))
+
+            // discovery removes the topic while its child is still being recreated, so Unsubscribe doesn't refuse
+            post multiConsumer.Mb MultiTopicConsumerMessage.PatternTickTime
+            let! connected = consumer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isTrue "Nothing should be pending once discovery removed the topic" connected
+            let unsubscribing = consumer.UnsubscribeAsync()
+            do! Task.Delay 500
+            Expect.isFalse "Unsubscribe must wait for the child that is being recreated" unsubscribing.IsCompleted
+            release.SetResult()
+            do! unsubscribing.WaitAsync(TimeSpan.FromSeconds(15.0))
+
+            // the child created for the removed topic was closed before Unsubscribe completed
+            let! (consumer2 : IConsumer<byte[]>) =
+                getClient().NewConsumer()
+                    .Topic(removedTopic.ToString())
+                    .ConsumerName("replacement")
+                    .SubscriptionName(subscriptionName)
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(15.0))
+            do! consumer2.UnsubscribeAsync()
+
+            Log.Debug("Finished Unsubscribing waits for a child that is still being recreated for a removed topic")
+        }
+
         testTask "A child recreated across a redelivery is created again at the new epoch" {
 
             Log.Debug("Started A child recreated across a redelivery is created again at the new epoch")

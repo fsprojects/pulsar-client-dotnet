@@ -299,14 +299,15 @@ let assertNotConnectedBecauseOf (cause: Type) (work: Task<'T>) = task {
 }
 
 // Retries until the condition holds. Internal state read from the test thread can change underneath it,
-// so a failing read is retried too.
+// so a failing read is retried too. A condition that doesn't complete before the deadline counts as false.
 let waitUntil (description: string) (condition: unit -> Task<bool>) = task {
     let deadline = DateTime.UtcNow.AddSeconds 15.0
     let mutable satisfied = false
     while not satisfied do
+        let remaining = max TimeSpan.Zero (deadline - DateTime.UtcNow)
         let! result = task {
             try
-                return! condition()
+                return! condition().WaitAsync(remaining)
             with _ ->
                 return false
         }
