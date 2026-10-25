@@ -666,7 +666,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             producerCreatedTsc.TrySetException(ex) |> ignore
                             stopProducer()
                         | _ when producerCreatedTsc.Task.IsCompleted
-                                    || (Stopwatch.GetElapsedTime(createProducerStartTime) > clientConfig.OperationTimeout) ->
+                                    || (PulsarClientException.isRetriableError ex
+                                        && Stopwatch.GetElapsedTime(createProducerStartTime) < clientConfig.OperationTimeout) ->
                             // Either we had already created the producer once (producerCreatedFuture.isDone()) or we are
                             // still within the initial timeout budget and we are dealing with a retryable error
                             connectionHandler.ReconnectLater ex

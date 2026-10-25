@@ -37,7 +37,7 @@ type internal ReaderImpl<'T> private (readerConfig: ReaderConfiguration, clientC
     }
 
     let consumer =
-        ConsumerImpl<'T>(consumerConfig, clientConfig, readerConfig.Topic, connectionPool, readerConfig.Topic.PartitionIndex,
+        ConsumerImpl<'T>(consumerConfig, clientConfig, readerConfig.Topic, connectionPool.GetConnection, readerConfig.Topic.PartitionIndex,
                      false, readerConfig.StartMessageId, readerConfig.StartMessageFromRollbackDuration, lookup, true, schema,
                      schemaProvider, ConsumerInterceptors<'T>.Empty, fun _ -> ())
 

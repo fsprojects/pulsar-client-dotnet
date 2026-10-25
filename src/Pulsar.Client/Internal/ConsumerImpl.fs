@@ -66,7 +66,7 @@ type internal ConsumerInitInfo<'T> =
     }
 
 type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
-                           topicName: TopicName, connectionPool: ConnectionPool,
+                           topicName: TopicName, getConnection: Broker * int -> Task<ClientCnx>,
                            partitionIndex: int, hasParentConsumer: bool, startMessageId: MessageId option,
                            startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
                            createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
@@ -128,7 +128,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let connectionHandler =
         ConnectionHandler(prefix,
-                          connectionPool,
+                          getConnection,
                           lookup,
                           topicName.CompleteTopicName,
                           (fun _ -> post this.Mb ConsumerMessage.ConnectionOpened),
@@ -1012,11 +1012,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     with Flatten ex ->
                         clientCnx.RemoveConsumer consumerId
                         Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
+                        // As in the Java client: while it is being created, the consumer retries an error it can retry
+                        // and fails on any other one. Once created, it keeps retrying unless its topic is gone.
                         match ex with
                         | _ when PulsarClientException.isRetriableError ex
-                                && (Stopwatch.GetElapsedTime(createConsumerStartTime) > clientConfig.OperationTimeout) ->
+                                && (Stopwatch.GetElapsedTime(createConsumerStartTime) < clientConfig.OperationTimeout) ->
                             connectionHandler.ReconnectLater ex
-                        | _ when not subscribeTsc.Task.IsCompleted ->
+                        | _ when not subscribeTsc.Task.IsCompleted && not (PulsarClientException.isRetriableError ex) ->
                             // unable to create new consumer, fail operation
                             connectionHandler.Failed(ex)
                             subscribeTsc.SetException(ex)
@@ -1603,18 +1605,18 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         currentConsumerEpoch <- consumerEpoch
 
     static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
-                       topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
+                       topicName: TopicName, getConnection: Broker * int -> Task<ClientCnx>, partitionIndex: int,
                        hasParent: bool, startMessageId: MessageId option, startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
                        createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
                        interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit, ?consumerEpoch: ConsumerEpoch) =
         backgroundTask {
             let consumer =
                 if consumerConfig.ReceiverQueueSize > 0 then
-                    ConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, hasParent,
+                    ConsumerImpl(consumerConfig, clientConfig, topicName, getConnection, partitionIndex, hasParent,
                                 startMessageId, startMessageRollbackDuration, lookup, createTopicIfDoesNotExist,
                                 schema, schemaProvider, interceptors, cleanup)
                 else
-                    ZeroQueueConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, hasParent,
+                    ZeroQueueConsumerImpl(consumerConfig, clientConfig, topicName, getConnection, partitionIndex, hasParent,
                                         startMessageId, lookup, createTopicIfDoesNotExist,
                                         schema, schemaProvider, interceptors, cleanup) :> ConsumerImpl<'T>
 
@@ -1622,6 +1624,15 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             do! consumer.InitInternal()
             return consumer
         }
+
+    static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
+                       topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
+                       hasParent: bool, startMessageId: MessageId option, startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
+                       createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
+                       interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit, ?consumerEpoch: ConsumerEpoch) =
+        ConsumerImpl.Init(consumerConfig, clientConfig, topicName, connectionPool.GetConnection, partitionIndex, hasParent,
+                          startMessageId, startMessageRollbackDuration, lookup, createTopicIfDoesNotExist, schema,
+                          schemaProvider, interceptors, cleanup, ?consumerEpoch = consumerEpoch)
 
     abstract member ReceiveWrappedAsync: CancellationToken -> Task<ResultOrException<Message<'T>>>
     default this.ReceiveWrappedAsync(cancellationToken: CancellationToken) =
@@ -1863,14 +1874,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
 
 and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
-                           topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
+                           topicName: TopicName, getConnection: Broker * int -> Task<ClientCnx>, partitionIndex: int,
                            hasParent: bool, startMessageId: MessageId option,
                            lookup: ILookupService,
                            createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
                            schemaProvider: MultiVersionSchemaInfoProvider option,
                            interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) as this =
 
-    inherit ConsumerImpl<'T>(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, hasParent,
+    inherit ConsumerImpl<'T>(consumerConfig, clientConfig, topicName, getConnection, partitionIndex, hasParent,
                              startMessageId, TimeSpan.Zero, lookup, createTopicIfDoesNotExist,
                              schema, schemaProvider, interceptors, cleanup)
 

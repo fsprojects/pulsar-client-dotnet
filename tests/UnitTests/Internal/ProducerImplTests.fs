@@ -16,7 +16,7 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 
-let private testTimeout = TimeSpan.FromSeconds(10.0)
+let internal testTimeout = TimeSpan.FromSeconds(10.0)
 
 // The stopped-mailbox drain consumes ticks, so mailbox size cannot prove that timers stopped.
 let private getTimers (instance: obj) =
@@ -26,7 +26,7 @@ let private getTimers (instance: obj) =
         | :? Timer as timer -> Some timer
         | _ -> None)
 
-let private expectFailure<'T when 'T :> exn> (operation: Task) =
+let internal expectFailure<'T when 'T :> exn> (operation: Task) =
     task {
         try
             do! operation.WaitAsync(testTimeout)
@@ -38,7 +38,7 @@ let private expectFailure<'T when 'T :> exn> (operation: Task) =
             | _ -> return failtestf "Expected %s, got %O" typeof<'T>.Name ex
     }
 
-type private BrokerConnection(clientConfig: PulsarClientConfiguration) =
+type internal BrokerConnection(clientConfig: PulsarClientConfiguration) =
     let incoming = Pipe()
     let outgoing = Pipe()
     let output = outgoing.Reader.AsStream()
@@ -93,7 +93,7 @@ type private BrokerConnection(clientConfig: PulsarClientConfiguration) =
             return ()
         }
 
-    member this.StartProducer(config, interceptors, cleanup) =
+    member this.Connect() =
         task {
             let! sent = connection.Send(connection.NewConnectCommand()).WaitAsync(testTimeout)
             Expect.isTrue sent "The connection handshake should be sent"
@@ -107,9 +107,30 @@ type private BrokerConnection(clientConfig: PulsarClientConfiguration) =
                         ProtocolVersion = int ProtocolVersion.V19,
                         MaxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE)))
             let! _ = connected.Task.WaitAsync(testTimeout)
-            let starting =
-                ProducerImpl.Init(config, clientConfig, (fun _ -> Task.FromResult connection),
-                                  -1, lookup, Schema.BYTES(), interceptors, cleanup)
+            return ()
+        }
+
+    // only starts creating the producer, so the test answers its registration
+    member this.CreateProducer(config: ProducerConfiguration, interceptors: ProducerInterceptors<byte[]>,
+                               cleanup: ProducerImpl<byte[]> -> unit) : Task<Task<ProducerImpl<byte[]>>> =
+        task {
+            do! this.Connect()
+            return ProducerImpl.Init(config, clientConfig, (fun _ -> Task.FromResult connection),
+                                     -1, lookup, Schema.BYTES(), interceptors, cleanup)
+        }
+
+    // only starts creating the consumer, so the test answers its subscription
+    member this.CreateConsumer(config: ConsumerConfiguration<byte[]>) : Task<Task<ConsumerImpl<byte[]>>> =
+        task {
+            do! this.Connect()
+            return ConsumerImpl.Init(config, clientConfig, config.SingleTopic, (fun _ -> Task.FromResult connection),
+                                     -1, false, None, TimeSpan.Zero, lookup, true, Schema.BYTES(), None,
+                                     ConsumerInterceptors<byte[]>.Empty, ignore)
+        }
+
+    member this.StartProducer(config, interceptors, cleanup) =
+        task {
+            let! starting = this.CreateProducer(config, interceptors, cleanup)
             let! command = this.ReadCommand()
             Expect.equal command.``type`` BaseCommand.Type.Producer "Expected producer registration"
             do! this.Reply(
@@ -436,5 +457,66 @@ let tests =
             expectTimersStopped producer
             Expect.equal cleaned 1 "Successful close must clean up once"
             Expect.isTrue broker.Connection.IsActive "Successful close must preserve the shared connection"
+        }
+
+        testTask "Producer creation retries an error it can retry" {
+            use broker = new BrokerConnection(clientConfig)
+            let! (starting: Task<ProducerImpl<byte[]>>) = broker.CreateProducer(producerConfig, ProducerInterceptors<byte[]>.Empty, ignore)
+            let! (first: BaseCommand) = broker.ReadCommand()
+            Expect.equal first.``type`` BaseCommand.Type.Producer "Expected producer registration"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Error,
+                    Error = CommandError(
+                        RequestId = first.Producer.RequestId,
+                        Error = ServerError.ServiceNotReady,
+                        Message = "Service not ready")))
+
+            // as in the Java client, it registers again within the operation timeout
+            let! (second: BaseCommand) = broker.ReadCommand()
+            Expect.equal second.``type`` BaseCommand.Type.Producer "Expected the producer to register again"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.ProducerSuccess,
+                    ProducerSuccess = CommandProducerSuccess(
+                        RequestId = second.Producer.RequestId,
+                        ProducerName = "test-producer",
+                        LastSequenceId = -1L)))
+            let! (producer: ProducerImpl<byte[]>) = starting.WaitAsync(testTimeout)
+
+            let closing = (producer :> IProducer<byte[]>).DisposeAsync().AsTask()
+            let! (command: BaseCommand) = broker.ReadCommand()
+            Expect.equal command.``type`` BaseCommand.Type.CloseProducer "Expected close request"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = command.CloseProducer.RequestId)))
+            do! closing.WaitAsync(testTimeout)
+        }
+
+        testTask "Producer creation fails at once on an error it can't retry" {
+            use broker = new BrokerConnection(clientConfig)
+            let! (starting: Task<ProducerImpl<byte[]>>) = broker.CreateProducer(producerConfig, ProducerInterceptors<byte[]>.Empty, ignore)
+            let! (command: BaseCommand) = broker.ReadCommand()
+            Expect.equal command.``type`` BaseCommand.Type.Producer "Expected producer registration"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Error,
+                    Error = CommandError(
+                        RequestId = command.Producer.RequestId,
+                        Error = ServerError.AuthorizationError,
+                        Message = "Not authorized")))
+            let! _ = expectFailure<AuthorizationException> starting
+            return ()
+        }
+
+        testTask "Producer creation fails on an error it can retry once the operation timeout has passed" {
+            use broker = new BrokerConnection({ clientConfig with OperationTimeout = TimeSpan.FromSeconds(1.0) })
+            let! (starting: Task<ProducerImpl<byte[]>>) = broker.CreateProducer(producerConfig, ProducerInterceptors<byte[]>.Empty, ignore)
+            let! (command: BaseCommand) = broker.ReadCommand()
+            Expect.equal command.``type`` BaseCommand.Type.Producer "Leave the registration unanswered"
+            // the request times out once the operation timeout has passed, so it is not retried
+            let! _ = expectFailure<TimeoutException> starting
+            return ()
         }
     ]
