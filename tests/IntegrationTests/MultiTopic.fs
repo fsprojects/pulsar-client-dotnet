@@ -268,28 +268,45 @@ let tests =
                     .SubscribeAsync()
             let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
             Expect.equal multiConsumer.Consumers.Length 2 "Both topics should be subscribed"
+            let deletedChild =
+                multiConsumer.Consumers
+                |> Array.find (fun child -> child.Topic.EndsWith("-deleted")) :?> ConsumerImpl<byte[]>
             do! deletedProducer.DisposeAsync().AsTask()
 
-            // pattern children never create topics, so the deleted topic's child can't subscribe again and stops
+            // pattern children never create topics, so the deleted topic's child can't subscribe again and closes
             let! (response: Net.Http.HttpResponseMessage) = commonHttpClient.DeleteAsync($"{pulsarHttpAddress}/admin/v2/persistent/{deletedTopic}?force=true")
             response.EnsureSuccessStatusCode() |> ignore
-            do! waitUntil "the deleted topic's child is detached" (fun () -> Task.FromResult(multiConsumer.Consumers.Length = 1))
+            do! waitUntil "the deleted topic's consumer has closed" (fun () -> task {
+                try
+                    // a stopped consumer's mailbox only answers with an error
+                    let! _ = (deletedChild :> IConsumer<byte[]>).GetStats()
+                    return false
+                with _ ->
+                    return true
+            })
 
-            // restarting every child stream used to reach the stopped child and fail the whole consumer
+            // restarting every child's reads used to fail the whole consumer once they reached the closed child
             do! consumer.RedeliverUnacknowledgedMessagesAsync().WaitAsync(timeout)
-            // the topic stays pending until discovery removes it, so these would skip it
+            // as in the Java client, the closed child stays until discovery removes its topic
+            Expect.equal multiConsumer.Consumers.Length 2 "The closed child should stay until discovery removes its topic"
             let! connected = consumer.IsConnected().WaitAsync(timeout)
-            Expect.isFalse connected "The deleted topic's child is not consuming"
+            Expect.isFalse connected "The deleted topic's consumer is not connected"
             do! assertNotConnected (consumer.SeekAsync(MessageId.Earliest))
-            do! assertNotConnected (consumer.UnsubscribeAsync())
             let! _ = remainingProducer.SendAsync [| 1uy |]
             let! (message: Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(timeout)
             Expect.equal message.Data [| 1uy |] "The remaining topic should still be consumed"
             do! consumer.AcknowledgeAsync(message.MessageId).WaitAsync(timeout)
 
-            // once the topic exists again, the pending child is recreated without waiting for discovery
+            post multiConsumer.Mb MultiTopicConsumerMessage.PatternTickTime
+            do! waitUntil "discovery removes the deleted topic" (fun () -> task {
+                let! connected = consumer.IsConnected()
+                return connected && multiConsumer.Consumers.Length = 1
+            })
+
+            // once the topic exists again, discovery subscribes to it again
             use! (recreatedProducer: IProducer<byte[]>) =
                 client.NewProducer().Topic(deletedTopic).EnableBatching(false).CreateAsync()
+            post multiConsumer.Mb MultiTopicConsumerMessage.PatternTickTime
             do! waitUntil "the recreated topic is subscribed again" (fun () -> task {
                 let! connected = consumer.IsConnected()
                 return connected && multiConsumer.Consumers.Length = 2

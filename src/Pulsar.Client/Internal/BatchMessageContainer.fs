@@ -103,7 +103,8 @@ type internal MessageContainer<'T>(config: ProducerConfiguration) =
     abstract member CreateOpSendMsgs: unit -> seq<OpSendMsgWrapper<'T>>
     abstract member Clear: unit -> unit
     abstract member IsMultiBatches: bool
-    abstract member Discard: exn -> unit
+    // fails every message in the batch with the given function, then clears it
+    abstract member Discard: (BatchItem<'T> -> unit) -> unit
     member val CurrentBatchSizeBytes = 0 with get, set
     member val MaxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE with get, set
     member val NumMessagesInBatch = 0 with get, set
@@ -143,11 +144,9 @@ type internal DefaultBatchMessageContainer<'T>(prefix: string, config: ProducerC
         this.NumMessagesInBatch <- 0
         this.CurrentTxnId <- None
     override this.IsMultiBatches = false
-    override this.Discard ex =
+    override this.Discard fail =
         try
-            batchItems
-            |> Seq.iter (fun batchItem ->
-                batchItem.Tcs |> Option.iter (fun tcs -> tcs.TrySetException(ex) |> ignore))
+            batchItems |> Seq.iter fail
         finally
             this.Clear()
 
@@ -215,12 +214,9 @@ type internal KeyBasedBatchMessageContainer<'T>(prefix: string, config: Producer
         this.CurrentBatchSizeBytes <- 0
         this.NumMessagesInBatch <- 0
     override this.IsMultiBatches = true
-    override this.Discard ex =
+    override this.Discard fail =
         try
             keyBatchItems.Values
-            |> Seq.iter (fun batchItems ->
-                batchItems
-                |> Seq.iter (fun batchItem ->
-                    batchItem.Tcs |> Option.iter (fun tcs -> tcs.TrySetException(ex) |> ignore)))
+            |> Seq.iter (Seq.iter fail)
         finally
             this.Clear()

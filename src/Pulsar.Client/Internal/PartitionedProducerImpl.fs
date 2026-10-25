@@ -41,9 +41,14 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
     let keyValueProcessor: IKeyValueProcessor option = KeyValueProcessor.GetInstance schema
 
     let producers = ResizeArray<IProducer<'T>>(numPartitions)
+    // as in the Java client, partitions stop while the others keep running, e.g. when their topic is deleted,
+    // so only the parent disposes the interceptors
+    let childInterceptors = interceptors.Borrow()
     let producerCreatedTsc = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
     let maxPendingMessages = Math.Min(producerConfig.MaxPendingMessages, producerConfig.MaxPendingMessagesAcrossPartitions / numPartitions)
     let mutable connectionState = PartitionedConnectionState.Uninitialized
+    // why the mailbox failed, so later requests can report it
+    let mutable terminalError: exn = null
     let mutable numPartitions = numPartitions
     let hashingFunction =
         match producerConfig.HashingScheme with
@@ -134,10 +139,17 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
     let timer = new Timer(producerConfig.AutoUpdatePartitionsInterval.TotalMilliseconds)
 
+    // the partition producers keep running after the mailbox fails, until Close, so the rest of the cleanup
+    // waits for completeClose
     let stopProducer() =
-        cleanup(this)
         timer.Close()
         Log.Logger.LogInformation("{0} stopped", prefix)
+
+    // once the partition producers, which use the interceptors, are closed. Until then the producer stays registered,
+    // as in the Java client, so closing the client still closes it after its mailbox fails
+    let completeClose() =
+        interceptors.Close()
+        cleanup(this)
 
     let mb = Channel.CreateUnbounded<PartitionedProducerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
 
@@ -152,27 +164,42 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         | IsConnected channel ->
             channel.TrySetResult false |> ignore
         | Close channel ->
-            // the partition producers outlive a failed mailbox, so they still have to be closed.
-            backgroundTask {
-                try
-                    let! _ =
-                        producers
-                        |> Seq.map (fun producer -> producer.DisposeAsync().AsTask())
-                        |> Task.WhenAll
-                    this.ConnectionState <- Closed
-                    channel.TrySetResult(Ok ()) |> ignore
-                with Flatten closeEx ->
-                    Log.Logger.LogError(closeEx, "{0} could not close all partition producers properly", prefix)
-                    this.ConnectionState <- Closed
-                    channel.TrySetResult(Error closeEx) |> ignore
-            } |> ignore
+            match this.ConnectionState with
+            | Closing | Closed ->
+                // as in the Java client, and in the mailbox, only the first Close closes the partition producers
+                // and then disposes the interceptors
+                channel.TrySetResult(Ok ()) |> ignore
+            | _ ->
+                // the partition producers outlive a failed mailbox, so they still have to be closed.
+                this.ConnectionState <- Closing
+                backgroundTask {
+                    try
+                        let! _ =
+                            producers
+                            |> Seq.map (fun producer -> producer.DisposeAsync().AsTask())
+                            |> Task.WhenAll
+                        this.ConnectionState <- Closed
+                        completeClose()
+                        channel.TrySetResult(Ok ()) |> ignore
+                    with Flatten closeEx ->
+                        Log.Logger.LogError(closeEx, "{0} could not close all partition producers properly", prefix)
+                        this.ConnectionState <- Closed
+                        completeClose()
+                        channel.TrySetResult(Error closeEx) |> ignore
+                } |> ignore
         | Init | TickTime ->
             ()
+
+    let terminalException (cause: exn) =
+        NotConnectedException($"{prefix} has failed and can't recover, it has to be recreated: {cause.Message}", cause) :> exn
 
     let stoppedMailboxException () =
         match this.ConnectionState with
         | Closing | Closed -> AlreadyClosedException(prefix + " already closed") :> exn
-        | _ -> NotConnectedException(prefix + " not connected") :> exn
+        | _ ->
+            match terminalError with
+            | null -> NotConnectedException(prefix + " not connected") :> exn
+            | cause -> terminalException cause
 
     // requests posted after the mailbox exits would otherwise never be completed
     let drainStoppedMailbox () =
@@ -202,7 +229,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                                                     Topic = partitionedTopic }
                         backgroundTask {
                             let! producer = ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup,
-                                                schema, interceptors, fun _ -> ())
+                                                schema, childInterceptors, fun _ -> ())
                             return producer :> IProducer<'T>
                         })
                 // we mark success if all the partitions are created
@@ -227,6 +254,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     this.ConnectionState <- Failed
                     producerCreatedTsc.SetException(ex)
                     stopProducer()
+                    completeClose()
 
                 if this.ConnectionState = Failed then
                     continueLoop <- false
@@ -268,11 +296,14 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                         this.ConnectionState <- Closed
                         Log.Logger.LogInformation("{0} closed", prefix)
                         stopProducer()
+                        completeClose()
                         channel.SetResult(Ok())
                         continueLoop <- false
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} could not close", prefix)
                         this.ConnectionState <- Failed
+                        // as in the Java client, once every partition producer has finished closing, even if one failed
+                        interceptors.Close()
                         channel.SetResult(Error ex)
 
             | TickTime  ->
@@ -298,7 +329,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                                                                 Topic = partitionedTopic }
                                     backgroundTask {
                                         let! producer = ProducerImpl.Init(partititonedConfig, clientConfig, connectionPool, partitionIndex, lookup,
-                                                            schema, interceptors, fun _ -> ())
+                                                            schema, childInterceptors, fun _ -> ())
                                         return producer :> IProducer<'T>
                                     })
                             try
@@ -327,16 +358,22 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
 
             | GetStats channel ->
 
-                let! stats =
-                    producers
-                    |> Seq.map _.GetStats()
-                    |> Task.WhenAll
-                channel.SetResult(statsReduce stats)
+                try
+                    let! stats =
+                        producers
+                        |> Seq.map _.GetStats()
+                        |> Task.WhenAll
+                    channel.SetResult(statsReduce stats)
+                with Flatten ex ->
+                    // a partition producer that has stopped, e.g. because its topic was deleted, fails only this
+                    // request, so the other partitions keep working
+                    channel.SetException ex
         }:> Task).ContinueWith(fun t ->
             try
                 if t.IsFaulted then
                     let (Flatten ex) = t.Exception
                     Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                    terminalError <- ex
                     this.ConnectionState <- Failed
                     stopProducer()
                     try
@@ -373,7 +410,9 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         | Closing | Closed ->
             raise (AlreadyClosedException(prefix + " already closed"))
         | Uninitialized | Failed ->
-            raise (NotConnectedException(prefix + " Invalid connection state: " + this.ConnectionState.ToString()))
+            match terminalError with
+            | null -> raise (NotConnectedException(prefix + " Invalid connection state: " + this.ConnectionState.ToString()))
+            | cause -> raise (terminalException cause)
         | Ready ->
             let keyString = message.Key |> Option.map _.PartitionKey |> Option.defaultValue %""
             let partition = router.ChoosePartition(keyString, numPartitions)
