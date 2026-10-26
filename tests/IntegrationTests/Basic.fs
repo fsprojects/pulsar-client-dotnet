@@ -21,11 +21,6 @@ open Pulsar.Client.IntegrationTests
 open Pulsar.Client.IntegrationTests.Common
 open FSharp.UMX
 
-let unwrap (ex: exn) =
-    match ex with
-    | :? AggregateException as agg -> agg.GetBaseException()
-    | _ -> ex
-
 let assertMailboxException (work: Task<'T>) = task {
     try
         let! _ = work.WaitAsync(TimeSpan.FromSeconds(5.0))
@@ -35,17 +30,6 @@ let assertMailboxException (work: Task<'T>) = task {
         | :? NullReferenceException -> ()
         | :? TimeoutException -> failwith "Task did not fault within 5 seconds"
         | other -> failwith $"Expected the mailbox NullReferenceException but got {other.GetType().Name}: {other.Message}"
-}
-
-let assertNotConnected (work: Task<'T>) = task {
-    try
-        let! _ = work.WaitAsync(TimeSpan.FromSeconds(5.0))
-        failwith "Task completed successfully after mailbox failure"
-    with ex ->
-        match unwrap ex with
-        | :? NotConnectedException -> ()
-        | :? TimeoutException -> failwith "Task did not fault within 5 seconds"
-        | other -> failwith $"Expected NotConnectedException but got {other.GetType().Name}: {other.Message}"
 }
 
 let assertAlreadyClosed (work: Task<'T>) = task {
@@ -58,6 +42,68 @@ let assertAlreadyClosed (work: Task<'T>) = task {
         | :? TimeoutException -> failwith "Task did not fault within 5 seconds"
         | other -> failwith $"Expected AlreadyClosedException but got {other.GetType().Name}: {other.Message}"
 }
+
+// A null message faults a child consumer mailbox
+let private crashChildMailbox (child: ConsumerImpl<byte[]>) =
+    post child.Mb (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
+
+// A null poll result faults the multi-topic consumer mailbox, and the poller reply is the in-flight request
+let private crashMultiTopicMailbox (consumer: MultiTopicsConsumerImpl<byte[]>) (pollerReply: TaskCompletionSource<unit>) =
+    post consumer.Mb
+        (MultiTopicConsumerMessage.MessageReceived(struct (CancellationToken.None, Ok Unchecked.defaultof<Message<byte[]>>), pollerReply))
+
+// a stopped consumer's mailbox only answers with an error
+let private waitForStoppedChild (child: ConsumerImpl<byte[]>) =
+    waitUntil "the child consumer has stopped" (fun () -> task {
+        try
+            let! _ = (child :> IConsumer<byte[]>).GetStats()
+            return false
+        with _ ->
+            return true
+    })
+
+// A null reply channel faults the partitioned producer mailbox
+let private crashPartitionedProducerMailbox (producer: PartitionedProducerImpl<byte[]>) =
+    post producer.Mb (PartitionedProducerMessage.LastSequenceId Unchecked.defaultof<TaskCompletionSource<SequenceId>>)
+
+let private createPartitionedTopic (topicName: string) (partitions: int) = task {
+    use http = new HttpClient(new HttpClientHandler(UseProxy = false))
+    http.BaseAddress <- Uri(pulsarHttpAddress)
+    http.Timeout <- TimeSpan.FromSeconds(15.0)
+    use content = new StringContent(string partitions, Encoding.UTF8, "application/json")
+    let! created = http.PutAsync($"/admin/v2/persistent/{topicName}/partitions", content)
+    created.EnsureSuccessStatusCode() |> ignore
+}
+
+type private CountingProducerInterceptor() =
+    let mutable sent = 0
+    let mutable acknowledged = 0
+    let mutable disposed = 0
+    member _.Sent = Volatile.Read(&sent)
+    member _.Acknowledged = Volatile.Read(&acknowledged)
+    member _.Disposed = Volatile.Read(&disposed)
+    interface IProducerInterceptor<byte[]> with
+        member _.Dispose() = Interlocked.Increment(&disposed) |> ignore
+        member _.Eligible _ = true
+        member _.BeforeSend(_, message) =
+            Interlocked.Increment(&sent) |> ignore
+            message
+        member _.OnSendAcknowledgement(_, _, _, _) = Interlocked.Increment(&acknowledged) |> ignore
+
+type private CountingInterceptor() =
+    let mutable consumed = 0
+    let mutable disposed = 0
+    member _.Consumed = Volatile.Read(&consumed)
+    member _.Disposed = Volatile.Read(&disposed)
+    interface IConsumerInterceptor<byte[]> with
+        member _.Dispose() = Interlocked.Increment(&disposed) |> ignore
+        member _.BeforeConsume(_, message) =
+            Interlocked.Increment(&consumed) |> ignore
+            message
+        member _.OnAcknowledge(_, _, _) = ()
+        member _.OnAcknowledgeCumulative(_, _, _) = ()
+        member _.OnNegativeAcksSend(_, _) = ()
+        member _.OnAckTimeoutSend(_, _) = ()
 
 // Runs `queue` inside the mailbox loop while it is still handling the request that completes `trigger`,
 // so everything it posts is queued and read only after that request returns.
@@ -405,9 +451,9 @@ let tests =
             Log.Debug("Finished Requests posted after the consumer is closed are already closed")
         }
 
-        testTask "Multi-topic consumer completes requests after a child mailbox fails" {
+        testTask "Multi-topic consumer keeps consuming the other topics when a child mailbox fails" {
 
-            Log.Debug("Started Multi-topic consumer completes requests after a child mailbox fails")
+            Log.Debug("Started Multi-topic consumer keeps consuming the other topics when a child mailbox fails")
             let client = getClient()
             let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
@@ -421,30 +467,35 @@ let tests =
                     .SubscribeAsync()
 
             let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
-            let child = multiConsumer.Consumers |> Array.head :?> ConsumerImpl<byte[]>
-            // queued before the poller stops, so stopConsumer fails this waiter directly
+            let crashed = multiConsumer.Consumers |> Array.head :?> ConsumerImpl<byte[]>
+            let remainingTopic = (multiConsumer.Consumers |> Array.last).Topic
+            // queued before the child fails, and has to outlive it
             let pendingReceive = consumer.ReceiveAsync()
             do! Task.Delay 200
-            post child.Mb
-                (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
+            crashChildMailbox crashed
+            do! waitForStoppedChild crashed
 
-            // stopConsumer fails this waiter once the parent mailbox has stopped
-            Expect.throwsT2<AlreadyClosedException> (fun () ->
-                pendingReceive.WaitAsync(TimeSpan.FromSeconds(15.0)).Result |> ignore) |> ignore
-            Expect.throwsT2<NotConnectedException> (fun () ->
-                consumer.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
-            // these still post to the stopped mailbox, so they only return if the drain replies
-            Expect.throwsT2<NotConnectedException> (fun () ->
-                consumer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
-            Expect.throwsT2<NotConnectedException> (fun () ->
-                consumer.LastDisconnectedTimestamp().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
-            Expect.throwsT2<NotConnectedException> (fun () ->
-                consumer.HasReachedEndOfTopic().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            // as in the Java client, the stopped child is neither recreated nor removed, and the parent keeps running
+            Expect.isFalse "A failed child must not complete the pending receive" pendingReceive.IsCompleted
+            Expect.equal "The stopped child should stay registered" 2 multiConsumer.Consumers.Length
             let! connected = consumer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.isFalse "Multi-topic consumer should report disconnected after its mailbox stops" connected
+            Expect.isFalse "A stopped child is not connected" connected
+            // restarts every child's reads, including the stopped child's, which has nothing to redeliver
+            do! consumer.RedeliverUnacknowledgedMessagesAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(remainingTopic)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            let! _ = producer.SendAsync([| 1uy |])
+            let! (message : Message<byte[]>) = pendingReceive.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "Pending receive should get the message from the remaining child" [| 1uy |] (message.GetValue())
+            do! consumer.AcknowledgeAsync(message.MessageId).WaitAsync(TimeSpan.FromSeconds(5.0))
+            do! producer.DisposeAsync().AsTask()
             do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
-            Log.Debug("Finished Multi-topic consumer completes requests after a child mailbox fails")
+            Log.Debug("Finished Multi-topic consumer keeps consuming the other topics when a child mailbox fails")
         }
 
         testTask "Multi-topic consumer completes the request that faults its mailbox" {
@@ -457,26 +508,18 @@ let tests =
             let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topics([| topicName1; topicName2 |])
-                    .ConsumerName("failingInFlightAck")
+                    .ConsumerName("failingInFlightPoll")
                     .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.Exclusive)
                     .SubscribeAsync()
 
-            // the topic lookup throws before the ack is handed to a background task
-            let bogusId = { MessageId.Earliest with TopicName = %"missing-topic" }
-            try
-                do! consumer.AcknowledgeAsync(bogusId).WaitAsync(TimeSpan.FromSeconds(5.0))
-                failwith "Acknowledge completed successfully after faulting the mailbox"
-            with ex ->
-                match unwrap ex with
-                | :? System.Collections.Generic.KeyNotFoundException -> ()
-                | :? TimeoutException -> failwith "Acknowledge did not fault within 5 seconds"
-                | other -> failwith $"Expected KeyNotFoundException but got {other.GetType().Name}: {other.Message}"
+            let pollerReply = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            crashMultiTopicMailbox (consumer :?> MultiTopicsConsumerImpl<byte[]>) pollerReply
+            do! assertMailboxException pollerReply.Task
 
-            Expect.throwsT2<NotConnectedException> (fun () ->
-                consumer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
-            Expect.throwsT2<NotConnectedException> (fun () ->
-                consumer.LastDisconnectedTimestamp().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            // the drain reports why the consumer stopped
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (consumer.GetStats())
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (consumer.LastDisconnectedTimestamp())
             let! connected = consumer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
             Expect.isFalse "Multi-topic consumer should report disconnected after its mailbox stops" connected
             do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
@@ -484,7 +527,45 @@ let tests =
             Log.Debug("Finished Multi-topic consumer completes the request that faults its mailbox")
         }
 
-        testTask "Child mailbox failure stops a multi-topic consumer with a pending batch" {
+        testTask "Multi-topic consumer fails only the acknowledgement for an unknown topic" {
+
+            Log.Debug("Started Multi-topic consumer fails only the acknowledgement for an unknown topic")
+            let client = getClient()
+            let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topics([| topicName1; topicName2 |])
+                    .ConsumerName("unknownTopicAck")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+
+            // e.g. a message from a topic that pattern discovery has removed
+            let bogusId = { MessageId.Earliest with TopicName = %"missing-topic" }
+            do! assertNotConnected (consumer.AcknowledgeAsync(bogusId))
+            do! assertNotConnected (consumer.NegativeAcknowledge(bogusId))
+            do! assertNotConnected (consumer.AcknowledgeCumulativeAsync(bogusId))
+            let! connected = consumer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isTrue "Multi-topic consumer should stay connected" connected
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName1)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            let! _ = producer.SendAsync([| 1uy |])
+            let! (message : Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "Multi-topic consumer should keep consuming" [| 1uy |] (message.GetValue())
+            do! consumer.AcknowledgeAsync(message.MessageId).WaitAsync(TimeSpan.FromSeconds(5.0))
+            do! producer.DisposeAsync().AsTask()
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Multi-topic consumer fails only the acknowledgement for an unknown topic")
+        }
+
+        testTask "Child mailbox failure keeps a pending batch receive alive" {
             let client = getClient()
             let topics =
                 [| "public/default/topic-" + Guid.NewGuid().ToString("N")
@@ -497,18 +578,24 @@ let tests =
                     .BatchReceivePolicy(BatchReceivePolicy(-1, 1024L, TimeSpan.FromMinutes(1.0)))
                     .SubscribeAsync()
 
-            let child = (consumer :?> MultiTopicsConsumerImpl<byte[]>).Consumers |> Array.head :?> ConsumerImpl<byte[]>
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            let crashed = multiConsumer.Consumers |> Array.head :?> ConsumerImpl<byte[]>
+            let remainingTopic = (multiConsumer.Consumers |> Array.last).Topic
             let pendingBatch = consumer.BatchReceiveAsync()
             do! Task.Delay 200
-            post child.Mb
-                (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
+            crashChildMailbox crashed
 
-            // Buffering the close error fills the receive queue and pauses the poller before it can fail.
-            do! assertAlreadyClosed pendingBatch
-            do! assertNotConnected (consumer.ReceiveAsync())
-            do! assertNotConnected (consumer.BatchReceiveAsync())
-            let! connected = consumer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.isFalse "Parent must stop before completing pending receives" connected
+            // A buffered close error would fill the one-message queue, so this also checks that it isn't buffered.
+            do! waitForStoppedChild crashed
+            Expect.isFalse "A failed child must not complete the pending batch" pendingBatch.IsCompleted
+            use! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(remainingTopic)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            let! _ = producer.SendAsync(Array.create 1024 1uy)
+            let! (messages : Messages<byte[]>) = pendingBatch.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "Pending batch should get the message from the remaining child" 1 messages.Count
         }
 
         testTask "Close queued behind a multi-topic consumer mailbox failure completes only after cleanup" {
@@ -533,28 +620,21 @@ let tests =
                 (MultiTopicConsumerMessage.Receive { CancellationToken = CancellationToken.None; MessageChannel = pendingReceive })
 
             let trigger = TaskCompletionSource<bool>()
-            let ack = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let pollerReply = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
             let close = TaskCompletionSource<unit>()
-            // queued while the trigger is being handled: the topic lookup for the ack faults the mailbox
+            // queued while the trigger is being handled: the null poll result faults the mailbox
             // and the Close is left for the drain
             queueBehind trigger (fun () ->
-                let bogusId = { MessageId.Earliest with TopicName = %"missing-topic" }
-                post multiConsumer.Mb (MultiTopicConsumerMessage.Acknowledge(ack, bogusId, None))
+                crashMultiTopicMailbox multiConsumer pollerReply
                 post multiConsumer.Mb (MultiTopicConsumerMessage.Close close))
             let atClose =
-                snapshotOnCompletion close (fun () -> ack.Task.IsCompleted, pendingReceive.Task.IsCompleted)
+                snapshotOnCompletion close (fun () -> pollerReply.Task.IsCompleted, pendingReceive.Task.IsCompleted)
             post multiConsumer.Mb (MultiTopicConsumerMessage.IsConnected trigger)
 
-            let! (ackCompleted, receiveCompleted) = atClose.WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.isTrue "In-flight request should be failed before the queued Close completes" ackCompleted
+            let! (pollCompleted, receiveCompleted) = atClose.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isTrue "In-flight request should be failed before the queued Close completes" pollCompleted
             Expect.isTrue "Receive waiter should be failed before the queued Close completes" receiveCompleted
-            try
-                do! ack.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
-                failwith "Acknowledge completed successfully after faulting the mailbox"
-            with ex ->
-                match unwrap ex with
-                | :? System.Collections.Generic.KeyNotFoundException -> ()
-                | other -> failwith $"Expected KeyNotFoundException but got {other.GetType().Name}: {other.Message}"
+            do! assertMailboxException pollerReply.Task
             do! assertAlreadyClosed pendingReceive.Task
             // a Failed transition after the drain's Close would overwrite Closed and make this NotConnectedException
             do! assertAlreadyClosed (consumer.GetStats())
@@ -563,9 +643,9 @@ let tests =
             Log.Debug("Finished Close queued behind a multi-topic consumer mailbox failure completes only after cleanup")
         }
 
-        testTask "Multi-topic consumer is closed at the broker when a child mailbox fails" {
+        testTask "Multi-topic consumer closes its children at the broker after a child mailbox fails" {
 
-            Log.Debug("Started Multi-topic consumer is closed at the broker when a child mailbox fails")
+            Log.Debug("Started Multi-topic consumer closes its children at the broker after a child mailbox fails")
             let client = getClient()
             let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
@@ -580,31 +660,291 @@ let tests =
                     .SubscribeAsync()
 
             let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
-            let children = multiConsumer.Consumers |> Array.map (fun c -> c :?> ConsumerImpl<byte[]>)
-            let crashed = children[0]
-            // the crashed child unregisters itself; the other child stays until the parent Close disposes it
-            let survivingTopic =
-                let crashedTopic = (crashed :> IConsumer<byte[]>).Topic
-                if crashedTopic.Contains(topicName1) then topicName2 else topicName1
-            let pendingReceive = consumer.ReceiveAsync()
-            do! Task.Delay 200
-            post crashed.Mb
-                (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
-
-            do! assertAlreadyClosed pendingReceive
+            let crashed = multiConsumer.Consumers |> Array.head :?> ConsumerImpl<byte[]>
+            crashChildMailbox crashed
+            do! waitForStoppedChild crashed
             do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
-            let! (consumer2 : IConsumer<byte[]>) =
+            // the crashed child closed itself at the broker and Close closed the other one, so both topics take
+            // a new exclusive consumer
+            for topicName in [ topicName1; topicName2 ] do
+                let! (consumer2 : IConsumer<byte[]>) =
+                    client.NewConsumer()
+                        .Topic(topicName)
+                        .ConsumerName("replacement")
+                        .SubscriptionName(subscriptionName)
+                        .SubscriptionType(SubscriptionType.Exclusive)
+                        .SubscribeAsync()
+                        .WaitAsync(TimeSpan.FromSeconds(15.0))
+                do! consumer2.UnsubscribeAsync()
+
+            Log.Debug("Finished Multi-topic consumer closes its children at the broker after a child mailbox fails")
+        }
+
+        testTask "A pattern topic discovered after a redelivery is consumed" {
+
+            Log.Debug("Started A pattern topic discovered after a redelivery is consumed")
+            let client = getClient()
+            let topicPrefix = $"public/default/pattern-epoch-{Guid.NewGuid():N}-"
+            let! (firstProducer : IProducer<byte[]>) =
+                client.NewProducer().Topic(topicPrefix + "first").EnableBatching(false).CreateAsync()
+
+            let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
-                    .Topic(survivingTopic)
-                    .ConsumerName("replacement")
-                    .SubscriptionName(subscriptionName)
+                    .TopicsPattern(topicPrefix + ".*")
+                    .ConsumerName("discoveredAfterRedelivery")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .PatternAutoDiscoveryPeriod(TimeSpan.FromHours(1.0))
+                    .SubscribeAsync()
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            // moves the consumer epoch on. A child created afterwards has to start from it, otherwise the parent
+            // discards its messages as stale
+            do! consumer.RedeliverUnacknowledgedMessagesAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            let! (secondProducer : IProducer<byte[]>) =
+                client.NewProducer().Topic(topicPrefix + "second").EnableBatching(false).CreateAsync()
+            post multiConsumer.Mb MultiTopicConsumerMessage.PatternTickTime
+            do! waitUntil "the new topic is subscribed" (fun () -> task {
+                let! connected = consumer.IsConnected()
+                return connected && multiConsumer.Consumers.Length = 2
+            })
+
+            let! _ = secondProducer.SendAsync([| 1uy |])
+            let! (message : Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The discovered topic should be consumed" [| 1uy |] (message.GetValue())
+            do! consumer.AcknowledgeAsync(message.MessageId).WaitAsync(TimeSpan.FromSeconds(5.0))
+            do! firstProducer.DisposeAsync().AsTask()
+            do! secondProducer.DisposeAsync().AsTask()
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished A pattern topic discovered after a redelivery is consumed")
+        }
+
+        testTask "Multi-topic consumer can't seek or unsubscribe while a child has stopped" {
+
+            Log.Debug("Started Multi-topic consumer can't seek or unsubscribe while a child has stopped")
+            let client = getClient()
+            let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topics([| topicName1; topicName2 |])
+                    .ConsumerName("stoppedChildRequests")
+                    .SubscriptionName("test-subscription")
                     .SubscriptionType(SubscriptionType.Exclusive)
                     .SubscribeAsync()
-                    .WaitAsync(TimeSpan.FromSeconds(15.0))
-            do! consumer2.UnsubscribeAsync()
 
-            Log.Debug("Finished Multi-topic consumer is closed at the broker when a child mailbox fails")
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            let crashed = multiConsumer.Consumers |> Array.head :?> ConsumerImpl<byte[]>
+            let remainingTopic = (multiConsumer.Consumers |> Array.last).Topic
+            crashChildMailbox crashed
+            do! waitForStoppedChild crashed
+
+            // as in the Java client, the request goes to every child, so the stopped one fails it
+            do! assertNotConnected (consumer.SeekAsync(MessageId.Earliest))
+
+            // the consumer keeps running
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(remainingTopic)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            let! _ = producer.SendAsync([| 1uy |])
+            let! (message : Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The remaining topic should still be consumed" [| 1uy |] (message.GetValue())
+            do! consumer.AcknowledgeAsync(message.MessageId).WaitAsync(TimeSpan.FromSeconds(5.0))
+            do! producer.DisposeAsync().AsTask()
+
+            do! assertNotConnected (consumer.UnsubscribeAsync())
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Multi-topic consumer can't seek or unsubscribe while a child has stopped")
+        }
+
+        testTask "A stopped child doesn't dispose the multi-topic consumer's interceptors" {
+
+            Log.Debug("Started A stopped child doesn't dispose the multi-topic consumer's interceptors")
+            let client = getClient()
+            let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let interceptor = new CountingInterceptor()
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topics([| topicName1; topicName2 |])
+                    .ConsumerName("stoppedChildInterceptors")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .Intercept(interceptor)
+                    .SubscribeAsync()
+
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            let crashed = multiConsumer.Consumers |> Array.head :?> ConsumerImpl<byte[]>
+            let remainingTopic = (multiConsumer.Consumers |> Array.last).Topic
+            crashChildMailbox crashed
+            do! waitForStoppedChild crashed
+            Expect.equal "A stopped child must not dispose the interceptors the parent still uses" 0 interceptor.Disposed
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(remainingTopic)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            let! _ = producer.SendAsync([| 1uy |])
+            let! (message : Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The remaining child should still run the interceptors" 1 interceptor.Consumed
+            do! consumer.AcknowledgeAsync(message.MessageId).WaitAsync(TimeSpan.FromSeconds(5.0))
+            do! producer.DisposeAsync().AsTask()
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "Closing the parent should dispose the interceptors once" 1 interceptor.Disposed
+
+            Log.Debug("Finished A stopped child doesn't dispose the multi-topic consumer's interceptors")
+        }
+
+        testTask "Multi-topic consumer keeps its interceptors until its children are closed after its mailbox fails" {
+
+            Log.Debug("Started Multi-topic consumer keeps its interceptors until its children are closed after its mailbox fails")
+            let client = getClient()
+            let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let interceptor = new CountingInterceptor()
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topics([| topicName1; topicName2 |])
+                    .ConsumerName("failedParentInterceptors")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .Intercept(interceptor)
+                    .SubscribeAsync()
+
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            let pollerReply = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            crashMultiTopicMailbox multiConsumer pollerReply
+            do! assertMailboxException pollerReply.Task
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (consumer.GetStats())
+            Expect.equal "The children still use the interceptors after the mailbox fails" 0 interceptor.Disposed
+
+            // the children outlive the mailbox until Close
+            let child = multiConsumer.Consumers |> Array.head
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(child.Topic)
+                    .EnableBatching(false)
+                    .CreateAsync()
+            let! _ = producer.SendAsync([| 1uy |])
+            let! (_ : Message<byte[]>) = child.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The child should still run the interceptors" 1 interceptor.Consumed
+            do! producer.DisposeAsync().AsTask()
+
+            // overlapping Closes, e.g. from concurrent disposals: only the first one closes the children
+            // and then disposes the interceptors
+            let closes = Array.init 2 (fun _ -> TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously))
+            for close in closes do
+                post multiConsumer.Mb (MultiTopicConsumerMessage.Close close)
+            let! _ = (closes |> Array.map _.Task |> Task.WhenAll).WaitAsync(TimeSpan.FromSeconds(5.0))
+            for child in multiConsumer.Consumers do
+                do! assertAlreadyClosed (child.GetStats())
+            Expect.equal "Closing the multi-topic consumer should dispose the interceptors once" 1 interceptor.Disposed
+            do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Multi-topic consumer keeps its interceptors until its children are closed after its mailbox fails")
+        }
+
+        testTask "Closing the client closes a multi-topic consumer whose mailbox failed" {
+
+            Log.Debug("Started Closing the client closes a multi-topic consumer whose mailbox failed")
+            let! (client : PulsarClient) = PulsarClientBuilder().ServiceUrl(pulsarAddress).BuildAsync()
+            let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let interceptor = new CountingInterceptor()
+
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topics([| topicName1; topicName2 |])
+                    .ConsumerName("failedParentClientClose")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .Intercept(interceptor)
+                    .SubscribeAsync()
+
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            let pollerReply = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            crashMultiTopicMailbox multiConsumer pollerReply
+            do! assertMailboxException pollerReply.Task
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (consumer.GetStats())
+
+            // as in the Java client, the failed consumer stays registered until it is closed, so closing the client
+            // closes its children and disposes the interceptors
+            do! client.CloseAsync().WaitAsync(TimeSpan.FromSeconds(10.0))
+            for child in multiConsumer.Consumers do
+                do! assertAlreadyClosed (child.GetStats())
+            Expect.equal "Closing the client should dispose the interceptors" 1 interceptor.Disposed
+            do! assertAlreadyClosed (consumer.GetStats())
+
+            Log.Debug("Finished Closing the client closes a multi-topic consumer whose mailbox failed")
+        }
+
+        testTask "Removing a pattern topic ends the reads of its failed consumer" {
+
+            Log.Debug("Started Removing a pattern topic ends the reads of its failed consumer")
+            let topicPrefix = $"persistent://public/default/removed-failed-child-{Guid.NewGuid():N}-"
+            let removedTopic = TopicName(topicPrefix + "removed")
+            let remainingTopic = TopicName(topicPrefix + "remaining")
+            let removedName : string = %removedTopic.CompleteTopicName
+            // pattern children never create topics
+            for topic in [ removedTopic; remainingTopic ] do
+                let! (producer : IProducer<byte[]>) = getClient().NewProducer().Topic(topic.ToString()).CreateAsync()
+                do! producer.DisposeAsync().AsTask()
+            let retrying = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let readEnded = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            do! runWithLogger (fun text ->
+                    if text.Contains("receive failed on the consumer for " + removedName) then
+                        retrying.TrySetResult() |> ignore
+                    if text.Contains("stopped reading the removed consumer for " + removedName) then
+                        readEnded.TrySetResult() |> ignore) (fun () -> task {
+                let config = { PulsarClientConfiguration.Default with ServiceAddresses = [| Uri(pulsarAddress) |] }
+                let pool = ConnectionPool(config)
+                let lookup = new BinaryLookupService(config, pool) :> ILookupService
+                try
+                    let consumerInfo topic : ConsumerInitInfo<byte[]> =
+                        { TopicName = topic; Schema = Schema.BYTES(); SchemaProvider = None; Metadata = { Partitions = 0 } }
+                    let patternInfo =
+                        { InitialTopics = [| consumerInfo removedTopic; consumerInfo remainingTopic |]
+                          GetTopics = fun () -> Task.FromResult [| remainingTopic |]
+                          GetConsumerInfo = consumerInfo >> Task.FromResult }
+                    let consumerConfig =
+                        { ConsumerConfiguration<byte[]>.Default with
+                            TopicsPattern = topicPrefix + ".*"
+                            SubscriptionName = %"removed-failed-child"
+                            PatternAutoDiscoveryPeriod = TimeSpan.FromHours(1.0) }
+                    let! (multiConsumer : MultiTopicsConsumerImpl<byte[]>) =
+                        MultiTopicsConsumerImpl.InitPattern(consumerConfig, config, pool, patternInfo, lookup,
+                                                            ConsumerInterceptors<byte[]>.Empty, ignore)
+                    let consumer = multiConsumer :> IConsumer<byte[]>
+                    let failed =
+                        multiConsumer.Consumers |> Array.find (fun child -> child.Topic = removedName) :?> ConsumerImpl<byte[]>
+                    crashChildMailbox failed
+                    do! waitForStoppedChild failed
+                    // restarts every child's reads, so the failed child's read is retried every 10 seconds
+                    do! consumer.RedeliverUnacknowledgedMessagesAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+                    do! retrying.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+
+                    // discovery removes the topic, which ends the read instead of leaving it to retry
+                    post multiConsumer.Mb MultiTopicConsumerMessage.PatternTickTime
+                    do! readEnded.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+                    // the read ends before discovery has removed the child, so wait for the mailbox to finish discovery
+                    let! _ = consumer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
+                    Expect.equal "Only the remaining topic's consumer should be left" 1 multiConsumer.Consumers.Length
+                    do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+                finally
+                    lookup.Dispose()
+                    pool.CloseAllConnections().GetAwaiter().GetResult()
+            })
+
+            Log.Debug("Finished Removing a pattern topic ends the reads of its failed consumer")
         }
 
         testTask "Requests posted after the multi-topic consumer is closed are already closed" {
@@ -687,15 +1027,11 @@ let tests =
                                 do! Task.Delay 100
                             connected <- isConnected
 
-                        try
-                            let! _ = producer.SendAsync([| 1uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
-                            failwith "SendAsync succeeded after mailbox failure"
-                        with :? NotConnectedException ->
-                            ()
+                        // SendAsync checks the producer state before it posts, and still reports why the producer failed
+                        do! assertNotConnectedBecauseOf typeof<NullReferenceException> (task { return! producer.SendAsync([| 1uy |]) })
 
                         // GetStats still posts once the producer has failed, so this only returns if the stopped mailbox replies
-                        Expect.throwsT2<NotConnectedException> (fun () ->
-                            producer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+                        do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
 
                         do! producer.DisposeAsync()
 
@@ -950,9 +1286,59 @@ let tests =
             Log.Debug("Finished Close queued behind a producer mailbox failure completes only after cleanup")
         }
 
-        testTask "Partitioned producer completes the request that faults its mailbox" {
+        testTask "Partitioned producer keeps sending to the other partitions when a partition producer fails" {
 
-            Log.Debug("Started Partitioned producer completes the request that faults its mailbox")
+            Log.Debug("Started Partitioned producer keeps sending to the other partitions when a partition producer fails")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            do! createPartitionedTopic topicName 2
+            let interceptor = new CountingProducerInterceptor()
+            // every message goes to the partition that keeps working
+            let router = { new IMessageRouter with member _.ChoosePartition(_, _) = 1 }
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName("failingPartition")
+                    .MessageRoutingMode(MessageRoutingMode.CustomPartition)
+                    .CustomMessageRouter(router)
+                    .Intercept(interceptor)
+                    .CreateAsync()
+
+            let partitioned = producer :?> PartitionedProducerImpl<byte[]>
+            let failed = partitioned.Producers |> Array.head :?> ProducerImpl<byte[]>
+            let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
+            // a null message crashes one partition mailbox
+            post failed.Mb
+                (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
+            do! assertMailboxException crashingSend.Task
+
+            // as in the Java client, a failed partition doesn't stop the others
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
+            let! (_ : SequenceId) = producer.LastSequenceId().WaitAsync(TimeSpan.FromSeconds(5.0))
+            let! connected = producer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse "The failed partition is not connected" connected
+            let! (_ : MessageId) = producer.SendAsync([| 1uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The failed partition must not dispose the interceptors the others still use" 0 interceptor.Disposed
+            Expect.equal "The remaining partition should still run the interceptors" 1 interceptor.Sent
+            do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "Closing the partitioned producer should dispose the interceptors once" 1 interceptor.Disposed
+
+            // the partition producers were closed, so the producer name is free
+            let! (producer2 : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .ProducerName("failingPartition")
+                    .CreateAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(15.0))
+            do! producer2.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Partitioned producer keeps sending to the other partitions when a partition producer fails")
+        }
+
+        testTask "Partitioned producer reports why its mailbox failed" {
+
+            Log.Debug("Started Partitioned producer reports why its mailbox failed")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             do! createPartitionedTopic topicName 2
@@ -960,37 +1346,105 @@ let tests =
             let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
-                    .ProducerName("failingPartitionStats")
+                    .ProducerName("failingPartitionedMailbox")
                     .CreateAsync()
 
-            let partitioned = producer :?> PartitionedProducerImpl<byte[]>
-            let child = partitioned.Producers |> Array.head :?> ProducerImpl<byte[]>
-            let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
-            // a null message crashes one partition mailbox. The parent GetStats awaits that child and faults with it
-            post child.Mb
-                (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
-            do! assertMailboxException crashingSend.Task
-
-            // this call is the message the parent mailbox is handling when it faults, so the drain cannot see it
-            do! assertNotConnected (producer.GetStats())
-            // later calls are answered by the drain
-            do! assertNotConnected (producer.GetStats())
-            do! assertNotConnected (producer.LastSequenceId())
-            do! assertNotConnected (producer.LastDisconnectedTimestamp())
+            crashPartitionedProducerMailbox (producer :?> PartitionedProducerImpl<byte[]>)
+            // answered by the drain, with the failure as the cause
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.LastSequenceId())
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.LastDisconnectedTimestamp())
+            // sends never reach the mailbox, they check the producer state first
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (task { return! producer.SendAsync([| 1uy |]) })
             let! connected = producer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
             Expect.isFalse "Partitioned producer should report disconnected after its mailbox stops" connected
             do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
-            // the child producers were closed, so the producer name is free
+            // the partition producers outlive the mailbox and were closed by Close, so the producer name is free
             let! (producer2 : IProducer<byte[]>) =
                 client.NewProducer()
                     .Topic(topicName)
-                    .ProducerName("failingPartitionStats")
+                    .ProducerName("failingPartitionedMailbox")
                     .CreateAsync()
                     .WaitAsync(TimeSpan.FromSeconds(15.0))
             do! producer2.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
-            Log.Debug("Finished Partitioned producer completes the request that faults its mailbox")
+            Log.Debug("Finished Partitioned producer reports why its mailbox failed")
+        }
+
+        testTask "Partitioned producer keeps its interceptors until its partitions are closed after its mailbox fails" {
+
+            Log.Debug("Started Partitioned producer keeps its interceptors until its partitions are closed after its mailbox fails")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            do! createPartitionedTopic topicName 2
+            let interceptor = new CountingProducerInterceptor()
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .EnableBatching(false)
+                    .Intercept(interceptor)
+                    .CreateAsync()
+
+            let partitioned = producer :?> PartitionedProducerImpl<byte[]>
+            crashPartitionedProducerMailbox partitioned
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
+            Expect.equal "The partitions still use the interceptors after the mailbox fails" 0 interceptor.Disposed
+
+            // the partitions outlive the mailbox until Close, and report the outcome of their sends
+            let partition = partitioned.Producers |> Array.head
+            let! (_ : MessageId) = partition.SendAsync([| 1uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The partition should still report its acknowledgements" 1 interceptor.Acknowledged
+            Expect.equal "The interceptors should not be disposed before the partitions are closed" 0 interceptor.Disposed
+
+            // overlapping Closes, e.g. from concurrent disposals: only the first one closes the partitions
+            // and then disposes the interceptors
+            let closes =
+                Array.init 2 (fun _ -> TaskCompletionSource<Result<unit, exn>>(TaskCreationOptions.RunContinuationsAsynchronously))
+            for close in closes do
+                post partitioned.Mb (PartitionedProducerMessage.Close close)
+            let! (closeResults : Result<unit, exn>[]) =
+                (closes |> Array.map _.Task |> Task.WhenAll).WaitAsync(TimeSpan.FromSeconds(5.0))
+            for closeResult in closeResults do
+                match closeResult with
+                | Ok () -> ()
+                | Error other -> failwith $"Close failed with {other.GetType().Name}: {other.Message}"
+            for child in partitioned.Producers do
+                do! assertAlreadyClosed (child.GetStats())
+            Expect.equal "Closing the partitioned producer should dispose the interceptors once" 1 interceptor.Disposed
+            do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            Log.Debug("Finished Partitioned producer keeps its interceptors until its partitions are closed after its mailbox fails")
+        }
+
+        testTask "Closing the client closes a partitioned producer whose mailbox failed" {
+
+            Log.Debug("Started Closing the client closes a partitioned producer whose mailbox failed")
+            let! (client : PulsarClient) = PulsarClientBuilder().ServiceUrl(pulsarAddress).BuildAsync()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            do! createPartitionedTopic topicName 2
+            let interceptor = new CountingProducerInterceptor()
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer()
+                    .Topic(topicName)
+                    .Intercept(interceptor)
+                    .CreateAsync()
+
+            let partitioned = producer :?> PartitionedProducerImpl<byte[]>
+            crashPartitionedProducerMailbox partitioned
+            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
+
+            // as in the Java client, the failed producer stays registered until it is closed, so closing the client
+            // closes its partitions and disposes the interceptors
+            do! client.CloseAsync().WaitAsync(TimeSpan.FromSeconds(10.0))
+            for child in partitioned.Producers do
+                do! assertAlreadyClosed (child.GetStats())
+            Expect.equal "Closing the client should dispose the interceptors" 1 interceptor.Disposed
+            do! assertAlreadyClosed (producer.GetStats())
+
+            Log.Debug("Finished Closing the client closes a partitioned producer whose mailbox failed")
         }
 
         testTask "Close queued behind a partitioned producer mailbox failure completes only after cleanup" {
@@ -1006,29 +1460,23 @@ let tests =
                     .CreateAsync()
 
             let partitioned = producer :?> PartitionedProducerImpl<byte[]>
-            // closed partitions stay in the list and answer GetStats with AlreadyClosedException, which faults
-            // the parent mailbox. Disposing them again completes at once, so the drain's Close does not wait
-            for child in partitioned.Producers do
-                do! child.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
-
             let trigger = TaskCompletionSource<bool>()
-            let crashingStats = TaskCompletionSource<ProducerStats>(TaskCreationOptions.RunContinuationsAsynchronously)
             let close = TaskCompletionSource<Result<unit, exn>>()
-            // queued while the trigger is being handled: GetStats faults the mailbox and the Close is left for the drain
+            // queued while the trigger is being handled: the first request faults the mailbox and the Close is left
+            // for the drain
             queueBehind trigger (fun () ->
-                post partitioned.Mb (PartitionedProducerMessage.GetStats crashingStats)
+                crashPartitionedProducerMailbox partitioned
                 post partitioned.Mb (PartitionedProducerMessage.Close close))
-            let atClose = snapshotOnCompletion close (fun () -> crashingStats.Task.IsCompleted)
             post partitioned.Mb (PartitionedProducerMessage.IsConnected trigger)
 
-            let! statsCompleted = atClose.WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.isTrue "In-flight request should be failed before the queued Close completes" statsCompleted
-            do! assertAlreadyClosed crashingStats.Task
-            match close.Task.Result with
+            let! (closeResult : Result<unit, exn>) = close.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+            match closeResult with
             | Ok () -> ()
             | Error other -> failwith $"Close failed after mailbox failure with {other.GetType().Name}: {other.Message}"
             // a Failed transition after the drain's Close would overwrite Closed and make this NotConnectedException
             do! assertAlreadyClosed (producer.GetStats())
+            for child in partitioned.Producers do
+                do! assertAlreadyClosed (child.GetStats())
             do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
             Log.Debug("Finished Close queued behind a partitioned producer mailbox failure completes only after cleanup")

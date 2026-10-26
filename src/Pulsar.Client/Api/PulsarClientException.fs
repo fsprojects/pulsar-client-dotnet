@@ -9,7 +9,9 @@ type IncompatibleSchemaException(msg) = inherit Exception(msg)
 type LookupException(msg) = inherit Exception(msg)
 type TooManyRequestsException(msg) = inherit Exception(msg)
 type ConnectException(msg) = inherit Exception(msg)
-type AlreadyClosedException(msg) = inherit Exception(msg)
+type AlreadyClosedException(msg: string, innerException: exn) =
+    inherit Exception(msg, innerException)
+    new(msg: string) = AlreadyClosedException(msg, null)
 type TopicTerminatedException(msg) = inherit Exception(msg)
 type AuthenticationException(msg) = inherit Exception(msg)
 type AuthorizationException(msg) = inherit Exception(msg)
@@ -19,7 +21,9 @@ type BrokerPersistenceException(msg) = inherit Exception(msg)
 type BrokerMetadataException(msg) = inherit Exception(msg)
 type ProducerBusyException(msg) = inherit Exception(msg)
 type ConsumerBusyException(msg) = inherit Exception(msg)
-type NotConnectedException(msg) = inherit Exception(msg)
+type NotConnectedException(msg: string, innerException: exn) =
+    inherit Exception(msg, innerException)
+    new(msg: string) = NotConnectedException(msg, null)
 type InvalidMessageException(msg) = inherit Exception(msg)
 type InvalidTopicNameException(msg) = inherit Exception(msg)
 type NotSupportedException(msg) = inherit Exception(msg)
@@ -78,4 +82,13 @@ module PulsarClientException =
         | :? ConsumerBusyException
              -> false
         | _ -> true
+
+    // As in the Java client: the topic was deleted, and the client may not create it again, so a producer or
+    // consumer that was already created closes itself instead of reconnecting.
+    let isUnrecoverableError (ex: exn) =
+        match ex with
+        | :? TopicDoesNotExistException
+        | :? NotFoundException
+             -> true
+        | _ -> false
 

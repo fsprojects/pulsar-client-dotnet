@@ -66,7 +66,7 @@ type internal ConsumerInitInfo<'T> =
     }
 
 type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
-                           topicName: TopicName, connectionPool: ConnectionPool,
+                           topicName: TopicName, getConnection: Broker * int -> Task<ClientCnx>,
                            partitionIndex: int, hasParentConsumer: bool, startMessageId: MessageId option,
                            startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
                            createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
@@ -128,7 +128,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let connectionHandler =
         ConnectionHandler(prefix,
-                          connectionPool,
+                          getConnection,
                           lookup,
                           topicName.CompleteTopicName,
                           (fun _ -> post this.Mb ConsumerMessage.ConnectionOpened),
@@ -584,7 +584,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let stopConsumer () =
         closeConsumerTasks()
-        failWaiters <| AlreadyClosedException "Consumer is already closed"
+        // a failed consumer passes on why it stopped, e.g. to a multi-topic parent
+        failWaiters <| AlreadyClosedException("Consumer is already closed", connectionHandler.FailureCause)
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let isInvalidConsumerEpoch = isInvalidConsumerEpoch consumerConfig.SubscriptionType
@@ -904,7 +905,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let stoppedMailboxException () =
         match connectionHandler.ConnectionState with
         | Closing | Closed | Terminated -> AlreadyClosedException(prefix + " already closed") :> exn
-        | _ -> NotConnectedException(prefix + " not connected") :> exn
+        | _ -> NotConnectedException(prefix + " not connected", connectionHandler.FailureCause) :> exn
 
     let failMailbox (ex: exn) =
         Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
@@ -928,7 +929,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 ()
         with closeEx ->
             Log.Logger.LogWarning(closeEx, "{0} failed to close consumer at the broker after mailbox failure", prefix)
-        connectionHandler.Failed()
+        connectionHandler.Failed(ex)
         stopConsumer()
         try
             currentMessage |> Option.iter (replyFromStoppedMailbox ex)
@@ -1011,26 +1012,29 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     with Flatten ex ->
                         clientCnx.RemoveConsumer consumerId
                         Log.Logger.LogError(ex, "{0} failed to subscribe to topic", prefix)
+                        // As in the Java client: while it is being created, the consumer retries an error it can retry
+                        // and fails on any other one. Once created, it keeps retrying unless its topic is gone.
                         match ex with
                         | _ when PulsarClientException.isRetriableError ex
-                                && (Stopwatch.GetElapsedTime(createConsumerStartTime) > clientConfig.OperationTimeout) ->
+                                && (Stopwatch.GetElapsedTime(createConsumerStartTime) < clientConfig.OperationTimeout) ->
                             connectionHandler.ReconnectLater ex
-                        | _ when not subscribeTsc.Task.IsCompleted ->
+                        | _ when not subscribeTsc.Task.IsCompleted && not (PulsarClientException.isRetriableError ex) ->
                             // unable to create new consumer, fail operation
-                            connectionHandler.Failed()
+                            connectionHandler.Failed(ex)
                             subscribeTsc.SetException(ex)
                             stopConsumer()
                             continueLoop <- false
-                        | :? TopicDoesNotExistException ->
+                        | _ when PulsarClientException.isUnrecoverableError ex ->
                             // The topic was deleted after the consumer was created, and we're
                             // not allowed to recreate the topic. This can happen in few cases:
                             //  * Regex consumer getting error after topic gets deleted
                             //  * Regular consumer after topic is manually delete and with
                             //    auto-topic-creation set to false
-                            // No more retries are needed in this case.
-                            connectionHandler.Failed()
-                            closeConsumerTasks()
+                            // No more retries are needed in this case. As in the Java client, pending receives
+                            // fail with AlreadyClosedException, so a multi-topic parent stops reading this consumer.
                             Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
+                            connectionHandler.Failed(ex)
+                            stopConsumer()
                             continueLoop <- false
                         | _ ->
                             // consumer was subscribed and connected, but we got some error, keep trying
@@ -1408,7 +1412,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 if ((nonRetriableError || timeout) && subscribeTsc.TrySetException(ex)) then
                     Log.Logger.LogInformation("{0} creation failed {1}", prefix,
                                                 if nonRetriableError then "with unretriableError" else "after timeout")
-                    connectionHandler.Failed()
+                    connectionHandler.Failed(ex)
+                    stopConsumer()
+                    continueLoop <- false
+                elif PulsarClientException.isUnrecoverableError ex then
+                    // the topic was deleted after the consumer was created, as when subscribing fails
+                    Log.Logger.LogWarning("{0} Closed consumer because topic does not exist anymore. {1}", prefix, ex.Message)
+                    connectionHandler.Failed(ex)
                     stopConsumer()
                     continueLoop <- false
 
@@ -1590,25 +1600,39 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         connectionHandler.GrabCnx()
         subscribeTsc.Task
 
+    // only before InitInternal, so that the first subscribe already uses it
+    member internal this.SetInitialConsumerEpoch(consumerEpoch: ConsumerEpoch) =
+        currentConsumerEpoch <- consumerEpoch
+
+    static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
+                       topicName: TopicName, getConnection: Broker * int -> Task<ClientCnx>, partitionIndex: int,
+                       hasParent: bool, startMessageId: MessageId option, startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
+                       createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
+                       interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit, ?consumerEpoch: ConsumerEpoch) =
+        backgroundTask {
+            let consumer =
+                if consumerConfig.ReceiverQueueSize > 0 then
+                    ConsumerImpl(consumerConfig, clientConfig, topicName, getConnection, partitionIndex, hasParent,
+                                startMessageId, startMessageRollbackDuration, lookup, createTopicIfDoesNotExist,
+                                schema, schemaProvider, interceptors, cleanup)
+                else
+                    ZeroQueueConsumerImpl(consumerConfig, clientConfig, topicName, getConnection, partitionIndex, hasParent,
+                                        startMessageId, lookup, createTopicIfDoesNotExist,
+                                        schema, schemaProvider, interceptors, cleanup) :> ConsumerImpl<'T>
+
+            consumerEpoch |> Option.iter (fun epoch -> consumer.SetInitialConsumerEpoch epoch)
+            do! consumer.InitInternal()
+            return consumer
+        }
+
     static member Init(consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
                        topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
                        hasParent: bool, startMessageId: MessageId option, startMessageRollbackDuration: TimeSpan, lookup: ILookupService,
                        createTopicIfDoesNotExist: bool, schema: ISchema<'T>, schemaProvider: MultiVersionSchemaInfoProvider option,
-                       interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) =
-        backgroundTask {
-            let consumer =
-                if consumerConfig.ReceiverQueueSize > 0 then
-                    ConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, hasParent,
-                                startMessageId, startMessageRollbackDuration, lookup, createTopicIfDoesNotExist,
-                                schema, schemaProvider, interceptors, cleanup)
-                else
-                    ZeroQueueConsumerImpl(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, hasParent,
-                                        startMessageId, lookup, createTopicIfDoesNotExist,
-                                        schema, schemaProvider, interceptors, cleanup) :> ConsumerImpl<'T>
-
-            do! consumer.InitInternal()
-            return consumer
-        }
+                       interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit, ?consumerEpoch: ConsumerEpoch) =
+        ConsumerImpl.Init(consumerConfig, clientConfig, topicName, connectionPool.GetConnection, partitionIndex, hasParent,
+                          startMessageId, startMessageRollbackDuration, lookup, createTopicIfDoesNotExist, schema,
+                          schemaProvider, interceptors, cleanup, ?consumerEpoch = consumerEpoch)
 
     abstract member ReceiveWrappedAsync: CancellationToken -> Task<ResultOrException<Message<'T>>>
     default this.ReceiveWrappedAsync(cancellationToken: CancellationToken) =
@@ -1850,14 +1874,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
 
 and internal ZeroQueueConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clientConfig: PulsarClientConfiguration,
-                           topicName: TopicName, connectionPool: ConnectionPool, partitionIndex: int,
+                           topicName: TopicName, getConnection: Broker * int -> Task<ClientCnx>, partitionIndex: int,
                            hasParent: bool, startMessageId: MessageId option,
                            lookup: ILookupService,
                            createTopicIfDoesNotExist: bool, schema: ISchema<'T>,
                            schemaProvider: MultiVersionSchemaInfoProvider option,
                            interceptors: ConsumerInterceptors<'T>, cleanup: ConsumerImpl<'T> -> unit) as this =
 
-    inherit ConsumerImpl<'T>(consumerConfig, clientConfig, topicName, connectionPool, partitionIndex, hasParent,
+    inherit ConsumerImpl<'T>(consumerConfig, clientConfig, topicName, getConnection, partitionIndex, hasParent,
                              startMessageId, TimeSpan.Zero, lookup, createTopicIfDoesNotExist,
                              schema, schemaProvider, interceptors, cleanup)
 

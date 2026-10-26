@@ -28,7 +28,9 @@
     <Compile Include="Auth\AuthenticationOauth2Tests.fs" />
     <Compile Include="Internal\EndPointResolverTests.fs" />
     <Compile Include="Internal\ConnectionPoolTests.fs" />
+    <Compile Include="Internal\HttpLookupServiceTests.fs" />
     <Compile Include="Internal\ProducerImplTests.fs" />
+    <Compile Include="Internal\ConsumerImplTests.fs" />
     <Compile Include="Internal\BatchMessageContainerTests.fs" />
     <Compile Include="Internal\CompressionCodecTests.fs" />
     <Compile Include="Internal\AcknowledgmentsGroupingTrackerTests.fs" />

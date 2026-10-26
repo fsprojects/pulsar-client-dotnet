@@ -1,13 +1,20 @@
 ﻿namespace Pulsar.Client.Internal
 
 open System
+open System.Threading
 open Microsoft.Extensions.Logging
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 
-type internal ConsumerInterceptors<'T>(interceptors: IConsumerInterceptor<'T> array) =
+type internal ConsumerInterceptors<'T>(interceptors: IConsumerInterceptor<'T> array, ownsInterceptors: bool) =
+     let mutable closed = 0
+     new(interceptors: IConsumerInterceptor<'T> array) = ConsumerInterceptors<'T>(interceptors, true)
      member this.Interceptors = interceptors
      static member Empty with get() = ConsumerInterceptors<'T>([||])
+
+     // the same interceptors for a consumer that doesn't own them, e.g. a child of a multi-topic consumer,
+     // which can stop while the owner keeps using them
+     member this.Borrow() = ConsumerInterceptors<'T>(interceptors, false)
      
      member this.BeforeConsume (consumer: IConsumer<'T>, msg: Message<'T>) =
           let mutable interceptorMessage = msg         
@@ -49,9 +56,11 @@ type internal ConsumerInterceptors<'T>(interceptors: IConsumerInterceptor<'T> ar
                     with e ->
                          Log.Logger.LogWarning(e, "Error executing interceptor OnAckTimeoutSend callback");
           
+     // only the first call disposes them, as every Close of an owner whose mailbox has stopped calls it again
      member this.Close() =
-          for interceptor in interceptors do
-               try
-                    interceptor.Dispose()
-               with e ->
-                    Log.Logger.LogWarning(e, "Fail to close consumer interceptor");
+          if ownsInterceptors && Interlocked.Exchange(&closed, 1) = 0 then
+               for interceptor in interceptors do
+                    try
+                         interceptor.Dispose()
+                    with e ->
+                         Log.Logger.LogWarning(e, "Fail to close consumer interceptor");

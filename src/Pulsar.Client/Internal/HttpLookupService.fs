@@ -31,16 +31,22 @@ type internal PulsarHttpClient () =
 
     member this.Get<'T> (requestUri: string, auth: Authentication) =
         backgroundTask {
-            let authenticationDataProvider = auth.GetAuthData()
-            if authenticationDataProvider.HasDataForHttp() then
-                use request = new HttpRequestMessage(HttpMethod.Get, requestUri)
-                for headerPropertyEntry in authenticationDataProvider.GetHttpHeaders() do
-                    request.Headers.Add(headerPropertyEntry.Key, headerPropertyEntry.Value)
-                use! response = httpClient.SendAsync(request)
-                response.EnsureSuccessStatusCode() |> ignore
-                return! response.Content.ReadFromJsonAsync<'T>(jsonOptions)
-            else
-                return! httpClient.GetFromJsonAsync<'T>(requestUri, jsonOptions)
+            try
+                let authenticationDataProvider = auth.GetAuthData()
+                if authenticationDataProvider.HasDataForHttp() then
+                    use request = new HttpRequestMessage(HttpMethod.Get, requestUri)
+                    for headerPropertyEntry in authenticationDataProvider.GetHttpHeaders() do
+                        request.Headers.Add(headerPropertyEntry.Key, headerPropertyEntry.Value)
+                    use! response = httpClient.SendAsync(request)
+                    response.EnsureSuccessStatusCode() |> ignore
+                    return! response.Content.ReadFromJsonAsync<'T>(jsonOptions)
+                else
+                    return! httpClient.GetFromJsonAsync<'T>(requestUri, jsonOptions)
+            with
+            // As in the Java client, e.g. a lookup of a deleted topic, so a producer or consumer that was already
+            // created stops instead of reconnecting
+            | :? HttpRequestException as ex when ex.StatusCode = Nullable HttpStatusCode.NotFound ->
+                return raise (NotFoundException($"Not found: {requestUri}"))
         }
 
     member this.Dispose() =
@@ -246,7 +252,7 @@ type internal HttpLookupService (config: PulsarClientConfiguration) =
                 match ex with
                 //  When there is no topic related schema, pulsar http rest api will return a 404 exception
                 //  In this case the request it's success, and we can return a None schema
-                | :? HttpRequestException as ex when ex.StatusCode = Nullable HttpStatusCode.NotFound ->
+                | :? NotFoundException ->
                     Log.Logger.LogWarning(ex, "No schema found for topic {0} version {1}", topicName, schemaVersion)
                     return None
                 | _ ->

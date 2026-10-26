@@ -117,7 +117,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
     let failPendingBatchMessages (ex: exn) =
         if batchMessageContainer.NumMessagesInBatch > 0 then
-            batchMessageContainer.Discard ex
+            batchMessageContainer.Discard(fun batchItem -> failMessage batchItem.Message batchItem.Tcs ex)
 
     let disposePendingPayload (msg: PendingMessage<'T>) =
         lock msg.Payload (fun () -> msg.Payload.Dispose())
@@ -127,9 +127,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             let msg = pendingMessages.Dequeue()
             disposePendingPayload msg
             failPendingMessage msg ex
+        // as in the Java client, every message that went through the interceptors hears how its send ended,
+        // including those still waiting for room in the queue or in the batch
         while blockedRequests.Count > 0 do
-            let struct(_, channel, _) = blockedRequests.Dequeue()
-            channel.TrySetException(ex) |> ignore
+            let struct(message, channel, _) = blockedRequests.Dequeue()
+            failMessage message (Some channel) ex
         if producerConfig.BatchingEnabled then
             failPendingBatchMessages ex
 
@@ -510,9 +512,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         batchTimer.Stop()
         cryptoTimer.Stop()
         connectionHandler.Close()
-        interceptors.Close()
         statTimer.Stop()
         cleanup(this)
+        // last, as in the Java client; pending messages have to be failed before, so the interceptors hear about them
+        interceptors.Close()
         Log.Logger.LogInformation("{0} stopped", prefix)
 
     let producerOperations = {
@@ -544,7 +547,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let stoppedMailboxException () =
         match connectionHandler.ConnectionState with
         | Closing | Closed | Terminated -> AlreadyClosedException(prefix + " already closed") :> exn
-        | _ -> NotConnectedException(prefix + " not connected") :> exn
+        | _ -> NotConnectedException(prefix + " not connected", connectionHandler.FailureCause) :> exn
 
     let failMailbox (ex: exn) =
         if not mailboxFailed then
@@ -572,7 +575,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     ()
             with closeEx ->
                 Log.Logger.LogWarning(closeEx, "{0} failed to close producer at the broker after mailbox failure", prefix)
-            connectionHandler.Failed()
+            connectionHandler.Failed(ex)
             try
                 failPendingMessages ex
             with pendingEx ->
@@ -583,6 +586,15 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             with currentEx ->
                 Log.Logger.LogWarning(currentEx, "{0} failed to fail the in-flight request after mailbox failure", prefix)
             producerCreatedTsc.TrySetException(ex) |> ignore
+
+    // As in the Java client: the topic was deleted, and the producer may not create it again, so it closes itself
+    // instead of reconnecting.
+    let closeWhenReceivedUnrecoverableError (ex: exn) =
+        Log.Logger.LogWarning("{0} Closed producer because topic does not exist anymore. {1}", prefix, ex.Message)
+        connectionHandler.Closed()
+        failPendingMessages <| AlreadyClosedException("Producer was closed because its topic does not exist anymore", ex)
+        stopProducer()
+        producerCreatedTsc.TrySetException(ex) |> ignore
 
     // requests posted after the mailbox exits would otherwise never be completed
     let drainStoppedMailbox () =
@@ -636,13 +648,6 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         clientCnx.RemoveProducer producerId
                         Log.Logger.LogError(ex, "{0} Failed to create", prefix)
                         match ex with
-                        | :? TopicDoesNotExistException ->
-                            match connectionHandler.ConnectionState with
-                            | Failed ->
-                                Log.Logger.LogWarning("{0} Topic doesn't exist exception {1}", prefix, ex.Message)
-                                let! _ = postAndAsyncReply this.Mb ProducerMessage.Close
-                                producerCreatedTsc.TrySetException(ex) |> ignore
-                            | _ -> ()
                         | :? ProducerBlockedQuotaExceededException ->
                             Log.Logger.LogWarning("{0} Topic backlog quota exceeded. {1}", prefix, ex.Message)
                             failPendingMessages(ex)
@@ -652,6 +657,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             ()
 
                         match ex with
+                        | _ when PulsarClientException.isUnrecoverableError ex ->
+                            closeWhenReceivedUnrecoverableError ex
                         | :? TopicTerminatedException ->
                             Log.Logger.LogWarning("{0} is terminated. {1}", prefix, ex.Message)
                             connectionHandler.Terminate()
@@ -659,19 +666,23 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             producerCreatedTsc.TrySetException(ex) |> ignore
                             stopProducer()
                         | _ when producerCreatedTsc.Task.IsCompleted
-                                    || (Stopwatch.GetElapsedTime(createProducerStartTime) > clientConfig.OperationTimeout) ->
+                                    || (PulsarClientException.isRetriableError ex
+                                        && Stopwatch.GetElapsedTime(createProducerStartTime) < clientConfig.OperationTimeout) ->
                             // Either we had already created the producer once (producerCreatedFuture.isDone()) or we are
                             // still within the initial timeout budget and we are dealing with a retryable error
                             connectionHandler.ReconnectLater ex
                         | _ ->
-                            connectionHandler.Failed()
+                            connectionHandler.Failed(ex)
                             producerCreatedTsc.SetException(ex)
                             stopProducer()
                 | _ ->
                     Log.Logger.LogWarning("{0} connection opened but connection is not ready", prefix)
 
-                if connectionHandler.ConnectionState = Failed then
+                match connectionHandler.ConnectionState with
+                | Failed | Closed ->
                     continueLoop <- false
+                | _ ->
+                    ()
 
             | ProducerMessage.ConnectionClosed clientCnx ->
 
@@ -686,8 +697,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 if ((nonRetriableError || timeout) && producerCreatedTsc.TrySetException(ex)) then
                     Log.Logger.LogInformation("{0} connection failed {1}", prefix,
                                                 if nonRetriableError then "with unretriableError" else "after timeout")
-                    connectionHandler.Failed()
+                    connectionHandler.Failed(ex)
                     stopProducer()
+                    continueLoop <- false
+                elif PulsarClientException.isUnrecoverableError ex then
+                    closeWhenReceivedUnrecoverableError ex
                     continueLoop <- false
 
             | ProducerMessage.BeginSendMessage sendRequest ->
@@ -900,21 +914,21 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         response |> PulsarResponseType.GetEmpty
                         clientCnx.RemoveProducer(producerId)
                         connectionHandler.Closed()
-                        stopProducer()
                         failPendingMessages <| AlreadyClosedException "Producer was already closed"
+                        stopProducer()
                         channel.SetResult <| Ok()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed to close", prefix)
                         clientCnx.RemoveProducer(producerId)
                         connectionHandler.Closed()
-                        stopProducer()
                         failPendingMessages ex
+                        stopProducer()
                         channel.SetResult <| Error ex
                 | _ ->
                     Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
                     connectionHandler.Closed()
-                    stopProducer()
                     failPendingMessages <| AlreadyClosedException "Producer was already closed"
+                    stopProducer()
                     channel.SetResult <| Ok()
 
                 continueLoop <- false
