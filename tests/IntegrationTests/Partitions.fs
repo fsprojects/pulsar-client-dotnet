@@ -8,6 +8,7 @@ open Expecto.Flip
 open Pulsar.Client.Api
 
 open System.Text
+open System.Threading
 open System.Threading.Tasks
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
@@ -352,7 +353,7 @@ let tests =
                         for batchIndex in 1..consecutiveBatches do
                             let sw = Stopwatch()
                             sw.Start()
-                            use cts = new Threading.CancellationTokenSource(batchTimeout + TimeSpan.FromSeconds(1.0))
+                            use cts = new CancellationTokenSource(batchTimeout + TimeSpan.FromSeconds(1.0))
                             let! messagesBatch = consumer.BatchReceiveAsync(cts.Token)
                             let elapsed = sw.Elapsed
                             if messagesBatch.Count <> maxNumMessages then
@@ -425,17 +426,20 @@ let tests =
             let sw = Stopwatch()
             sw.Start()
             for i in 1..totalMessages do
-                use cts = new Threading.CancellationTokenSource(receiveTimeout - sw.Elapsed)
+                let cts = new CancellationTokenSource(receiveTimeout - sw.Elapsed)
                 try
-                    let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
-                    match message.MessageId.Partition with
-                    | 0 -> partition0Count <- partition0Count + 1
-                    | 1 -> partition1Count <- partition1Count + 1
-                    | p -> failwith <| sprintf "Unexpected partition %i" p
-                    do! consumer.AcknowledgeAsync(message.MessageId)
-                with :? OperationCanceledException ->
-                    failwith <| sprintf "Timed out after %i/%i messages while draining past shared-queue pause (elapsed %f ms); partition0=%i partition1=%i"
-                        (i - 1) totalMessages sw.Elapsed.TotalMilliseconds partition0Count partition1Count
+                    try
+                        let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
+                        match message.MessageId.Partition with
+                        | 0 -> partition0Count <- partition0Count + 1
+                        | 1 -> partition1Count <- partition1Count + 1
+                        | p -> failwith <| sprintf "Unexpected partition %i" p
+                        do! consumer.AcknowledgeAsync(message.MessageId)
+                    with :? OperationCanceledException ->
+                        failwith <| sprintf "Timed out after %i/%i messages while draining past shared-queue pause (elapsed %f ms); partition0=%i partition1=%i"
+                            (i - 1) totalMessages sw.Elapsed.TotalMilliseconds partition0Count partition1Count
+                finally
+                    cts.Dispose()
 
             if partition0Count <> messagesPerPartition || partition1Count <> messagesPerPartition then
                 failwith <| sprintf "Expected %i messages from each partition after pause/resume, got partition0=%i partition1=%i"
@@ -505,20 +509,23 @@ let tests =
             let sw = Stopwatch()
             sw.Start()
             for i in 1..totalMessages do
-                use cts = new Threading.CancellationTokenSource(receiveTimeout - sw.Elapsed)
+                let cts = new CancellationTokenSource(receiveTimeout - sw.Elapsed)
                 try
-                    let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
-                    match message.MessageId.Partition with
-                    | 0 -> hotCount <- hotCount + 1
-                    | 1 ->
-                        coldCount <- coldCount + 1
-                        if coldCount = coldPartitionMessages && hotCountWhenColdDone.IsNone then
-                            hotCountWhenColdDone <- Some hotCount
-                    | p -> failwith <| sprintf "Unexpected partition %i" p
-                    do! consumer.AcknowledgeAsync(message.MessageId)
-                with :? OperationCanceledException ->
-                    failwith <| sprintf "Timed out after %i/%i messages (elapsed %f ms); hot=%i cold=%i"
-                        (i - 1) totalMessages sw.Elapsed.TotalMilliseconds hotCount coldCount
+                    try
+                        let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
+                        match message.MessageId.Partition with
+                        | 0 -> hotCount <- hotCount + 1
+                        | 1 ->
+                            coldCount <- coldCount + 1
+                            if coldCount = coldPartitionMessages && hotCountWhenColdDone.IsNone then
+                                hotCountWhenColdDone <- Some hotCount
+                        | p -> failwith <| sprintf "Unexpected partition %i" p
+                        do! consumer.AcknowledgeAsync(message.MessageId)
+                    with :? OperationCanceledException ->
+                        failwith <| sprintf "Timed out after %i/%i messages (elapsed %f ms); hot=%i cold=%i"
+                            (i - 1) totalMessages sw.Elapsed.TotalMilliseconds hotCount coldCount
+                finally
+                    cts.Dispose()
 
             match hotCountWhenColdDone with
             | None ->
@@ -584,7 +591,7 @@ let tests =
             sw.Start()
             do! task {
                 for i in 1..messagesInProducerBatch do
-                    use cts = new Threading.CancellationTokenSource(consumeTimeout - sw.Elapsed)
+                    use cts = new CancellationTokenSource(consumeTimeout - sw.Elapsed)
                     try
                         let! (message : Message<byte[]>) = consumer.ReceiveAsync(cts.Token)
                         receivedMessageIds.Add(message.MessageId)
