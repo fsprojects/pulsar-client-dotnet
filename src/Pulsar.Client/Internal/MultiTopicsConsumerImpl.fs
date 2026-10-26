@@ -399,7 +399,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         }
 
     let isPollingAllowed() =
-        incomingMessages.Count < consumerConfig.ReceiverQueueSize
+        incomingMessages.Count < max 1 consumerConfig.ReceiverQueueSize
 
     let isInvalidConsumerEpoch = isInvalidConsumerEpoch consumerConfig.SubscriptionType
     let isConsumerEpochSupported = isConsumerEpochSupported consumerConfig.SubscriptionType
