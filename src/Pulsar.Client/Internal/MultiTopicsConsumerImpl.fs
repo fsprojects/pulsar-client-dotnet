@@ -120,6 +120,11 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let incomingMessages = Queue<ResultOrException<Message<'T>>>()
     let partitionsTimer = new Timer(consumerConfig.AutoUpdatePartitionsInterval.TotalMilliseconds)
     let patternTimer = new Timer(consumerConfig.PatternAutoDiscoveryPeriod.TotalMilliseconds)
+    // as in the Java client, the shared queue holds at least two messages, polling pauses when it is full
+    // and resumes when it is half empty; Java rejects a zero queue here, which keeps holding a single message
+    let sharedQueueSize =
+        if consumerConfig.ReceiverQueueSize = 0 then 1 else max 2 consumerConfig.ReceiverQueueSize
+    let sharedQueueResumeThreshold = sharedQueueSize / 2
     let dummyTopicName = "MultiTopicsConsumer-" + Generators.getRandomName()
 
     let redeliverMessages messages =
@@ -428,9 +433,6 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                 Log.Logger.LogError(ex, "{0} could not processRemovedTopics fully", prefix)
         }
 
-    let isPollingAllowed() =
-        incomingMessages.Count < max 1 consumerConfig.ReceiverQueueSize
-
     let isInvalidConsumerEpoch = isInvalidConsumerEpoch consumerConfig.SubscriptionType
     let isConsumerEpochSupported = isConsumerEpochSupported consumerConfig.SubscriptionType
 
@@ -442,7 +444,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         incomingMessages.Enqueue(m)
         
     let tryResumePoller() =
-        if isPollingAllowed() && (waitingPoller <> defaultWaitingPoller) then
+        if incomingMessages.Count <= sharedQueueResumeThreshold && (waitingPoller <> defaultWaitingPoller) then
             Log.Logger.LogDebug("{0} resume poller", prefix)
             waitingPoller.SetResult()
             waitingPoller <- defaultWaitingPoller
@@ -815,10 +817,10 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             let ch = batchWaiters |> dequeueBatchWaiter
                             replyWithBatch ch
                 // check if should reply to poller immediately
-                if isPollingAllowed() then
+                if incomingMessages.Count < sharedQueueSize then
                     pollerChannel.SetResult()
                 else
-                    Log.Logger.LogDebug("{0} paused poller, incomingMessages={1}, receiverQueueSize={2}", prefix, incomingMessages.Count, consumerConfig.ReceiverQueueSize)
+                    Log.Logger.LogDebug("{0} paused poller, incomingMessages={1}, sharedQueueSize={2}", prefix, incomingMessages.Count, sharedQueueSize)
                     waitingPoller <- pollerChannel
 
             | Receive receiveCallback ->
