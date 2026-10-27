@@ -1,10 +1,12 @@
 module Pulsar.Client.IntegrationTests.Common
 
 open System
+open System.Diagnostics
 open System.Net.Http
 open Pulsar.Client.Api
 
 open System.Text
+open System.Text.Json
 open System.Threading.Tasks
 open System.Security.Cryptography.X509Certificates
 open Pulsar.Client.Common
@@ -128,6 +130,34 @@ let getTxnClient() =
         .ServiceUrl(pulsarAddress)
         .EnableTransaction(true)
         .BuildAsync().Result
+
+let createPartitionedTopic (topicName: string) (numPartitions: int) =
+    task {
+        use http = new HttpClient(new HttpClientHandler(UseProxy = false))
+        http.BaseAddress <- Uri(pulsarHttpAddress)
+        http.Timeout <- TimeSpan.FromSeconds(15.0)
+        use partitions = new StringContent(string numPartitions, Encoding.UTF8, "application/json")
+        let! created = http.PutAsync($"/admin/v2/persistent/{topicName}/partitions", partitions)
+        created.EnsureSuccessStatusCode() |> ignore
+    }
+
+// msgOutCounter counts the messages the broker has sent to the subscription's consumers
+let waitForDispatchedMessages (topicName: string) (subscriptionName: string) (count: int64) (timeout: TimeSpan) =
+    task {
+        use http = new HttpClient(new HttpClientHandler(UseProxy = false))
+        http.BaseAddress <- Uri(pulsarHttpAddress)
+        http.Timeout <- TimeSpan.FromSeconds(15.0)
+        let sw = Stopwatch.StartNew()
+        let mutable dispatched = 0L
+        while dispatched < count do
+            if sw.Elapsed > timeout then
+                failwith $"The broker dispatched {dispatched}/{count} messages of {topicName} to {subscriptionName} in {timeout}"
+            let! stats = http.GetStringAsync($"/admin/v2/persistent/{topicName}/stats")
+            use json = JsonDocument.Parse(stats)
+            dispatched <- json.RootElement.GetProperty("subscriptions").GetProperty(subscriptionName).GetProperty("msgOutCounter").GetInt64()
+            if dispatched < count then
+                do! Task.Delay(50)
+    }
 
 let produceMessages (producer: IProducer<byte[]>) number producerName =
     task {
