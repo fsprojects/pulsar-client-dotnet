@@ -488,10 +488,11 @@ let tests =
                     return found0.Value, found1.Value
                 }
 
+            let subscriptionName = "test-subscription-" + Guid.NewGuid().ToString("N")
             let! (consumer : IConsumer<byte[]>) =
                 client.NewConsumer()
                     .Topic(topicName)
-                    .SubscriptionName("test-subscription-" + Guid.NewGuid().ToString("N"))
+                    .SubscriptionName(subscriptionName)
                     .ConsumerName("PartitionedConsumerAntiStarvation")
                     .ReceiverQueueSize(receiverQueueSize)
                     .SubscribeAsync()
@@ -502,6 +503,9 @@ let tests =
             for _ in 1..coldPartitionMessages do
                 let! _ = producer.NewMessage(Encoding.UTF8.GetBytes("cold"), coldKey) |> producer.SendAsync
                 ()
+            // the broker dispatches new entries with a delay, so without this wait
+            // the hot backlog could be drained before the cold messages reach the consumer
+            do! waitForDispatchedMessages (topicName + "-partition-1") subscriptionName (int64 coldPartitionMessages) receiveTimeout
 
             let mutable hotCount = 0
             let mutable coldCount = 0
