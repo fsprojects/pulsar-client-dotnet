@@ -674,7 +674,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     Log.Logger.LogInformation("{0} poller has stopped normally", prefix)
             )
 
-    let mb = Channel.CreateUnbounded<MultiTopicConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mb = Channel.CreateUnbounded<MultiTopicConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
 
     let replyFromStoppedMailbox (ex: exn) (msg: MultiTopicConsumerMessage<'T>) =
         match msg with

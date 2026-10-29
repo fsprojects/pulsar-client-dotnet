@@ -526,7 +526,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         ConnectionClosed = fun clientCnx -> post this.Mb (ConnectionClosed clientCnx)
     }
 
-    let mb = Channel.CreateUnbounded<ProducerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mb = Channel.CreateUnbounded<ProducerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     let mutable currentMessage : ProducerMessage<'T> option = None
     let mutable mailboxFailed = false
 

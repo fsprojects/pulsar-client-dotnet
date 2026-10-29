@@ -40,7 +40,7 @@ type internal UnAckedMessageTracker(prefix: string,
         for _ in [1..stepsCount] do
             timePartitions.Enqueue(RedeliverSet())
 
-    let mb = Channel.CreateUnbounded<UnackedTrackerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mb = Channel.CreateUnbounded<UnackedTrackerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do

@@ -46,7 +46,7 @@ type internal ConnectionHandler( parentPrefix: string,
         | Uninitialized | Connecting | Ready _ -> true
         | _ -> false
 
-    let mb = Channel.CreateUnbounded<ConnectionHandlerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mb = Channel.CreateUnbounded<ConnectionHandlerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
