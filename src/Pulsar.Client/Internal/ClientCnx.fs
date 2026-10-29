@@ -216,7 +216,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         post this.OperationsMb CnxOperation.Stop
         post this.RequestsMb RequestsOperation.Stop
 
-    let requestsMb = Channel.CreateUnbounded<RequestsOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let requestsMb = Channel.CreateUnbounded<RequestsOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
@@ -254,7 +254,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogInformation("{0} requestsMb mailbox has stopped normally", prefix))
         |> ignore
 
-    let operationsMb = Channel.CreateUnbounded<CnxOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let operationsMb = Channel.CreateUnbounded<CnxOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
@@ -309,7 +309,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 return false
         }
 
-    let sendMb = Channel.CreateUnbounded<SocketMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let sendMb = Channel.CreateUnbounded<SocketMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do

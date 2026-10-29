@@ -121,7 +121,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
         connectionHandler.Close()
         Log.Logger.LogInformation("{0} stopped", prefix)
 
-    let mb = Channel.CreateUnbounded<TransactionMetaStoreMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mb = Channel.CreateUnbounded<TransactionMetaStoreMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do

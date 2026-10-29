@@ -60,7 +60,7 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                 | true, v -> seq { v }
                 | false, _ -> Seq.empty)
 
-    let mb = Channel.CreateUnbounded<InterceptorCommand>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mb = Channel.CreateUnbounded<InterceptorCommand>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do

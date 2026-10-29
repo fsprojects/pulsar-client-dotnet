@@ -864,7 +864,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         AckReceipt = fun reqId -> post this.Mb (AckReceipt(reqId))
     }
 
-    let mb = Channel.CreateUnbounded<ConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mb = Channel.CreateUnbounded<ConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     let mutable currentMessage : ConsumerMessage<'T> option = None
 
     let replyFromStoppedMailbox (ex: exn) (msg: ConsumerMessage<'T>) =
