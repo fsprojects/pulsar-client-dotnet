@@ -12,6 +12,7 @@ open Expecto
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
+open pulsar.proto
 
 let private config =
     { PulsarClientConfiguration.Default with
@@ -54,6 +55,30 @@ let private newCnx (incoming: Pipe) (output: PipeWriter) =
 let private request (cnx: ClientCnx) =
     let requestId = Generators.getNextRequestId()
     cnx.SendAndWaitForReply requestId (Commands.newPartitionMetadataRequest topic requestId)
+
+let private mailbox<'T> name (cnx: ClientCnx) =
+    typeof<ClientCnx>.GetProperty(name, BindingFlags.Instance ||| BindingFlags.NonPublic).GetValue(cnx) :?> Channel<'T>
+
+/// Holds the requests loop until the returned gate is opened: the loop completes an injected request whose continuation
+/// runs on the loop's thread and waits there.
+let private holdRequestsLoop (requestsMb: Channel<RequestsOperation>) : Task<TaskCompletionSource> =
+    task {
+        let held = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+        let gate = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+        let reply = TaskCompletionSource<PulsarResponseType>()
+        reply.Task.ContinueWith((fun (_: Task<PulsarResponseType>) ->
+            held.TrySetResult() |> ignore
+            gate.Task.Wait(TimeSpan.FromSeconds(5.0)) |> ignore), TaskContinuationOptions.ExecuteSynchronously) |> ignore
+        let requestId = Generators.getNextRequestId()
+        // Written from the thread pool: requestsMb allows synchronous continuations, so its loop can run on the
+        // writer's thread, and that thread is the one held.
+        Task.Run(fun () ->
+            requestsMb.Writer.TryWrite(AddRequest(requestId, BaseCommand.Type.PartitionedMetadata, reply)) |> ignore
+            requestsMb.Writer.TryWrite(CompleteRequest(requestId, BaseCommand.Type.PartitionedMetadata, PulsarResponseType.Empty)) |> ignore)
+        |> ignore
+        do! held.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+        return gate
+    }
 
 // requestsMb stops its timeout timer and operationsMb its keep-alive timer when they process Stop,
 // so both timers being disabled means both mailboxes have stopped.
@@ -107,6 +132,10 @@ let tests =
             Expect.isFalse cnx.IsActive "The connection is deactivated"
             let! firstCompleted = completesInTime first
             Expect.isTrue firstCompleted "The request registered before the close fails with the connection"
+            // Wait until requestsMb is completed too, so the second request's AddRequest is rejected; the last test covers
+            // one queued behind Stop. Not asserted: without the change nothing completes requestsMb, and the second
+            // request is what fails.
+            let! _ = completesInTime (mailbox<RequestsOperation> "RequestsMb" cnx).Reader.Completion
 
             // Only now does the send loop finish the first write and reach the second request.
             output.Open()
@@ -119,9 +148,7 @@ let tests =
             let incoming = Pipe()
             let output = new GatedWriter()
             let cnx = newCnx incoming output
-            let sendMb =
-                typeof<ClientCnx>.GetProperty("SendMb", BindingFlags.Instance ||| BindingFlags.NonPublic).GetValue(cnx)
-                :?> Channel<SocketMessage>
+            let sendMb = mailbox<SocketMessage> "SendMb" cnx
 
             // The send loop is held inside a write, and Stop is queued behind it while the connection is still active,
             // so the next calls pass the IsActive check and land behind Stop.
@@ -146,5 +173,28 @@ let tests =
             Expect.isTrue lateSendCompleted "A send after the send loop stopped completes"
             Expect.isFalse lateSend.Result "A send after the send loop stopped reports that nothing was sent"
             do! failsWithConnectException lateRequest "A request after the send loop stopped"
+        }
+
+        testTask "A request whose AddRequest is queued behind Stop completes" {
+            let incoming = Pipe()
+            let outgoing = Pipe()
+            let cnx = newCnx incoming outgoing.Writer
+            let requestsMb = mailbox<RequestsOperation> "RequestsMb" cnx
+
+            // With the requests loop held, Stop is queued, and then a request whose AddRequest lands behind it.
+            let! (gate: TaskCompletionSource) = holdRequestsLoop requestsMb
+            try
+                Expect.isTrue (requestsMb.Writer.TryWrite RequestsOperation.Stop) "Stop is queued"
+                let queued = request cnx
+                // The send loop writes a request only after requestsMb has accepted its AddRequest.
+                let! written = completesInTime (outgoing.Reader.ReadAsync().AsTask())
+                Expect.isTrue written "The send loop wrote the request, so requestsMb accepted its AddRequest"
+
+                gate.TrySetResult() |> ignore
+
+                do! failsWithConnectException queued "A request queued behind Stop in requestsMb"
+            finally
+                // Also releases the requests loop when an assertion above fails.
+                gate.TrySetResult() |> ignore
         }
     ]
