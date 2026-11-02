@@ -5,6 +5,7 @@ open System.IO.Pipelines
 open System.Net
 open System.Reflection
 open System.Threading
+open System.Threading.Channels
 open System.Threading.Tasks
 open System.Timers
 open Expecto
@@ -78,6 +79,15 @@ let private completesInTime (request: Task) =
         return finished = request
     }
 
+let private failsWithConnectException (request: Task<PulsarResponseType>) description =
+    task {
+        let! completed = completesInTime request
+        Expect.isTrue completed $"{description} completes"
+        Expect.isTrue request.IsFaulted $"{description} fails"
+        let ex = request.Exception.InnerException
+        Expect.isTrue (ex :? ConnectException) $"{description} fails with ConnectException, got {ex}"
+    }
+
 [<Tests>]
 let tests =
     testList "ClientCnx" [
@@ -93,15 +103,48 @@ let tests =
 
             // The broker closes the connection: it is deactivated and its mailboxes stop.
             incoming.Writer.Complete()
+            do! mailboxesStopped cnx
+            Expect.isFalse cnx.IsActive "The connection is deactivated"
             let! firstCompleted = completesInTime first
             Expect.isTrue firstCompleted "The request registered before the close fails with the connection"
-            Expect.isFalse cnx.IsActive "The connection is deactivated"
-            do! mailboxesStopped cnx
 
             // Only now does the send loop finish the first write and reach the second request.
             output.Open()
 
             let! secondCompleted = completesInTime second
             Expect.isTrue secondCompleted "The second request gets a reply, a ConnectException or a TimeoutException"
+        }
+
+        testTask "Calls queued behind Stop, or made after the send loop has stopped, complete" {
+            let incoming = Pipe()
+            let output = new GatedWriter()
+            let cnx = newCnx incoming output
+            let sendMb =
+                typeof<ClientCnx>.GetProperty("SendMb", BindingFlags.Instance ||| BindingFlags.NonPublic).GetValue(cnx)
+                :?> Channel<SocketMessage>
+
+            // The send loop is held inside a write, and Stop is queued behind it while the connection is still active,
+            // so the next calls pass the IsActive check and land behind Stop.
+            let _held = request cnx
+            do! output.FlushEntered.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isTrue (sendMb.Writer.TryWrite SocketMessage.Stop) "Stop is queued"
+            let queuedSend = cnx.Send(Commands.newPing())
+            let queuedRequest = request cnx
+
+            output.Open()
+
+            let! queuedSendCompleted = completesInTime queuedSend
+            Expect.isTrue queuedSendCompleted "A send queued behind Stop completes"
+            Expect.isFalse queuedSend.Result "A send queued behind Stop reports that nothing was sent"
+            do! failsWithConnectException queuedRequest "A request queued behind Stop"
+
+            // The send loop has stopped and its mailbox is completed, but the connection still counts as active.
+            Expect.isTrue cnx.IsActive "The connection was never deactivated"
+            let lateSend = cnx.Send(Commands.newPing())
+            let lateRequest = request cnx
+            let! lateSendCompleted = completesInTime lateSend
+            Expect.isTrue lateSendCompleted "A send after the send loop stopped completes"
+            Expect.isFalse lateSend.Result "A send after the send loop stopped reports that nothing was sent"
+            do! failsWithConnectException lateRequest "A request after the send loop stopped"
         }
     ]
