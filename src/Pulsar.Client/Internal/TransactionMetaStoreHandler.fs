@@ -139,14 +139,14 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                             let! response = clientCnx.SendAndWaitForReply requestId payload
                             response |> PulsarResponseType.GetEmpty
                             Log.Logger.LogInformation("{0} Transaction coordinator client connect success!", transactionCoordinatorId)
-                            clientCnx.AddTransactionMetaStoreHandler(transactionCoordinatorId, transactionMetaStoreOperations)
+                            do! clientCnx.AddTransactionMetaStoreHandler(transactionCoordinatorId, transactionMetaStoreOperations)
                             connectionHandler.ResetBackoff()
                             transactionCoordinatorCreatedTsc.TrySetResult() |> ignore
                         with Flatten ex ->
                             Log.Logger.LogError(ex, "{0} Transaction coordinator client connect fail!", transactionCoordinatorId)
                             transactionCoordinatorCreatedTsc.TrySetException(ex) |> ignore
                     else
-                        clientCnx.AddTransactionMetaStoreHandler(transactionCoordinatorId, transactionMetaStoreOperations)
+                        do! clientCnx.AddTransactionMetaStoreHandler(transactionCoordinatorId, transactionMetaStoreOperations)
                         transactionCoordinatorCreatedTsc.TrySetResult() |> ignore
                 | _ ->
                     Log.Logger.LogWarning("{0} connection opened but connection is not ready, current state is ", prefix)

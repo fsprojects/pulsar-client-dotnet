@@ -618,7 +618,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 | Ready clientCnx ->
                     Log.Logger.LogInformation("{0} starting register to topic {1}", prefix, producerConfig.Topic)
                     updateMaxMessageSize clientCnx.MaxMessageSize
-                    clientCnx.AddProducer(producerId, producerOperations)
+                    do! clientCnx.AddProducer(producerId, producerOperations)
                     let requestId = Generators.getNextRequestId()
                     try
                         let payload = Commands.newProducer producerConfig.Topic.CompleteTopicName producerConfig.ProducerName

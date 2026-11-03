@@ -959,7 +959,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
                     Log.Logger.LogInformation("{0} starting subscribe to topic {1}", prefix, topicName)
-                    clientCnx.AddConsumer(consumerId, consumerOperations)
+                    do! clientCnx.AddConsumer(consumerId, consumerOperations)
                     let requestId = Generators.getNextRequestId()
                     let initialMsgId, seekChannel = clearReceiverQueue()
                     startMessageId <- initialMsgId
