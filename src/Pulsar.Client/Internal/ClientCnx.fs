@@ -247,6 +247,16 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogTrace("{0} timeout tick", prefix)
                 handleTimeoutedMessages()
         } :> Task).ContinueWith(fun t ->
+            // Nothing reads the mailbox any more: fail the registered requests and every AddRequest still queued,
+            // so no caller waits for a reply or a timeout that will never come.
+            requestsMb.Writer.TryComplete() |> ignore
+            requestTimeoutTimer.Stop()
+            failAllRequests()
+            let mutable msg = Unchecked.defaultof<RequestsOperation>
+            while requestsMb.Reader.TryRead(&msg) do
+                match msg with
+                | AddRequest (_, _, tsc) -> tsc.TrySetException(ConnectException "Disconnected.") |> ignore
+                | _ -> ()
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
                 Log.Logger.LogCritical(ex, "{0} requestsMb mailbox failure", prefix)
@@ -322,13 +332,23 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 ()
             | SocketRequestMessageWithReply (reqId, payload, channel) ->
                 let struct(_, commandType) = payload
-                post requestsMb (AddRequest(reqId, commandType, channel))
-                let! _ = sendSerializedPayload payload
-                ()
+                if requestsMb.Writer.TryWrite(AddRequest(reqId, commandType, channel)) then
+                    let! _ = sendSerializedPayload payload
+                    ()
+                else
+                    channel.TrySetException(ConnectException "Disconnected.") |> ignore
             | SocketMessage.Stop ->
                 Log.Logger.LogDebug("{0} sendMb stopped", prefix)
                 continueLoop <- false
         }:> Task).ContinueWith(fun t ->
+            // Nothing reads the mailbox any more: answer every message still queued, so no caller waits forever.
+            sendMb.Writer.TryComplete() |> ignore
+            let mutable msg = Unchecked.defaultof<SocketMessage>
+            while sendMb.Reader.TryRead(&msg) do
+                match msg with
+                | SocketMessageWithReply (_, channel) -> channel.TrySetResult(false) |> ignore
+                | SocketRequestMessageWithReply (_, _, channel) -> channel.TrySetException(ConnectException "Disconnected.") |> ignore
+                | SocketMessageWithoutReply _ | SocketMessage.Stop -> ()
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
                 Log.Logger.LogCritical(ex, "{0} sendMb mailbox failure", prefix)
@@ -885,7 +905,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     member this.Send payload =
         if this.IsActive then
-            postAndAsyncReply sendMb (fun replyChannel -> SocketMessageWithReply(payload, replyChannel))
+            let reply = TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)
+            if sendMb.Writer.TryWrite(SocketMessageWithReply(payload, reply)) then reply.Task else falseTask
         else
             falseTask
 
@@ -895,7 +916,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     member this.SendAndWaitForReply reqId payload =
         if this.IsActive then
-            postAndAsyncReply sendMb (fun replyChannel -> SocketRequestMessageWithReply(reqId, payload, replyChannel))
+            let reply = TaskCompletionSource<PulsarResponseType>(TaskCreationOptions.RunContinuationsAsynchronously)
+            if sendMb.Writer.TryWrite(SocketRequestMessageWithReply(reqId, payload, reply)) then
+                reply.Task
+            else
+                Task.FromException<PulsarResponseType> <| ConnectException "Disconnected."
         else
             Task.FromException<PulsarResponseType> <| ConnectException "Disconnected."
 
