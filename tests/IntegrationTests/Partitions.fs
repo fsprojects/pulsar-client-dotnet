@@ -683,4 +683,32 @@ let tests =
             Log.Debug("Finished Deduplication works with partitions")
         }
 
+        testTask "Partition consumers subscribe under the consumer's name" {
+
+            Log.Debug("Started Partition consumers subscribe under the consumer's name")
+            let client = getClient()
+            let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let partitions = 3
+            do! createPartitionedTopic topicName partitions
+
+            let subscriptionName = "test-subscription-" + Guid.NewGuid().ToString("N")
+            // no ConsumerName, so the client generates one
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topic(topicName)
+                    .SubscriptionName(subscriptionName)
+                    .SubscribeAsync()
+
+            // as in the Java client, the broker sees one name for all the partitions of one consumer,
+            // which is what Failover subscriptions sort by when they assign partitions
+            let! (names : (string * string) list) = getPartitionConsumerNames topicName subscriptionName
+            Expect.equal "One consumer per partition" partitions names.Length
+            for partition, name in names do
+                Expect.equal $"Consumer name on {partition}" consumer.Name name
+
+            do! consumer.DisposeAsync().AsTask()
+
+            Log.Debug("Finished Partition consumers subscribe under the consumer's name")
+        }
+
     ]

@@ -310,6 +310,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
     let childConsumerInfo (consumerInitInfo: ConsumerInitInfo<'T>) (childTopic: TopicName) partitionIndex
                           receiverQueueSize createTopicIfDoesNotExist =
         let childConfig = { consumerConfig with
+                                ConsumerName = consumerName
                                 ReceiverQueueSize = receiverQueueSize
                                 Topics = [| childTopic |] }
         {
