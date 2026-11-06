@@ -22,6 +22,7 @@ type internal MultiTopicsReaderImpl<'T> private (readerConfig: ReaderConfigurati
         ConsumerConfiguration<'T>.Default with
             Topics = [| readerConfig.Topic |]
             SubscriptionName = %subscriptionName
+            ConsumerName = readerConfig.ReaderName
             SubscriptionType = SubscriptionType.Exclusive
             SubscriptionMode = SubscriptionMode.NonDurable
             ReceiverQueueSize = readerConfig.ReceiverQueueSize
