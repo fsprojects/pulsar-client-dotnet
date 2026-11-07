@@ -445,11 +445,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let clearDeadLetters() = deadLettersProcessor.ClearMessages()
 
-    let clearAckRequests() =
+    let failAckRequests (ex: exn) =
         for KeyValue(_, (_, _, tcs)) in ackRequests do
             stats.IncrementNumAcksFailed()
-            tcs.SetException(MessageAcknowledgeException "Consumer was closed")
+            tcs.TrySetException(ex) |> ignore
         ackRequests.Clear()
+
+    let clearAckRequests() =
+        failAckRequests (MessageAcknowledgeException "Consumer was closed")
 
     let getNewIndividualMsgIdWithPartition messageId =
         { messageId with Type = MessageIdType.Single; Partition = partitionIndex; TopicName = topicName.CompleteTopicName }
@@ -875,6 +878,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     }
 
     let mb = Channel.CreateUnbounded<ConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let recoveryBacklog = Queue<ConsumerMessage<'T>>()
     let mutable currentMessage : ConsumerMessage<'T> option = None
 
     let replyFromStoppedMailbox (ex: exn) (msg: ConsumerMessage<'T>) =
@@ -958,17 +962,27 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
         } |> ignore
 
+    let failRecoveryBacklog (ex: exn) =
+        while recoveryBacklog.Count > 0 do
+            try
+                recoveryBacklog.Dequeue()
+                |> replyFromStoppedMailbox ex
+            with replyEx ->
+                Log.Logger.LogWarning(replyEx, "{0} failed to reply to a request retained during recovery", prefix)
+
     let discardQueuedMessagesFromConnection (clientCnx: ClientCnx) =
-        let pendingMessages = ResizeArray<ConsumerMessage<'T>>()
         let mutable msg = Unchecked.defaultof<ConsumerMessage<'T>>
         while mb.Reader.TryRead(&msg) do
             match msg with
             | MessageReceived (rawMessage, receivedCnx) when obj.ReferenceEquals(receivedCnx, clientCnx) ->
                 rawMessage.Payload.Dispose()
             | _ ->
-                pendingMessages.Add msg
-        for pendingMessage in pendingMessages do
-            post mb pendingMessage
+                recoveryBacklog.Enqueue msg
+
+    let clearReceiverQueueForRecovery (ex: exn) =
+        let initialMsgId, seekChannel = clearReceiverQueue()
+        seekChannel |> Option.iter (fun channel -> channel.TrySetException(ex) |> ignore)
+        startMessageId <- initialMsgId
 
     let recoverMailboxFailure (ex: exn) =
         backgroundTask {
@@ -978,8 +992,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             currentMessage |> Option.iter (replyFromStoppedMailbox ex)
             match connectionHandler.ConnectionState with
             | Ready clientCnx ->
-                let initialMsgId, _ = clearReceiverQueue()
-                startMessageId <- initialMsgId
+                clearReceiverQueueForRecovery ex
+                failAckRequests ex
                 let requestId = Generators.getNextRequestId()
                 try
                     do! (clientCnx.RemoveConsumerAndWait consumerId).WaitAsync(clientConfig.OperationTimeout)
@@ -996,13 +1010,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     // the connection no longer reports its closure to the removed consumer
                     connectionHandler.ConnectionClosed clientCnx
             | Connecting ->
-                let initialMsgId, _ = clearReceiverQueue()
-                startMessageId <- initialMsgId
+                clearReceiverQueueForRecovery ex
+                failAckRequests ex
             | Uninitialized ->
-                let initialMsgId, _ = clearReceiverQueue()
-                startMessageId <- initialMsgId
+                clearReceiverQueueForRecovery ex
+                failAckRequests ex
                 connectionHandler.GrabCnx()
             | _ ->
+                failRecoveryBacklog ex
                 failMailbox ex
                 drainStoppedMailbox()
         }
@@ -1011,7 +1026,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-            let! msg = mb.Reader.ReadAsync()
+            let! msg =
+                if recoveryBacklog.Count > 0 then
+                    Task.FromResult(recoveryBacklog.Dequeue())
+                else
+                    mb.Reader.ReadAsync().AsTask()
             currentMessage <- Some msg
             match msg with
             | ConsumerMessage.ConnectionOpened ->
@@ -1569,6 +1588,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 Log.Logger.LogCritical(recoveryEx, "{0} failed to recover consumer for topic {1}",
                                                        prefix, topicName)
                                 try
+                                    failRecoveryBacklog recoveryEx
                                     failMailbox recoveryEx
                                 finally
                                     drainStoppedMailbox()

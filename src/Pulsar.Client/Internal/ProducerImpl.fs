@@ -19,6 +19,14 @@ open System.Runtime.InteropServices
 open Pulsar.Client.Transaction
 open System.Threading.Channels
 
+module private ProducerStreamOwnership =
+    let forgetOwnedStream (streams: ResizeArray<MemoryStream>) (stream: MemoryStream) =
+        let mutable index = 0
+        while index < streams.Count && not (Object.ReferenceEquals(streams[index], stream)) do
+            index <- index + 1
+        if index < streams.Count then
+            streams.RemoveAt(index)
+
 type SendMessageRequest<'T> =
     (struct(MessageBuilder<'T> * TaskCompletionSource<MessageId> * bool))
 
@@ -327,44 +335,53 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                           Stream = stream } =
         let batchCallbacks = opSendMsg
         let batchSize = batchCallbacks.Length
-        let pendingMessage =
-            // as in the Java client, an unexpected error fails only this batch rather than the whole producer
-            try
-                let payloadLength = int stream.Length
-                let metadata = createMessageMetadata sequenceId txnId (Some batchSize)
-                                   payloadLength partitionKey EmptyProps None orderingKey None replicationClusters
-                let compressedBatchPayload = compressionCodec.Encode stream
-                if (compressedBatchPayload.Length > maxMessageSize) then
-                    Error (InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes" :> exn)
-                else
-                    let encryptResult = encrypt metadata compressedBatchPayload
-                    match encryptResult with
-                    | Ok encryptedBatchPayload ->
-                        let sendTask =
-                            Commands.newSend producerId sequenceId (Some highestSequenceId) batchSize metadata encryptedBatchPayload
-                        Ok {
-                            SequenceId = sequenceId
-                            HighestSequenceId = highestSequenceId
-                            SendTask = sendTask
-                            Payload = encryptedBatchPayload
-                            Callback = BatchCallbacks batchCallbacks
-                            CreatedAt = %Stopwatch.GetTimestamp()
-                        }
-                    | Error ex ->
-                        Error ex
-            with ex ->
-                Log.Logger.LogError(ex, "{0} failed to send a batch of {1} messages to topic {2}",
-                                    prefix, batchSize, producerConfig.Topic.CompleteTopicName)
-                Error ex
-        match pendingMessage with
-        | Ok pendingMessage ->
-            stats.UpdateNumMsgsSent(batchSize, int pendingMessage.Payload.Length)
-            sendMessage pendingMessage
-            lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
-        | Error ex ->
-            batchCallbacks
-            |> Array.iter (fun ((_, message, tcs)) ->
-                failMessage message tcs ex)
+        let mutable ownedPayload = stream
+        let mutable payloadTransferred = false
+        try
+            let pendingMessage =
+                // as in the Java client, an unexpected error fails only this batch rather than the whole producer
+                try
+                    let payloadLength = int stream.Length
+                    let metadata = createMessageMetadata sequenceId txnId (Some batchSize)
+                                       payloadLength partitionKey EmptyProps None orderingKey None replicationClusters
+                    let compressedBatchPayload = compressionCodec.Encode stream
+                    ownedPayload <- compressedBatchPayload
+                    if (compressedBatchPayload.Length > maxMessageSize) then
+                        Error (InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes" :> exn)
+                    else
+                        let encryptResult = encrypt metadata compressedBatchPayload
+                        match encryptResult with
+                        | Ok encryptedBatchPayload ->
+                            ownedPayload <- encryptedBatchPayload
+                            let sendTask =
+                                Commands.newSend producerId sequenceId (Some highestSequenceId) batchSize metadata encryptedBatchPayload
+                            Ok {
+                                SequenceId = sequenceId
+                                HighestSequenceId = highestSequenceId
+                                SendTask = sendTask
+                                Payload = encryptedBatchPayload
+                                Callback = BatchCallbacks batchCallbacks
+                                CreatedAt = %Stopwatch.GetTimestamp()
+                            }
+                        | Error ex ->
+                            Error ex
+                with ex ->
+                    Log.Logger.LogError(ex, "{0} failed to send a batch of {1} messages to topic {2}",
+                                        prefix, batchSize, producerConfig.Topic.CompleteTopicName)
+                    Error ex
+            match pendingMessage with
+            | Ok pendingMessage ->
+                stats.UpdateNumMsgsSent(batchSize, int pendingMessage.Payload.Length)
+                sendMessage pendingMessage
+                payloadTransferred <- true
+                lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
+            | Error ex ->
+                batchCallbacks
+                |> Array.iter (fun ((_, message, tcs)) ->
+                    failMessage message tcs ex)
+        finally
+            if not payloadTransferred then
+                ownedPayload.Dispose()
 
     let canAddToCurrentBatch (msg: MessageBuilder<'T>) =
         batchMessageContainer.HaveEnoughSpace(msg) && batchMessageContainer.HasSameTxn(msg)
@@ -423,6 +440,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     None
                 else
                     Some channel
+            let ownedPayloads = ResizeArray<MemoryStream>()
+            use _ = { new IDisposable with member _.Dispose() = for payload in ownedPayloads do payload.Dispose() }
             // as in the Java client, an unexpected error fails only this message rather than the whole producer
             try
                 let sequenceId =
@@ -465,7 +484,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     // Preserve sequence order when a message bypasses the accumulated batch.
                     if producerConfig.BatchingEnabled then
                         batchMessageAndSend()
-                    let compressedPayload = compressionCodec.Encode (new MemoryStream(message.Payload))
+                    let sourcePayload = new MemoryStream(message.Payload)
+                    ownedPayloads.Add(sourcePayload)
+                    let compressedPayload = compressionCodec.Encode sourcePayload
+                    if not (Object.ReferenceEquals(sourcePayload, compressedPayload)) then
+                        sourcePayload.Dispose()
+                        ProducerStreamOwnership.forgetOwnedStream ownedPayloads sourcePayload
+                        ownedPayloads.Add(compressedPayload)
                     let payloadLength = int compressedPayload.Length
                     if payloadLength > maxMessageSize && not producerConfig.ChunkingEnabled then
                         let ex = InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes"
@@ -492,6 +517,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                     metadata.NumChunksFromMsg <- totalChunks
                                     metadata.TotalChunkMsgSize <- payloadLength
                                     let chunkStream = MemoryStreamManager.GetStream("chunk")
+                                    ownedPayloads.Add(chunkStream)
                                     compressedPayload.Seek(readStartIndex, SeekOrigin.Begin) |> ignore
                                     let chunkSize = Math.Min(maxMessageSize, payloadLength - readStartIndex)
                                     let targetSpan = chunkStream.GetSpan(chunkSize).Slice(0, chunkSize)
@@ -499,12 +525,17 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                     chunkStream.Advance(writtenBytes)
                                     if compressedPayload.Position = compressedPayload.Length then
                                         compressedPayload.Dispose()
+                                        ProducerStreamOwnership.forgetOwnedStream ownedPayloads compressedPayload
                                     chunkStream :> MemoryStream
                                 else
                                     compressedPayload
                             let encryptResult = encrypt metadata chunkPayload
                             match encryptResult with
                             | Ok encryptedPayload ->
+                                if not (Object.ReferenceEquals(chunkPayload, encryptedPayload)) then
+                                    chunkPayload.Dispose()
+                                    ProducerStreamOwnership.forgetOwnedStream ownedPayloads chunkPayload
+                                    ownedPayloads.Add(encryptedPayload)
                                 let payload =
                                     Commands.newSend producerId sequenceId None 1 metadata encryptedPayload
                                 let chunkDetails =
@@ -522,6 +553,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 }
                                 stats.UpdateNumMsgsSent(1, int encryptedPayload.Length)
                                 sendMessage pendingMessage
+                                if not isChunked
+                                   || (isChunked && producerConfig.Topic.IsPersistent)
+                                   || chunkId = totalChunks - 1 then
+                                    ProducerStreamOwnership.forgetOwnedStream ownedPayloads encryptedPayload
                                 lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
                                 chunkId <- chunkId + 1
                                 readStartIndex <- chunkId * maxMessageSize
