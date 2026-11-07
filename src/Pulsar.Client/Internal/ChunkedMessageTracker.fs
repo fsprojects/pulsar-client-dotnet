@@ -30,6 +30,8 @@ type internal ChunkedMessageCtx(totalChunksCount: int, totalChunksSize: int) =
         member this.ChunkedMessageIds = chunkedMessageIds
         member this.Decompress (uncompressedSize, codec: ICompressionCodec) =
             codec.Decode(uncompressedSize, chunkedMsgBuffer, currentBufferLength)
+        member this.DecompressWithType (uncompressedSize, compressionType: CompressionType) =
+            (CompressionCodec.get compressionType).Decode(uncompressedSize, chunkedMsgBuffer, currentBufferLength)
         member this.ReceivedTime = receivedTime
         member this.Dispose() =
             ArrayPool.Shared.Return chunkedMsgBuffer
@@ -84,7 +86,9 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
                     Ok ctx
             | _ ->
                 Error <| $"Received unexpected chunk uuid = %A{metadata.Uuid}, chunkId = %A{metadata.ChunkId}, total-chunks = %A{metadata.NumChunks}"
-    member this.MessageReceived (rawMessage: RawMessage, msgId: MessageId, ctx: ChunkedMessageCtx, codec: ICompressionCodec) =
+    member private this.MessageReceivedCore
+        (rawMessage: RawMessage, msgId: MessageId, ctx: ChunkedMessageCtx,
+         decompress: ChunkedMessageCtx -> RawMessage -> byte[]) =
         let payloadLength = int rawMessage.Payload.Length
         if ctx.CurrentBufferLength + payloadLength > ctx.TotalChunksSize then
             // the chunks add up to more than the declared size, the message is malformed and would overrun the buffer
@@ -94,19 +98,46 @@ type internal ChunkedMessageTracker(prefix, maxPendingChunkedMessage, autoAckOld
             pendingChunkedMessageUuidQueue.Remove rawMessage.Metadata.Uuid |> ignore
             removeChunkMessage rawMessage.Metadata.Uuid ctx false
             ackOrTrack msgId false
-            None
+            Ok None
         else
             ctx.MessageReceived rawMessage
             // if final chunk is not received yet then release payload and return
             if %rawMessage.Metadata.ChunkId = rawMessage.Metadata.NumChunks - 1 then
                 chunkedMessagesMap.Remove rawMessage.Metadata.Uuid |> ignore
                 pendingChunkedMessageUuidQueue.Remove rawMessage.Metadata.Uuid |> ignore
-                let decompressedPayload = ctx.Decompress(rawMessage.Metadata.UncompressedMessageSize, codec)
-                let chunkMsgIds = Some ctx.ChunkedMessageIds
+                let decompressedPayload =
+                    try
+                        Ok(decompress ctx rawMessage)
+                    with ex ->
+                        Error ex
+                let chunkMsgIds = ctx.ChunkedMessageIds
                 ctx.Dispose()
-                Some (decompressedPayload, { msgId with ChunkMessageIds = chunkMsgIds } )
+                match decompressedPayload with
+                | Ok payload ->
+                    Ok(Some (payload, { msgId with ChunkMessageIds = Some chunkMsgIds }))
+                | Error ex ->
+                    Error(ex, chunkMsgIds)
             else
-                None
+                Ok None
+
+    member this.MessageReceived (rawMessage: RawMessage, msgId: MessageId, ctx: ChunkedMessageCtx) =
+        this.MessageReceivedCore(
+            rawMessage,
+            msgId,
+            ctx,
+            fun ctx rawMessage ->
+                ctx.DecompressWithType(rawMessage.Metadata.UncompressedMessageSize,
+                                       rawMessage.Metadata.CompressionType))
+
+    member this.MessageReceived (rawMessage: RawMessage, msgId: MessageId, ctx: ChunkedMessageCtx,
+                                 codec: ICompressionCodec) =
+        match this.MessageReceivedCore(
+                  rawMessage,
+                  msgId,
+                  ctx,
+                  fun ctx rawMessage -> ctx.Decompress(rawMessage.Metadata.UncompressedMessageSize, codec)) with
+        | Ok result -> result
+        | Error (ex, _) -> raise ex
 
     member this.RemoveExpireIncompleteChunkedMessages() =
         if pendingChunkedMessageUuidQueue.Count > 0 then

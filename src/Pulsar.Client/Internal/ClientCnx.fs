@@ -65,7 +65,7 @@ and internal CnxOperation =
     | AddProducer of ProducerId * ProducerOperations
     | AddConsumer of ConsumerId * ConsumerOperations
     | AddTransactionMetaStoreHandler of TransactionCoordinatorId * TransactionMetaStoreOperations
-    | RemoveConsumer of ConsumerId
+    | RemoveConsumer of ConsumerId * TaskCompletionSource<unit> option
     | RemoveProducer of ProducerId
     | RemoveTransactionMetaStoreHandler of TransactionCoordinatorId
     | ChannelInactive
@@ -278,9 +278,10 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             | AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations) ->
                 Log.Logger.LogDebug("{0} adding transaction metastore {1}", prefix, transactionMetaStoreId)
                 transactionMetaStores[transactionMetaStoreId] <- transactionMetaStoreOperations
-            | RemoveConsumer consumerId ->
+            | RemoveConsumer (consumerId, completion) ->
                 Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
                 consumers.Remove(consumerId) |> ignore
+                completion |> Option.iter (fun tcs -> tcs.TrySetResult() |> ignore)
             | RemoveProducer producerId ->
                 Log.Logger.LogDebug("{0} removing producer {1}", prefix, producerId)
                 producers.Remove(producerId) |> ignore
@@ -686,7 +687,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         | XCommandCloseConsumer cmd ->
             match consumers.TryGetValue %cmd.ConsumerId with
             | true, consumerOperations ->
-                post operationsMb (RemoveConsumer %cmd.ConsumerId)
+                post operationsMb (RemoveConsumer (%cmd.ConsumerId, None))
                 consumerOperations.ConnectionClosed(this)
             | _ ->
                 Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandCloseConsumer", prefix, %cmd.ConsumerId)
@@ -926,7 +927,17 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     member this.RemoveConsumer (consumerId: ConsumerId) =
         if this.IsActive then
-            post operationsMb (RemoveConsumer(consumerId))
+            post operationsMb (RemoveConsumer(consumerId, None))
+
+    member this.RemoveConsumerAndWait (consumerId: ConsumerId) =
+        if not this.IsActive then
+            Task.CompletedTask
+        else
+            let completion = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            post operationsMb (RemoveConsumer(consumerId, Some completion))
+            if not this.IsActive then
+                completion.TrySetResult() |> ignore
+            completion.Task :> Task
 
     member this.RemoveProducer (consumerId: ProducerId) =
         if this.IsActive then

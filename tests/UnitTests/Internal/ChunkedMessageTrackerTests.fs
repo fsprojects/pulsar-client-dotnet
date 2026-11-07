@@ -371,4 +371,30 @@ let tests =
             Expect.sequenceEqual "" [ msgId0, false; msgId1, false ] tracked
             tracker.GetContext(metadata0) |> Expect.isOk ""
         }
+
+        test "Chunk decompression failure returns every chunk id" {
+            let tracker = ChunkedMessageTracker("ChunkedMessageTracker_decompression", 2, true, TimeSpan.Zero, fun _ _ -> ())
+            let unsupportedCompression = enum<CompressionType> 999
+            let metadata0 =
+                { testMetadata with NumChunks = 2; TotalChunkMsgSize = 2; Uuid = %"decompression"
+                                    CompressionType = unsupportedCompression }
+            let msgId0 = { EntryId = %1L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let rawMessage0 = { testRawMessage with MessageId = msgId0; Metadata = metadata0; Payload = new MemoryStream [| 1uy |] }
+            let ctx =
+                match tracker.GetContext(metadata0) with
+                | Ok ctx -> ctx
+                | Error error -> failtest error
+            tracker.MessageReceived(rawMessage0, msgId0, ctx, testCodec) |> Expect.isNone ""
+
+            let metadata1 = { metadata0 with ChunkId = %1 }
+            let msgId1 = { EntryId = %2L; LedgerId = %1L; Type = Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let rawMessage1 = { testRawMessage with MessageId = msgId1; Metadata = metadata1; Payload = new MemoryStream [| 2uy |] }
+            let ctx =
+                match tracker.GetContext(metadata1) with
+                | Ok ctx -> ctx
+                | Error error -> failtest error
+            match tracker.MessageReceived(rawMessage1, msgId1, ctx) with
+            | Error (_, chunkIds) -> Expect.sequenceEqual "" [| msgId0; msgId1 |] chunkIds
+            | Ok _ -> failtest "Expected the unsupported compression type to fail"
+        }
     ]
