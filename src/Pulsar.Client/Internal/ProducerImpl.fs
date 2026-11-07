@@ -144,10 +144,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             sendTimeoutTimer.Start()
 
     let batchTimer = new Timer()
+    do batchTimer.Elapsed.Add(fun _ -> post this.Mb (Tick SendBatchTick))
     let startSendBatchTimer () =
         batchTimer.Interval <- producerConfig.BatchingMaxPublishDelay.TotalMilliseconds
         batchTimer.AutoReset <- true
-        batchTimer.Elapsed.Add(fun _ -> post this.Mb (Tick SendBatchTick))
         batchTimer.Start()
 
     let statTimer = new Timer()
@@ -1203,4 +1203,3 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     | Ok () -> ()
                     | Error ex -> reraize ex
                 } |> ValueTask
-
