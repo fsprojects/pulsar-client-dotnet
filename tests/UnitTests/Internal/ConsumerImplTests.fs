@@ -74,7 +74,7 @@ let tests =
             return ()
         }
 
-        testTask "Consumer recovers after an unexpected mailbox exception" {
+        testTask "Consumer fails retained requests queued behind close after recovery" {
             use broker = new BrokerConnection(clientConfig)
             let! (starting: Task<ConsumerImpl<byte[]>>) = broker.CreateConsumer(consumerConfig)
             let! (firstSubscribe: BaseCommand) = broker.ReadCommand()
@@ -154,6 +154,30 @@ let tests =
                 "The next message should reach the recovered consumer"
             let! (message: Message<byte[]>) = receive.WaitAsync(testTimeout)
             Expect.equal message.Data [| 42uy |] "The pending receive should complete after recovery"
-            do! closeConsumer broker consumer
+
+            let malformedMessage = { rawMessage with Payload = new MemoryStream [||] }
+            Expect.isTrue (consumer.Mb.Writer.TryWrite(ConsumerMessage.MessageReceived(struct(malformedMessage, broker.Connection))))
+                "A second malformed message should trigger recovery"
+
+            let mutable recoveryClose: BaseCommand = null
+            while isNull recoveryClose do
+                let! (command: BaseCommand) = broker.ReadCommand()
+                if command.``type`` = BaseCommand.Type.CloseConsumer then
+                    recoveryClose <- command
+
+            let closeChannel = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let statsChannel = TaskCompletionSource<ConsumerStats>(TaskCreationOptions.RunContinuationsAsynchronously)
+            Expect.isTrue (consumer.Mb.Writer.TryWrite(ConsumerMessage.Close closeChannel))
+                "The close request should be queued behind the recovery"
+            Expect.isTrue (consumer.Mb.Writer.TryWrite(ConsumerMessage.GetStats statsChannel))
+                "The stats request should be retained after the queued close"
+
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = recoveryClose.CloseConsumer.RequestId)))
+            do! closeChannel.Task.WaitAsync(testTimeout)
+            let! _ = expectFailure<AlreadyClosedException> statsChannel.Task
+            return ()
         }
     ]

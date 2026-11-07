@@ -921,6 +921,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         | Closing | Closed | Terminated -> AlreadyClosedException(prefix + " already closed") :> exn
         | _ -> NotConnectedException(prefix + " not connected", connectionHandler.FailureCause) :> exn
 
+    let failRecoveryBacklog (ex: exn) =
+        while recoveryBacklog.Count > 0 do
+            try
+                recoveryBacklog.Dequeue()
+                |> replyFromStoppedMailbox ex
+            with replyEx ->
+                Log.Logger.LogWarning(replyEx, "{0} failed to reply to a request retained during recovery", prefix)
+
     let failMailbox (ex: exn) =
         Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
         try
@@ -954,6 +962,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     // requests posted after the mailbox exits would otherwise never be completed
     let drainStoppedMailbox () =
         backgroundTask {
+            failRecoveryBacklog (stoppedMailboxException ())
             while true do
                 let! msg = mb.Reader.ReadAsync()
                 try
@@ -961,14 +970,6 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 with ex ->
                     Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
         } |> ignore
-
-    let failRecoveryBacklog (ex: exn) =
-        while recoveryBacklog.Count > 0 do
-            try
-                recoveryBacklog.Dequeue()
-                |> replyFromStoppedMailbox ex
-            with replyEx ->
-                Log.Logger.LogWarning(replyEx, "{0} failed to reply to a request retained during recovery", prefix)
 
     let discardQueuedMessagesFromConnection (clientCnx: ClientCnx) =
         let mutable msg = Unchecked.defaultof<ConsumerMessage<'T>>
