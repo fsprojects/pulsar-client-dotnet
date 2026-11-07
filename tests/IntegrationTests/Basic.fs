@@ -21,16 +21,25 @@ open Pulsar.Client.IntegrationTests
 open Pulsar.Client.IntegrationTests.Common
 open FSharp.UMX
 
-let assertMailboxException (work: Task<'T>) = task {
+let private assertFailure<'T when 'T :> exn> (work: Task) = task {
+    let mutable error = None
     try
-        let! _ = work.WaitAsync(TimeSpan.FromSeconds(5.0))
-        failwith "Task completed successfully after mailbox failure"
+        do! work.WaitAsync(TimeSpan.FromSeconds(5.0))
     with ex ->
-        match unwrap ex with
-        | :? NullReferenceException -> ()
-        | :? TimeoutException -> failwith "Task did not fault within 5 seconds"
-        | other -> failwith $"Expected the mailbox NullReferenceException but got {other.GetType().Name}: {other.Message}"
+        error <- Some (unwrap ex)
+    match error with
+    | Some (:? 'T) -> ()
+    | Some other -> failwith $"Expected {typeof<'T>.Name} but got {other.GetType().Name}: {other.Message}"
+    | None -> failwith $"Expected {typeof<'T>.Name}, but the task completed successfully"
 }
+
+let assertMailboxException (work: Task) = assertFailure<NullReferenceException> work
+
+// Unlike a bad send, completing a request twice faults the mailbox outside per-operation handling.
+let private crashProducerMailbox (producer: ProducerImpl<byte[]>) =
+    let completed = TaskCompletionSource<ProducerStats>()
+    completed.SetResult(Unchecked.defaultof<ProducerStats>)
+    post producer.Mb (ProducerMessage.GetStats completed)
 
 let assertAlreadyClosed (work: Task<'T>) = task {
     try
@@ -43,7 +52,7 @@ let assertAlreadyClosed (work: Task<'T>) = task {
         | other -> failwith $"Expected AlreadyClosedException but got {other.GetType().Name}: {other.Message}"
 }
 
-// A null message faults a child consumer mailbox
+// A null raw message also breaks recovery cleanup, exercising the terminal-failure fallback.
 let private crashChildMailbox (child: ConsumerImpl<byte[]>) =
     post child.Mb (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
 
@@ -286,9 +295,9 @@ let tests =
             Log.Debug("Finished Queued messages release their payloads when the consumer mailbox fails")
         }
 
-        testTask "Consumer completes the request that faults its mailbox" {
+        testTask "Consumer fails the in-flight request and preserves pending receives during recovery" {
 
-            Log.Debug("Started Consumer completes the request that faults its mailbox")
+            Log.Debug("Started Consumer fails the in-flight request and preserves pending receives during recovery")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
@@ -301,17 +310,26 @@ let tests =
                     .SubscribeAsync()
 
             let consumerImpl = consumer :?> ConsumerImpl<byte[]>
+            let pendingReceive = TaskCompletionSource<Message<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously)
+            post consumerImpl.Mb
+                (ConsumerMessage.Receive { CancellationToken = CancellationToken.None; MessageChannel = pendingReceive })
             let seek = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
             // a null chunk list throws while building the seek, before its channel is completed
             let badSeekId = { MessageId.Earliest with ChunkMessageIds = Some null }
             post consumerImpl.Mb (ConsumerMessage.SeekAsync(SeekType.MessageId badSeekId, seek))
 
             do! assertMailboxException seek.Task
-            Expect.throwsT2<NotConnectedException> (fun () ->
-                consumer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
+            let! _ = consumer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse "Recovery should preserve the pending receive" pendingReceive.Task.IsCompleted
+            use! (producer: IProducer<byte[]>) =
+                client.NewProducer().Topic(topicName).EnableBatching(false).CreateAsync()
+            let! _ = producer.SendAsync([| 42uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
+            let! (message: Message<byte[]>) = pendingReceive.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The pending receive should complete after resubscription" [| 42uy |] message.Data
+            do! consumer.AcknowledgeAsync(message.MessageId)
             do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
-            Log.Debug("Finished Consumer completes the request that faults its mailbox")
+            Log.Debug("Finished Consumer fails the in-flight request and preserves pending receives during recovery")
         }
 
         testTask "Close queued behind a consumer mailbox failure completes only after cleanup" {
@@ -337,7 +355,7 @@ let tests =
             let trigger = TaskCompletionSource<ConsumerStats>()
             let seek = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
             let close = TaskCompletionSource<unit>()
-            // queued while the trigger is being handled: the seek faults the mailbox and the Close is left for the drain
+            // The seek faults the mailbox, then recovery must honor the queued Close.
             queueBehind trigger (fun () ->
                 let badSeekId = { MessageId.Earliest with ChunkMessageIds = Some null }
                 post consumerImpl.Mb (ConsumerMessage.SeekAsync(SeekType.MessageId badSeekId, seek))
@@ -348,7 +366,7 @@ let tests =
             post consumerImpl.Mb (ConsumerMessage.GetStats trigger)
 
             let! (connected, seekCompleted, receiveCompleted) = atClose.WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.isFalse "Consumer should be failed before the queued Close completes" connected
+            Expect.isFalse "Consumer should be closed before the queued Close completes" connected
             Expect.isTrue "In-flight request should be failed before the queued Close completes" seekCompleted
             Expect.isTrue "Receive waiter should be failed before the queued Close completes" receiveCompleted
             do! assertMailboxException seek.Task
@@ -375,7 +393,7 @@ let tests =
             let payload = new System.IO.MemoryStream([| 1uy |])
             let crashingMessage =
                 {
-                    MessageId = MessageId.Earliest
+                    MessageId = { MessageId.Earliest with LedgerId = %1L; EntryId = %1L }
                     ConsumerEpoch = Nullable()
                     Metadata = Unchecked.defaultof<_>
                     RedeliveryCount = 0
@@ -390,9 +408,14 @@ let tests =
             post (consumer :?> ConsumerImpl<byte[]>).Mb
                 (ConsumerMessage.MessageReceived(struct (crashingMessage, Unchecked.defaultof<ClientCnx>)))
 
-            Expect.throwsT2<NotConnectedException> (fun () ->
-                consumer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0)).Result |> ignore) |> ignore
-            Expect.isFalse "In-flight message payload should be disposed when the mailbox stops" payload.CanRead
+            let! _ = consumer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse "In-flight message payload should be disposed during recovery" payload.CanRead
+            use! (producer: IProducer<byte[]>) =
+                client.NewProducer().Topic(topicName).EnableBatching(false).CreateAsync()
+            let! _ = producer.SendAsync([| 42uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
+            let! (message: Message<byte[]>) = consumer.ReceiveAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The recovered consumer should receive another message" [| 42uy |] message.Data
+            do! consumer.AcknowledgeAsync(message.MessageId)
             do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
             Log.Debug("Finished In-flight message payload is disposed when the consumer mailbox fails")
@@ -970,14 +993,42 @@ let tests =
             Log.Debug("Finished Requests posted after the multi-topic consumer is closed are already closed")
         }
 
-        testTask "Producer is closed at the broker when its mailbox fails" {
+        testTask "An unexpected send error leaves other sends and the producer usable" {
+            let client = getClient()
+            for batching in [ false; true ] do
+                let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
+                use! (producer: IProducer<byte[]>) =
+                    client.NewProducer()
+                        .Topic(topicName)
+                        .EnableBatching(batching)
+                        .BatchingMaxPublishDelay(TimeSpan.FromMinutes(1.0))
+                        .CreateAsync()
 
-            Log.Debug("Started Producer is closed at the broker when its mailbox fails")
+                let firstSend = producer.SendAsync([| 1uy |])
+                let invalidSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
+                post (producer :?> ProducerImpl<byte[]>).Mb
+                    (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, invalidSend, false)))
+                do! assertMailboxException invalidSend.Task
+
+                let nextSend = producer.SendAsync([| 2uy |])
+                do! producer.FlushAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+                let! _ = firstSend.WaitAsync(TimeSpan.FromSeconds(5.0))
+                let! _ = nextSend.WaitAsync(TimeSpan.FromSeconds(5.0))
+                let! _ = producer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0))
+                let! connected = producer.IsConnected()
+                Expect.isTrue "A failed send must not disconnect the producer" connected
+        }
+
+        testTask "Producer closes its broker registration and recovers after a mailbox failure" {
+
+            Log.Debug("Started Producer closes its broker registration and recovers after a mailbox failure")
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             // Only this client's connection should count towards the close-reply assertion.
             let observed = obj()
             let mutable producerId = ""
             let mutable cnxPrefix = ""
+            let mutable expectedCloseReply = ""
+            let closeReply = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
             let missingCloseRequests = ConcurrentQueue<string>()
             do! runWithLogger (fun text ->
                 lock observed (fun () ->
@@ -988,6 +1039,10 @@ let tests =
                     if cnxPrefix = "" && producerId <> "" && text.EndsWith(" adding producer " + producerId) then
                         let marker = " adding producer " + producerId
                         cnxPrefix <- text.Substring(0, text.Length - marker.Length)
+                    if cnxPrefix <> "" && text.StartsWith(cnxPrefix + " add request ") && text.EndsWith("type CloseProducer") then
+                        expectedCloseReply <- text.Replace(" add request ", " complete request ").Replace("type CloseProducer", "type Success")
+                    if expectedCloseReply <> "" && text = expectedCloseReply then
+                        closeReply.TrySetResult() |> ignore
                     if cnxPrefix <> "" && text.StartsWith(cnxPrefix) && text.Contains("complete non-existent request") then
                         missingCloseRequests.Enqueue(text))) (fun () -> task {
                     let client = getNewClient()
@@ -998,45 +1053,24 @@ let tests =
                             client.NewProducer()
                                 .Topic(topicName)
                                 .ProducerName(producerName)
+                                .EnableBatching(false)
                                 .CreateAsync()
 
-                        let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
-                        // a null message crashes the producer mailbox while handling the send
-                        post (producer :?> ProducerImpl<byte[]>).Mb
-                            (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
-
-                        let crashed =
-                            task {
-                                try
-                                    let! _ = crashingSend.Task
-                                    return false
-                                with _ ->
-                                    return true
-                            }
-                        let! sendFailed = crashed.WaitAsync(TimeSpan.FromSeconds(5.0))
-                        if not sendFailed then
-                            failwith "Crashing send did not fail within 5 seconds"
-
-                        let deadline = DateTime.UtcNow.AddSeconds 5.0
-                        let mutable connected = true
-                        while connected do
-                            if DateTime.UtcNow >= deadline then
-                                failwith "Producer did not fail within 5 seconds"
-                            let! isConnected = producer.IsConnected()
-                            if isConnected then
-                                do! Task.Delay 100
-                            connected <- isConnected
-
-                        // SendAsync checks the producer state before it posts, and still reports why the producer failed
-                        do! assertNotConnectedBecauseOf typeof<NullReferenceException> (task { return! producer.SendAsync([| 1uy |]) })
-
-                        // GetStats still posts once the producer has failed, so this only returns if the stopped mailbox replies
-                        do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
+                        let! _ = producer.SendAsync([| 1uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
+                        let! firstSequenceId = producer.LastSequenceId()
+                        crashProducerMailbox (producer :?> ProducerImpl<byte[]>)
+                        do! closeReply.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+                        // This request is behind the fault and completes only once the mailbox restarts.
+                        let! _ = producer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0))
+                        let! _ = producer.SendAsync([| 2uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
+                        let! nextSequenceId = producer.LastSequenceId()
+                        Expect.isTrue "Recovery must preserve the sequence id generator" (nextSequenceId > firstSequenceId)
+                        let! connected = producer.IsConnected()
+                        Expect.isTrue "The same producer should be usable after recovery" connected
 
                         do! producer.DisposeAsync()
 
-                        // the producer name must be free for a replacement. That reply is the broker Success
-                        // for CloseProducer, so an unregistered request id would already have been logged
+                        // Explicit disposal must still release the recovered producer's broker registration.
                         let! (producer2 : IProducer<byte[]>) =
                             client.NewProducer()
                                 .Topic(topicName)
@@ -1053,7 +1087,7 @@ let tests =
                         client.CloseAsync().GetAwaiter().GetResult()
                 })
 
-            Log.Debug("Finished Producer is closed at the broker when its mailbox fails")
+            Log.Debug("Finished Producer closes its broker registration and recovers after a mailbox failure")
         }
 
         testTask "Pending broker sends fault when the producer mailbox fails" {
@@ -1063,15 +1097,16 @@ let tests =
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let mutable producerImpl = Unchecked.defaultof<ProducerImpl<byte[]>>
             let pendingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
-            let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let mutable crashOnSend = true
             // encryption runs inside the send, before the mailbox reads again. The crash is queued there
             // so it is processed only after the send is stored as a pending broker message, and a broker
             // ack cannot overtake it on this single-reader channel
             let encryptor =
                 { new IMessageEncryptor with
                     member _.Encrypt payload =
-                        post producerImpl.Mb
-                            (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
+                        if crashOnSend then
+                            crashOnSend <- false
+                            crashProducerMailbox producerImpl
                         EncryptedMessage(payload, Array.empty, "", Array.empty)
                     member _.UpdateEncryptionKeys() = () }
 
@@ -1086,8 +1121,9 @@ let tests =
             post producerImpl.Mb
                 (ProducerMessage.BeginSendMessage(struct (producer.NewMessage([| 1uy |]), pendingSend, false)))
 
-            do! assertMailboxException pendingSend.Task
-            do! assertMailboxException crashingSend.Task
+            do! assertFailure<InvalidOperationException> pendingSend.Task
+            let! _ = producer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0))
+            let! _ = producer.SendAsync([| 2uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
             do! producer.DisposeAsync()
 
             Log.Debug("Finished Pending broker sends fault when the producer mailbox fails")
@@ -1109,23 +1145,24 @@ let tests =
 
             let producerImpl = producer :?> ProducerImpl<byte[]>
             let batchedSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
-            let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
             // one message stays in the batch container: the batch is neither full nor due
             post producerImpl.Mb
                 (ProducerMessage.BeginSendMessage(struct (producer.NewMessage([| 1uy |]), batchedSend, false)))
-            post producerImpl.Mb
-                (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
+            crashProducerMailbox producerImpl
 
-            do! assertMailboxException batchedSend.Task
-            do! assertMailboxException crashingSend.Task
+            do! assertFailure<InvalidOperationException> batchedSend.Task
+            let! _ = producer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0))
+            let recoveredSend = producer.SendAsync([| 2uy |])
+            do! producer.FlushAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+            let! _ = recoveredSend.WaitAsync(TimeSpan.FromSeconds(5.0))
             do! producer.DisposeAsync()
 
             Log.Debug("Finished Batched sends fault when the producer mailbox fails")
         }
 
-        testTask "All key batches fault when a later batch crashes the producer mailbox" {
+        testTask "A failing key batch does not fail other key batches or the producer" {
 
-            Log.Debug("Started All key batches fault when a later batch crashes the producer mailbox")
+            Log.Debug("Started A failing key batch does not fail other key batches or the producer")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let failureMessage = "replication clusters enumeration failed"
@@ -1149,16 +1186,15 @@ let tests =
                 producer.NewMessage([| 2uy |], key = "second")
                     .WithReplicateTo(failingReplicationClusters)
             let secondSend = producer.SendAsync(secondMessage)
+            let thirdSend = producer.SendAsync(producer.NewMessage([| 3uy |], key = "third"))
 
-            // Key batches are processed by increasing sequence id. The first is added to
-            // pendingMessages, then enumerating the second batch's replication clusters throws.
-            // Both callbacks still remain in the uncleared key-batch container at that point.
+            // Metadata creation fails for the middle key batch; both surrounding batches must still send.
             let flush = producer.FlushAsync()
 
             let assertBatchFailure (work: Task<'T>) = task {
                 try
                     let! _ = work.WaitAsync(TimeSpan.FromSeconds(5.0))
-                    failwith "Task completed successfully after the key batch crashed the mailbox"
+                    failwith "Task completed successfully despite its invalid batch metadata"
                 with ex ->
                     match unwrap ex with
                     | :? InvalidOperationException as failure when failure.Message = failureMessage -> ()
@@ -1166,12 +1202,16 @@ let tests =
                     | other -> failwith $"Expected the key batch exception but got {other.GetType().Name}: {other.Message}"
             }
 
-            do! assertBatchFailure firstSend
+            let! _ = firstSend.WaitAsync(TimeSpan.FromSeconds(5.0))
             do! assertBatchFailure secondSend
-            do! assertBatchFailure flush
+            let! _ = thirdSend.WaitAsync(TimeSpan.FromSeconds(5.0))
+            do! flush.WaitAsync(TimeSpan.FromSeconds(5.0))
+            let nextSend = producer.SendAsync(producer.NewMessage([| 4uy |], key = "next"))
+            do! producer.FlushAsync().WaitAsync(TimeSpan.FromSeconds(5.0))
+            let! _ = nextSend.WaitAsync(TimeSpan.FromSeconds(5.0))
             do! producer.DisposeAsync()
 
-            Log.Debug("Finished All key batches fault when a later batch crashes the producer mailbox")
+            Log.Debug("Finished A failing key batch does not fail other key batches or the producer")
         }
 
         testTask "BlockIfQueueFull sends fault when the producer mailbox fails" {
@@ -1192,24 +1232,24 @@ let tests =
             let blockedSend1 = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
             let blockedSend2 = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
             // MaxPendingMessages 0 accepts nothing, so both sends sit in the blocked queue.
-            // a null send would be blocked too, so crash through a different mailbox message
+            // Fault outside send processing so the pending queue limit cannot block the injection.
             post producerImpl.Mb
                 (ProducerMessage.BeginSendMessage(struct (producer.NewMessage([| 1uy |]), blockedSend1, false)))
             post producerImpl.Mb
                 (ProducerMessage.BeginSendMessage(struct (producer.NewMessage([| 2uy |]), blockedSend2, false)))
-            post producerImpl.Mb
-                (ProducerMessage.GetStats(Unchecked.defaultof<TaskCompletionSource<ProducerStats>>))
+            crashProducerMailbox producerImpl
 
-            do! assertMailboxException blockedSend1.Task
-            do! assertMailboxException blockedSend2.Task
+            do! assertFailure<InvalidOperationException> blockedSend1.Task
+            do! assertFailure<InvalidOperationException> blockedSend2.Task
+            let! _ = producer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0))
             do! producer.DisposeAsync()
 
             Log.Debug("Finished BlockIfQueueFull sends fault when the producer mailbox fails")
         }
 
-        testTask "Requests posted as the producer mailbox fails are faulted" {
+        testTask "Requests queued behind a producer mailbox failure complete after recovery" {
 
-            Log.Debug("Started Requests posted as the producer mailbox fails are faulted")
+            Log.Debug("Started Requests queued behind a producer mailbox failure complete after recovery")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
 
@@ -1220,33 +1260,24 @@ let tests =
                     .CreateAsync()
 
             let producerImpl = producer :?> ProducerImpl<byte[]>
-            let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
-            // the mailbox loop throws inside this post. Later posts are read only by the drain
-            post producerImpl.Mb
-                (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
-
+            let trigger = TaskCompletionSource<ProducerStats>()
             let lateSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
             let flush = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
-            let close = TaskCompletionSource<Result<unit, exn>>(TaskCreationOptions.RunContinuationsAsynchronously)
             let stats = TaskCompletionSource<ProducerStats>(TaskCreationOptions.RunContinuationsAsynchronously)
-            post producerImpl.Mb
-                (ProducerMessage.BeginSendMessage(struct (producer.NewMessage([| 1uy |]), lateSend, false)))
-            post producerImpl.Mb (ProducerMessage.Flush flush)
-            post producerImpl.Mb (ProducerMessage.Close close)
-            post producerImpl.Mb (ProducerMessage.GetStats stats)
+            queueBehind trigger (fun () ->
+                crashProducerMailbox producerImpl
+                post producerImpl.Mb
+                    (ProducerMessage.BeginSendMessage(struct (producer.NewMessage([| 1uy |]), lateSend, false)))
+                post producerImpl.Mb (ProducerMessage.Flush flush)
+                post producerImpl.Mb (ProducerMessage.GetStats stats))
+            post producerImpl.Mb (ProducerMessage.GetStats trigger)
 
-            do! assertMailboxException crashingSend.Task
-            // these were still in the mailbox when it stopped, so the drain completes them
-            do! assertNotConnected lateSend.Task
-            do! assertNotConnected flush.Task
-            do! assertNotConnected stats.Task
-            let! (closeResult: Result<unit, exn>) = close.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
-            match closeResult with
-            | Ok () -> ()
-            | Error other -> failwith $"Close failed after mailbox failure with {other.GetType().Name}: {other.Message}"
-
+            let! _ = stats.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+            let! _ = lateSend.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+            do! flush.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
             do! producer.DisposeAsync()
-            Log.Debug("Finished Requests posted as the producer mailbox fails are faulted")
+            do! assertAlreadyClosed (producer.GetStats())
+            Log.Debug("Finished Requests queued behind a producer mailbox failure complete after recovery")
         }
 
         testTask "Close queued behind a producer mailbox failure completes only after cleanup" {
@@ -1263,21 +1294,22 @@ let tests =
 
             let producerImpl = producer :?> ProducerImpl<byte[]>
             let trigger = TaskCompletionSource<ProducerStats>()
-            let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let pendingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
             let close = TaskCompletionSource<Result<unit, exn>>()
-            // queued while the trigger is being handled: the null send faults the mailbox and the Close is left for the drain
+            // Queue the fault before a broker ack can arrive, followed by a Close that recovery must honor.
             queueBehind trigger (fun () ->
                 post producerImpl.Mb
-                    (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
+                    (ProducerMessage.BeginSendMessage(struct (producer.NewMessage([| 1uy |]), pendingSend, false)))
+                crashProducerMailbox producerImpl
                 post producerImpl.Mb (ProducerMessage.Close close))
             let atClose =
-                snapshotOnCompletion close (fun () -> producer.IsConnected().Result, crashingSend.Task.IsCompleted)
+                snapshotOnCompletion close (fun () -> producer.IsConnected().Result, pendingSend.Task.IsCompleted)
             post producerImpl.Mb (ProducerMessage.GetStats trigger)
 
             let! (connected, sendCompleted) = atClose.WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.isFalse "Producer should be failed before the queued Close completes" connected
-            Expect.isTrue "In-flight request should be failed before the queued Close completes" sendCompleted
-            do! assertMailboxException crashingSend.Task
+            Expect.isFalse "Producer should be closed before the queued Close completes" connected
+            Expect.isTrue "Pending sends should be failed before the queued Close completes" sendCompleted
+            do! assertFailure<InvalidOperationException> pendingSend.Task
             match close.Task.Result with
             | Ok () -> ()
             | Error other -> failwith $"Close failed after mailbox failure with {other.GetType().Name}: {other.Message}"
@@ -1286,15 +1318,15 @@ let tests =
             Log.Debug("Finished Close queued behind a producer mailbox failure completes only after cleanup")
         }
 
-        testTask "Partitioned producer keeps sending to the other partitions when a partition producer fails" {
+        testTask "Partitioned producer keeps sending and recovers a partition after a mailbox failure" {
 
-            Log.Debug("Started Partitioned producer keeps sending to the other partitions when a partition producer fails")
+            Log.Debug("Started Partitioned producer keeps sending and recovers a partition after a mailbox failure")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             do! createPartitionedTopic topicName 2
             let interceptor = new CountingProducerInterceptor()
-            // every message goes to the partition that keeps working
-            let router = { new IMessageRouter with member _.ChoosePartition(_, _) = 1 }
+            let mutable targetPartition = 1
+            let router = { new IMessageRouter with member _.ChoosePartition(_, _) = Volatile.Read(&targetPartition) }
 
             let! (producer : IProducer<byte[]>) =
                 client.NewProducer()
@@ -1302,25 +1334,24 @@ let tests =
                     .ProducerName("failingPartition")
                     .MessageRoutingMode(MessageRoutingMode.CustomPartition)
                     .CustomMessageRouter(router)
+                    .EnableBatching(false)
                     .Intercept(interceptor)
                     .CreateAsync()
 
             let partitioned = producer :?> PartitionedProducerImpl<byte[]>
             let failed = partitioned.Producers |> Array.head :?> ProducerImpl<byte[]>
-            let crashingSend = TaskCompletionSource<MessageId>(TaskCreationOptions.RunContinuationsAsynchronously)
-            // a null message crashes one partition mailbox
-            post failed.Mb
-                (ProducerMessage.BeginSendMessage(struct (Unchecked.defaultof<MessageBuilder<byte[]>>, crashingSend, false)))
-            do! assertMailboxException crashingSend.Task
-
-            // as in the Java client, a failed partition doesn't stop the others
-            do! assertNotConnectedBecauseOf typeof<NullReferenceException> (producer.GetStats())
+            crashProducerMailbox failed
+            let! otherMessageId = producer.SendAsync([| 1uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The unaffected partition should keep sending" 1 otherMessageId.Partition
+            let! _ = producer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Volatile.Write(&targetPartition, 0)
+            let! recoveredMessageId = producer.SendAsync([| 2uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The recovered partition should send again" 0 recoveredMessageId.Partition
             let! (_ : SequenceId) = producer.LastSequenceId().WaitAsync(TimeSpan.FromSeconds(5.0))
             let! connected = producer.IsConnected().WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.isFalse "The failed partition is not connected" connected
-            let! (_ : MessageId) = producer.SendAsync([| 1uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
-            Expect.equal "The failed partition must not dispose the interceptors the others still use" 0 interceptor.Disposed
-            Expect.equal "The remaining partition should still run the interceptors" 1 interceptor.Sent
+            Expect.isTrue "Both partitions should be connected after recovery" connected
+            Expect.equal "Recovery must not dispose the shared interceptors" 0 interceptor.Disposed
+            Expect.equal "Both partitions should still run the interceptors" 2 interceptor.Sent
             do! producer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
             Expect.equal "Closing the partitioned producer should dispose the interceptors once" 1 interceptor.Disposed
 
@@ -1333,7 +1364,7 @@ let tests =
                     .WaitAsync(TimeSpan.FromSeconds(15.0))
             do! producer2.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
-            Log.Debug("Finished Partitioned producer keeps sending to the other partitions when a partition producer fails")
+            Log.Debug("Finished Partitioned producer keeps sending and recovers a partition after a mailbox failure")
         }
 
         testTask "Partitioned producer reports why its mailbox failed" {
