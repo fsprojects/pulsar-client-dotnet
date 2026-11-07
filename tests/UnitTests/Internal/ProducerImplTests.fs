@@ -205,13 +205,70 @@ let private expectTimersStopped producer =
     for timer in timers do
         Expect.isFalse timer.Enabled "Producer timers must stop before disposal completes"
 
+// answering a request that is already complete throws, which faults the mailbox outside any send
+let private crashMailbox (producer: ProducerImpl<byte[]>) =
+    let completed = TaskCompletionSource<ProducerStats>()
+    completed.SetResult(Unchecked.defaultof<ProducerStats>)
+    post producer.Mb (ProducerMessage.GetStats completed)
+
+let private replyReceipt (broker: BrokerConnection) (send: BaseCommand) =
+    broker.Reply(
+        BaseCommand(
+            ``type`` = BaseCommand.Type.SendReceipt,
+            SendReceipt = CommandSendReceipt(
+                ProducerId = send.Send.ProducerId,
+                SequenceId = send.Send.SequenceId,
+                HighestSequenceId = send.Send.HighestSequenceId,
+                MessageId = MessageIdData(ledgerId = 1UL, entryId = 1UL))))
+
 [<Tests>]
 let tests =
     testList "ProducerImpl" [
-        testTask "Mailbox failure does not write disposed payloads to the shared connection" {
+        testTask "An unexpected send error fails only that message" {
             use broker = new BrokerConnection(clientConfig)
             let config = { producerConfig with BatchingEnabled = false; SendTimeout = TimeSpan.Zero }
-            let! producer = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
+            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
+            let failing =
+                postAndAsyncReply producer.Mb (fun reply ->
+                    BeginSendMessage(struct(Unchecked.defaultof<MessageBuilder<byte[]>>, reply, false)))
+            let! _ = expectFailure<NullReferenceException> failing
+
+            // as in the Java client, the producer stays registered and keeps sending
+            let sending = enqueueMessage producer [| 1uy |]
+            let! (send: BaseCommand) = broker.ReadCommand()
+            Expect.equal send.``type`` BaseCommand.Type.Send "The next message should be sent rather than the producer closed"
+            do! replyReceipt broker send
+            let! _ = sending.WaitAsync(testTimeout)
+            Expect.isTrue broker.Connection.IsActive "A failed send must preserve the shared connection"
+        }
+
+        testTask "A batch that can't be built fails only its messages" {
+            use broker = new BrokerConnection(clientConfig)
+            let config =
+                { producerConfig with
+                    BatchingEnabled = true
+                    BatchingMaxPublishDelay = TimeSpan.FromMinutes(1.0)
+                    SendTimeout = TimeSpan.Zero }
+            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
+            // the batch reads the properties only when it is built
+            let invalid = (producer :> IProducer<byte[]>).NewMessage([| 1uy |]).WithProperties(null)
+            let failing = postAndAsyncReply producer.Mb (fun reply -> BeginSendMessage(struct(invalid, reply, false)))
+            do! (postAndAsyncReply producer.Mb ProducerMessage.Flush).WaitAsync(testTimeout)
+            let! _ = expectFailure<NullReferenceException> failing
+
+            let sending = enqueueMessage producer [| 2uy |]
+            let flushing = postAndAsyncReply producer.Mb ProducerMessage.Flush
+            let! (send: BaseCommand) = broker.ReadCommand()
+            Expect.equal send.``type`` BaseCommand.Type.Send "The next batch should be sent rather than the producer closed"
+            do! replyReceipt broker send
+            let! _ = sending.WaitAsync(testTimeout)
+            do! flushing.WaitAsync(testTimeout)
+        }
+
+        testTask "Producer recovers after an unexpected mailbox exception without writing disposed payloads" {
+            use broker = new BrokerConnection(clientConfig)
+            let config = { producerConfig with BatchingEnabled = false; SendTimeout = TimeSpan.Zero }
+            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
             let writing = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
             let release = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
             let write _ =
@@ -222,51 +279,73 @@ let tests =
 
             try
                 let sending = enqueueMessage producer [| 1uy |]
-                let crashing =
-                    postAndAsyncReply producer.Mb (fun reply ->
-                        BeginSendMessage(struct(Unchecked.defaultof<MessageBuilder<byte[]>>, reply, false)))
-                let! _ = expectFailure<NullReferenceException> sending
-                let! _ = expectFailure<NullReferenceException> crashing
-                expectTimersStopped producer
+                crashMailbox producer
+                // the failure may have left the pending queue half updated, so its sends fail
+                let! _ = expectFailure<InvalidOperationException> sending
+                ()
             finally
                 release.TrySetResult() |> ignore
 
             let! sent = blockedWrite.WaitAsync(testTimeout)
             Expect.isTrue sent "The shared writer should resume normally"
-            let! (command: BaseCommand) = broker.ReadCommand()
-            Expect.equal command.``type`` BaseCommand.Type.CloseProducer "Discard the failed send and close the producer"
+            let! (close: BaseCommand) = broker.ReadCommand()
+            Expect.equal close.``type`` BaseCommand.Type.CloseProducer "Discard the failed send and close the producer"
             do! broker.Reply(
                 BaseCommand(
                     ``type`` = BaseCommand.Type.Success,
-                    Success = CommandSuccess(RequestId = command.CloseProducer.RequestId)))
-            Expect.isTrue broker.Connection.IsActive "Failed producer cleanup must preserve the shared connection"
+                    Success = CommandSuccess(RequestId = close.CloseProducer.RequestId)))
+
+            // as in the Java client, a created producer outlives an unexpected error
+            let! (register: BaseCommand) = broker.ReadCommand()
+            Expect.equal register.``type`` BaseCommand.Type.Producer "The producer should register again"
+            Expect.equal register.Producer.ProducerId close.CloseProducer.ProducerId "The producer should keep its id"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.ProducerSuccess,
+                    ProducerSuccess = CommandProducerSuccess(
+                        RequestId = register.Producer.RequestId,
+                        ProducerName = "test-producer",
+                        LastSequenceId = -1L)))
+
+            let sending = enqueueMessage producer [| 2uy |]
+            let! (send: BaseCommand) = broker.ReadCommand()
+            Expect.equal send.``type`` BaseCommand.Type.Send "The recovered producer should send again"
+            do! replyReceipt broker send
+            let! _ = sending.WaitAsync(testTimeout)
+            Expect.isTrue broker.Connection.IsActive "Recovery must preserve the shared connection"
         }
 
-        testTask "Requests after a mailbox failure keep its cause" {
+        testTask "Requests after an unrecoverable mailbox failure keep its cause" {
             use broker = new BrokerConnection(clientConfig)
-            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(producerConfig, ProducerInterceptors<byte[]>.Empty, ignore)
-            let crashing =
-                postAndAsyncReply producer.Mb (fun reply ->
-                    BeginSendMessage(struct(Unchecked.defaultof<MessageBuilder<byte[]>>, reply, false)))
-            let! _ = expectFailure<NullReferenceException> crashing
-            let! (command: BaseCommand) = broker.ReadCommand()
-            Expect.equal command.``type`` BaseCommand.Type.CloseProducer "The failed producer should be closed at the broker"
+            let config = { producerConfig with BatchingEnabled = false; SendTimeout = TimeSpan.Zero }
+            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
+            // a terminated producer has nothing to recover, so a mailbox failure fails it
+            let sending = enqueueMessage producer [| 1uy |]
+            let! (send: BaseCommand) = broker.ReadCommand()
+            Expect.equal send.``type`` BaseCommand.Type.Send "Expected the message to be sent"
             do! broker.Reply(
                 BaseCommand(
-                    ``type`` = BaseCommand.Type.Success,
-                    Success = CommandSuccess(RequestId = command.CloseProducer.RequestId)))
+                    ``type`` = BaseCommand.Type.SendError,
+                    SendError = CommandSendError(
+                        ProducerId = send.Send.ProducerId,
+                        SequenceId = send.Send.SequenceId,
+                        Error = ServerError.TopicTerminatedError,
+                        Message = "Topic terminated")))
+            let! _ = expectFailure<TopicTerminatedException> sending
+            crashMailbox producer
 
             let failedProducer = producer :> IProducer<byte[]>
+            // GetStats still posts, so the stopped mailbox answers it
+            let! (statsError: NotConnectedException) = expectFailure<NotConnectedException> (failedProducer.GetStats())
+            Expect.isTrue (statsError.InnerException :? InvalidOperationException) "The stopped mailbox should report why the producer failed"
             // sends and flushes check the producer state before they post
             let! (sendError: NotConnectedException) =
                 expectFailure<NotConnectedException> (task { return! failedProducer.SendAsync([| 1uy |]) })
-            Expect.isTrue (sendError.InnerException :? NullReferenceException) "A send should report why the producer failed"
+            Expect.isTrue (sendError.InnerException :? InvalidOperationException) "A send should report why the producer failed"
             let! (flushError: NotConnectedException) =
                 expectFailure<NotConnectedException> (task { return! failedProducer.FlushAsync() })
-            Expect.isTrue (flushError.InnerException :? NullReferenceException) "A flush should report why the producer failed"
-            // GetStats still posts, so the stopped mailbox answers it
-            let! (statsError: NotConnectedException) = expectFailure<NotConnectedException> (failedProducer.GetStats())
-            Expect.isTrue (statsError.InnerException :? NullReferenceException) "The stopped mailbox should report why the producer failed"
+            Expect.isTrue (flushError.InnerException :? InvalidOperationException) "A flush should report why the producer failed"
+            expectTimersStopped producer
         }
 
         testTask "Producer closes itself when its topic no longer exists" {
@@ -425,7 +504,7 @@ let tests =
                         BatchBuilder = batchBuilder
                         BatchingMaxPublishDelay = TimeSpan.FromHours(1.0)
                         SendTimeout = TimeSpan.Zero }
-                let! producer = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
+                let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
                 let first = enqueueMessage producer [| 1uy |]
                 let second = enqueueMessage producer [| 2uy |]
                 let! _ = (producer :> IProducer<byte[]>).GetStats().WaitAsync(testTimeout)

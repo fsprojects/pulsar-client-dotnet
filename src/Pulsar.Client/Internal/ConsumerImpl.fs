@@ -992,10 +992,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     discardQueuedMessagesFromConnection clientCnx
                     Log.Logger.LogWarning(closeEx, "{0} failed to close consumer for topic {1} after mailbox failure; closing its connection",
                                           prefix, topicName)
-                    let notifyConnectionClosed = clientCnx.IsActive
                     clientCnx.Dispose()
-                    if notifyConnectionClosed then
-                        connectionHandler.ConnectionClosed clientCnx
+                    // the connection no longer reports its closure to the removed consumer
+                    connectionHandler.ConnectionClosed clientCnx
             | Connecting ->
                 let initialMsgId, _ = clearReceiverQueue()
                 startMessageId <- initialMsgId
@@ -1555,24 +1554,32 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
                     NotConnectedException "Not connected to broker" |> channel.SetException
         } :> Task).ContinueWith(fun t ->
+            let mutable recovering = false
             try
                 if t.IsFaulted then
                     let (Flatten ex) = t.Exception
-                    backgroundTask {
-                        try
-                            do! recoverMailboxFailure ex
-                            if connectionHandler.ConnectionState <> Failed then
-                                startMailboxLoop() |> ignore
-                        with recoveryEx ->
-                            Log.Logger.LogCritical(recoveryEx, "{0} failed to recover consumer for topic {1}",
-                                                   prefix, topicName)
-                            failMailbox recoveryEx
-                            drainStoppedMailbox()
-                    } |> ignore
+                    if subscribeTsc.Task.IsCompletedSuccessfully then
+                        recovering <- true
+                        backgroundTask {
+                            try
+                                do! recoverMailboxFailure ex
+                                if connectionHandler.ConnectionState <> Failed then
+                                    startMailboxLoop() |> ignore
+                            with recoveryEx ->
+                                Log.Logger.LogCritical(recoveryEx, "{0} failed to recover consumer for topic {1}",
+                                                       prefix, topicName)
+                                try
+                                    failMailbox recoveryEx
+                                finally
+                                    drainStoppedMailbox()
+                        } |> ignore
+                    else
+                        // fail the subscription instead of retrying it
+                        failMailbox ex
                 else
                     Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
             finally
-                if not t.IsFaulted then
+                if not recovering then
                     // only after cleanup, so a queued Close can't complete before the consumer has stopped
                     drainStoppedMailbox())
 
