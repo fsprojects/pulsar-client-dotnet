@@ -655,6 +655,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 let msgReceived = getMessageReceived cmd metadata payload checkSumValid
                 consumerOperations.MessageReceived(msgReceived, this)
             | _ ->
+                payload.Dispose()
                 Log.Logger.LogWarning("{0} consumer {1} wasn't found on CommandMessage", prefix, %cmd.ConsumerId)
         | XCommandLookupResponse cmd ->
             if cmd.ShouldSerializeError() then
