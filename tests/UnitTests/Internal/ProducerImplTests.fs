@@ -365,7 +365,7 @@ let tests =
 
             // Re-registering the same id succeeds only if the previous producer was removed.
             let registered = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
-            broker.Connection.AddProducer(
+            do! broker.Connection.AddProducer(
                 (producer :> IProducer<byte[]>).ProducerId,
                 { AckReceived = ignore
                   TopicTerminatedError = ignore

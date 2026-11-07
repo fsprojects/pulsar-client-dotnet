@@ -60,7 +60,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 channel.SetException ex
         } |> ignore
 
-    let mb = Channel.CreateUnbounded<TaskSeqMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mb = Channel.CreateUnbounded<TaskSeqMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         while true do
             match! mb.Reader.ReadAsync() with

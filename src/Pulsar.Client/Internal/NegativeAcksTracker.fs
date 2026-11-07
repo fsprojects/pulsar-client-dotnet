@@ -28,7 +28,7 @@ type internal NegativeAcksTracker(prefix: string,
     let state = SortedDictionary<MessageId, TimeStamp>()
 
 
-    let mb = Channel.CreateUnbounded<NegativeAcksTrackerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mb = Channel.CreateUnbounded<NegativeAcksTrackerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
