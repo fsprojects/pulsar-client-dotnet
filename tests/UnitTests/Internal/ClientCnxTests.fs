@@ -1,6 +1,8 @@
 module Pulsar.Client.UnitTests.Internal.ClientCnxTests
 
 open System
+open System.Buffers.Binary
+open System.IO
 open System.IO.Pipelines
 open System.Net
 open System.Reflection
@@ -9,6 +11,7 @@ open System.Threading.Channels
 open System.Threading.Tasks
 open System.Timers
 open Expecto
+open ProtoBuf
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
@@ -51,6 +54,15 @@ let private newCnx (incoming: Pipe) (output: PipeWriter) =
         Commands.DEFAULT_MAX_MESSAGE_SIZE,
         TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously),
         ignore)
+
+/// The bytes a broker sends for a command: [total size][command size][command].
+let private frameOf (command: BaseCommand) =
+    use stream = new MemoryStream()
+    stream.Write(Array.zeroCreate<byte> 4, 0, 4)
+    Serializer.SerializeWithLengthPrefix(stream, command, PrefixStyle.Fixed32BigEndian)
+    let frame = stream.ToArray()
+    BinaryPrimitives.WriteInt32BigEndian(frame.AsSpan(0, 4), frame.Length - 4)
+    frame
 
 let private request (cnx: ClientCnx) =
     let requestId = Generators.getNextRequestId()
@@ -196,5 +208,26 @@ let tests =
             finally
                 // Also releases the requests loop when an assertion above fails.
                 gate.TrySetResult() |> ignore
+        }
+
+        testTask "A frame is read as soon as its last bytes arrive, even when they are fewer than 8" {
+            // The writer pauses until the reader has examined what was written, so the reader sees the start of the
+            // frame on its own, as when a TLS record or a pipe buffer boundary splits the frame.
+            let incoming = Pipe(PipeOptions(pauseWriterThreshold = 1L, resumeWriterThreshold = 1L))
+            let connected = TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let _cnx =
+                ClientCnx(config, broker,
+                    { Input = incoming.Reader; Output = Pipe().Writer; Dispose = fun () -> incoming.Writer.Complete() },
+                    Commands.DEFAULT_MAX_MESSAGE_SIZE, connected, ignore)
+            let frame =
+                frameOf (BaseCommand(``type`` = BaseCommand.Type.Connected,
+                                     Connected = CommandConnected(ServerVersion = "test-broker", ProtocolVersion = int ProtocolVersion.V19)))
+            let split = frame.Length - 3
+            let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(frame, 0, split)).AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+            let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(frame, split, 3)).AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            let! read = completesInTime connected.Task
+            Expect.isTrue read "The frame is handled without waiting for more data from the broker"
+            incoming.Writer.Complete()
         }
     ]
