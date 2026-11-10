@@ -128,7 +128,17 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     endOpenActivities()
                 with ex ->
                     log.LogError(ex, "{0} failed to end the open activities", prefix)
-                log.LogCritical(t.Exception, "{0} mailbox failure", prefix)
+                // a cancelled task has no exception of its own: what cancelled it is thrown to whoever waits for it
+                let failure: exn =
+                    if t.IsFaulted then
+                        t.Exception :> exn
+                    else
+                        try
+                            t.GetAwaiter().GetResult()
+                            null
+                        with ex ->
+                            ex
+                log.LogCritical(failure, "{0} mailbox failure", prefix)
             else
                 log.LogInformation("{0} mailbox has stopped normally", prefix))
         |> ignore
