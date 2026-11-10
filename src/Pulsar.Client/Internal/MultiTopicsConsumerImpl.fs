@@ -238,7 +238,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                             result <- Some message
                         | Error (:? AlreadyClosedException) ->
                             // it stays registered until the parent closes or discovery removes its topic
-                            Log.Logger.LogDebug("{0} stopped reading the closed consumer for {1}", prefix, topic)
+                            Log.Logger.LogWarning("{0} stopped reading the closed consumer for {1}", prefix, topic)
                             do! wait Timeout.InfiniteTimeSpan
                         | Error ex ->
                             Log.Logger.LogError(ex, "{0} receive failed on the consumer for {1}, retrying in {2}",

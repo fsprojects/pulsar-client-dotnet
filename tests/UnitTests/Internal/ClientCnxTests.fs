@@ -1,6 +1,7 @@
 module Pulsar.Client.UnitTests.Internal.ClientCnxTests
 
 open System
+open System.Buffers
 open System.Buffers.Binary
 open System.IO
 open System.IO.Pipelines
@@ -11,6 +12,8 @@ open System.Threading.Channels
 open System.Threading.Tasks
 open System.Timers
 open Expecto
+open FSharp.UMX
+open Microsoft.IO
 open ProtoBuf
 open Pulsar.Client.Api
 open Pulsar.Client.Common
@@ -128,6 +131,67 @@ let private failsWithConnectException (request: Task<PulsarResponseType>) descri
 [<Tests>]
 let tests =
     testList "ClientCnx" [
+        testSequenced <| testTask "Messages arriving after consumer removal dispose pooled payloads" {
+            let originalManager = MemoryStreamManager
+            let manager = RecyclableMemoryStreamManager()
+            let disposed = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let subscription = manager.StreamDisposed.Subscribe(fun args ->
+                if args.Tag = "payload" then
+                    disposed.TrySetResult() |> ignore)
+            let incoming = Pipe()
+            let outgoing = Pipe()
+            let cnx = newCnx incoming outgoing.Writer
+            let delivered = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let consumerId = %1UL
+            try
+                // This test runs alone because the stream manager is shared by all connections.
+                MemoryStreamManager <- manager
+                cnx.AddConsumer(consumerId, {
+                    MessageReceived = fun struct(message, _) ->
+                        delivered.TrySetResult() |> ignore
+                        message.Payload.Dispose()
+                    ReachedEndOfTheTopic = ignore
+                    ActiveConsumerChanged = ignore
+                    ConnectionClosed = ignore
+                    AckReceipt = ignore
+                    AckError = ignore
+                })
+                do! cnx.RemoveConsumerAndWait(consumerId).WaitAsync(TimeSpan.FromSeconds(5.0))
+
+                use frame = new MemoryStream()
+                use writer = new BinaryWriter(frame)
+                writer.Write(0)
+                let command =
+                    BaseCommand(
+                        ``type`` = BaseCommand.Type.Message,
+                        Message = CommandMessage(
+                            ConsumerId = %consumerId,
+                            MessageId = MessageIdData(ledgerId = 1UL, entryId = 1UL)))
+                Serializer.SerializeWithLengthPrefix(frame, command, PrefixStyle.Fixed32BigEndian)
+                writer.Write(int16ToBigEndian MagicNumber)
+                let checksumPosition = frame.Position
+                writer.Write(0)
+                let metadata = MessageMetadata(ProducerName = "test-producer", SequenceId = 1UL, PublishTime = 1UL)
+                Serializer.SerializeWithLengthPrefix(frame, metadata, PrefixStyle.Fixed32BigEndian)
+                writer.Write([| 42uy |])
+                let checksum =
+                    ReadOnlySequence<byte>(frame.ToArray().AsMemory(int checksumPosition + 4))
+                    |> CRC32C.GetForROS
+                    |> int32
+                frame.Position <- checksumPosition
+                writer.Write(int32ToBigEndian checksum)
+                frame.Position <- 0L
+                writer.Write(int32ToBigEndian (int frame.Length - 4))
+                let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(frame.ToArray())).AsTask()
+
+                do! disposed.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+                Expect.isFalse delivered.Task.IsCompleted "Removed consumers must not receive messages"
+            finally
+                cnx.Dispose()
+                MemoryStreamManager <- originalManager
+                subscription.Dispose()
+        }
+
         testTask "A request the send loop reaches after the connection is deactivated still completes" {
             let incoming = Pipe()
             let output = new GatedWriter()

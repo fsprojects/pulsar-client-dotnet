@@ -87,6 +87,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let createConsumerStartTime = Stopwatch.GetTimestamp()
     let mutable hasReachedEndOfTopic = false
     let mutable avalablePermits = 0
+    let mutable mailboxRecoveryInProgress = false
+    let mutable mailboxRecoveriesSinceLastMessage = 0
     let mutable startMessageId =
         match startMessageId with
         | Some startMsgId ->
@@ -444,11 +446,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
     let clearDeadLetters() = deadLettersProcessor.ClearMessages()
 
-    let clearAckRequests() =
+    let failAckRequests (ex: exn) =
         for KeyValue(_, (_, _, tcs)) in ackRequests do
             stats.IncrementNumAcksFailed()
-            tcs.SetException(MessageAcknowledgeException "Consumer was closed")
+            tcs.TrySetException(ex) |> ignore
         ackRequests.Clear()
+
+    let clearAckRequests() =
+        failAckRequests (MessageAcknowledgeException "Consumer was closed")
 
     let getNewIndividualMsgIdWithPartition messageId =
         { messageId with Type = MessageIdType.Single; Partition = partitionIndex; TopicName = topicName.CompleteTopicName }
@@ -666,27 +671,35 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     return struct ((fun _ _ -> raise <| SchemaSerializationException ex.Message), schema)
         }
 
-    let processMessageChunk (rawMessage: RawMessage) msgId =
-        match chunkedMessageTracker.GetContext(rawMessage.Metadata) with
-        | Ok chunkedContext ->
-            let compressionCodec = rawMessage.Metadata.CompressionType |> CompressionCodec.get
-            match chunkedMessageTracker.MessageReceived(rawMessage, msgId, chunkedContext, compressionCodec) with
-            | Some payloadAndMessageId ->
-                Some payloadAndMessageId
-            | None ->
+    let processMessageChunk clientCnx (rawMessage: RawMessage) msgId =
+        backgroundTask {
+            match chunkedMessageTracker.GetContext(rawMessage.Metadata) with
+            | Ok chunkedContext ->
+                match chunkedMessageTracker.MessageReceived(rawMessage, msgId, chunkedContext) with
+                | Ok(Some payloadAndMessageId) ->
+                    return Some payloadAndMessageId
+                | Ok None ->
+                    increaseAvailablePermits 1
+                    return None
+                | Error (ex, chunkMessageIds) ->
+                    Log.Logger.LogError(ex, "{0} Decompression exception for chunked message {1}", prefix, msgId)
+                    for index = 0 to chunkMessageIds.Length - 2 do
+                        if box chunkMessageIds[index] |> isNull |> not then
+                            sendAcknowledge chunkMessageIds[index] Individual EmptyProperties
+                    do! discardCorruptedMessage msgId clientCnx 1 CommandAck.ValidationError.DecompressionError
+                    return None
+            | Error error ->
+                // discard message if chunk is out-of-order
+                Log.Logger.LogWarning("{0} {1} msgId = {2}", prefix, error, rawMessage.MessageId)
                 increaseAvailablePermits 1
-                None
-        | Error error ->
-            // discard message if chunk is out-of-order
-            Log.Logger.LogWarning("{0} {1} msgId = {2}", prefix, error, rawMessage.MessageId)
-            increaseAvailablePermits 1
-            let publishDateTime = convertToDateTime %rawMessage.Metadata.PublishTime
-            if consumerConfig.ExpireTimeOfIncompleteChunkedMessage > TimeSpan.Zero &&
-                DateTime.UtcNow > publishDateTime.Add(consumerConfig.ExpireTimeOfIncompleteChunkedMessage) then
-                sendAcknowledge rawMessage.MessageId Individual EmptyProperties
-            else
-                trackMessage rawMessage.MessageId
-            None
+                let publishDateTime = convertToDateTime %rawMessage.Metadata.PublishTime
+                if consumerConfig.ExpireTimeOfIncompleteChunkedMessage > TimeSpan.Zero &&
+                    DateTime.UtcNow > publishDateTime.Add(consumerConfig.ExpireTimeOfIncompleteChunkedMessage) then
+                    sendAcknowledge rawMessage.MessageId Individual EmptyProperties
+                else
+                    trackMessage rawMessage.MessageId
+                return None
+        }
 
     let createMessage (rawMessage: RawMessage) (decoder: struct ((string -> byte[] -> 'T) * ISchema<'T>))
                       isMessageUndecryptable messageId (payload: byte[]) (msgKey: string) hasBase64EncodedKey
@@ -749,7 +762,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             if isMessageUndecryptable || (rawMessage.Metadata.NumMessages = 1 && not rawMessage.Metadata.HasNumMessagesInBatch) then
                 // right now, chunked messages are only supported by non-shared subscription
                 if isChunkedMessage then
-                    match processMessageChunk rawMessage msgId with
+                    let! chunkResult = processMessageChunk clientCnx rawMessage msgId
+                    match chunkResult with
                     | Some (chunkedPayload, msgIdWithChunk) ->
                         handleSingleMessagePayload rawMessage msgIdWithChunk chunkedPayload hasWaitingChannel
                             hasWaitingBatchChannel isMessageUndecryptable decoder
@@ -865,6 +879,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     }
 
     let mb = Channel.CreateUnbounded<ConsumerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let recoveryBacklog = Queue<ConsumerMessage<'T>>()
     let mutable currentMessage : ConsumerMessage<'T> option = None
 
     let replyFromStoppedMailbox (ex: exn) (msg: ConsumerMessage<'T>) =
@@ -907,6 +922,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         | Closing | Closed | Terminated -> AlreadyClosedException(prefix + " already closed") :> exn
         | _ -> NotConnectedException(prefix + " not connected", connectionHandler.FailureCause) :> exn
 
+    let failRecoveryBacklog (ex: exn) =
+        while recoveryBacklog.Count > 0 do
+            try
+                recoveryBacklog.Dequeue()
+                |> replyFromStoppedMailbox ex
+            with replyEx ->
+                Log.Logger.LogWarning(replyEx, "{0} failed to reply to a request retained during recovery", prefix)
+
     let failMailbox (ex: exn) =
         Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
         try
@@ -940,6 +963,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     // requests posted after the mailbox exits would otherwise never be completed
     let drainStoppedMailbox () =
         backgroundTask {
+            failRecoveryBacklog (stoppedMailboxException ())
             while true do
                 let! msg = mb.Reader.ReadAsync()
                 try
@@ -948,10 +972,99 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
         } |> ignore
 
-    do (backgroundTask {
+    let discardQueuedMessagesFromConnection (clientCnx: ClientCnx) =
+        let mutable msg = Unchecked.defaultof<ConsumerMessage<'T>>
+        while mb.Reader.TryRead(&msg) do
+            match msg with
+            | MessageReceived (rawMessage, receivedCnx) when obj.ReferenceEquals(receivedCnx, clientCnx) ->
+                rawMessage.Payload.Dispose()
+            | _ ->
+                recoveryBacklog.Enqueue msg
+
+    let clearReceiverQueueForRecovery (ex: exn) =
+        let initialMsgId, seekChannel = clearReceiverQueue()
+        seekChannel |> Option.iter (fun channel -> channel.TrySetException(ex) |> ignore)
+        startMessageId <- initialMsgId
+
+    let closeAfterInFlightClose () =
+        backgroundTask {
+            let previousState = connectionHandler.ConnectionState
+            connectionHandler.Closing()
+            match previousState with
+            | Ready clientCnx ->
+                try
+                    do! (clientCnx.RemoveConsumerAndWait consumerId).WaitAsync(clientConfig.OperationTimeout)
+                    let requestId = Generators.getNextRequestId()
+                    let payload = Commands.newCloseConsumer consumerId requestId
+                    let! response =
+                        (clientCnx.SendAndWaitForReply requestId payload).WaitAsync(clientConfig.OperationTimeout)
+                    response |> PulsarResponseType.GetEmpty
+                with Flatten closeEx ->
+                    Log.Logger.LogWarning(closeEx, "{0} failed to close consumer at the broker after a failed Close request", prefix)
+                    clientCnx.Dispose()
+            | _ ->
+                ()
+            connectionHandler.Closed()
+            failAckRequests (AlreadyClosedException(prefix + " already closed"))
+            stopConsumer()
+            failRecoveryBacklog (stoppedMailboxException ())
+            currentMessage
+            |> Option.iter (replyFromStoppedMailbox (AlreadyClosedException(prefix + " already closed")))
+        }
+
+    let recoverMailboxFailure (ex: exn) =
+        backgroundTask {
+            match currentMessage with
+            | Some (ConsumerMessage.Close _) ->
+                do! closeAfterInFlightClose ()
+            | _ ->
+                mailboxRecoveriesSinceLastMessage <- mailboxRecoveriesSinceLastMessage + 1
+                Log.Logger.LogError(ex,
+                                    "{0} mailbox failed unexpectedly for topic {1}; recovering consumer (recovery {2} since last message)",
+                                    prefix, topicName, mailboxRecoveriesSinceLastMessage)
+                mailboxRecoveryInProgress <- true
+                currentMessage |> Option.iter (replyFromStoppedMailbox ex)
+                match connectionHandler.ConnectionState with
+                | Ready clientCnx ->
+                    clearReceiverQueueForRecovery ex
+                    failAckRequests ex
+                    let requestId = Generators.getNextRequestId()
+                    try
+                        do! (clientCnx.RemoveConsumerAndWait consumerId).WaitAsync(clientConfig.OperationTimeout)
+                        let payload = Commands.newCloseConsumer consumerId requestId
+                        let! response = clientCnx.SendAndWaitForReply requestId payload
+                        response |> PulsarResponseType.GetEmpty
+                        discardQueuedMessagesFromConnection clientCnx
+                        connectionHandler.ReconnectLater ex
+                    with Flatten closeEx ->
+                        discardQueuedMessagesFromConnection clientCnx
+                        Log.Logger.LogWarning(closeEx, "{0} failed to close consumer for topic {1} after mailbox failure; closing its connection",
+                                              prefix, topicName)
+                        clientCnx.Dispose()
+                        // the connection no longer reports its closure to the removed consumer
+                        connectionHandler.ConnectionClosed clientCnx
+                | Connecting ->
+                    clearReceiverQueueForRecovery ex
+                    failAckRequests ex
+                | Uninitialized ->
+                    clearReceiverQueueForRecovery ex
+                    failAckRequests ex
+                    connectionHandler.GrabCnx()
+                | _ ->
+                    failRecoveryBacklog ex
+                    failMailbox ex
+                    drainStoppedMailbox()
+        }
+
+    let rec startMailboxLoop () =
+        (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-            let! msg = mb.Reader.ReadAsync()
+            let! msg =
+                if recoveryBacklog.Count > 0 then
+                    ValueTask<ConsumerMessage<'T>>(recoveryBacklog.Dequeue())
+                else
+                    mb.Reader.ReadAsync()
             currentMessage <- Some msg
             match msg with
             | ConsumerMessage.ConnectionOpened ->
@@ -998,7 +1111,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         let! response = clientCnx.SendAndWaitForReply requestId payload
                         response |> PulsarResponseType.GetEmpty
                         this.ConsumerIsReconnectedToBroker()
-                        connectionHandler.ResetBackoff()
+                        if mailboxRecoveryInProgress then
+                            mailboxRecoveryInProgress <- false
+                        else
+                            connectionHandler.ResetBackoff()
                         let initialFlowCount = consumerConfig.ReceiverQueueSize
                         subscribeTsc.TrySetResult() |> ignore
                         if initialFlowCount <> 0 then
@@ -1106,6 +1222,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     rawMessage.Payload.Dispose()
                     // the metadata of a message that failed its checksum cannot be trusted for the batch size
                     do! discardCorruptedMessage msgId clientCnx 1 CommandAck.ValidationError.ChecksumMismatch
+                mailboxRecoveriesSinceLastMessage <- 0
 
             | ConsumerMessage.Receive receiveCallback ->
 
@@ -1490,16 +1607,38 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     Log.Logger.LogError("{0} can't unsubscribe since not connected", prefix)
                     NotConnectedException "Not connected to broker" |> channel.SetException
         } :> Task).ContinueWith(fun t ->
+            let mutable recovering = false
             try
                 if t.IsFaulted then
                     let (Flatten ex) = t.Exception
-                    failMailbox ex
+                    if subscribeTsc.Task.IsCompletedSuccessfully then
+                        recovering <- true
+                        backgroundTask {
+                            try
+                                do! recoverMailboxFailure ex
+                                match connectionHandler.ConnectionState with
+                                | Uninitialized | Connecting | Ready _ -> startMailboxLoop() |> ignore
+                                | _ -> drainStoppedMailbox()
+                            with recoveryEx ->
+                                Log.Logger.LogCritical(recoveryEx, "{0} failed to recover consumer for topic {1}",
+                                                       prefix, topicName)
+                                try
+                                    failRecoveryBacklog recoveryEx
+                                    failMailbox recoveryEx
+                                finally
+                                    drainStoppedMailbox()
+                        } |> ignore
+                    else
+                        // fail the subscription instead of retrying it
+                        failMailbox ex
                 else
                     Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
             finally
-                // only after cleanup, so a queued Close can't complete before the consumer has stopped
-                drainStoppedMailbox())
-    |> ignore
+                if not recovering then
+                    // only after cleanup, so a queued Close can't complete before the consumer has stopped
+                    drainStoppedMailbox())
+
+    do startMailboxLoop() |> ignore
 
     do startStatTimer()
     do startChunkTimer()

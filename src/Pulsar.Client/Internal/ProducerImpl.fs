@@ -19,6 +19,14 @@ open System.Runtime.InteropServices
 open Pulsar.Client.Transaction
 open System.Threading.Channels
 
+module private ProducerStreamOwnership =
+    let forgetOwnedStream (streams: ResizeArray<MemoryStream>) (stream: MemoryStream) =
+        let mutable index = 0
+        while index < streams.Count && not (Object.ReferenceEquals(streams[index], stream)) do
+            index <- index + 1
+        if index < streams.Count then
+            streams.RemoveAt(index)
+
 type SendMessageRequest<'T> =
     (struct(MessageBuilder<'T> * TaskCompletionSource<MessageId> * bool))
 
@@ -119,6 +127,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         if batchMessageContainer.NumMessagesInBatch > 0 then
             batchMessageContainer.Discard(fun batchItem -> failMessage batchItem.Message batchItem.Tcs ex)
 
+    let failBlockedAndBatchedMessages (ex: exn) =
+        while blockedRequests.Count > 0 do
+            let struct(message, channel, _) = blockedRequests.Dequeue()
+            failMessage message (Some channel) ex
+        if producerConfig.BatchingEnabled then
+            failPendingBatchMessages ex
+
     let disposePendingPayload (msg: PendingMessage<'T>) =
         lock msg.Payload (fun () -> msg.Payload.Dispose())
 
@@ -129,11 +144,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             failPendingMessage msg ex
         // as in the Java client, every message that went through the interceptors hears how its send ended,
         // including those still waiting for room in the queue or in the batch
-        while blockedRequests.Count > 0 do
-            let struct(message, channel, _) = blockedRequests.Dequeue()
-            failMessage message (Some channel) ex
-        if producerConfig.BatchingEnabled then
-            failPendingBatchMessages ex
+        failBlockedAndBatchedMessages ex
 
     let sendTimeoutTimer = new Timer()
     let startSendTimeoutTimer () =
@@ -144,10 +155,10 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             sendTimeoutTimer.Start()
 
     let batchTimer = new Timer()
+    do batchTimer.Elapsed.Add(fun _ -> post this.Mb (Tick SendBatchTick))
     let startSendBatchTimer () =
         batchTimer.Interval <- producerConfig.BatchingMaxPublishDelay.TotalMilliseconds
         batchTimer.AutoReset <- true
-        batchTimer.Elapsed.Add(fun _ -> post this.Mb (Tick SendBatchTick))
         batchTimer.Start()
 
     let statTimer = new Timer()
@@ -205,10 +216,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     Task.CompletedTask)
         clientCnx.SendAndForget(struct(writeIfPending, commandType))
 
-    let sendMessage (pendingMessage: PendingMessage<'T>) =
+    let sendMessage (pendingMessage: PendingMessage<'T>) transferOwnership =
         if Log.Logger.IsEnabled LogLevel.Debug then
             Log.Logger.LogDebug("{0} sendMessage sequenceId={1}", prefix, %pendingMessage.SequenceId)
         pendingMessages.Enqueue(pendingMessage)
+        transferOwnership ()
         match connectionHandler.ConnectionState with
         | Ready clientCnx ->
             sendPendingMessage clientCnx pendingMessage
@@ -325,38 +337,62 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let processOpSendMsg { OpSendMsg = opSendMsg; SequenceId = sequenceId; HighestSequenceId = highestSequenceId;
                           PartitionKey = partitionKey; OrderingKey = orderingKey; TxnId = txnId; ReplicationClusters = replicationClusters;
                           Stream = stream } =
-        let payloadLength = int stream.Length
         let batchCallbacks = opSendMsg
         let batchSize = batchCallbacks.Length
-        let metadata = createMessageMetadata sequenceId txnId (Some batchSize)
-                           payloadLength partitionKey EmptyProps None orderingKey None replicationClusters
-        let compressedBatchPayload = compressionCodec.Encode stream
-        if (compressedBatchPayload.Length > maxMessageSize) then
-            batchCallbacks
-            |> Array.iter (fun ((_, message, tcs)) ->
-                let ex = InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes"
-                failMessage message tcs ex)
-        else
-            let encryptResult = encrypt metadata compressedBatchPayload
-            match encryptResult with
-            | Ok encryptedBatchPayload ->
-                let sendTask =
-                    Commands.newSend producerId sequenceId (Some highestSequenceId) batchSize metadata encryptedBatchPayload
-                let pendingMessage = {
-                    SequenceId = sequenceId
-                    HighestSequenceId = highestSequenceId
-                    SendTask = sendTask
-                    Payload = encryptedBatchPayload
-                    Callback = BatchCallbacks batchCallbacks
-                    CreatedAt = %Stopwatch.GetTimestamp()
-                }
-                stats.UpdateNumMsgsSent(batchSize, int encryptedBatchPayload.Length)
-                sendMessage pendingMessage
-                lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
+        let mutable ownedPayload = stream
+        let mutable payloadTransferred = false
+        try
+            let pendingMessage =
+                // as in the Java client, an unexpected error fails only this batch rather than the whole producer
+                try
+                    let payloadLength = int stream.Length
+                    let metadata = createMessageMetadata sequenceId txnId (Some batchSize)
+                                       payloadLength partitionKey EmptyProps None orderingKey None replicationClusters
+                    let compressedBatchPayload = compressionCodec.Encode stream
+                    ownedPayload <- compressedBatchPayload
+                    if (compressedBatchPayload.Length > maxMessageSize) then
+                        Error (InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes" :> exn)
+                    else
+                        let encryptResult = encrypt metadata compressedBatchPayload
+                        match encryptResult with
+                        | Ok encryptedBatchPayload ->
+                            ownedPayload <- encryptedBatchPayload
+                            let sendTask =
+                                Commands.newSend producerId sequenceId (Some highestSequenceId) batchSize metadata encryptedBatchPayload
+                            Ok {
+                                SequenceId = sequenceId
+                                HighestSequenceId = highestSequenceId
+                                SendTask = sendTask
+                                Payload = encryptedBatchPayload
+                                Callback = BatchCallbacks batchCallbacks
+                                CreatedAt = %Stopwatch.GetTimestamp()
+                            }
+                        | Error ex ->
+                            Error ex
+                with ex ->
+                    Log.Logger.LogError(ex, "{0} failed to send a batch of {1} messages to topic {2}",
+                                        prefix, batchSize, producerConfig.Topic.CompleteTopicName)
+                    Error ex
+            match pendingMessage with
+            | Ok pendingMessage ->
+                try
+                    stats.UpdateNumMsgsSent(batchSize, int pendingMessage.Payload.Length)
+                    sendMessage pendingMessage (fun () -> payloadTransferred <- true)
+                    lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
+                with ex ->
+                    if pendingMessages |> Seq.exists (fun queued -> Object.ReferenceEquals(queued, pendingMessage)) then
+                        raise ex
+                    Log.Logger.LogError(ex, "{0} failed to enqueue a batch of {1} messages to topic {2}",
+                                        prefix, batchSize, producerConfig.Topic.CompleteTopicName)
+                    batchCallbacks
+                    |> Array.iter (fun struct (_, message, tcs) -> failMessage message tcs ex)
             | Error ex ->
                 batchCallbacks
                 |> Array.iter (fun ((_, message, tcs)) ->
                     failMessage message tcs ex)
+        finally
+            if not payloadTransferred then
+                ownedPayload.Dispose()
 
     let canAddToCurrentBatch (msg: MessageBuilder<'T>) =
         batchMessageContainer.HaveEnoughSpace(msg) && batchMessageContainer.HasSameTxn(msg)
@@ -365,11 +401,23 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         let batchSize = batchMessageContainer.NumMessagesInBatch
         Log.Logger.LogTrace("{0} Batching the messages from the batch container with {1} messages", prefix, batchSize)
         if batchSize > 0 then
-            if batchMessageContainer.IsMultiBatches then
-                for msg in batchMessageContainer.CreateOpSendMsgs() do
-                    processOpSendMsg msg
-            else
-                let msg = batchMessageContainer.CreateOpSendMsg()
+            // build every batch before sending any, so a failure can't send part of the container
+            let opSendMsgs = ResizeArray()
+            try
+                if batchMessageContainer.IsMultiBatches then
+                    opSendMsgs.AddRange(batchMessageContainer.CreateOpSendMsgs())
+                else
+                    opSendMsgs.Add(batchMessageContainer.CreateOpSendMsg())
+            with ex ->
+                // unlike the Java client, which retries these messages in a later batch, fail them,
+                // since a batch that can't be built would most likely fail again
+                Log.Logger.LogError(ex, "{0} failed to build a batch of {1} messages for topic {2}",
+                                    prefix, batchSize, producerConfig.Topic.CompleteTopicName)
+                for opSendMsg in opSendMsgs do
+                    opSendMsg.Stream.Dispose()
+                opSendMsgs.Clear()
+                failPendingBatchMessages ex
+            for msg in opSendMsgs do
                 processOpSendMsg msg
         batchMessageContainer.Clear()
 
@@ -403,109 +451,147 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     None
                 else
                     Some channel
-            let sequenceId =
-                match message.SequenceId with
-                | Some seqId ->
-                    seqId
-                | None ->
-                    let oldValue = msgIdGenerator
-                    msgIdGenerator <- msgIdGenerator + %1L
-                    %oldValue
-            if canAddToBatch message then
-                let batchItem = { Message = message; Tcs = channel; SequenceId = sequenceId }
-                if canAddToCurrentBatch message then
-                    // should trigger complete the batch message, new message will add to a new batch and new batch
-                    // sequence id use the new message, so that broker can handle the message duplication
-                    if sequenceId <= lastSequenceIdPushed then
-                        isLastSequenceIdPotentialDuplicated <- true
-                        if sequenceId <= %lastSequenceIdPublished then
-                            Log.Logger.LogWarning("{0} Message with sequence id {1} is definitely a duplicate",
-                                                  prefix, message.SequenceId)
-                        else
-                            Log.Logger.LogInformation("{0} Message with sequence id {1} might be a duplicate but cannot be determined at this time.",
+            let ownedPayloads = ResizeArray<MemoryStream>()
+            use _ = { new IDisposable with member _.Dispose() = for payload in ownedPayloads do payload.Dispose() }
+            let mutable batchOperationInProgress = false
+            let mutable sendEnqueued = false
+            // as in the Java client, an unexpected error fails only this message rather than the whole producer
+            try
+                let sequenceId =
+                    match message.SequenceId with
+                    | Some seqId ->
+                        seqId
+                    | None ->
+                        let oldValue = msgIdGenerator
+                        msgIdGenerator <- msgIdGenerator + %1L
+                        %oldValue
+                if canAddToBatch message then
+                    let batchItem = { Message = message; Tcs = channel; SequenceId = sequenceId }
+                    if canAddToCurrentBatch message then
+                        // should trigger complete the batch message, new message will add to a new batch and new batch
+                        // sequence id use the new message, so that broker can handle the message duplication
+                        if sequenceId <= lastSequenceIdPushed then
+                            isLastSequenceIdPotentialDuplicated <- true
+                            if sequenceId <= %lastSequenceIdPublished then
+                                Log.Logger.LogWarning("{0} Message with sequence id {1} is definitely a duplicate",
                                                       prefix, message.SequenceId)
-                        doBatchSendAndAdd batchItem
-                    else
-                        // Should flush the last potential duplicated since can't combine potential duplicated messages
-                        // and non-duplicated messages into a batch.
-                        if isLastSequenceIdPotentialDuplicated then
-                            doBatchSendAndAdd batchItem
-                        else
-                            // handle boundary cases where message being added would exceed
-                            // batch size and/or max message size
-                            if batchMessageContainer.Add(batchItem) then
-                                Log.Logger.LogDebug("{0} Max batch container size exceeded", prefix)
-                                batchMessageAndSend()
-                        isLastSequenceIdPotentialDuplicated <- false
-                else
-                   doBatchSendAndAdd batchItem
-            else
-                // Preserve sequence order when a message bypasses the accumulated batch.
-                if producerConfig.BatchingEnabled then
-                    batchMessageAndSend()
-                let compressedPayload = compressionCodec.Encode (new MemoryStream(message.Payload))
-                let payloadLength = int compressedPayload.Length
-                if payloadLength > maxMessageSize && not producerConfig.ChunkingEnabled then
-                    let ex = InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes"
-                    failMessage message channel ex
-                else
-                    let totalChunks =
-                        Math.Max(1, payloadLength) / maxMessageSize
-                            + (if Math.Max(1, payloadLength) % maxMessageSize = 0 then 0 else 1)
-                    let mutable readStartIndex = 0
-                    let mutable chunkError = false
-                    let mutable chunkId = 0
-                    let isChunked = totalChunks > 1
-                    let uuid = if isChunked then $"{producerName}-{sequenceId}" else null
-                    let messageIds = if isChunked then Array.zeroCreate totalChunks else Array.empty
-                    let txnId = message.Txn |> Option.map _.Id
-                    while chunkId < totalChunks && not chunkError do
-                        let metadata = createMessageMetadata sequenceId txnId None
-                                           message.Payload.Length message.Key message.Properties message.DeliverAt
-                                           message.OrderingKey message.EventTime message.ReplicationClusters
-                        let chunkPayload =
-                            if isChunked && producerConfig.Topic.IsPersistent then
-                                metadata.Uuid <- uuid
-                                metadata.ChunkId <- chunkId
-                                metadata.NumChunksFromMsg <- totalChunks
-                                metadata.TotalChunkMsgSize <- payloadLength
-                                let chunkStream = MemoryStreamManager.GetStream("chunk")
-                                compressedPayload.Seek(readStartIndex, SeekOrigin.Begin) |> ignore
-                                let chunkSize = Math.Min(maxMessageSize, payloadLength - readStartIndex)
-                                let targetSpan = chunkStream.GetSpan(chunkSize).Slice(0, chunkSize)
-                                let writtenBytes = compressedPayload.Read(targetSpan)
-                                chunkStream.Advance(writtenBytes)
-                                if compressedPayload.Position = compressedPayload.Length then
-                                    compressedPayload.Dispose()
-                                chunkStream :> MemoryStream
                             else
-                                compressedPayload
-                        let encryptResult = encrypt metadata chunkPayload
-                        match encryptResult with
-                        | Ok encryptedPayload ->
-                            let payload =
-                                Commands.newSend producerId sequenceId None 1 metadata encryptedPayload
-                            let chunkDetails =
-                                if isChunked then
-                                    Some { TotalChunks = totalChunks; ChunkId = chunkId; MessageIds = messageIds }
+                                Log.Logger.LogInformation("{0} Message with sequence id {1} might be a duplicate but cannot be determined at this time.",
+                                                          prefix, message.SequenceId)
+                            batchOperationInProgress <- true
+                            doBatchSendAndAdd batchItem
+                            batchOperationInProgress <- false
+                        else
+                            // Should flush the last potential duplicated since can't combine potential duplicated messages
+                            // and non-duplicated messages into a batch.
+                            if isLastSequenceIdPotentialDuplicated then
+                                batchOperationInProgress <- true
+                                doBatchSendAndAdd batchItem
+                                batchOperationInProgress <- false
+                            else
+                                // handle boundary cases where message being added would exceed
+                                // batch size and/or max message size
+                                batchOperationInProgress <- true
+                                let batchIsFull = batchMessageContainer.Add(batchItem)
+                                batchOperationInProgress <- false
+                                if batchIsFull then
+                                    Log.Logger.LogDebug("{0} Max batch container size exceeded", prefix)
+                                    batchOperationInProgress <- true
+                                    batchMessageAndSend()
+                                    batchOperationInProgress <- false
+                            isLastSequenceIdPotentialDuplicated <- false
+                    else
+                       batchOperationInProgress <- true
+                       doBatchSendAndAdd batchItem
+                       batchOperationInProgress <- false
+                else
+                    // Preserve sequence order when a message bypasses the accumulated batch.
+                    if producerConfig.BatchingEnabled then
+                        batchOperationInProgress <- true
+                        batchMessageAndSend()
+                        batchOperationInProgress <- false
+                    let sourcePayload = new MemoryStream(message.Payload)
+                    ownedPayloads.Add(sourcePayload)
+                    let compressedPayload = compressionCodec.Encode sourcePayload
+                    if not (Object.ReferenceEquals(sourcePayload, compressedPayload)) then
+                        sourcePayload.Dispose()
+                        ProducerStreamOwnership.forgetOwnedStream ownedPayloads sourcePayload
+                        ownedPayloads.Add(compressedPayload)
+                    let payloadLength = int compressedPayload.Length
+                    if payloadLength > maxMessageSize && not producerConfig.ChunkingEnabled then
+                        let ex = InvalidMessageException <| $"Message size is bigger than {maxMessageSize} bytes"
+                        failMessage message channel ex
+                    else
+                        let totalChunks =
+                            Math.Max(1, payloadLength) / maxMessageSize
+                                + (if Math.Max(1, payloadLength) % maxMessageSize = 0 then 0 else 1)
+                        let mutable readStartIndex = 0
+                        let mutable chunkError = false
+                        let mutable chunkId = 0
+                        let isChunked = totalChunks > 1
+                        let uuid = if isChunked then $"{producerName}-{sequenceId}" else null
+                        let messageIds = if isChunked then Array.zeroCreate totalChunks else Array.empty
+                        let txnId = message.Txn |> Option.map _.Id
+                        while chunkId < totalChunks && not chunkError do
+                            let metadata = createMessageMetadata sequenceId txnId None
+                                               message.Payload.Length message.Key message.Properties message.DeliverAt
+                                               message.OrderingKey message.EventTime message.ReplicationClusters
+                            let chunkPayload =
+                                if isChunked && producerConfig.Topic.IsPersistent then
+                                    metadata.Uuid <- uuid
+                                    metadata.ChunkId <- chunkId
+                                    metadata.NumChunksFromMsg <- totalChunks
+                                    metadata.TotalChunkMsgSize <- payloadLength
+                                    let chunkStream = MemoryStreamManager.GetStream("chunk")
+                                    ownedPayloads.Add(chunkStream)
+                                    compressedPayload.Seek(readStartIndex, SeekOrigin.Begin) |> ignore
+                                    let chunkSize = Math.Min(maxMessageSize, payloadLength - readStartIndex)
+                                    let targetSpan = chunkStream.GetSpan(chunkSize).Slice(0, chunkSize)
+                                    let writtenBytes = compressedPayload.Read(targetSpan)
+                                    chunkStream.Advance(writtenBytes)
+                                    if compressedPayload.Position = compressedPayload.Length then
+                                        compressedPayload.Dispose()
+                                        ProducerStreamOwnership.forgetOwnedStream ownedPayloads compressedPayload
+                                    chunkStream :> MemoryStream
                                 else
-                                    None
-                            let pendingMessage = {
-                                SequenceId = sequenceId
-                                HighestSequenceId = %(-1L)
-                                SendTask = payload
-                                Payload = encryptedPayload
-                                Callback = SingleCallback (chunkDetails, message, channel)
-                                CreatedAt = %Stopwatch.GetTimestamp()
-                            }
-                            stats.UpdateNumMsgsSent(1, int encryptedPayload.Length)
-                            sendMessage pendingMessage
-                            lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
-                            chunkId <- chunkId + 1
-                            readStartIndex <- chunkId * maxMessageSize
-                        | Error ex ->
-                            chunkError <- true
-                            failMessage message channel ex
+                                    compressedPayload
+                            let encryptResult = encrypt metadata chunkPayload
+                            match encryptResult with
+                            | Ok encryptedPayload ->
+                                if not (Object.ReferenceEquals(chunkPayload, encryptedPayload)) then
+                                    chunkPayload.Dispose()
+                                    ProducerStreamOwnership.forgetOwnedStream ownedPayloads chunkPayload
+                                    ownedPayloads.Add(encryptedPayload)
+                                let payload =
+                                    Commands.newSend producerId sequenceId None 1 metadata encryptedPayload
+                                let chunkDetails =
+                                    if isChunked then
+                                        Some { TotalChunks = totalChunks; ChunkId = chunkId; MessageIds = messageIds }
+                                    else
+                                        None
+                                let pendingMessage = {
+                                    SequenceId = sequenceId
+                                    HighestSequenceId = %(-1L)
+                                    SendTask = payload
+                                    Payload = encryptedPayload
+                                    Callback = SingleCallback (chunkDetails, message, channel)
+                                    CreatedAt = %Stopwatch.GetTimestamp()
+                                }
+                                stats.UpdateNumMsgsSent(1, int encryptedPayload.Length)
+                                sendMessage pendingMessage (fun () ->
+                                    sendEnqueued <- true
+                                    ProducerStreamOwnership.forgetOwnedStream ownedPayloads encryptedPayload)
+                                lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
+                                chunkId <- chunkId + 1
+                                readStartIndex <- chunkId * maxMessageSize
+                            | Error ex ->
+                                chunkError <- true
+                                failMessage message channel ex
+            with ex ->
+                if batchOperationInProgress || sendEnqueued then
+                    raise ex
+                Log.Logger.LogError(ex, "{0} failed to send a message to topic {1}", prefix, producerConfig.Topic.CompleteTopicName)
+                failMessage message channel ex
 
     let stopProducer() =
         sendTimeoutTimer.Stop()
@@ -529,6 +615,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let mb = Channel.CreateUnbounded<ProducerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     let mutable currentMessage : ProducerMessage<'T> option = None
     let mutable mailboxFailed = false
+    let mutable closingConnection: ClientCnx option = None
 
     let replyFromStoppedMailbox (ex: exn) (msg: ProducerMessage<'T>) =
         match msg with
@@ -554,8 +641,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             mailboxFailed <- true
             Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
             try
-                match connectionHandler.ConnectionState with
-                | Ready clientCnx ->
+                let clientCnx =
+                    match connectionHandler.ConnectionState, closingConnection with
+                    | Ready clientCnx, _ -> Some clientCnx
+                    | Closing, Some clientCnx -> Some clientCnx
+                    | _ -> None
+                match clientCnx with
+                | Some clientCnx ->
                     // release the producer at the broker, otherwise its name stays registered until the connection drops.
                     // the mailbox can no longer wait inline; register the request so the broker Success completes it
                     // instead of being logged as a non-existent request, and drop the local producer even if that reply fails
@@ -607,7 +699,84 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
         } |> ignore
 
-    do (backgroundTask {
+    let pendingSendIsComplete (channel: TaskCompletionSource<MessageId>) =
+        let matchingEntries =
+            pendingMessages
+            |> Seq.choose (fun pending ->
+                match pending.Callback with
+                | SingleCallback (chunkDetails, _, Some pendingChannel)
+                    when Object.ReferenceEquals(channel, pendingChannel) ->
+                    Some (chunkDetails |> Option.forall (fun details -> details.IsLast))
+                | BatchCallbacks callbacks ->
+                    if callbacks
+                       |> Array.exists (fun struct (_, _, pendingChannel) ->
+                           pendingChannel
+                           |> Option.exists (fun pendingChannel -> Object.ReferenceEquals(channel, pendingChannel))) then
+                        Some true
+                    else
+                        None
+                | _ ->
+                    None)
+            |> Seq.toArray
+        if matchingEntries.Length = 0 then
+            None
+        else
+            Some (matchingEntries |> Array.contains true)
+
+    let recoverMailboxFailure (ex: exn) =
+        backgroundTask {
+            match currentMessage, connectionHandler.ConnectionState with
+            | Some (Close _), _ ->
+                // Close is terminal: do not reopen a producer whose close request was interrupted.
+                failMailbox ex
+                drainStoppedMailbox()
+            | _, ((Ready _ | Connecting) as state) ->
+                Log.Logger.LogError(ex, "{0} mailbox failed unexpectedly for topic {1}; recovering producer",
+                                    prefix, producerConfig.Topic.CompleteTopicName)
+                try
+                    failBlockedAndBatchedMessages ex
+                with pendingEx ->
+                    Log.Logger.LogWarning(pendingEx, "{0} failed to fail blocked or batched sends after mailbox failure", prefix)
+                match currentMessage with
+                | Some ((BeginSendMessage struct (message, channel, isFireAndForget)) as msg) ->
+                    match pendingSendIsComplete channel with
+                    | Some true ->
+                        ()
+                    | Some false ->
+                        // Earlier chunks may be queued, but without the final chunk the logical send can never complete.
+                        failMessage message (if isFireAndForget then None else Some channel) ex
+                    | None ->
+                        replyFromStoppedMailbox ex msg
+                | Some msg ->
+                    replyFromStoppedMailbox ex msg
+                | None ->
+                    ()
+                match state with
+                | Ready clientCnx ->
+                    // register again from a clean state, as a new connection would
+                    clientCnx.RemoveProducer producerId
+                    let requestId = Generators.getNextRequestId()
+                    try
+                        let payload = Commands.newCloseProducer producerId requestId
+                        let! response = clientCnx.SendAndWaitForReply requestId payload
+                        response |> PulsarResponseType.GetEmpty
+                        connectionHandler.ReconnectLater ex
+                    with Flatten closeEx ->
+                        Log.Logger.LogWarning(closeEx, "{0} failed to close producer for topic {1} after mailbox failure; closing its connection",
+                                              prefix, producerConfig.Topic.CompleteTopicName)
+                        clientCnx.Dispose()
+                        // the connection no longer reports its closure to the removed producer
+                        connectionHandler.ConnectionClosed clientCnx
+                | _ ->
+                    // the reconnect in progress registers the producer again
+                    ()
+            | _ ->
+                failMailbox ex
+                drainStoppedMailbox()
+        }
+
+    let rec startMailboxLoop () =
+        (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
             let! msg = mb.Reader.ReadAsync()
@@ -750,7 +919,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                             currentMessageId
                                     interceptors.OnSendAcknowledgement(this, msg, msgId, null)
                                     stats.IncrementNumAcksReceived(Stopwatch.GetElapsedTime(%pendingMessage.CreatedAt))
-                                    tcs |> Option.iter _.SetResult(msgId)
+                                    tcs |> Option.iter (fun tcs -> tcs.TrySetResult(msgId) |> ignore)
                                 else
                                     // updating messageIds array
                                     let chunkDetails = chunkDetailsOption.Value
@@ -766,7 +935,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                                     Type = Batch msgId; TopicName = %""; ChunkMessageIds = None }
                                     interceptors.OnSendAcknowledgement(this, msg, msgId, null)
                                     stats.IncrementNumAcksReceived(Stopwatch.GetElapsedTime(%pendingMessage.CreatedAt))
-                                    tcs |> Option.iter _.SetResult(msgId))
+                                    tcs |> Option.iter (fun tcs -> tcs.TrySetResult(msgId) |> ignore))
                         else
                             Log.Logger.LogWarning("{0} Got ack for batch msg error. expecting: {1} - {2} - got: {3} - {4} - queue-size: {5}",
                                                     prefix, pendingMessage.SequenceId, pendingMessage.HighestSequenceId,
@@ -905,6 +1074,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
+                    closingConnection <- Some clientCnx
                     connectionHandler.Closing()
                     Log.Logger.LogInformation("{0} starting close", prefix)
                     let requestId = Generators.getNextRequestId()
@@ -916,6 +1086,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         connectionHandler.Closed()
                         failPendingMessages <| AlreadyClosedException "Producer was already closed"
                         stopProducer()
+                        closingConnection <- None
                         channel.SetResult <| Ok()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed to close", prefix)
@@ -923,6 +1094,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         connectionHandler.Closed()
                         failPendingMessages ex
                         stopProducer()
+                        closingConnection <- None
                         channel.SetResult <| Error ex
                 | _ ->
                     Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)
@@ -933,16 +1105,37 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                 continueLoop <- false
             }:> Task).ContinueWith(fun t ->
+                let mutable recovering = false
                 try
                     if t.IsFaulted then
                         let (Flatten ex) = t.Exception
-                        failMailbox ex
+                        if producerCreatedTsc.Task.IsCompletedSuccessfully then
+                            // as in the Java client, a created producer outlives an unexpected error
+                            recovering <- true
+                            backgroundTask {
+                                try
+                                    do! recoverMailboxFailure ex
+                                    if connectionHandler.ConnectionState <> Failed then
+                                        startMailboxLoop() |> ignore
+                                with recoveryEx ->
+                                    Log.Logger.LogCritical(recoveryEx, "{0} failed to recover producer for topic {1}",
+                                                           prefix, producerConfig.Topic.CompleteTopicName)
+                                    try
+                                        failMailbox recoveryEx
+                                    finally
+                                        drainStoppedMailbox()
+                            } |> ignore
+                        else
+                            // fail the creation instead of retrying it
+                            failMailbox ex
                     else
                         Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
                 finally
-                    // only after cleanup, so a queued Close can't complete before the producer has stopped
-                    drainStoppedMailbox())
-    |> ignore
+                    if not recovering then
+                        // only after cleanup, so a queued Close can't complete before the producer has stopped
+                        drainStoppedMailbox())
+
+    do startMailboxLoop() |> ignore
 
     do startSendTimeoutTimer()
     do startStatTimer()
@@ -1120,4 +1313,3 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     | Ok () -> ()
                     | Error ex -> reraize ex
                 } |> ValueTask
-

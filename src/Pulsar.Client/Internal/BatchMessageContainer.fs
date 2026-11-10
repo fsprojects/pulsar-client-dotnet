@@ -18,7 +18,7 @@ module internal BatchHelpers =
 
     let makeBatch<'T> (messageStream: MemoryStream) (batchItems: ResizeArray<BatchItem<'T>>) =
         let messageWriter = new BinaryWriter(messageStream)
-        let batchCallbacks =
+        try
             [|
                 for index in 0 .. batchItems.Count - 1 do
                     let batchItem = batchItems[index]
@@ -52,7 +52,10 @@ module internal BatchHelpers =
                     messageWriter.Write(message.Payload)
                     struct(BatchDetails(%index, BatchMessageAcker.NullAcker), message, batchItem.Tcs)
             |]
-        batchCallbacks
+        with _ ->
+            // the caller never receives the pooled stream, so release it here
+            messageStream.Dispose()
+            reraise()
 
 type internal OpSendMsg<'T> = BatchCallback<'T>[]
 type internal OpSendMsgWrapper<'T> = {
