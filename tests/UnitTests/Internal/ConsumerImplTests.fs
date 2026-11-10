@@ -62,6 +62,12 @@ let private readClose (broker: BrokerConnection) =
 let private succeed (broker: BrokerConnection) requestId =
     broker.Reply(BaseCommand(``type`` = BaseCommand.Type.Success, Success = CommandSuccess(RequestId = requestId)))
 
+let private refuse (broker: BrokerConnection) requestId =
+    broker.Reply(
+        BaseCommand(
+            ``type`` = BaseCommand.Type.Error,
+            Error = CommandError(RequestId = requestId, Error = ServerError.PersistenceError, Message = "Refused")))
+
 /// A consumer that has subscribed.
 let private startConsumer (broker: BrokerConnection) config (consumerClientConfig: PulsarClientConfiguration) =
     task {
@@ -443,6 +449,21 @@ let tests =
                 do! succeed broker subscribe.Subscribe.RequestId
             finally
                 Log.Logger <- original
+            do! closeConsumer broker consumer
+        }
+
+        testTask "A consumer is ready again after an unsubscribe that the broker refuses" {
+            use broker = new BrokerConnection(clientConfig)
+            let! (consumer: ConsumerImpl<byte[]>) = startConsumer broker consumerConfig clientConfig
+            let unsubscribing: Task<unit> = (consumer :> IConsumer<byte[]>).UnsubscribeAsync()
+            let! (unsubscribe: BaseCommand) = readCommandOf BaseCommand.Type.Unsubscribe broker
+            do! refuse broker unsubscribe.Unsubscribe.RequestId
+            let! _ = expectFailure<BrokerPersistenceException> unsubscribing
+
+            // As in the Java client. A consumer that stayed as it was while it unsubscribed could not be used, and
+            // nothing would close it at the broker either.
+            let! (connected: bool) = (consumer :> IConsumer<byte[]>).IsConnected()
+            Expect.isTrue connected "The consumer is ready again"
             do! closeConsumer broker consumer
         }
     ]

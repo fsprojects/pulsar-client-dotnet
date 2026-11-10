@@ -1656,6 +1656,13 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         channel.SetResult()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
+                        match connectionHandler.ConnectionState with
+                        | Closing ->
+                            // As in the Java client, the consumer is ready again: it can go on, and be closed. What
+                            // its connection told it meanwhile, such as that it has closed, is next in the mailbox.
+                            connectionHandler.SetReady clientCnx
+                        | _ ->
+                            ()
                         channel.SetException ex
 
                     if connectionHandler.ConnectionState = Closed then
