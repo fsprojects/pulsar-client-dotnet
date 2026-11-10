@@ -34,24 +34,33 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
     let endActivity messageId (ackResult: AckResult) =
         match cache.TryGetValue messageId with
         | true, activity ->
-            match ackResult with
-            | Ok ackType ->
-                 stopActivitySuccessfully activity ackType
-            | Error exn ->
-                activity
-                    .SetTag("messaging.acknowledge_type", "Error")
-                    .SetTag("exception.type", exn.GetType().FullName)
-                    .SetTag("exception.message", exn.Message)
-                    .SetTag("exception.stacktrace", exn.StackTrace)
-                    .Dispose()
-            cache.Remove messageId |> ignore
+            // Ending an activity runs the code of its listeners. Whatever one of them throws, the activity has ended,
+            // and would otherwise stay here for as long as the consumer runs.
+            try
+                match ackResult with
+                | Ok ackType ->
+                     stopActivitySuccessfully activity ackType
+                | Error exn ->
+                    activity
+                        .SetTag("messaging.acknowledge_type", "Error")
+                        .SetTag("exception.type", exn.GetType().FullName)
+                        .SetTag("exception.message", exn.Message)
+                        .SetTag("exception.stacktrace", exn.StackTrace)
+                        .Dispose()
+            finally
+                cache.Remove messageId |> ignore
         | _ ->
             log.LogDebug("{0} Can't find start of activity for msgId={1}", prefix, messageId)
 
     let endPreviousActivities msgId (ackResult: AckResult) =
         cache.Keys
         |> Seq.filter (fun key -> key <= msgId)
-        |> Seq.iter (fun key -> endActivity key ackResult)
+        |> Seq.iter (fun key ->
+            // each on its own, so that what a listener throws for one doesn't leave the others open
+            try
+                endActivity key ackResult
+            with ex ->
+                log.LogError(ex, "{0} failed to end the activity of msgId={1}", prefix, key))
 
     let getter =
         Func<IReadOnlyDictionary<string, string>, string, IEnumerable<string>>
