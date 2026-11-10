@@ -219,7 +219,10 @@ type internal ConnectionPool (initialConfig: PulsarClientConfiguration) =
     member this.GetConnection (broker: Broker, maxMessageSize: int) =
         let t = connections.GetOrAdd(broker.LogicalAddress, fun _ ->
                 lazy connect(broker, maxMessageSize)).Value
-        if t.IsFaulted then
+        // As in the Java client, an attempt that didn't succeed is not kept, however it ended. One that an
+        // OperationCanceledException ended, such as a token request that timed out, is cancelled instead of faulted,
+        // and every later request for the connection would get it.
+        if t.IsFaulted || t.IsCanceled then
             let key = broker.LogicalAddress
             match connections.TryRemove(key) with
             | true, _ -> Log.Logger.LogInformation("Removed faulted connection task to {0}", key)
