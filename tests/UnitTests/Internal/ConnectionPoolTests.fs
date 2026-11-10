@@ -76,9 +76,10 @@ let tests =
                     ()
                 Expect.isTrue "The attempt ends cancelled, not faulted" cancelled.IsCanceled
 
-                // As in the Java client, the pool lets go of an attempt that didn't succeed: whoever asks next still
-                // gets it, and the pool connects again after that. A cancelled attempt would stay for good otherwise.
-                Expect.isTrue "" (obj.ReferenceEquals(connect (), cancelled))
+                // As in the Java client, the pool lets go of an attempt that didn't succeed. It does that when it is
+                // asked for the connection: here, or already above, if the attempt ended while it was being started.
+                // A cancelled attempt would stay for good otherwise.
+                connect () |> ignore
                 let! (cnx: ClientCnx) = (connect ()).WaitAsync(timeout)
                 Expect.isTrue "The pool has connected again" cnx.IsActive
             finally
