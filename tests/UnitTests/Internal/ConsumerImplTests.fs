@@ -2,6 +2,7 @@ module Pulsar.Client.UnitTests.Internal.ConsumerImplTests
 
 open System
 open System.IO
+open System.IO.Pipelines
 open System.Threading.Tasks
 open Expecto
 open FSharp.UMX
@@ -376,5 +377,36 @@ let tests =
             while broker.Connection.IsActive && DateTime.UtcNow < deadline do
                 do! Task.Delay(10)
             Expect.isFalse broker.Connection.IsActive "The connection is closed"
+        }
+
+        testTask "A consumer closed without its mailbox closes its connection when the close can't be sent" {
+            // the connection keeps its default timeouts, and its keep-alive doesn't run within the test
+            use broker = new BrokerConnection(clientConfig)
+            let consumerClientConfig = { clientConfig with OperationTimeout = TimeSpan.FromMilliseconds(250.0) }
+            let! (starting: Task<ConsumerImpl<byte[]>>) = broker.CreateConsumer(consumerConfig, consumerClientConfig)
+            let! (subscribe: BaseCommand) = broker.ReadCommand()
+            Expect.equal subscribe.``type`` BaseCommand.Type.Subscribe "Expected subscription"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = subscribe.Subscribe.RequestId)))
+            let! (consumer: ConsumerImpl<byte[]>) = starting.WaitAsync(testTimeout)
+
+            // The connection waits for a write that doesn't end, as on a socket the broker has stopped reading. It
+            // sends nothing that comes after, and a request only gets its timeout when it is sent.
+            let write = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            broker.Connection.SendAndForget(struct ((fun (_: PipeWriter) -> write.Task), BaseCommand.Type.Ping))
+            try
+                // neither the mailbox's close nor the one made without the mailbox is sent
+                do! (consumer :> IConsumer<byte[]>).DisposeAsync().AsTask().WaitAsync(testTimeout)
+
+                // The consumer is off its connection, so the broker only lets go of it with the connection. An
+                // exclusive subscription would stay taken otherwise.
+                let deadline = DateTime.UtcNow + testTimeout
+                while broker.Connection.IsActive && DateTime.UtcNow < deadline do
+                    do! Task.Delay(10)
+                Expect.isFalse broker.Connection.IsActive "The connection is closed"
+            finally
+                write.TrySetResult() |> ignore
         }
     ]

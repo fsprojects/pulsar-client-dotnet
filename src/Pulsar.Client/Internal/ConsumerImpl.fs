@@ -628,7 +628,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             let payload = Commands.newCloseConsumer consumerId requestId
             backgroundTask {
                 try
-                    let! response = clientCnx.SendAndWaitForReply requestId payload
+                    // A request gets its timeout when the connection sends it. A connection that doesn't get to
+                    // sending it, because an earlier write doesn't end, would leave this waiting.
+                    let! response = (clientCnx.SendAndWaitForReply requestId payload).WaitAsync(closeTimeout)
                     response |> PulsarResponseType.GetEmpty
                 with Flatten ex ->
                     // As after a failed recovery: the consumer is off its connection, so the broker only lets go
