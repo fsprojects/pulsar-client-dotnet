@@ -574,12 +574,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             duringSeek <- None
         | _ -> ()
 
-    let closeConsumerTasks() =
-        failSeekTask()
+    // the part of closing that is safe outside the mailbox, and more than once
+    let releaseResources() =
         unAckedMessageTracker.Close()
         acksGroupingTracker.Close()
-        clearDeadLetters()
-        clearAckRequests()
         negativeAcksTracker.Close()
         connectionHandler.Close()
         interceptors.Close()
@@ -587,11 +585,49 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         chunkTimer.Stop()
         cleanup(this)
 
+    let closeConsumerTasks() =
+        failSeekTask()
+        clearDeadLetters()
+        clearAckRequests()
+        releaseResources()
+
+    let mutable stopped = false
+
     let stopConsumer () =
+        stopped <- true
         closeConsumerTasks()
         // a failed consumer passes on why it stopped, e.g. to a multi-topic parent
         failWaiters <| AlreadyClosedException("Consumer is already closed", connectionHandler.FailureCause)
         Log.Logger.LogInformation("{0} stopped", prefix)
+
+    // As in the Java client, closing takes no longer than its request to the broker can take to time out. Here that
+    // is up to twice the operation timeout, as a request is failed by the first timer tick after its timeout. The
+    // mailbox closes the consumer, so if the consumer is not closed by then, the mailbox has not got to it: it waits
+    // for something that doesn't end, or it has stopped without answering.
+    let closeTimeout = clientConfig.OperationTimeout + clientConfig.OperationTimeout
+
+    // Closes what can be closed without the mailbox. The queues, the waiters and the pending requests are its own,
+    // and it deals with them if it ever gets to the Close it was sent.
+    let closeWithoutMailbox () =
+        Log.Logger.LogError("{0} did not close within {1}, closing it without its mailbox", prefix, closeTimeout)
+        let previousState = connectionHandler.ConnectionState
+        connectionHandler.Closed()
+        match previousState with
+        | Ready clientCnx ->
+            // the broker would otherwise keep sending messages to a consumer that nobody reads
+            clientCnx.RemoveConsumer consumerId
+            let requestId = Generators.getNextRequestId()
+            let payload = Commands.newCloseConsumer consumerId requestId
+            backgroundTask {
+                try
+                    let! response = clientCnx.SendAndWaitForReply requestId payload
+                    response |> PulsarResponseType.GetEmpty
+                with Flatten ex ->
+                    Log.Logger.LogWarning(ex, "{0} failed to close consumer at the broker", prefix)
+            } |> ignore
+        | _ ->
+            ()
+        releaseResources()
 
     let isInvalidConsumerEpoch = isInvalidConsumerEpoch consumerConfig.SubscriptionType
     let isConsumerEpochSupported = isConsumerEpochSupported consumerConfig.SubscriptionType
@@ -1526,7 +1562,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
                 let nonRetriableError = ex |> PulsarClientException.isRetriableError |> not
                 let timeout = Stopwatch.GetElapsedTime(createConsumerStartTime) > clientConfig.OperationTimeout
-                if ((nonRetriableError || timeout) && subscribeTsc.TrySetException(ex)) then
+                if connectionHandler.ConnectionState = Failed then
+                    // Only the connection handler itself fails while the consumer runs: its loop has stopped, and
+                    // nothing would connect the consumer again.
+                    Log.Logger.LogError(ex, "{0} stopping because its connection handler failed", prefix)
+                    subscribeTsc.TrySetException(ex) |> ignore
+                    stopConsumer()
+                    continueLoop <- false
+                elif ((nonRetriableError || timeout) && subscribeTsc.TrySetException(ex)) then
                     Log.Logger.LogInformation("{0} creation failed {1}", prefix,
                                                 if nonRetriableError then "with unretriableError" else "after timeout")
                     connectionHandler.Failed(ex)
@@ -1618,7 +1661,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 do! recoverMailboxFailure ex
                                 match connectionHandler.ConnectionState with
                                 | Uninitialized | Connecting | Ready _ -> startMailboxLoop() |> ignore
-                                | _ -> drainStoppedMailbox()
+                                | _ ->
+                                    // The state changed while the consumer was recovering, e.g. it was closed without
+                                    // its mailbox, so nothing has stopped the consumer yet and failed its waiters.
+                                    if not stopped then
+                                        stopConsumer()
+                                    drainStoppedMailbox()
                             with recoveryEx ->
                                 Log.Logger.LogCritical(recoveryEx, "{0} failed to recover consumer for topic {1}",
                                                        prefix, topicName)
@@ -2008,7 +2056,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 ValueTask()
             | _ ->
                 backgroundTask {
-                    do! postAndAsyncReply mb ConsumerMessage.Close
+                    try
+                        do! (postAndAsyncReply mb ConsumerMessage.Close).WaitAsync(closeTimeout)
+                    with :? System.TimeoutException ->
+                        closeWithoutMailbox()
                 } |> ValueTask
 
 

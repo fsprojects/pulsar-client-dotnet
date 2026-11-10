@@ -15,6 +15,7 @@ open pulsar.proto
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
+open Pulsar.Client.UnitTests.Internal.ConnectionHandlerTests
 
 let internal testTimeout = TimeSpan.FromSeconds(10.0)
 
@@ -119,11 +120,14 @@ type internal BrokerConnection(clientConfig: PulsarClientConfiguration) =
                                      -1, lookup, Schema.BYTES(), interceptors, cleanup)
         }
 
-    // only starts creating the consumer, so the test answers its subscription
-    member this.CreateConsumer(config: ConsumerConfiguration<byte[]>) : Task<Task<ConsumerImpl<byte[]>>> =
+    // only starts creating the consumer, so the test answers its subscription; the consumer can be given timeouts
+    // that differ from those of the connection
+    member this.CreateConsumer(config: ConsumerConfiguration<byte[]>, ?consumerClientConfig: PulsarClientConfiguration)
+                               : Task<Task<ConsumerImpl<byte[]>>> =
         task {
             do! this.Connect()
-            return ConsumerImpl.Init(config, clientConfig, config.SingleTopic, (fun _ -> Task.FromResult connection),
+            return ConsumerImpl.Init(config, defaultArg consumerClientConfig clientConfig, config.SingleTopic,
+                                     (fun _ -> Task.FromResult connection),
                                      -1, false, None, TimeSpan.Zero, lookup, true, Schema.BYTES(), None,
                                      ConsumerInterceptors<byte[]>.Empty, ignore)
         }
@@ -701,5 +705,34 @@ let tests =
             // the request times out once the operation timeout has passed, so it is not retried
             let! _ = expectFailure<TimeoutException> starting
             return ()
+        }
+
+        testSequenced <| testTask "A producer fails its sends when its connection handler stops" {
+            use broker = new BrokerConnection(clientConfig)
+            let config =
+                { producerConfig with
+                    ProducerName = "handler-failure-producer"
+                    BatchingEnabled = false
+                    SendTimeout = TimeSpan.Zero }
+            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
+            // a send the broker doesn't acknowledge, and that no send timeout ends
+            let sending = enqueueMessage producer [| 1uy |]
+            let! (send: BaseCommand) = broker.ReadCommand()
+            Expect.equal send.``type`` BaseCommand.Type.Send "The message is sent"
+
+            let original = Log.Logger
+            try
+                // the producer's connection handler fails wherever it deals with the closed connection
+                Log.Logger <-
+                    FailingLogger(original, fun message ->
+                        message.Contains "handler-failure-producer" && message.Contains "ConnectionHandler")
+                broker.Disconnect()
+
+                // nothing connects the producer again, so its sends must not wait for that
+                let! _ = expectFailure<NotConnectedException> sending
+                let! _ = expectFailure<NotConnectedException> (enqueueMessage producer [| 2uy |])
+                return ()
+            finally
+                Log.Logger <- original
         }
     ]

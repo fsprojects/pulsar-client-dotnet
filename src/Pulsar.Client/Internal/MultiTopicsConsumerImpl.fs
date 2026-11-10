@@ -223,39 +223,60 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     while result.IsNone do
                         cancellationToken.ThrowIfCancellationRequested()
                         removed.ThrowIfCancellationRequested()
-                        let! hasReachedEndOfTopic = consumerImp.HasReachedEndOfTopic()
-                        if hasReachedEndOfTopic then
-                            Log.Logger.LogWarning("{0} topic was terminated", topic)
-                            do! wait Timeout.InfiniteTimeSpan
-                        let! message =
-                            try
-                                consumer.ReceiveWrappedAsync(cancellationToken)
-                            with ex ->
-                                // a stopped child throws before it posts the receive
-                                Task.FromResult(Error ex)
-                        match message with
-                        | Error _ when cancellationToken.IsCancellationRequested ->
-                            result <- Some message
-                        | Error (:? AlreadyClosedException) ->
-                            // it stays registered until the parent closes or discovery removes its topic
-                            Log.Logger.LogWarning("{0} stopped reading the closed consumer for {1}", prefix, topic)
-                            do! wait Timeout.InfiniteTimeSpan
-                        | Error ex ->
-                            Log.Logger.LogError(ex, "{0} receive failed on the consumer for {1}, retrying in {2}",
+                        try
+                            let! hasReachedEndOfTopic = consumerImp.HasReachedEndOfTopic()
+                            if hasReachedEndOfTopic then
+                                Log.Logger.LogWarning("{0} topic was terminated", topic)
+                                do! wait Timeout.InfiniteTimeSpan
+                            let! message =
+                                try
+                                    consumer.ReceiveWrappedAsync(cancellationToken)
+                                with ex ->
+                                    // a stopped child throws before it posts the receive
+                                    Task.FromResult(Error ex)
+                            match message with
+                            | Error _ when cancellationToken.IsCancellationRequested ->
+                                result <- Some message
+                            | Error (:? AlreadyClosedException) ->
+                                // it stays registered until the parent closes or discovery removes its topic
+                                Log.Logger.LogWarning("{0} stopped reading the closed consumer for {1}", prefix, topic)
+                                do! wait Timeout.InfiniteTimeSpan
+                            | Error ex ->
+                                Log.Logger.LogError(ex, "{0} receive failed on the consumer for {1}, retrying in {2}",
+                                                    prefix, topic, childReceiveRetryDelay)
+                                do! wait childReceiveRetryDelay
+                            | Ok msg ->
+                                let newMessageId = { msg.MessageId with TopicName = topic }
+                                result <- Some (Ok (msg.WithMessageId(newMessageId)))
+                        // The Java client retries whatever fails a child's receive, not only a failed result, so
+                        // nothing a child throws here reaches the poller and stops the parent.
+                        with ex when not (cancellationToken.IsCancellationRequested || removed.IsCancellationRequested) ->
+                            Log.Logger.LogError(ex, "{0} unexpected failure reading the consumer for {1}, retrying in {2}",
                                                 prefix, topic, childReceiveRetryDelay)
                             do! wait childReceiveRetryDelay
-                        | Ok msg ->
-                            let newMessageId = { msg.MessageId with TopicName = topic }
-                            result <- Some (Ok (msg.WithMessageId(newMessageId)))
                     return struct (cancellationToken, result.Value)
                 with
-                | :? OperationCanceledException as ex when cancellationToken.IsCancellationRequested ->
+                | ex when cancellationToken.IsCancellationRequested ->
                     return struct (cancellationToken, Error ex)
-                | :? OperationCanceledException as ex when removed.IsCancellationRequested ->
+                | ex when removed.IsCancellationRequested ->
                     Log.Logger.LogDebug("{0} stopped reading the removed consumer for {1}", prefix, topic)
                     // nothing polls a removed child, and its cancelled token would discard this anyway
                     return struct (removed, Error ex)
             }
+
+    // As in the Java client, where a child answers a request within the time the request can take to time out. Here
+    // the child answers through its mailbox, so a child whose mailbox doesn't get to the request would keep this
+    // consumer's mailbox waiting, and with it every other request and the close.
+    let childRequestTimeout = clientConfig.OperationTimeout + clientConfig.OperationTimeout
+
+    let childRequest (child: IConsumer<'T>) (request: IConsumer<'T> -> Task<unit>) =
+        backgroundTask {
+            try
+                do! (backgroundTask { do! request child }).WaitAsync(childRequestTimeout)
+            with :? System.TimeoutException ->
+                raise (Pulsar.Client.Api.TimeoutException(
+                        $"{prefix} the consumer for {child.Topic} did not answer within {childRequestTimeout}"))
+        }
 
     let resetStreams (action: IConsumer<'T> -> Task<unit>) =
         backgroundTask {
@@ -267,7 +288,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             try
                 let! _ =
                     children
-                    |> Array.map (fun child -> backgroundTask { do! action child.Consumer })
+                    |> Array.map (fun child -> childRequest child.Consumer action)
                     |> Task.WhenAll
                 ()
             finally
@@ -345,6 +366,21 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
         consumers.Values
         |> Seq.map (fun child -> child.Consumer.DisposeAsync().AsTask())
         |> Task.WhenAll
+
+    // Runs outside the mailbox, once the consumer is Closing and has stopped: nothing else changes the children then,
+    // and a child that is slow to close keeps no receive and no other request waiting.
+    let closeChildrenAndComplete (channel: TaskCompletionSource<unit>) =
+        backgroundTask {
+            try
+                try
+                    do! closeChildren()
+                with Flatten ex ->
+                    Log.Logger.LogError(ex, "{0} could not close all child consumers properly", prefix)
+                this.ConnectionState <- Closed
+                completeClose()
+            finally
+                channel.TrySetResult() |> ignore
+        } |> ignore
 
     let singleInit (consumerInitInfo: ConsumerInitInfo<'T>) =
         let topic = consumerInitInfo.TopicName
@@ -718,15 +754,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
             | _ ->
                 // the child consumers outlive a failed mailbox, so they still have to be closed
                 this.ConnectionState <- Closing
-                backgroundTask {
-                    try
-                        do! closeChildren()
-                    with Flatten closeEx ->
-                        Log.Logger.LogError(closeEx, "{0} could not close all child consumers properly", prefix)
-                    this.ConnectionState <- Closed
-                    completeClose()
-                    channel.TrySetResult() |> ignore
-                } |> ignore
+                closeChildrenAndComplete channel
         | _ ->
             ()
 
@@ -1128,18 +1156,12 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     channel.SetResult()
                 | _ ->
                     this.ConnectionState <- Closing
-                    try
-                        do! closeChildren()
-                        this.ConnectionState <- Closed
-                        stopConsumer()
-                        completeClose()
-                        channel.SetResult()
-                    with Flatten ex ->
-                        Log.Logger.LogError(ex, "{0} could not close all child consumers properly", prefix)
-                        this.ConnectionState <- Closed
-                        stopConsumer()
-                        completeClose()
-                        channel.SetResult()
+                    // The Java client fails the pending receives once the children have closed. Here they are
+                    // failed first, and the mailbox stops instead of waiting for the children, so a child that is
+                    // slow to close keeps nobody waiting: requests made while the children close are answered as
+                    // already closed, as in Java.
+                    stopConsumer()
+                    closeChildrenAndComplete channel
                 continueLoop <- false
 
             | Unsubscribe channel ->
@@ -1154,7 +1176,7 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                     // as in the Java client, every child is tried even if a stopped one fails at once
                     let consumerTasks =
                         consumers
-                        |> Seq.map (fun (KeyValue(_, child)) -> backgroundTask { do! child.Consumer.UnsubscribeAsync() })
+                        |> Seq.map (fun (KeyValue(_, child)) -> childRequest child.Consumer _.UnsubscribeAsync())
                         |> Seq.toArray
                     try
                         let! _ = Task.WhenAll consumerTasks
