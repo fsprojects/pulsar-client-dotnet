@@ -11,6 +11,7 @@ open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open Pulsar.Client.UnitTests.Internal.ConnectionHandlerTests
+open Pulsar.Client.UnitTests.Internal.LocalBroker
 open Pulsar.Client.UnitTests.Internal.ProducerImplTests
 
 let private clientConfig =
@@ -465,6 +466,38 @@ let tests =
             let! (connected: bool) = (consumer :> IConsumer<byte[]>).IsConnected()
             Expect.isTrue connected "The consumer is ready again"
             do! closeConsumer broker consumer
+        }
+
+        testTask "A consumer whose connection closes while it unsubscribes connects again" {
+            let unsubscribeReceived = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            // it answers no unsubscribe
+            let broker =
+                new LocalBroker(fun command _ ->
+                    if command.``type`` = BaseCommand.Type.Unsubscribe then
+                        unsubscribeReceived.TrySetResult() |> ignore)
+            broker.ReleaseCloses()
+            let connectionPool = ConnectionPool(clientConfig)
+            try
+                let! (consumerImpl: ConsumerImpl<byte[]>) =
+                    ConsumerImpl.Init(consumerConfig, clientConfig, consumerConfig.SingleTopic, connectionPool, -1,
+                                      false, None, TimeSpan.Zero, lookupFor broker, true, Schema.BYTES(), None,
+                                      ConsumerInterceptors<byte[]>.Empty, ignore).WaitAsync(testTimeout)
+                let consumer = consumerImpl :> IConsumer<byte[]>
+                let unsubscribing: Task<unit> = consumer.UnsubscribeAsync()
+                do! unsubscribeReceived.Task.WaitAsync(testTimeout)
+                broker.DropConnections()
+                let! _ = expectFailure<ConnectException> unsubscribing
+
+                // The consumer is ready again, and then gets to what its connection told it meanwhile: it connects
+                // like any other consumer that has lost its connection. In the Java client it stays without one.
+                let deadline = DateTime.UtcNow + testTimeout
+                while broker.Subscriptions < 2 && DateTime.UtcNow < deadline do
+                    do! Task.Delay(10)
+                Expect.equal broker.Subscriptions 2 "The consumer has subscribed again"
+                do! consumer.DisposeAsync().AsTask().WaitAsync(testTimeout)
+            finally
+                connectionPool.CloseAllConnections().Wait(testTimeout) |> ignore
+                (broker :> IDisposable).Dispose()
         }
 
         testTask "A second close doesn't wait for the one in flight" {

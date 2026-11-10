@@ -4,6 +4,7 @@ open System
 open System.IO
 open System.Net
 open System.Net.Sockets
+open System.Threading
 open System.Threading.Tasks
 open ProtoBuf
 open pulsar.proto
@@ -22,6 +23,7 @@ type internal LocalBroker(handle: BaseCommand -> (BaseCommand -> unit) -> unit) 
     let mutable holdCloses = true
     let heldCloses = ResizeArray<unit -> unit>()
     let closeRequested = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+    let mutable subscriptions = 0
     let clients = ResizeArray<TcpClient>()
 
     let readCommand (stream: Stream) =
@@ -57,6 +59,7 @@ type internal LocalBroker(handle: BaseCommand -> (BaseCommand -> unit) -> unit) 
                                     ProtocolVersion = int ProtocolVersion.V19,
                                     MaxMessageSize = Commands.DEFAULT_MAX_MESSAGE_SIZE)))
                     | BaseCommand.Type.Subscribe ->
+                        Interlocked.Increment(&subscriptions) |> ignore
                         succeed command.Subscribe.RequestId
                     | BaseCommand.Type.CloseConsumer ->
                         let requestId = command.CloseConsumer.RequestId
@@ -94,6 +97,9 @@ type internal LocalBroker(handle: BaseCommand -> (BaseCommand -> unit) -> unit) 
 
     /// Completes when a consumer has asked to be closed.
     member _.CloseRequested = closeRequested.Task
+
+    /// How many times a consumer has subscribed.
+    member _.Subscriptions = Volatile.Read(&subscriptions)
 
     /// Answers the closes held so far, and every later one at once.
     member _.ReleaseCloses() =
