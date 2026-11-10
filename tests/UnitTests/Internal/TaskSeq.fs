@@ -293,4 +293,18 @@ let tests =
             // the loop stops when it calls the generator again
             do! failsWith failure waiting
         }
+
+        testTask "A request waiting for the generators' tasks fails when the loop stops" {
+            let failure = InvalidOperationException "generator could not start"
+            let pending: TaskGenerator<int> = fun () -> TaskCompletionSource<int>().Task
+            let failing: TaskGenerator<int> = fun () -> raise failure
+            let ts = TaskSeq([pending])
+
+            // it waits for the task of the only generator, which never completes
+            let waiting = ts.Next()
+            // as when a multi-topic consumer starts reading the consumer of a new topic
+            ts.AddGenerators([failing])
+
+            do! failsWith failure waiting
+        }
     ]

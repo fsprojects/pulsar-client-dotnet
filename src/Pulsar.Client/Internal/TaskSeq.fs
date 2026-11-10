@@ -162,6 +162,9 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                 let mutable msg = Unchecked.defaultof<TaskSeqMessage<'T>>
                 while mb.Reader.TryRead(&msg) do
                     failRequest ex msg
+                // A request that already waits for the generators' tasks would go on waiting for them. It starts
+                // again when the tasks are reset, and then finds the mailbox completed.
+                resetWhenAnyTcs.TrySetCanceled() |> ignore
             else
                 Log.Logger.LogInformation("Taskseq mailbox has stopped normally"))
     |> ignore
