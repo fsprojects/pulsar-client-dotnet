@@ -44,33 +44,19 @@ let private closeConsumer (broker: BrokerConnection) (consumer: ConsumerImpl<byt
         do! closing.WaitAsync(testTimeout)
     }
 
-/// Holds the consumer's mailbox until the returned source is completed. The mailbox completes a request whose
-/// continuation runs on the mailbox's thread and waits there, like a mailbox that waits for something that doesn't end.
-let internal holdMailbox (consumer: ConsumerImpl<byte[]>) : Task<TaskCompletionSource> =
+// the consumer sends other commands in between, such as the one that asks for messages
+let private readCommandOf (commandType: BaseCommand.Type) (broker: BrokerConnection) =
     task {
-        let held = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
-        let release = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
-        let stats = TaskCompletionSource<ConsumerStats>()
-        stats.Task.ContinueWith((fun (_: Task<ConsumerStats>) ->
-            held.TrySetResult() |> ignore
-            release.Task.Wait(testTimeout) |> ignore), TaskContinuationOptions.ExecuteSynchronously) |> ignore
-        // Written from the thread pool: the mailbox allows synchronous continuations, so its loop can run on the
-        // writer's thread, and that thread is the one held.
-        Task.Run(fun () -> consumer.Mb.Writer.TryWrite(ConsumerMessage.GetStats stats) |> ignore) |> ignore
-        do! held.Task.WaitAsync(testTimeout)
-        return release
+        let mutable found: BaseCommand = null
+        while isNull found do
+            let! (command: BaseCommand) = broker.ReadCommand()
+            if command.``type`` = commandType then
+                found <- command
+        return found
     }
 
-// the consumer asks for messages first
 let private readClose (broker: BrokerConnection) =
-    task {
-        let mutable close: BaseCommand = null
-        while isNull close do
-            let! (command: BaseCommand) = broker.ReadCommand()
-            if command.``type`` = BaseCommand.Type.CloseConsumer then
-                close <- command
-        return close
-    }
+    readCommandOf BaseCommand.Type.CloseConsumer broker
 
 // its metadata is missing, which the consumer's mailbox doesn't expect
 let private malformedMessage () =
@@ -231,9 +217,10 @@ let tests =
         }
 
         testTask "Closing completes although the mailbox doesn't get to it" {
-            let clientConfig = { clientConfig with OperationTimeout = TimeSpan.FromMilliseconds(250.0) }
+            // the connection keeps its default timeouts, so no request timeout ends the broker's silence
             use broker = new BrokerConnection(clientConfig)
-            let! (starting: Task<ConsumerImpl<byte[]>>) = broker.CreateConsumer(consumerConfig)
+            let consumerClientConfig = { clientConfig with OperationTimeout = TimeSpan.FromMilliseconds(250.0) }
+            let! (starting: Task<ConsumerImpl<byte[]>>) = broker.CreateConsumer(consumerConfig, consumerClientConfig)
             let! (subscribe: BaseCommand) = broker.ReadCommand()
             Expect.equal subscribe.``type`` BaseCommand.Type.Subscribe "Expected subscription"
             do! broker.Reply(
@@ -243,21 +230,25 @@ let tests =
             let! (consumer: ConsumerImpl<byte[]>) = starting.WaitAsync(testTimeout)
             let pendingReceive: Task<Message<byte[]>> = (consumer :> IConsumer<byte[]>).ReceiveAsync()
 
-            let! (release: TaskCompletionSource) = holdMailbox consumer
-            try
-                let closing = (consumer :> IConsumer<byte[]>).DisposeAsync().AsTask()
+            // the mailbox waits for the broker's answer to a seek, like a mailbox that waits for something that doesn't end
+            let seeking: Task<unit> = (consumer :> IConsumer<byte[]>).SeekAsync(MessageId.Earliest)
+            let! (seek: BaseCommand) = readCommandOf BaseCommand.Type.Seek broker
+            let closing = (consumer :> IConsumer<byte[]>).DisposeAsync().AsTask()
 
-                // as in the Java client, the close takes no longer than its request can take, and the broker is told
-                let! (_: BaseCommand) = readClose broker
-                do! closing.WaitAsync(testTimeout)
-                Expect.isFalse release.Task.IsCompleted "The mailbox is still held"
-                Expect.throwsT<AlreadyClosedException> (fun () -> (consumer :> IConsumer<byte[]>).ReceiveAsync() |> ignore)
-                    "The consumer is closed"
-            finally
-                release.TrySetResult() |> ignore
+            // as in the Java client, the close takes no longer than its request can take, and the broker is told
+            let! (_: BaseCommand) = readClose broker
+            do! closing.WaitAsync(testTimeout)
+            Expect.isFalse seeking.IsCompleted "The mailbox still waits for the seek"
+            Expect.throwsT<AlreadyClosedException> (fun () -> (consumer :> IConsumer<byte[]>).ReceiveAsync() |> ignore)
+                "The consumer is closed"
 
             // the mailbox finishes the close once it gets to it
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = seek.Seek.RequestId)))
             let! _ = expectFailure<AlreadyClosedException> pendingReceive
+            let! _ = expectFailure<AlreadyClosedException> seeking
             return ()
         }
 

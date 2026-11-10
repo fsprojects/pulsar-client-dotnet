@@ -4,12 +4,12 @@ open System
 open System.Threading.Tasks
 open Expecto
 open FSharp.UMX
+open pulsar.proto
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
 open Pulsar.Client.UnitTests.Internal.LocalBroker
 open Pulsar.Client.UnitTests.Internal.ProducerImplTests
-open Pulsar.Client.UnitTests.Internal.ConsumerImplTests
 
 let private clientConfig =
     { PulsarClientConfiguration.Default with
@@ -68,26 +68,32 @@ let tests =
         }
 
         testTask "A request fails when a child doesn't answer it, and the consumer still closes" {
-            let clientConfig = { clientConfig with OperationTimeout = TimeSpan.FromMilliseconds(250.0) }
-            let broker = new LocalBroker()
+            // the connections keep their default timeouts, so no request timeout ends the broker's silence
+            let consumerClientConfig = { clientConfig with OperationTimeout = TimeSpan.FromMilliseconds(250.0) }
+            let seekReceived = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let broker =
+                new LocalBroker(fun command _ ->
+                    if command.``type`` = BaseCommand.Type.Seek then
+                        seekReceived.TrySetResult() |> ignore)
             broker.ReleaseCloses()
             let connectionPool = ConnectionPool(clientConfig)
-            let mutable release: TaskCompletionSource = null
             try
-                let! (multiConsumer: MultiTopicsConsumerImpl<byte[]>) = createConsumer broker clientConfig connectionPool
+                let! (multiConsumer: MultiTopicsConsumerImpl<byte[]>) = createConsumer broker consumerClientConfig connectionPool
                 let consumer = multiConsumer :> IConsumer<byte[]>
-                let! (held: TaskCompletionSource) = holdMailbox (multiConsumer.Consumers[0] :?> ConsumerImpl<byte[]>)
-                release <- held
+
+                // One child's mailbox waits for the broker's answer to a seek, like a mailbox that waits for something
+                // that doesn't end. The seek fails when the connections are closed at the end.
+                let seeking: Task<unit> = multiConsumer.Consumers[0].SeekAsync(MessageId.Earliest)
+                seeking.ContinueWith(fun (seek: Task<unit>) -> seek.Exception |> ignore) |> ignore
+                do! seekReceived.Task.WaitAsync(testTimeout)
 
                 // As in the Java client, where the child's request would time out. The consumer's mailbox waits for
                 // its children here, so without an end to that it could not get to any other request, or to the close.
                 let! _ = expectFailure<Pulsar.Client.Api.TimeoutException> (consumer.RedeliverUnacknowledgedMessagesAsync())
 
-                // the child that is still held is closed without its mailbox
+                // the child that still waits is closed without its mailbox
                 do! consumer.DisposeAsync().AsTask().WaitAsync(testTimeout)
             finally
-                if not (isNull release) then
-                    release.TrySetResult() |> ignore
                 connectionPool.CloseAllConnections().Wait(testTimeout) |> ignore
                 (broker :> IDisposable).Dispose()
         }
