@@ -2,6 +2,7 @@ module Pulsar.Client.UnitTests.Internal.TaskSeq
 
 open System
 open System.Collections.Generic
+open System.Threading.Channels
 open System.Threading.Tasks
 open Expecto
 open Expecto.Flip
@@ -12,6 +13,22 @@ open Pulsar.Client.Internal
 open Pulsar.Client.Schema
 open Pulsar.Client.UnitTests
 
+
+/// A generator whose tasks the test completes itself, so the order they complete in doesn't depend on timers.
+type private ControlledGenerator<'T>() =
+    let handedOut = Channel.CreateUnbounded<TaskCompletionSource<'T>>()
+    let generator: TaskGenerator<'T> =
+        fun () ->
+            let source = TaskCompletionSource<'T>(TaskCreationOptions.RunContinuationsAsynchronously)
+            handedOut.Writer.TryWrite source |> ignore
+            source.Task
+    member _.Generator = generator
+    /// Completes the generator's oldest task that is still pending, once the loop has taken it.
+    member _.Complete(result: 'T) =
+        task {
+            let! source = handedOut.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
+            source.SetResult result
+        }
 
 let private failsWith (cause: exn) (request: Task) =
     task {
@@ -66,34 +83,40 @@ let tests =
             Expect.equal "" 40 result4
         }
         
+        // The test completes the tasks itself. With delays, the added generator's second task was due 20 ms before
+        // the next task of an initial one, which is about one tick of the timer on Windows, so they could swap.
         testTask "Additional generator work well" {
-            let gen1 = fun () -> task {
-                do! Task.Delay(100)
-                return 100
-            }
-            let gen2 = fun () -> task {
-                do! Task.Delay(100)
-                return 100
-            }
-            let gen3 = fun () -> task {
-                do! Task.Delay(40)
-                return 40
-            }
-            let ts = TaskSeq([gen1; gen2])
-            let! result1 = ts.Next() 
-            ts.AddGenerators([gen3])
-            let! result2 = ts.Next() 
-            let! result3 = ts.Next() 
-            let! result4 = ts.Next() 
-            let! result5 = ts.Next() 
-            
-            Expect.equal "" 100 result1
-            Expect.equal "" 100 result2
-            Expect.equal "" 40 result3
-            Expect.equal "" 40 result4
-            Expect.equal "" 100 result5
+            let gen1 = ControlledGenerator<int>()
+            let gen2 = ControlledGenerator<int>()
+            let gen3 = ControlledGenerator<int>()
+            let ts = TaskSeq([gen1.Generator; gen2.Generator])
+            let next () = ts.Next().WaitAsync(TimeSpan.FromSeconds(5.0))
+
+            let next1 = next ()
+            do! gen1.Complete 1
+            let! result1 = next1
+            // completes while nothing waits for it, and before the generator is added
+            do! gen2.Complete 2
+            ts.AddGenerators([gen3.Generator])
+            let! result2 = next ()
+            let next3 = next ()
+            do! gen3.Complete 3
+            let! result3 = next3
+            // the added generator is asked for another task, as the initial ones are
+            let next4 = next ()
+            do! gen3.Complete 3
+            let! result4 = next4
+            let next5 = next ()
+            do! gen1.Complete 1
+            let! result5 = next5
+
+            Expect.equal "" 1 result1
+            Expect.equal "" 2 result2
+            Expect.equal "" 3 result3
+            Expect.equal "" 3 result4
+            Expect.equal "" 1 result5
         }
-        
+
         testTask "Add/Remove generator work well" {
             let gen1 = fun () -> task {
                 do! Task.Delay(100)
