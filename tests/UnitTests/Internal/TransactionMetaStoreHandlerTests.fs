@@ -251,6 +251,39 @@ let tests =
                 (broker :> IDisposable).Dispose()
         }
 
+        testTask "A handler the broker doesn't allow to connect to the coordinator is closed" {
+            let clientConfig = { clientConfig with OperationTimeout = TimeSpan.FromSeconds(30.0) }
+            let attempts = Channel.CreateUnbounded<uint64>()
+            let broker =
+                new LocalBroker(fun command send ->
+                    match command.``type`` with
+                    | BaseCommand.Type.TcClientConnectRequest ->
+                        // what a broker without transactions answers: an error, not a response to the connect
+                        let requestId = command.tcClientConnectRequest.RequestId
+                        send (BaseCommand(
+                                ``type`` = BaseCommand.Type.Error,
+                                Error = CommandError(
+                                    RequestId = requestId,
+                                    Error = ServerError.NotAllowedError,
+                                    Message = "Transactions are not enabled")))
+                        attempts.Writer.TryWrite requestId |> ignore
+                    | _ ->
+                        ())
+            let connectionPool = ConnectionPool(clientConfig)
+            let created = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let handler = TransactionMetaStoreHandler(clientConfig, %0UL, topic, connectionPool, lookupFor broker, created)
+            try
+                // as in the Java client, the creation fails with that error, and the handler doesn't try again
+                let! _ = expectFailure<NotAllowedException> created.Task
+                do! Task.Delay(500)
+                Expect.equal attempts.Reader.Count 1 "The handler made one attempt"
+                Expect.throwsT<AlreadyClosedException> (fun () -> handler.NewTransactionAsync(TimeSpan.FromMinutes(1.0)) |> ignore)
+                    "The handler is closed"
+            finally
+                connectionPool.CloseAllConnections().Wait(testTimeout) |> ignore
+                (broker :> IDisposable).Dispose()
+        }
+
         // sequenced: its thousand requests would slow down the tests that depend on timing
         testSequenced <| testTask "No more than 1000 requests wait for their answers at once" {
             let clientConfig = { clientConfig with OperationTimeout = TimeSpan.FromSeconds(30.0) }
