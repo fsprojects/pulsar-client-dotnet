@@ -226,8 +226,7 @@ let tests =
             let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(frame, 0, split)).AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
             let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(frame, split, 3)).AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
-            let! read = completesInTime connected.Task
-            Expect.isTrue read "The frame is handled without waiting for more data from the broker"
+            let! _ = connected.Task.WaitAsync(TimeSpan.FromSeconds(2.0))
             incoming.Writer.Complete()
         }
     ]
