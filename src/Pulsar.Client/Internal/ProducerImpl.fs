@@ -699,6 +699,30 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     Log.Logger.LogWarning(ex, "{0} failed to reply to a request after the mailbox stopped", prefix)
         } |> ignore
 
+    let pendingSendIsComplete (channel: TaskCompletionSource<MessageId>) =
+        let matchingEntries =
+            pendingMessages
+            |> Seq.choose (fun pending ->
+                match pending.Callback with
+                | SingleCallback (chunkDetails, _, Some pendingChannel)
+                    when Object.ReferenceEquals(channel, pendingChannel) ->
+                    Some (chunkDetails |> Option.forall (fun details -> details.IsLast))
+                | BatchCallbacks callbacks ->
+                    if callbacks
+                       |> Array.exists (fun struct (_, _, pendingChannel) ->
+                           pendingChannel
+                           |> Option.exists (fun pendingChannel -> Object.ReferenceEquals(channel, pendingChannel))) then
+                        Some true
+                    else
+                        None
+                | _ ->
+                    None)
+            |> Seq.toArray
+        if matchingEntries.Length = 0 then
+            None
+        else
+            Some (matchingEntries |> Array.contains true)
+
     let recoverMailboxFailure (ex: exn) =
         backgroundTask {
             match currentMessage, connectionHandler.ConnectionState with
@@ -714,20 +738,19 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 with pendingEx ->
                     Log.Logger.LogWarning(pendingEx, "{0} failed to fail blocked or batched sends after mailbox failure", prefix)
                 match currentMessage with
-                | Some (BeginSendMessage struct (_, channel, _))
-                    when pendingMessages
-                         |> Seq.exists (fun pending ->
-                             match pending.Callback with
-                             | SingleCallback (_, _, Some pendingChannel) ->
-                                 Object.ReferenceEquals(channel, pendingChannel)
-                             | SingleCallback _ -> false
-                             | BatchCallbacks callbacks ->
-                                 callbacks
-                                 |> Array.exists (fun struct (_, _, pendingChannel) ->
-                                     pendingChannel
-                                     |> Option.exists (fun pendingChannel -> Object.ReferenceEquals(channel, pendingChannel)))) ->
+                | Some ((BeginSendMessage struct (message, channel, isFireAndForget)) as msg) ->
+                    match pendingSendIsComplete channel with
+                    | Some true ->
+                        ()
+                    | Some false ->
+                        // Earlier chunks may be queued, but without the final chunk the logical send can never complete.
+                        failMessage message (if isFireAndForget then None else Some channel) ex
+                    | None ->
+                        replyFromStoppedMailbox ex msg
+                | Some msg ->
+                    replyFromStoppedMailbox ex msg
+                | None ->
                     ()
-                | _ -> currentMessage |> Option.iter (replyFromStoppedMailbox ex)
                 match state with
                 | Ready clientCnx ->
                     // register again from a clean state, as a new connection would

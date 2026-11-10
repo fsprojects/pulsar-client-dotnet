@@ -315,6 +315,70 @@ let tests =
             Expect.isTrue broker.Connection.IsActive "Recovery must preserve the shared connection"
         }
 
+        testTask "A failed partial chunk send completes its request during recovery" {
+            use broker = new BrokerConnection(clientConfig)
+            let config =
+                { producerConfig with
+                    BatchingEnabled = false
+                    ChunkingEnabled = true
+                    SendTimeout = TimeSpan.Zero }
+            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
+            let mutable clusterEnumerations = 0
+            let replicationClusters =
+                seq {
+                    clusterEnumerations <- clusterEnumerations + 1
+                    if clusterEnumerations = 2 then
+                        raise (InvalidOperationException "replication clusters enumeration failed")
+                    yield "cluster"
+                }
+            let payload = Array.zeroCreate<byte> (Commands.DEFAULT_MAX_MESSAGE_SIZE + 1)
+            let message =
+                (producer :> IProducer<byte[]>).NewMessage(payload)
+                    .WithReplicateTo(replicationClusters)
+            let sending =
+                postAndAsyncReply producer.Mb (fun reply -> BeginSendMessage(struct(message, reply, false)))
+
+            let! (firstChunk: BaseCommand) = broker.ReadCommand()
+            Expect.equal firstChunk.``type`` BaseCommand.Type.Send "The first chunk should have been queued"
+            let! (close: BaseCommand) = broker.ReadCommand()
+            Expect.equal close.``type`` BaseCommand.Type.CloseProducer "Partial chunk construction should trigger recovery"
+            Expect.equal clusterEnumerations 2 "Replication-cluster metadata should be built for both chunks"
+            let! _ = expectFailure<InvalidOperationException> sending
+
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = close.CloseProducer.RequestId)))
+            let! (register: BaseCommand) = broker.ReadCommand()
+            Expect.equal register.``type`` BaseCommand.Type.Producer "The producer should register again"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.ProducerSuccess,
+                    ProducerSuccess = CommandProducerSuccess(
+                        RequestId = register.Producer.RequestId,
+                        ProducerName = "test-producer",
+                        LastSequenceId = -1L)))
+
+            let! (replayedChunk: BaseCommand) = broker.ReadCommand()
+            Expect.equal replayedChunk.``type`` BaseCommand.Type.Send "The queued chunk should retain normal pending-send handling"
+            do! replyReceipt broker replayedChunk
+            let nextSending = enqueueMessage producer [| 2uy |]
+            let! (nextSend: BaseCommand) = broker.ReadCommand()
+            Expect.equal nextSend.``type`` BaseCommand.Type.Send "The producer should remain usable"
+            do! replyReceipt broker nextSend
+            let! _ = nextSending.WaitAsync(testTimeout)
+
+            let closing = postAndAsyncReply producer.Mb ProducerMessage.Close
+            let! (closeAfterRecovery: BaseCommand) = broker.ReadCommand()
+            Expect.equal closeAfterRecovery.``type`` BaseCommand.Type.CloseProducer "The producer should close normally"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = closeAfterRecovery.CloseProducer.RequestId)))
+            let! _ = closing.WaitAsync(testTimeout)
+            Expect.isTrue broker.Connection.IsActive "Partial chunk recovery must preserve the shared connection"
+        }
+
         testTask "Close queued during recovery fails retained sends before completing" {
             let clientConfig =
                 { clientConfig with
