@@ -117,8 +117,8 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                 | TransactionCoordinatorMessage.Start ch -> ch.TrySetResult(Error ex) |> ignore
                 | Close -> continueLoop <- false
         } :> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            let ex = loopFailure t
+            if not (isNull ex) then
                 Volatile.Write(&stopCause, ex)
             // Nothing reads the mailbox any more: a start still queued is answered here, and a later one by its
             // caller, instead of being left waiting.
@@ -128,7 +128,7 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                 match msg with
                 | TransactionCoordinatorMessage.Start ch -> ch.TrySetResult(Error (stoppedException ())) |> ignore
                 | Close -> ()
-            if t.IsFaulted then
+            if not (isNull ex) then
                 Log.Logger.LogCritical(stoppedException (), "transaction coordinator mailbox failure")
             else
                 Log.Logger.LogInformation("transaction coordinator mailbox has stopped normally"))

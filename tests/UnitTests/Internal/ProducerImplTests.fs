@@ -319,6 +319,32 @@ let tests =
             Expect.isTrue broker.Connection.IsActive "Recovery must preserve the shared connection"
         }
 
+        // sequenced: it replaces the logger that everything shares
+        testSequenced <| testTask "A producer recovers when a cancellation stops its mailbox" {
+            use broker = new BrokerConnection(clientConfig)
+            let config = { producerConfig with BatchingEnabled = false; SendTimeout = TimeSpan.Zero }
+            let! (producer: ProducerImpl<byte[]>) = broker.StartProducer(config, ProducerInterceptors<byte[]>.Empty, ignore)
+            let original = Log.Logger
+            try
+                Log.Logger <- cancellingLogger original (fun message -> message.Contains "Flush requested")
+                let flushing: Task<unit> = postAndAsyncReply producer.Mb ProducerMessage.Flush
+                let! (failure: InvalidOperationException) = expectFailure<InvalidOperationException> flushing
+                Expect.isTrue (failure.InnerException :? OperationCanceledException) "The request fails with what holds the cancellation"
+
+                // As after any other failure of its mailbox, the producer closes at the broker and registers again. A
+                // mailbox that ends cancelled would pass for one that was stopped, and leave the producer without it.
+                let! (close: BaseCommand) = broker.ReadCommand()
+                Expect.equal close.``type`` BaseCommand.Type.CloseProducer "Close the producer before re-registering"
+                do! broker.Reply(
+                    BaseCommand(
+                        ``type`` = BaseCommand.Type.Success,
+                        Success = CommandSuccess(RequestId = close.CloseProducer.RequestId)))
+                let! (register: BaseCommand) = broker.ReadCommand()
+                Expect.equal register.``type`` BaseCommand.Type.Producer "The producer should register again"
+            finally
+                Log.Logger <- original
+        }
+
         testTask "A failed partial chunk send completes its request during recovery" {
             use broker = new BrokerConnection(clientConfig)
             let config =

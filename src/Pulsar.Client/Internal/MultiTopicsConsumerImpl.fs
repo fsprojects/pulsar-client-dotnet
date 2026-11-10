@@ -703,8 +703,9 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         ()
                 }
         , ct) :> Task).ContinueWith(fun t ->
-                if t.IsFaulted then
-                    let (Flatten ex) = t.Exception
+                // a poller that is stopped before it has started ends cancelled, which is no failure
+                let ex = if t.IsCanceled && ct.IsCancellationRequested then null else loopFailure t
+                if not (isNull ex) then
                     Log.Logger.LogCritical(ex, "{0} poller failure", prefix)
                     post this.Mb (PollerFailed ex)
                 else
@@ -1192,8 +1193,8 @@ type internal MultiTopicsConsumerImpl<'T> (consumerConfig: ConsumerConfiguration
                         continueLoop <- true
         }:> Task).ContinueWith(fun t ->
             try
-                if t.IsFaulted then
-                    let (Flatten ex) = t.Exception
+                let ex = loopFailure t
+                if not (isNull ex) then
                     Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
                     terminalError <- ex
                     this.ConnectionState <- Failed

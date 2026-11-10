@@ -481,4 +481,28 @@ let tests =
                 if cnx.IsActive then
                     cnx.Dispose()
         }
+
+        // sequenced: it replaces the logger that everything shares
+        testSequenced <| testTask "A connection is deactivated when a cancellation stops the loop that looks after it" {
+            let incoming = Pipe()
+            let cnx = newCnx incoming (Pipe().Writer)
+            let consumer = RegisteredConsumer(cnx, %1UL)
+            do! registered cnx
+            let original = Log.Logger
+            try
+                // the removal fails where it is logged, and so does dealing with that failure
+                Log.Logger <-
+                    cancellingLogger original (fun message ->
+                        message.Contains "removed consumer 2" || message.Contains "operation failed")
+                cnx.RemoveConsumer(%2UL)
+
+                // As when the loop ends faulted. Its consumers would otherwise stay on a connection that nothing
+                // looks after any more.
+                do! consumer.ConnectionClosed.WaitAsync(TimeSpan.FromSeconds(5.0))
+                Expect.isFalse cnx.IsActive "The connection is deactivated"
+            finally
+                Log.Logger <- original
+                if cnx.IsActive then
+                    cnx.Dispose()
+        }
     ]

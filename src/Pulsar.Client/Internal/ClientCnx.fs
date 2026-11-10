@@ -264,8 +264,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 match msg with
                 | AddRequest (_, _, tsc) -> tsc.TrySetException(ConnectException "Disconnected.") |> ignore
                 | _ -> ()
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            let ex = loopFailure t
+            if not (isNull ex) then
                 Log.Logger.LogCritical(ex, "{0} requestsMb mailbox failure", prefix)
             else
                 Log.Logger.LogInformation("{0} requestsMb mailbox has stopped normally", prefix))
@@ -327,8 +327,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 match msg with
                 | RemoveConsumer (_, Some completion) -> completion.TrySetResult() |> ignore
                 | _ -> ()
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            let ex = loopFailure t
+            if not (isNull ex) then
                 if this.IsActive then
                     deactivateChannel()
                 Log.Logger.LogCritical(ex, "{0} operationsMb mailbox failure", prefix)
@@ -379,8 +379,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 | SocketMessageWithReply (_, channel) -> channel.TrySetResult(false) |> ignore
                 | SocketRequestMessageWithReply (_, _, channel) -> channel.TrySetException(ConnectException "Disconnected.") |> ignore
                 | SocketMessageWithoutReply _ | SocketMessage.Stop -> ()
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            let ex = loopFailure t
+            if not (isNull ex) then
                 Log.Logger.LogCritical(ex, "{0} sendMb mailbox failure", prefix)
             else
                 Log.Logger.LogInformation("{0} sendMb mailbox has stopped normally", prefix))

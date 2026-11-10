@@ -59,6 +59,19 @@ let private readCommandOf (commandType: BaseCommand.Type) (broker: BrokerConnect
 let private readClose (broker: BrokerConnection) =
     readCommandOf BaseCommand.Type.CloseConsumer broker
 
+let private succeed (broker: BrokerConnection) requestId =
+    broker.Reply(BaseCommand(``type`` = BaseCommand.Type.Success, Success = CommandSuccess(RequestId = requestId)))
+
+/// A consumer that has subscribed.
+let private startConsumer (broker: BrokerConnection) config (consumerClientConfig: PulsarClientConfiguration) =
+    task {
+        let! (starting: Task<ConsumerImpl<byte[]>>) = broker.CreateConsumer(config, consumerClientConfig)
+        let! (subscribe: BaseCommand) = broker.ReadCommand()
+        Expect.equal subscribe.``type`` BaseCommand.Type.Subscribe "Expected subscription"
+        do! succeed broker subscribe.Subscribe.RequestId
+        return! starting.WaitAsync(testTimeout)
+    }
+
 // its metadata is missing, which the consumer's mailbox doesn't expect
 let private malformedMessage () =
     { MessageId = {
@@ -408,5 +421,28 @@ let tests =
                 Expect.isFalse broker.Connection.IsActive "The connection is closed"
             finally
                 write.TrySetResult() |> ignore
+        }
+
+        // sequenced: it replaces the logger that everything shares
+        testSequenced <| testTask "A consumer recovers when a cancellation stops its mailbox" {
+            use broker = new BrokerConnection(clientConfig)
+            let! (consumer: ConsumerImpl<byte[]>) =
+                startConsumer broker { consumerConfig with ConsumerName = "cancelled-mailbox-consumer" } clientConfig
+            let original = Log.Logger
+            try
+                Log.Logger <-
+                    cancellingLogger original (fun message ->
+                        message.Contains "cancelled-mailbox-consumer" && message.Contains "IncreaseAvailablePermits")
+                post consumer.Mb (ConsumerMessage.IncreaseAvailablePermits 1)
+
+                // As after any other failure of its mailbox, the consumer closes at the broker and subscribes again. A
+                // mailbox that ends cancelled would pass for one that was stopped, and leave the consumer without it.
+                let! (close: BaseCommand) = readClose broker
+                do! succeed broker close.CloseConsumer.RequestId
+                let! (subscribe: BaseCommand) = readCommandOf BaseCommand.Type.Subscribe broker
+                do! succeed broker subscribe.Subscribe.RequestId
+            finally
+                Log.Logger <- original
+            do! closeConsumer broker consumer
         }
     ]

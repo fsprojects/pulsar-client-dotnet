@@ -290,8 +290,8 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
                 failRequest ex msg
 
         } :> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            let ex = loopFailure t
+            if not (isNull ex) then
                 Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
                 System.Threading.Volatile.Write(&stopCause, ex)
             else

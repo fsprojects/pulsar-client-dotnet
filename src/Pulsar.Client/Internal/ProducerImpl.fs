@@ -1115,8 +1115,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             }:> Task).ContinueWith(fun t ->
                 let mutable recovering = false
                 try
-                    if t.IsFaulted then
-                        let (Flatten ex) = t.Exception
+                    let ex = loopFailure t
+                    if not (isNull ex) then
                         if producerCreatedTsc.Task.IsCompletedSuccessfully then
                             // as in the Java client, a created producer outlives an unexpected error
                             recovering <- true

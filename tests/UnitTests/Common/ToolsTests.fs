@@ -21,6 +21,15 @@ type private QueueScheduler() =
     override _.QueueTask task = queue.Enqueue task
     override _.TryExecuteTaskInline(_, _) = false
 
+/// The task of a loop that the exception has escaped.
+let private loopStoppedBy (ex: exn) =
+    let loop: Task<unit> = backgroundTask { return raise ex }
+    try
+        loop.Wait()
+    with _ ->
+        ()
+    loop :> Task
+
 [<Tests>]
 let tests =
 
@@ -112,6 +121,27 @@ let tests =
             scheduler.RunQueued()
             tcs.SetResult 1
             Expect.isTrue "" (mirrored.Result.Wait(TimeSpan.FromSeconds 5.0))
+        }
+
+        test "loopFailure is null for a loop that ended by itself" {
+            Expect.isNull "" (loopFailure Task.CompletedTask)
+        }
+
+        test "loopFailure is the exception that stopped a loop" {
+            let failure = InvalidOperationException "the loop failed"
+            let loop = loopStoppedBy failure
+            Expect.isTrue "" loop.IsFaulted
+            Expect.isTrue "" (obj.ReferenceEquals(loopFailure loop, failure))
+        }
+
+        test "loopFailure holds the cancellation that stopped a loop" {
+            let cancellation = OperationCanceledException "a call timed out"
+            let loop = loopStoppedBy cancellation
+            Expect.isTrue "The loop ends cancelled, not faulted" loop.IsCanceled
+            let failure = loopFailure loop
+            // a caller that failed with the cancellation itself would end cancelled in turn
+            Expect.isFalse "" (failure :? OperationCanceledException)
+            Expect.isTrue "" (obj.ReferenceEquals(failure.InnerException, cancellation))
         }
     ]
     

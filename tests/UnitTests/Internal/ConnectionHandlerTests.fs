@@ -12,15 +12,21 @@ open Pulsar.Client.Internal
 
 /// Fails on the log messages the predicate picks, like anything else that can fail where a failure is being dealt
 /// with, such as running out of memory. A test that installs it runs alone, because everything shares the logger.
-type internal FailingLogger(inner: ILogger, fails: string -> bool) =
+type internal FailingLogger(inner: ILogger, fails: string -> bool, ?failure: unit -> exn) =
+    let failure = defaultArg failure (fun () -> InvalidOperationException "could not log" :> exn)
     interface ILogger with
         member _.BeginScope<'TState>(state: 'TState) : IDisposable = inner.BeginScope<'TState>(state)
         member _.IsEnabled(logLevel: LogLevel) = inner.IsEnabled(logLevel)
         member _.Log<'TState>(logLevel: LogLevel, eventId: EventId, state: 'TState, ex: exn,
                               formatter: Func<'TState, exn, string>) =
             if fails (formatter.Invoke(state, ex)) then
-                raise (InvalidOperationException "could not log")
+                raise (failure ())
             inner.Log<'TState>(logLevel, eventId, state, ex, formatter)
+
+/// Fails with an OperationCanceledException, like a call that times out in something a loop runs. Such an exception
+/// leaves the task of the loop it escapes cancelled instead of faulted.
+let internal cancellingLogger (inner: ILogger) (fails: string -> bool) =
+    FailingLogger(inner, fails, fun () -> OperationCanceledException "the call was cancelled" :> exn)
 
 let private topic = TopicName("public/default/connection-handler").CompleteTopicName
 
@@ -84,6 +90,28 @@ let tests =
 
                 // nothing connects the owner again, so it must not wait for that
                 let! (cause: exn) = failed.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+                match handler.CheckIfActive() with
+                | :? NotConnectedException as ex ->
+                    Expect.isTrue (obj.ReferenceEquals(ex.InnerException, cause)) "Requests are refused with the cause"
+                | ex ->
+                    failtestf "Expected NotConnectedException, got %O" ex
+            finally
+                Log.Logger <- original
+        }
+
+        testSequenced <| testTask "The owner is told when a cancellation stops the handler" {
+            let original = Log.Logger
+            let failed = TaskCompletionSource<exn>(TaskCreationOptions.RunContinuationsAsynchronously)
+            try
+                Log.Logger <- cancellingLogger original (fun message -> message.Contains "cancelled-handler")
+                let handler =
+                    ConnectionHandler("cancelled-handler", getConnection, lookupFailingOnce (), topic,
+                                      ignore, (fun ex -> failed.TrySetResult ex |> ignore), backoff ())
+                handler.GrabCnx()
+
+                // a loop that ends cancelled has stopped as much as one that ends faulted, and the owner must not wait
+                let! (cause: exn) = failed.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+                Expect.isTrue (cause.InnerException :? OperationCanceledException) "The cause holds the cancellation"
                 match handler.CheckIfActive() with
                 | :? NotConnectedException as ex ->
                     Expect.isTrue (obj.ReferenceEquals(ex.InnerException, cause)) "Requests are refused with the cause"

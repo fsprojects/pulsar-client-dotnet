@@ -1666,8 +1666,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         } :> Task).ContinueWith(fun t ->
             let mutable recovering = false
             try
-                if t.IsFaulted then
-                    let (Flatten ex) = t.Exception
+                let ex = loopFailure t
+                if not (isNull ex) then
                     if subscribeTsc.Task.IsCompletedSuccessfully then
                         recovering <- true
                         backgroundTask {

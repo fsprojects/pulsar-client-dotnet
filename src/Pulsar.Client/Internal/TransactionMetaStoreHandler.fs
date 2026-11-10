@@ -454,8 +454,8 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
                 | _ -> ()
 
         }:> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            let ex = loopFailure t
+            if not (isNull ex) then
                 connectionHandler.Failed(ex)
                 // the transaction coordinator client waits for this while it starts
                 transactionCoordinatorCreatedTsc.TrySetException(ex) |> ignore
@@ -465,7 +465,7 @@ type internal TransactionMetaStoreHandler(clientConfig: PulsarClientConfiguratio
             let mutable msg = Unchecked.defaultof<TransactionMetaStoreMessage>
             while mb.Reader.TryRead(&msg) do
                 failRequest (stoppedException ()) msg
-            if t.IsFaulted then
+            if not (isNull ex) then
                 stopTransactionMetaStoreHandler()
                 Log.Logger.LogCritical(connectionHandler.FailureCause, "{0} mailbox failure", prefix)
             else

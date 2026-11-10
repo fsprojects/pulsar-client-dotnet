@@ -130,8 +130,8 @@ type internal ConnectionHandler( parentPrefix: string,
                     asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
 
         }:> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            let ex = loopFailure t
+            if not (isNull ex) then
                 // Nothing connects the owner again, so it is told first: a consumer would otherwise keep its
                 // receives waiting for messages that can't come.
                 this.Failed(ex)

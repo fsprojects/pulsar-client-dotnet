@@ -8,6 +8,7 @@ open pulsar.proto
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
+open Pulsar.Client.UnitTests.Internal.ConnectionHandlerTests
 open Pulsar.Client.UnitTests.Internal.LocalBroker
 open Pulsar.Client.UnitTests.Internal.ProducerImplTests
 
@@ -94,6 +95,34 @@ let tests =
                 // the child that still waits is closed without its mailbox
                 do! consumer.DisposeAsync().AsTask().WaitAsync(testTimeout)
             finally
+                connectionPool.CloseAllConnections().Wait(testTimeout) |> ignore
+                (broker :> IDisposable).Dispose()
+        }
+
+        // sequenced: it replaces the logger that everything shares
+        testSequenced <| testTask "A consumer fails when a cancellation stops its mailbox" {
+            let broker = new LocalBroker()
+            broker.ReleaseCloses()
+            let connectionPool = ConnectionPool(clientConfig)
+            let original = Log.Logger
+            try
+                let! (multiConsumer: MultiTopicsConsumerImpl<byte[]>) = createConsumer broker clientConfig connectionPool
+                let consumer = multiConsumer :> IConsumer<byte[]>
+                let pendingReceive = consumer.ReceiveAsync()
+                Log.Logger <-
+                    cancellingLogger original (fun message ->
+                        message.Contains "mt/consumer" && message.Contains "HasMessageAvailable")
+
+                // A mailbox that ends cancelled would pass for one that was stopped. The request it was dealing with
+                // would get no answer, and the receives would wait for a consumer that no longer runs.
+                let! (failure: InvalidOperationException) =
+                    expectFailure<InvalidOperationException> (multiConsumer.HasMessageAvailableAsync())
+                Expect.isTrue (failure.InnerException :? OperationCanceledException) "The failure holds the cancellation"
+                let! _ = expectFailure<AlreadyClosedException> pendingReceive
+                Log.Logger <- original
+                do! consumer.DisposeAsync().AsTask().WaitAsync(testTimeout)
+            finally
+                Log.Logger <- original
                 connectionPool.CloseAllConnections().Wait(testTimeout) |> ignore
                 (broker :> IDisposable).Dispose()
         }

@@ -154,8 +154,8 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
                 Log.Logger.LogError(ex, "PulsarClient failed to process a request")
                 failRequest ex msg
         } :> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            let ex = loopFailure t
+            if not (isNull ex) then
                 Volatile.Write(&stopCause, ex)
             // Nothing reads the mailbox any more: the requests still queued are refused here, and later ones by
             // their caller, instead of being left waiting.
@@ -163,7 +163,7 @@ type PulsarClient internal (initialConfig: PulsarClientConfiguration) as this =
             let mutable msg = Unchecked.defaultof<PulsarClientMessage>
             while mb.Reader.TryRead(&msg) do
                 failRequest (stoppedException ()) msg
-            if t.IsFaulted then
+            if not (isNull ex) then
                 Log.Logger.LogCritical(stoppedException (), "PulsarClient mailbox failure")
             else
                 Log.Logger.LogInformation("PulsarClient mailbox has stopped normally"))

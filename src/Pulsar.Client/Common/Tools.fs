@@ -184,6 +184,26 @@ let runContinuationsAsynchronously (task: Task<'T>) =
 let post (channel: Channel<'T>) msg =
     channel.Writer.TryWrite msg |> ignore
 
+/// What stopped a loop, or null if the loop ended by itself.
+/// An OperationCanceledException that escapes a loop leaves its task cancelled instead of faulted, which is a failure
+/// of the loop all the same. It would also cancel the task of a caller that got it as the failure of its request,
+/// where it could pass for a normal stop once more, as in the poller of a multi-topic consumer. So the failure of a
+/// cancelled loop is an exception that holds the cancellation.
+let loopFailure (loop: Task) : exn =
+    if loop.IsFaulted then
+        let (Flatten ex) = loop.Exception
+        ex
+    elif loop.IsCanceled then
+        let cancellation: exn =
+            try
+                loop.GetAwaiter().GetResult()
+                null
+            with ex ->
+                ex
+        InvalidOperationException("The loop was stopped by a cancellation", cancellation) :> exn
+    else
+        null
+
 let wrapException (f: unit -> 'a) =
     try
         Ok <| f()
