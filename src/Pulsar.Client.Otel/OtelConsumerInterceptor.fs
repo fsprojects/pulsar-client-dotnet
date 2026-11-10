@@ -60,6 +60,15 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                 | true, v -> seq { v }
                 | false, _ -> Seq.empty)
 
+    // Nothing ends an activity once the loop has stopped, so it ends the ones that are open, and no more are started.
+    let endOpenActivities () =
+        for KeyValue(_, activity) in cache do
+            activity
+                .SetTag("messaging.acknowledge_type", "InterceptorStopped")
+                .Dispose()
+        activitySource.Dispose()
+        cache.Clear()
+
     let mb = Channel.CreateUnbounded<InterceptorCommand>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (backgroundTask {
         let mutable continueLoop = true
@@ -84,12 +93,7 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     | _ ->
                         cache.Add(msgId, activity)
                 | InterceptorCommand.Stop ->
-                    for KeyValue(_, activity) in cache do
-                        activity
-                            .SetTag("messaging.acknowledge_type", "InterceptorStopped")
-                            .Dispose()
-                    activitySource.Dispose()
-                    cache.Clear()
+                    endOpenActivities()
                     log.LogInformation("{0} Closed", prefix)
                     continueLoop <- false
             // what fails for one message must not end the tracing of all the later ones
@@ -112,7 +116,12 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                         ()
                 | _ ->
                     ()
-            if t.IsFaulted then
+            if t.IsFaulted || t.IsCanceled then
+                // what a Stop would have done
+                try
+                    endOpenActivities()
+                with ex ->
+                    log.LogError(ex, "{0} failed to end the open activities", prefix)
                 log.LogCritical(t.Exception, "{0} mailbox failure", prefix)
             else
                 log.LogInformation("{0} mailbox has stopped normally", prefix))
@@ -144,7 +153,9 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     parentContext.Baggage.GetBaggage()
                     |> Seq.iter (fun (KeyValue kv) ->
                         activity.AddBaggage kv |> ignore)
-                    postMb (InterceptorCommand.BeforeConsume(message.MessageId, activity))
+                    if not (mb.Writer.TryWrite(InterceptorCommand.BeforeConsume(message.MessageId, activity))) then
+                        // the loop has stopped, so nothing else would end this activity
+                        activity.Dispose()
                 else
                    //don't handle activity
                     ()
