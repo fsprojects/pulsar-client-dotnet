@@ -32,41 +32,50 @@ type internal NegativeAcksTracker(prefix: string,
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-            match! mb.Reader.ReadAsync() with
-            | Add (msgId, channel) ->
+            let! msg = mb.Reader.ReadAsync()
+            try
+                match msg with
+                | Add (msgId, channel) ->
 
-                Log.Logger.LogDebug("{0} Adding message {1}", prefix, msgId)
-                if state.ContainsKey(msgId) |> not then
-                    state.Add(msgId, %Stopwatch.GetTimestamp())
-                    channel.SetResult(true)
-                else
-                    Log.Logger.LogWarning("{0} Duplicate message add {1}", prefix, msgId)
-                    channel.SetResult(false)
+                    Log.Logger.LogDebug("{0} Adding message {1}", prefix, msgId)
+                    if state.ContainsKey(msgId) |> not then
+                        state.Add(msgId, %Stopwatch.GetTimestamp())
+                        channel.SetResult(true)
+                    else
+                        Log.Logger.LogWarning("{0} Duplicate message add {1}", prefix, msgId)
+                        channel.SetResult(false)
 
-            | TickTime ->
+                | TickTime ->
 
-                if state.Count > 0 then
-                    let messagesToRedeliver = HashSet<MessageId>()
-                    for KeyValue(messageId, postedDate) in state do
-                        if Stopwatch.GetElapsedTime(%postedDate) > nackDelay then
-                            match messageId.ChunkMessageIds with
-                            | Some msgIds ->
-                                msgIds |> Array.iter (messagesToRedeliver.Add >> ignore)
-                            | None ->
-                                messagesToRedeliver.Add(messageId) |> ignore
-                    if messagesToRedeliver.Count > 0 then
-                        for msgId in messagesToRedeliver do
-                            state.Remove(msgId) |> ignore
-                        Log.Logger.LogDebug("{0} Redelivering {1} messages", prefix, messagesToRedeliver.Count)
-                        redeliverUnacknowledgedMessages messagesToRedeliver
-                else
-                    ()
+                    if state.Count > 0 then
+                        let messagesToRedeliver = HashSet<MessageId>()
+                        for KeyValue(messageId, postedDate) in state do
+                            if Stopwatch.GetElapsedTime(%postedDate) > nackDelay then
+                                match messageId.ChunkMessageIds with
+                                | Some msgIds ->
+                                    msgIds |> Array.iter (messagesToRedeliver.Add >> ignore)
+                                | None ->
+                                    messagesToRedeliver.Add(messageId) |> ignore
+                        if messagesToRedeliver.Count > 0 then
+                            for msgId in messagesToRedeliver do
+                                state.Remove(msgId) |> ignore
+                            Log.Logger.LogDebug("{0} Redelivering {1} messages", prefix, messagesToRedeliver.Count)
+                            redeliverUnacknowledgedMessages messagesToRedeliver
+                    else
+                        ()
 
-            | Stop ->
+                | Stop ->
 
-                Log.Logger.LogDebug("{0} Stop", prefix)
-                state.Clear()
-                continueLoop <- false
+                    Log.Logger.LogDebug("{0} Stop", prefix)
+                    state.Clear()
+                    continueLoop <- false
+            // As in the Java client, where the tracker is not a loop that an exception could stop: the tracker goes
+            // on, or negatively acknowledged messages would no longer be redelivered without anybody noticing.
+            with ex ->
+                Log.Logger.LogError(ex, "{0} failed to process a request", prefix)
+                match msg with
+                | Add (_, channel) -> channel.TrySetException ex |> ignore
+                | _ -> ()
         }:> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception

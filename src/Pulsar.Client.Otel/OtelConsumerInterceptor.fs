@@ -64,33 +64,54 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-            match! mb.Reader.ReadAsync() with
-            | InterceptorCommand.Ack (msgId, ackResult) ->
-                endActivity msgId ackResult
-            | InterceptorCommand.NegativeAck (msgId, ackResult) ->
-                endActivity msgId ackResult
-            | InterceptorCommand.Timeout (msgId, ackResult) ->
-                endActivity msgId ackResult
-            | InterceptorCommand.CumulativeAck (msgId, ackResult) ->
-                endPreviousActivities msgId ackResult
-            | InterceptorCommand.BeforeConsume (msgId, activity) ->
-                match cache.TryGetValue msgId with
-                | true, _ ->
-                    activity
-                        .SetTag("messaging.acknowledge_type", "Duplicate")
-                        .Dispose()
-                | _ ->
-                    cache.Add(msgId, activity)
-            | InterceptorCommand.Stop ->
-                for KeyValue(_, activity) in cache do
-                    activity
-                        .SetTag("messaging.acknowledge_type", "InterceptorStopped")
-                        .Dispose()
-                activitySource.Dispose()
-                cache.Clear()
-                log.LogInformation("{0} Closed", prefix)
-                continueLoop <- false
+            let! msg = mb.Reader.ReadAsync()
+            try
+                match msg with
+                | InterceptorCommand.Ack (msgId, ackResult) ->
+                    endActivity msgId ackResult
+                | InterceptorCommand.NegativeAck (msgId, ackResult) ->
+                    endActivity msgId ackResult
+                | InterceptorCommand.Timeout (msgId, ackResult) ->
+                    endActivity msgId ackResult
+                | InterceptorCommand.CumulativeAck (msgId, ackResult) ->
+                    endPreviousActivities msgId ackResult
+                | InterceptorCommand.BeforeConsume (msgId, activity) ->
+                    match cache.TryGetValue msgId with
+                    | true, _ ->
+                        activity
+                            .SetTag("messaging.acknowledge_type", "Duplicate")
+                            .Dispose()
+                    | _ ->
+                        cache.Add(msgId, activity)
+                | InterceptorCommand.Stop ->
+                    for KeyValue(_, activity) in cache do
+                        activity
+                            .SetTag("messaging.acknowledge_type", "InterceptorStopped")
+                            .Dispose()
+                    activitySource.Dispose()
+                    cache.Clear()
+                    log.LogInformation("{0} Closed", prefix)
+                    continueLoop <- false
+            // what fails for one message must not end the tracing of all the later ones
+            with ex ->
+                log.LogError(ex, "{0} failed to process a command", prefix)
+                match msg with
+                | InterceptorCommand.Stop -> continueLoop <- false
+                | _ -> ()
         } :> Task).ContinueWith(fun t ->
+            // Nothing reads the mailbox any more, so it takes no more commands: they would pile up with their
+            // activities for as long as the consumer runs.
+            mb.Writer.TryComplete() |> ignore
+            let mutable msg = Unchecked.defaultof<InterceptorCommand>
+            while mb.Reader.TryRead(&msg) do
+                match msg with
+                | InterceptorCommand.BeforeConsume (_, activity) ->
+                    try
+                        activity.Dispose()
+                    with _ ->
+                        ()
+                | _ ->
+                    ()
             if t.IsFaulted then
                 log.LogCritical(t.Exception, "{0} mailbox failure", prefix)
             else

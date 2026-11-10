@@ -85,4 +85,39 @@ let tests =
             redelivered2 |> Expect.equal "" 2
             tracker.Close()
         }
+
+        testTask "A redelivery that fails doesn't stop the tracker" {
+
+            let scheduler = new ManualInvokeScheduler()
+            let getScheduler onTick =
+                scheduler.Callback <- onTick
+                scheduler :> IDisposable
+
+            let tcs = TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let calls = ref 0
+            let redeliver msgIds =
+                calls.Value <- calls.Value + 1
+                if calls.Value = 1 then
+                    failwith "could not redeliver"
+                tcs.TrySetResult(msgIds |> Seq.length) |> ignore
+
+            let tracker = NegativeAcksTracker("", TimeSpan.FromMilliseconds(100.0), redeliver, getScheduler)
+            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Single; TopicName = %""; ChunkMessageIds = None }
+            let msgId2 = { msgId1 with EntryId = %2L }
+
+            let! result = tracker.Add msgId1
+            result |> Expect.isTrue ""
+            do! Task.Delay(120) //waiting for expiration to happen
+            scheduler.Tick()     //the redelivery fails
+
+            // the tracker goes on, so later messages are still redelivered
+            let! result = (tracker.Add msgId2).WaitAsync(TimeSpan.FromSeconds(5.0))
+            result |> Expect.isTrue ""
+            do! Task.Delay(120)
+            scheduler.Tick()
+
+            let! redelivered = tcs.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+            redelivered |> Expect.equal "" 1
+            tracker.Close()
+        }
     ]

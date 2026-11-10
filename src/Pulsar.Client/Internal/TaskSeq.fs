@@ -2,6 +2,7 @@ namespace Pulsar.Client.Internal
 
 open System
 open System.Collections.Generic
+open System.Threading
 open System.Threading.Tasks
 
 open Pulsar.Client.Common
@@ -61,9 +62,28 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
         } |> ignore
 
     let mb = Channel.CreateUnbounded<TaskSeqMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    // why the loop stopped, set before the mailbox is completed, so a request that finds it completed can report it
+    let mutable stopCause: exn = null
+    let mutable currentMessage: TaskSeqMessage<'T> voption = ValueNone
+
+    let getStopCause () = Volatile.Read(&stopCause)
+
+    let failRequest (ex: exn) (msg: TaskSeqMessage<'T>) =
+        match msg with
+        | WhenAnyTask channel
+        | Next channel ->
+            channel.TrySetException ex |> ignore
+        | RemoveGenerator (_, channel) ->
+            channel.TrySetException ex |> ignore
+        | NextComplete _
+        | AddGenerators _ ->
+            ()
+
     do (backgroundTask {
         while true do
-            match! mb.Reader.ReadAsync() with
+            let! msg = mb.Reader.ReadAsync()
+            currentMessage <- ValueSome msg
+            match msg with
             | WhenAnyTask channel ->
 
                 Log.Logger.LogTrace("TaskSeq.WhenAnyTask nextWaiting:{0}", nextWaiting)
@@ -132,6 +152,16 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
                 Log.Logger.LogCritical(ex, "Taskseq mailbox failure")
+                // Nothing reads the mailbox any more. The request the loop stopped on, the ones waiting for a task,
+                // and every request queued or made later fail, so no caller waits for a reply that can't come.
+                Volatile.Write(&stopCause, ex)
+                mb.Writer.TryComplete() |> ignore
+                currentMessage |> ValueOption.iter (failRequest ex)
+                while waitingQueue.Count > 0 do
+                    waitingQueue.Dequeue().TrySetException ex |> ignore
+                let mutable msg = Unchecked.defaultof<TaskSeqMessage<'T>>
+                while mb.Reader.TryRead(&msg) do
+                    failRequest ex msg
             else
                 Log.Logger.LogInformation("Taskseq mailbox has stopped normally"))
     |> ignore
@@ -142,7 +172,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
 
     member private this.RestartNext() =
         async {
-            let! completedTask = postAndAsyncReply mb WhenAnyTask |> Async.AwaitTask
+            let! completedTask = postAndAsyncReplyOrFail mb getStopCause WhenAnyTask |> Async.AwaitTask
             Log.Logger.LogTrace("TaskSeq.RestartNext {0}", completedTask.Status)
             if completedTask.IsCanceled then
                 return! this.RestartNext()
@@ -152,7 +182,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
 
     member this.Next() =
         backgroundTask {
-            let! completedTask = postAndAsyncReply mb Next |> Async.AwaitTask
+            let! completedTask = postAndAsyncReplyOrFail mb getStopCause Next |> Async.AwaitTask
             Log.Logger.LogTrace("TaskSeq.Next {0}", completedTask.Status)
             if completedTask.IsCanceled then
                 let! restartedTask = this.RestartNext()
@@ -167,4 +197,4 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
         post mb (AddGenerators generators)
 
     member this.RemoveGenerator generator =
-        postAndAsyncReply mb (fun channel -> RemoveGenerator (generator, channel))
+        postAndAsyncReplyOrFail mb getStopCause (fun channel -> RemoveGenerator (generator, channel))

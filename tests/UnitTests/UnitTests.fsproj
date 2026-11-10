@@ -24,10 +24,12 @@
     <Compile Include="Api\ConsumerBuilderTests.fs" />
     <Compile Include="Api\ProducerBuilderTests.fs" />
     <Compile Include="Api\PulsarClientBuilderTests.fs" />
+    <Compile Include="Api\PulsarClientTests.fs" />
     <Compile Include="Api\AutoClusterFailoverTests.fs" />
     <Compile Include="Auth\AuthenticationOauth2Tests.fs" />
     <Compile Include="Internal\EndPointResolverTests.fs" />
     <Compile Include="Internal\ConnectionPoolTests.fs" />
+    <Compile Include="Internal\ConnectionHandlerTests.fs" />
     <Compile Include="Internal\HttpLookupServiceTests.fs" />
     <Compile Include="Internal\ProducerImplTests.fs" />
     <Compile Include="Internal\ClientCnxTests.fs" />

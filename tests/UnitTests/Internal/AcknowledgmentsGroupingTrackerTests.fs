@@ -306,4 +306,51 @@ let tests =
 
             ackTracker.Close()
         }
+
+        testTask "A request that fails doesn't stop the tracker" {
+            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let failure = InvalidOperationException "could not send"
+            let payloads = ResizeArray<byte[]>()
+            let sendPayload _cnx payload =
+                task {
+                    payloads.Add(writeSendTask payload)
+                    if payloads.Count = 1 then
+                        raise failure
+                    return true
+                }
+            let messageId = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+
+            ackTracker.AddAcknowledgment(messageId, Individual, EmptyProperties)
+            // as in the Java client, the failure is that of the request
+            let failed = ackTracker.FlushAsync(getState())
+            let! finished = Task.WhenAny(failed, Task.Delay(TimeSpan.FromSeconds(5.0)))
+            Expect.isTrue "The flush must not wait for a reply that can't come" (obj.ReferenceEquals(finished, failed))
+            Expect.isTrue "The flush must fail with what went wrong"
+                (failed.IsFaulted && obj.ReferenceEquals(failed.Exception.GetBaseException(), failure))
+
+            // the consumer's mailbox waits for these replies for every message it receives and when it closes
+            let! isDuplicate = ackTracker.IsDuplicate(messageId).WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isTrue "The tracker still answers, and has kept the acknowledgment it could not send" isDuplicate
+            do! ackTracker.FlushAsync(getState()).WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The next flush sends the acknowledgment" 2 payloads.Count
+            Expect.sequenceEqual "" payloads[0] payloads[1]
+
+            ackTracker.Close()
+        }
+
+        testTask "A closed tracker still answers" {
+            let getState() = ConnectionState.Ready Unchecked.defaultof<ClientCnx>
+            let sendPayload _cnx _payload = Task.FromResult true
+            let messageId = { LedgerId = %1L; EntryId = %1L; Type = MessageIdType.Single; Partition = 0; TopicName = %""; ChunkMessageIds = None }
+            let ackTracker = AcknowledgmentsGroupingTracker("", %1UL, TimeSpan.FromDays(1.0), getState, sendPayload) :> IAcknowledgmentsGroupingTracker
+
+            ackTracker.AddAcknowledgment(messageId, Individual, EmptyProperties)
+            ackTracker.Close()
+
+            // a consumer's mailbox that is still running after the tracker was closed must not wait for it
+            let! isDuplicate = ackTracker.IsDuplicate(messageId).WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse "A closed tracker has no acknowledgments" isDuplicate
+            do! ackTracker.FlushAsync(getState()).WaitAsync(TimeSpan.FromSeconds(5.0))
+        }
     ]

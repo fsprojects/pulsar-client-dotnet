@@ -183,10 +183,43 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         }
 
     let mb = Channel.CreateUnbounded<GroupingTrackerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    // why the loop stopped, if it failed; set before the mailbox is completed
+    let mutable stopCause: exn = null
+
+    let failRequest (ex: exn) (msg: GroupingTrackerMessage) =
+        match msg with
+        | GroupingTrackerMessage.IsDuplicate (_, channel) ->
+            channel.TrySetException ex |> ignore
+        | FlushAsync (_, channel) ->
+            channel.TrySetException ex |> ignore
+        | _ ->
+            ()
+
+    // The consumer's mailbox waits for these replies, so they are given even when the loop no longer runs. A closed
+    // tracker has no acknowledgments: no message is a duplicate, and there is nothing to flush.
+    let replyAfterStop (msg: GroupingTrackerMessage) =
+        match System.Threading.Volatile.Read(&stopCause) with
+        | null ->
+            match msg with
+            | GroupingTrackerMessage.IsDuplicate (_, channel) ->
+                channel.TrySetResult false |> ignore
+            | FlushAsync (_, channel) ->
+                channel.TrySetResult() |> ignore
+            | _ ->
+                ()
+        | ex ->
+            failRequest ex msg
+
+    let postAndReply (msg: GroupingTrackerMessage) =
+        if not (mb.Writer.TryWrite msg) then
+            replyAfterStop msg
+
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-                match! mb.Reader.ReadAsync() with
+            let! msg = mb.Reader.ReadAsync()
+            try
+                match msg with
                 | GroupingTrackerMessage.IsDuplicate (msgId, channel) ->
 
                     if msgId <= lastCumulativeAck then
@@ -250,12 +283,24 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
 
                     continueLoop <- false
 
+            // As in the Java client, where the tracker is not a loop that an exception could stop: only the request
+            // that failed is lost, and the consumer that asked for a reply gets the failure.
+            with Flatten ex ->
+                Log.Logger.LogError(ex, "{0} failed to process a request", prefix)
+                failRequest ex msg
+
         } :> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
                 Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                System.Threading.Volatile.Write(&stopCause, ex)
             else
-                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
+                Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix)
+            // nothing reads the mailbox any more, so what is queued is answered here, and what comes later by its caller
+            mb.Writer.TryComplete() |> ignore
+            let mutable msg = Unchecked.defaultof<GroupingTrackerMessage>
+            while mb.Reader.TryRead(&msg) do
+                replyAfterStop msg)
         |> ignore
 
     let timer = new Timer()
@@ -271,7 +316,9 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         /// Since the ack are delayed, we need to do some best-effort duplicate check to discard messages that are being
         /// resent after a disconnection and for which the user has already sent an acknowledgement.
         member this.IsDuplicate(msgId) =
-            postAndAsyncReply mb (fun channel -> GroupingTrackerMessage.IsDuplicate (msgId, channel))
+            let channel = TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)
+            postAndReply (GroupingTrackerMessage.IsDuplicate (msgId, channel))
+            channel.Task
         member this.AddAcknowledgment(msgId, ackType, properties) =
             post mb (GroupingTrackerMessage.AddAcknowledgment (msgId, ackType, properties))
         member this.AddBatchIndexAcknowledgment(msgId, ackType, properties) =
@@ -281,7 +328,9 @@ type internal AcknowledgmentsGroupingTracker(prefix: string, consumerId: Consume
         member this.FlushAndClean() =
             post mb GroupingTrackerMessage.FlushAndClean
         member this.FlushAsync connectionState =
-            postAndAsyncReply mb (fun channel -> FlushAsync (connectionState, channel))
+            let channel = TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+            postAndReply (FlushAsync (connectionState, channel))
+            channel.Task
         member this.Close() =
             timer.Stop()
             post mb GroupingTrackerMessage.Stop

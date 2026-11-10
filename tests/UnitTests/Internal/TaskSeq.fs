@@ -13,6 +13,15 @@ open Pulsar.Client.Schema
 open Pulsar.Client.UnitTests
 
 
+let private failsWith (cause: exn) (request: Task) =
+    task {
+        let! finished = Task.WhenAny(request, Task.Delay(TimeSpan.FromSeconds(5.0)))
+        Expect.isTrue "The request must not wait for a loop that has stopped" (obj.ReferenceEquals(finished, request))
+        Expect.isTrue "The request must fail" request.IsFaulted
+        Expect.isTrue "The request must fail with what stopped the loop"
+            (obj.ReferenceEquals(request.Exception.GetBaseException(), cause))
+    }
+
 [<Tests>]
 let tests =
     
@@ -247,5 +256,41 @@ let tests =
             |]
             
             Expect.notEqual "" results1 results2 
+        }
+
+        // The loop calls the generators itself, so one that throws instead of returning a task stops the loop,
+        // as an OutOfMemoryException does when a task can't be allocated.
+        testTask "Requests fail with what stopped the loop instead of waiting for it" {
+            let failure = InvalidOperationException "generator could not start"
+            let pending: TaskGenerator<int> = fun () -> TaskCompletionSource<int>().Task
+            let failing: TaskGenerator<int> = fun () -> raise failure
+            let ts = TaskSeq([pending; failing])
+
+            // the request that made the loop start the generators
+            do! failsWith failure (ts.Next())
+            // requests made after the loop has stopped: a multi-topic consumer's poller, and its mailbox
+            do! failsWith failure (ts.Next())
+            do! failsWith failure (ts.RemoveGenerator pending)
+        }
+
+        testTask "A request waiting for its turn fails when the loop stops" {
+            let failure = InvalidOperationException "generator could not be re-armed"
+            let first = TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let calls = ref 0
+            let generator: TaskGenerator<int> =
+                fun () ->
+                    calls.Value <- calls.Value + 1
+                    if calls.Value = 1 then first.Task else raise failure
+            let ts = TaskSeq([generator])
+
+            let delivered = ts.Next()
+            // answered only after the first request has taken its task
+            let waiting = ts.Next()
+            first.SetResult 1
+
+            let! result = delivered.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "The task that completed is delivered" 1 result
+            // the loop stops when it calls the generator again
+            do! failsWith failure waiting
         }
     ]

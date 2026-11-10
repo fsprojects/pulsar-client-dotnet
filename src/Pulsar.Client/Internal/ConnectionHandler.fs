@@ -50,65 +50,93 @@ type internal ConnectionHandler( parentPrefix: string,
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-            match! mb.Reader.ReadAsync() with
-            | GrabCnx ->
+            let! msg = mb.Reader.ReadAsync()
+            try
+                match msg with
+                | GrabCnx ->
 
-                match this.ConnectionState with
-                | Ready _ ->
-                    Log.Logger.LogWarning("{0} Client cnx already set for topic {1}, ignoring reconnection request", prefix, topic);
-                | _ ->
-                    if isValidStateForReconnection() then
-                        try
-                            Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic)
-                            let! broker = lookup.GetBroker(topic)
-                            let! clientCnx = getConnection(broker, maxMessageSize)
-                            this.ConnectionState <- Ready clientCnx
-                            Log.Logger.LogDebug("{0} Successfully reconnected to {1}, {2}", prefix, topic, clientCnx)
-                            connectionOpened epoch
-                        with Flatten ex ->
-                            Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
-                            connectionFailed ex
-                            if isValidStateForReconnection() then
-                                post this.Mb (ReconnectLater ex)
-                    else
-                        Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                    match this.ConnectionState with
+                    | Ready _ ->
+                        Log.Logger.LogWarning("{0} Client cnx already set for topic {1}, ignoring reconnection request", prefix, topic);
+                    | _ ->
+                        if isValidStateForReconnection() then
+                            try
+                                Log.Logger.LogDebug("{0} Starting reconnect to {1}", prefix, topic)
+                                let! broker = lookup.GetBroker(topic)
+                                let! clientCnx = getConnection(broker, maxMessageSize)
+                                this.ConnectionState <- Ready clientCnx
+                                Log.Logger.LogDebug("{0} Successfully reconnected to {1}, {2}", prefix, topic, clientCnx)
+                                connectionOpened epoch
+                            with Flatten ex ->
+                                Log.Logger.LogWarning(ex, "{0} Error reconnecting to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                                connectionFailed ex
+                                if isValidStateForReconnection() then
+                                    post this.Mb (ReconnectLater ex)
+                        else
+                            Log.Logger.LogInformation("{0} Ignoring GrabCnx to {1} Current state {2}", prefix, topic, this.ConnectionState)
 
-            | ReconnectLater ex ->
+                | ReconnectLater ex ->
 
-                if isValidStateForReconnection() then
-                    let delay = backoff.Next()
-                    Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
-                        prefix, topic, this.ConnectionState, delay)
-                    this.ConnectionState <- Connecting
-                    epoch <- epoch + %1UL
-                    asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
-                else
-                    Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
-
-            | ConnectionClosed clientCnx ->
-
-                this.LastDisconnectedTimestamp <- %DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                match this.ConnectionState with
-                | Ready cnx when cnx <> clientCnx ->
-                    Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
-                | _ ->
                     if isValidStateForReconnection() then
                         let delay = backoff.Next()
-                        Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {3}ms ",
+                        Log.Logger.LogWarning(ex, "{0} Could not get connection to {1} Current state {2} -- Will try again in {3}ms ",
                             prefix, topic, this.ConnectionState, delay)
                         this.ConnectionState <- Connecting
                         epoch <- epoch + %1UL
                         asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
                     else
-                        Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
+                        Log.Logger.LogInformation("{0} Ignoring ReconnectLater to {1} Current state {2}", prefix, topic, this.ConnectionState)
 
-            | Close ->
-                continueLoop <- false
+                | ConnectionClosed clientCnx ->
+
+                    this.LastDisconnectedTimestamp <- %DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    match this.ConnectionState with
+                    | Ready cnx when cnx <> clientCnx ->
+                        Log.Logger.LogInformation("Closing {0} but {1} is already active", clientCnx.ClientCnxId, cnx.ClientCnxId)
+                    | _ ->
+                        if isValidStateForReconnection() then
+                            let delay = backoff.Next()
+                            Log.Logger.LogInformation("{0} Closed connection to {1} Current state {2} -- Will try again in {3}ms ",
+                                prefix, topic, this.ConnectionState, delay)
+                            this.ConnectionState <- Connecting
+                            epoch <- epoch + %1UL
+                            asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
+                        else
+                            Log.Logger.LogInformation("{0} Ignoring ConnectionClosed to {1} Current state {2}", prefix, topic, this.ConnectionState)
+
+                | Close ->
+                    continueLoop <- false
+
+            // As in the Java client, where whatever goes wrong while connecting ends in another attempt. The handler
+            // goes on, or its producer or consumer would stay disconnected with nothing to connect it again.
+            with Flatten ex ->
+                Log.Logger.LogError(ex, "{0} failed to process a request for {1} Current state {2}",
+                                    prefix, topic, this.ConnectionState)
+                let reconnect =
+                    match msg with
+                    | GrabCnx
+                    | ReconnectLater _ ->
+                        true
+                    | ConnectionClosed closedCnx ->
+                        match this.ConnectionState with
+                        | Ready cnx when cnx <> closedCnx -> false
+                        | _ -> true
+                    | Close ->
+                        false
+                if reconnect && isValidStateForReconnection() then
+                    let delay = backoff.Next()
+                    this.ConnectionState <- Connecting
+                    epoch <- epoch + %1UL
+                    asyncDelayMs delay (fun() -> post this.Mb GrabCnx)
+
         }:> Task).ContinueWith(fun t ->
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
+                // Nothing connects the owner again, so it is told first: a consumer would otherwise keep its
+                // receives waiting for messages that can't come.
                 this.Failed(ex)
+                connectionFailed ex
+                Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
             else
                 Log.Logger.LogInformation("{0} mailbox has stopped normally", prefix))
     |> ignore

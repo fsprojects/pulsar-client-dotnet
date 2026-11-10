@@ -165,6 +165,14 @@ let postAndAsyncReply (channel: Channel<'T>) f =
     (f tcs) |> channel.Writer.TryWrite |> ignore
     tcs.Task
 
+/// For a mailbox that is completed when its loop fails: a request made after that fails with what stopped the loop,
+/// instead of waiting for a reply that can't come.
+let postAndAsyncReplyOrFail (channel: Channel<'T>) (getStopCause: unit -> exn) f =
+    let tcs = TaskCompletionSource<_>(TaskCreationOptions.RunContinuationsAsynchronously)
+    if not (channel.Writer.TryWrite(f tcs)) then
+        tcs.SetException(getStopCause())
+    tcs.Task
+
 let runContinuationsAsynchronously (task: Task<'T>) =
     let tcs = TaskCompletionSource<'T>(TaskCreationOptions.RunContinuationsAsynchronously)
     task.ContinueWith((fun (t: Task<'T>) ->
