@@ -88,6 +88,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mutable hasReachedEndOfTopic = false
     let mutable avalablePermits = 0
     let mutable mailboxRecoveryInProgress = false
+    let mutable mailboxRecoveriesSinceLastMessage = 0
     let mutable startMessageId =
         match startMessageId with
         | Some startMsgId ->
@@ -985,42 +986,74 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         seekChannel |> Option.iter (fun channel -> channel.TrySetException(ex) |> ignore)
         startMessageId <- initialMsgId
 
-    let recoverMailboxFailure (ex: exn) =
+    let closeAfterInFlightClose () =
         backgroundTask {
-            Log.Logger.LogError(ex, "{0} mailbox failed unexpectedly for topic {1}; recovering consumer",
-                                prefix, topicName)
-            mailboxRecoveryInProgress <- true
-            currentMessage |> Option.iter (replyFromStoppedMailbox ex)
-            match connectionHandler.ConnectionState with
+            let previousState = connectionHandler.ConnectionState
+            connectionHandler.Closing()
+            match previousState with
             | Ready clientCnx ->
-                clearReceiverQueueForRecovery ex
-                failAckRequests ex
-                let requestId = Generators.getNextRequestId()
                 try
                     do! (clientCnx.RemoveConsumerAndWait consumerId).WaitAsync(clientConfig.OperationTimeout)
+                    let requestId = Generators.getNextRequestId()
                     let payload = Commands.newCloseConsumer consumerId requestId
-                    let! response = clientCnx.SendAndWaitForReply requestId payload
+                    let! response =
+                        (clientCnx.SendAndWaitForReply requestId payload).WaitAsync(clientConfig.OperationTimeout)
                     response |> PulsarResponseType.GetEmpty
-                    discardQueuedMessagesFromConnection clientCnx
-                    connectionHandler.ReconnectLater ex
                 with Flatten closeEx ->
-                    discardQueuedMessagesFromConnection clientCnx
-                    Log.Logger.LogWarning(closeEx, "{0} failed to close consumer for topic {1} after mailbox failure; closing its connection",
-                                          prefix, topicName)
+                    Log.Logger.LogWarning(closeEx, "{0} failed to close consumer at the broker after a failed Close request", prefix)
                     clientCnx.Dispose()
-                    // the connection no longer reports its closure to the removed consumer
-                    connectionHandler.ConnectionClosed clientCnx
-            | Connecting ->
-                clearReceiverQueueForRecovery ex
-                failAckRequests ex
-            | Uninitialized ->
-                clearReceiverQueueForRecovery ex
-                failAckRequests ex
-                connectionHandler.GrabCnx()
             | _ ->
-                failRecoveryBacklog ex
-                failMailbox ex
-                drainStoppedMailbox()
+                ()
+            connectionHandler.Closed()
+            failAckRequests (AlreadyClosedException(prefix + " already closed"))
+            stopConsumer()
+            failRecoveryBacklog (stoppedMailboxException ())
+            currentMessage
+            |> Option.iter (replyFromStoppedMailbox (AlreadyClosedException(prefix + " already closed")))
+        }
+
+    let recoverMailboxFailure (ex: exn) =
+        backgroundTask {
+            match currentMessage with
+            | Some (ConsumerMessage.Close _) ->
+                do! closeAfterInFlightClose ()
+            | _ ->
+                mailboxRecoveriesSinceLastMessage <- mailboxRecoveriesSinceLastMessage + 1
+                Log.Logger.LogError(ex,
+                                    "{0} mailbox failed unexpectedly for topic {1}; recovering consumer (recovery {2} since last message)",
+                                    prefix, topicName, mailboxRecoveriesSinceLastMessage)
+                mailboxRecoveryInProgress <- true
+                currentMessage |> Option.iter (replyFromStoppedMailbox ex)
+                match connectionHandler.ConnectionState with
+                | Ready clientCnx ->
+                    clearReceiverQueueForRecovery ex
+                    failAckRequests ex
+                    let requestId = Generators.getNextRequestId()
+                    try
+                        do! (clientCnx.RemoveConsumerAndWait consumerId).WaitAsync(clientConfig.OperationTimeout)
+                        let payload = Commands.newCloseConsumer consumerId requestId
+                        let! response = clientCnx.SendAndWaitForReply requestId payload
+                        response |> PulsarResponseType.GetEmpty
+                        discardQueuedMessagesFromConnection clientCnx
+                        connectionHandler.ReconnectLater ex
+                    with Flatten closeEx ->
+                        discardQueuedMessagesFromConnection clientCnx
+                        Log.Logger.LogWarning(closeEx, "{0} failed to close consumer for topic {1} after mailbox failure; closing its connection",
+                                              prefix, topicName)
+                        clientCnx.Dispose()
+                        // the connection no longer reports its closure to the removed consumer
+                        connectionHandler.ConnectionClosed clientCnx
+                | Connecting ->
+                    clearReceiverQueueForRecovery ex
+                    failAckRequests ex
+                | Uninitialized ->
+                    clearReceiverQueueForRecovery ex
+                    failAckRequests ex
+                    connectionHandler.GrabCnx()
+                | _ ->
+                    failRecoveryBacklog ex
+                    failMailbox ex
+                    drainStoppedMailbox()
         }
 
     let rec startMailboxLoop () =
@@ -1029,9 +1062,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         while continueLoop do
             let! msg =
                 if recoveryBacklog.Count > 0 then
-                    Task.FromResult(recoveryBacklog.Dequeue())
+                    ValueTask<ConsumerMessage<'T>>(recoveryBacklog.Dequeue())
                 else
-                    mb.Reader.ReadAsync().AsTask()
+                    mb.Reader.ReadAsync()
             currentMessage <- Some msg
             match msg with
             | ConsumerMessage.ConnectionOpened ->
@@ -1078,7 +1111,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         let! response = clientCnx.SendAndWaitForReply requestId payload
                         response |> PulsarResponseType.GetEmpty
                         this.ConsumerIsReconnectedToBroker()
-                        if not mailboxRecoveryInProgress then
+                        if mailboxRecoveryInProgress then
+                            mailboxRecoveryInProgress <- false
+                        else
                             connectionHandler.ResetBackoff()
                         let initialFlowCount = consumerConfig.ReceiverQueueSize
                         subscribeTsc.TrySetResult() |> ignore
@@ -1187,9 +1222,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     rawMessage.Payload.Dispose()
                     // the metadata of a message that failed its checksum cannot be trusted for the batch size
                     do! discardCorruptedMessage msgId clientCnx 1 CommandAck.ValidationError.ChecksumMismatch
-                if mailboxRecoveryInProgress then
-                    mailboxRecoveryInProgress <- false
-                    connectionHandler.ResetBackoff()
+                mailboxRecoveriesSinceLastMessage <- 0
 
             | ConsumerMessage.Receive receiveCallback ->
 
@@ -1583,8 +1616,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         backgroundTask {
                             try
                                 do! recoverMailboxFailure ex
-                                if connectionHandler.ConnectionState <> Failed then
-                                    startMailboxLoop() |> ignore
+                                match connectionHandler.ConnectionState with
+                                | Uninitialized | Connecting | Ready _ -> startMailboxLoop() |> ignore
+                                | _ -> drainStoppedMailbox()
                             with recoveryEx ->
                                 Log.Logger.LogCritical(recoveryEx, "{0} failed to recover consumer for topic {1}",
                                                        prefix, topicName)

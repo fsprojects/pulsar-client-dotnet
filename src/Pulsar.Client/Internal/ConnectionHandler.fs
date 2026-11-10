@@ -141,7 +141,10 @@ type internal ConnectionHandler( parentPrefix: string,
         post mb (ConnectionClosed clientCnx)
 
     member this.ReconnectLater ex =
-        post mb (ReconnectLater ex)
+        if isValidStateForReconnection() then
+            // Stop operations from using the old connection before the mailbox schedules the retry.
+            this.ConnectionState <- Connecting
+            post mb (ReconnectLater ex)
 
     member this.ResetBackoff() =
         backoff.Reset()

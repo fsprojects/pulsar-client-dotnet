@@ -276,20 +276,19 @@ let tests =
                 release.Task :> Task
             let blockedWrite = broker.Connection.Send(struct(write, BaseCommand.Type.Ping))
             do! writing.Task.WaitAsync(testTimeout)
+            let sending = enqueueMessage producer [| 1uy |]
 
             try
-                let sending = enqueueMessage producer [| 1uy |]
                 crashMailbox producer
-                // the failure may have left the pending queue half updated, so its sends fail
-                let! _ = expectFailure<InvalidOperationException> sending
-                ()
             finally
                 release.TrySetResult() |> ignore
 
             let! sent = blockedWrite.WaitAsync(testTimeout)
             Expect.isTrue sent "The shared writer should resume normally"
+            let! (originalSend: BaseCommand) = broker.ReadCommand()
+            Expect.equal originalSend.``type`` BaseCommand.Type.Send "The queued send should remain intact"
             let! (close: BaseCommand) = broker.ReadCommand()
-            Expect.equal close.``type`` BaseCommand.Type.CloseProducer "Discard the failed send and close the producer"
+            Expect.equal close.``type`` BaseCommand.Type.CloseProducer "Close the producer before re-registering"
             do! broker.Reply(
                 BaseCommand(
                     ``type`` = BaseCommand.Type.Success,
@@ -307,10 +306,10 @@ let tests =
                         ProducerName = "test-producer",
                         LastSequenceId = -1L)))
 
-            let sending = enqueueMessage producer [| 2uy |]
-            let! (send: BaseCommand) = broker.ReadCommand()
-            Expect.equal send.``type`` BaseCommand.Type.Send "The recovered producer should send again"
-            do! replyReceipt broker send
+            let! (replayedSend: BaseCommand) = broker.ReadCommand()
+            Expect.equal replayedSend.``type`` BaseCommand.Type.Send "The recovered producer should replay the queued send"
+            Expect.equal replayedSend.Send.SequenceId originalSend.Send.SequenceId "Replay should preserve the original sequence id"
+            do! replyReceipt broker replayedSend
             let! _ = sending.WaitAsync(testTimeout)
             Expect.isTrue broker.Connection.IsActive "Recovery must preserve the shared connection"
         }

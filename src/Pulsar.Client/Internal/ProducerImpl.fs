@@ -127,6 +127,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
         if batchMessageContainer.NumMessagesInBatch > 0 then
             batchMessageContainer.Discard(fun batchItem -> failMessage batchItem.Message batchItem.Tcs ex)
 
+    let failBlockedAndBatchedMessages (ex: exn) =
+        while blockedRequests.Count > 0 do
+            let struct(message, channel, _) = blockedRequests.Dequeue()
+            failMessage message (Some channel) ex
+        if producerConfig.BatchingEnabled then
+            failPendingBatchMessages ex
+
     let disposePendingPayload (msg: PendingMessage<'T>) =
         lock msg.Payload (fun () -> msg.Payload.Dispose())
 
@@ -137,11 +144,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             failPendingMessage msg ex
         // as in the Java client, every message that went through the interceptors hears how its send ended,
         // including those still waiting for room in the queue or in the batch
-        while blockedRequests.Count > 0 do
-            let struct(message, channel, _) = blockedRequests.Dequeue()
-            failMessage message (Some channel) ex
-        if producerConfig.BatchingEnabled then
-            failPendingBatchMessages ex
+        failBlockedAndBatchedMessages ex
 
     let sendTimeoutTimer = new Timer()
     let startSendTimeoutTimer () =
@@ -213,10 +216,11 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     Task.CompletedTask)
         clientCnx.SendAndForget(struct(writeIfPending, commandType))
 
-    let sendMessage (pendingMessage: PendingMessage<'T>) =
+    let sendMessage (pendingMessage: PendingMessage<'T>) transferOwnership =
         if Log.Logger.IsEnabled LogLevel.Debug then
             Log.Logger.LogDebug("{0} sendMessage sequenceId={1}", prefix, %pendingMessage.SequenceId)
         pendingMessages.Enqueue(pendingMessage)
+        transferOwnership ()
         match connectionHandler.ConnectionState with
         | Ready clientCnx ->
             sendPendingMessage clientCnx pendingMessage
@@ -371,10 +375,17 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     Error ex
             match pendingMessage with
             | Ok pendingMessage ->
-                stats.UpdateNumMsgsSent(batchSize, int pendingMessage.Payload.Length)
-                sendMessage pendingMessage
-                payloadTransferred <- true
-                lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
+                try
+                    stats.UpdateNumMsgsSent(batchSize, int pendingMessage.Payload.Length)
+                    sendMessage pendingMessage (fun () -> payloadTransferred <- true)
+                    lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %(getHighestSequenceId pendingMessage))
+                with ex ->
+                    if pendingMessages |> Seq.exists (fun queued -> Object.ReferenceEquals(queued, pendingMessage)) then
+                        raise ex
+                    Log.Logger.LogError(ex, "{0} failed to enqueue a batch of {1} messages to topic {2}",
+                                        prefix, batchSize, producerConfig.Topic.CompleteTopicName)
+                    batchCallbacks
+                    |> Array.iter (fun struct (_, message, tcs) -> failMessage message tcs ex)
             | Error ex ->
                 batchCallbacks
                 |> Array.iter (fun ((_, message, tcs)) ->
@@ -442,6 +453,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                     Some channel
             let ownedPayloads = ResizeArray<MemoryStream>()
             use _ = { new IDisposable with member _.Dispose() = for payload in ownedPayloads do payload.Dispose() }
+            let mutable batchOperationInProgress = false
+            let mutable sendEnqueued = false
             // as in the Java client, an unexpected error fails only this message rather than the whole producer
             try
                 let sequenceId =
@@ -465,25 +478,38 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                             else
                                 Log.Logger.LogInformation("{0} Message with sequence id {1} might be a duplicate but cannot be determined at this time.",
                                                           prefix, message.SequenceId)
+                            batchOperationInProgress <- true
                             doBatchSendAndAdd batchItem
+                            batchOperationInProgress <- false
                         else
                             // Should flush the last potential duplicated since can't combine potential duplicated messages
                             // and non-duplicated messages into a batch.
                             if isLastSequenceIdPotentialDuplicated then
+                                batchOperationInProgress <- true
                                 doBatchSendAndAdd batchItem
+                                batchOperationInProgress <- false
                             else
                                 // handle boundary cases where message being added would exceed
                                 // batch size and/or max message size
-                                if batchMessageContainer.Add(batchItem) then
+                                batchOperationInProgress <- true
+                                let batchIsFull = batchMessageContainer.Add(batchItem)
+                                batchOperationInProgress <- false
+                                if batchIsFull then
                                     Log.Logger.LogDebug("{0} Max batch container size exceeded", prefix)
+                                    batchOperationInProgress <- true
                                     batchMessageAndSend()
+                                    batchOperationInProgress <- false
                             isLastSequenceIdPotentialDuplicated <- false
                     else
+                       batchOperationInProgress <- true
                        doBatchSendAndAdd batchItem
+                       batchOperationInProgress <- false
                 else
                     // Preserve sequence order when a message bypasses the accumulated batch.
                     if producerConfig.BatchingEnabled then
+                        batchOperationInProgress <- true
                         batchMessageAndSend()
+                        batchOperationInProgress <- false
                     let sourcePayload = new MemoryStream(message.Payload)
                     ownedPayloads.Add(sourcePayload)
                     let compressedPayload = compressionCodec.Encode sourcePayload
@@ -552,11 +578,9 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                     CreatedAt = %Stopwatch.GetTimestamp()
                                 }
                                 stats.UpdateNumMsgsSent(1, int encryptedPayload.Length)
-                                sendMessage pendingMessage
-                                if not isChunked
-                                   || (isChunked && producerConfig.Topic.IsPersistent)
-                                   || chunkId = totalChunks - 1 then
-                                    ProducerStreamOwnership.forgetOwnedStream ownedPayloads encryptedPayload
+                                sendMessage pendingMessage (fun () ->
+                                    sendEnqueued <- true
+                                    ProducerStreamOwnership.forgetOwnedStream ownedPayloads encryptedPayload)
                                 lastSequenceIdPushed <- %Math.Max(%lastSequenceIdPushed, %sequenceId)
                                 chunkId <- chunkId + 1
                                 readStartIndex <- chunkId * maxMessageSize
@@ -564,6 +588,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                                 chunkError <- true
                                 failMessage message channel ex
             with ex ->
+                if batchOperationInProgress || sendEnqueued then
+                    raise ex
                 Log.Logger.LogError(ex, "{0} failed to send a message to topic {1}", prefix, producerConfig.Topic.CompleteTopicName)
                 failMessage message channel ex
 
@@ -589,6 +615,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
     let mb = Channel.CreateUnbounded<ProducerMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     let mutable currentMessage : ProducerMessage<'T> option = None
     let mutable mailboxFailed = false
+    let mutable closingConnection: ClientCnx option = None
 
     let replyFromStoppedMailbox (ex: exn) (msg: ProducerMessage<'T>) =
         match msg with
@@ -614,8 +641,13 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             mailboxFailed <- true
             Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
             try
-                match connectionHandler.ConnectionState with
-                | Ready clientCnx ->
+                let clientCnx =
+                    match connectionHandler.ConnectionState, closingConnection with
+                    | Ready clientCnx, _ -> Some clientCnx
+                    | Closing, Some clientCnx -> Some clientCnx
+                    | _ -> None
+                match clientCnx with
+                | Some clientCnx ->
                     // release the producer at the broker, otherwise its name stays registered until the connection drops.
                     // the mailbox can no longer wait inline; register the request so the broker Success completes it
                     // instead of being logged as a non-existent request, and drop the local producer even if that reply fails
@@ -669,16 +701,33 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
     let recoverMailboxFailure (ex: exn) =
         backgroundTask {
-            match connectionHandler.ConnectionState with
-            | (Ready _ | Connecting) as state ->
+            match currentMessage, connectionHandler.ConnectionState with
+            | Some (Close _), _ ->
+                // Close is terminal: do not reopen a producer whose close request was interrupted.
+                failMailbox ex
+                drainStoppedMailbox()
+            | _, ((Ready _ | Connecting) as state) ->
                 Log.Logger.LogError(ex, "{0} mailbox failed unexpectedly for topic {1}; recovering producer",
                                     prefix, producerConfig.Topic.CompleteTopicName)
-                // the failure may have left the queues half updated, so the sends in them can't be trusted
                 try
-                    failPendingMessages ex
+                    failBlockedAndBatchedMessages ex
                 with pendingEx ->
-                    Log.Logger.LogWarning(pendingEx, "{0} failed to fail pending sends after mailbox failure", prefix)
-                currentMessage |> Option.iter (replyFromStoppedMailbox ex)
+                    Log.Logger.LogWarning(pendingEx, "{0} failed to fail blocked or batched sends after mailbox failure", prefix)
+                match currentMessage with
+                | Some (BeginSendMessage struct (_, channel, _))
+                    when pendingMessages
+                         |> Seq.exists (fun pending ->
+                             match pending.Callback with
+                             | SingleCallback (_, _, Some pendingChannel) ->
+                                 Object.ReferenceEquals(channel, pendingChannel)
+                             | SingleCallback _ -> false
+                             | BatchCallbacks callbacks ->
+                                 callbacks
+                                 |> Array.exists (fun struct (_, _, pendingChannel) ->
+                                     pendingChannel
+                                     |> Option.exists (fun pendingChannel -> Object.ReferenceEquals(channel, pendingChannel)))) ->
+                    ()
+                | _ -> currentMessage |> Option.iter (replyFromStoppedMailbox ex)
                 match state with
                 | Ready clientCnx ->
                     // register again from a clean state, as a new connection would
@@ -1002,6 +1051,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
 
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
+                    closingConnection <- Some clientCnx
                     connectionHandler.Closing()
                     Log.Logger.LogInformation("{0} starting close", prefix)
                     let requestId = Generators.getNextRequestId()
@@ -1013,6 +1063,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         connectionHandler.Closed()
                         failPendingMessages <| AlreadyClosedException "Producer was already closed"
                         stopProducer()
+                        closingConnection <- None
                         channel.SetResult <| Ok()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed to close", prefix)
@@ -1020,6 +1071,7 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                         connectionHandler.Closed()
                         failPendingMessages ex
                         stopProducer()
+                        closingConnection <- None
                         channel.SetResult <| Error ex
                 | _ ->
                     Log.Logger.LogInformation("{0} closing but current state {1}", prefix, connectionHandler.ConnectionState)

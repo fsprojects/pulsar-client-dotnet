@@ -1,6 +1,7 @@
 module Pulsar.Client.IntegrationTests.Basic
 
 open System
+open System.IO
 open System.Text.Json
 open System.Threading
 open System.Diagnostics
@@ -55,6 +56,27 @@ let assertAlreadyClosed (work: Task<'T>) = task {
 // A null raw message also breaks recovery cleanup, exercising the terminal-failure fallback.
 let private crashChildMailbox (child: ConsumerImpl<byte[]>) =
     post child.Mb (ConsumerMessage.MessageReceived(struct (Unchecked.defaultof<RawMessage>, Unchecked.defaultof<ClientCnx>)))
+
+let private faultChildMailboxRecoverably (child: ConsumerImpl<byte[]>) =
+    let rawMessage =
+        { MessageId = {
+            LedgerId = %1L
+            EntryId = %1L
+            Type = Single
+            Partition = -1
+            TopicName = %""
+            ChunkMessageIds = None
+          }
+          ConsumerEpoch = Nullable()
+          Metadata = Unchecked.defaultof<Metadata>
+          Payload = new MemoryStream [||]
+          RedeliveryCount = 0
+          MessageKey = ""
+          IsKeyBase64Encoded = false
+          CheckSumValid = true
+          Properties = null
+          AckSet = null }
+    post child.Mb (ConsumerMessage.MessageReceived(struct (rawMessage, Unchecked.defaultof<ClientCnx>)))
 
 // A null poll result faults the multi-topic consumer mailbox, and the poller reply is the in-flight request
 let private crashMultiTopicMailbox (consumer: MultiTopicsConsumerImpl<byte[]>) (pollerReply: TaskCompletionSource<unit>) =
@@ -519,6 +541,41 @@ let tests =
             do! consumer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5.0))
 
             Log.Debug("Finished Multi-topic consumer keeps consuming the other topics when a child mailbox fails")
+        }
+
+        testTask "Multi-topic consumer resumes reads after a child mailbox recovers" {
+            let client = getClient()
+            let topicName1 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let topicName2 = "public/default/topic-" + Guid.NewGuid().ToString("N")
+            let! (consumer : IConsumer<byte[]>) =
+                client.NewConsumer()
+                    .Topics([| topicName1; topicName2 |])
+                    .ConsumerName("recoveringChildMailbox")
+                    .SubscriptionName("test-subscription")
+                    .SubscriptionType(SubscriptionType.Exclusive)
+                    .SubscribeAsync()
+
+            let multiConsumer = consumer :?> MultiTopicsConsumerImpl<byte[]>
+            let child = multiConsumer.Consumers |> Array.head :?> ConsumerImpl<byte[]>
+            let topic = (child :> IConsumer<byte[]>).Topic
+            let pendingReceive = consumer.ReceiveAsync()
+            do! Task.Delay(200)
+            faultChildMailboxRecoverably child
+
+            let! (producer : IProducer<byte[]>) =
+                client.NewProducer().Topic(topic).EnableBatching(false).CreateAsync()
+            let! _ = producer.SendAsync([| 1uy |])
+            let! (firstMessage : Message<byte[]>) = pendingReceive.WaitAsync(TimeSpan.FromSeconds(15.0))
+            Expect.equal "A receive already pending during recovery should resume" [| 1uy |] (firstMessage.GetValue())
+            do! consumer.AcknowledgeAsync(firstMessage.MessageId)
+
+            let receiveAfterRecovery = consumer.ReceiveAsync()
+            let! _ = producer.SendAsync([| 2uy |])
+            let! (secondMessage : Message<byte[]>) = receiveAfterRecovery.WaitAsync(TimeSpan.FromSeconds(15.0))
+            Expect.equal "A receive posted after recovery should work" [| 2uy |] (secondMessage.GetValue())
+            do! consumer.AcknowledgeAsync(secondMessage.MessageId)
+            do! producer.DisposeAsync().AsTask()
+            do! consumer.DisposeAsync().AsTask()
         }
 
         testTask "Multi-topic consumer completes the request that faults its mailbox" {
