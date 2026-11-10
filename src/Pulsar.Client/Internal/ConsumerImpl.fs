@@ -91,6 +91,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mutable mailboxRecoveriesSinceLastMessage = 0
     // the connection the mailbox is closing the consumer on, for a close that is finished without the mailbox
     let mutable closingConnection: ClientCnx option = None
+    // Set when the mailbox gets to a close, and never reset. An unsubscribe leaves the consumer Closing as well, but
+    // it can fail, and then the consumer is open again.
+    let mutable closeStarted = false
     let mutable startMessageId =
         match startMessageId with
         | Some startMsgId ->
@@ -1611,6 +1614,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
             | ConsumerMessage.Close channel ->
 
+                Volatile.Write(&closeStarted, true)
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
                     Volatile.Write(&closingConnection, Some clientCnx)
@@ -1642,6 +1646,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
+                    // for a close that is finished without the mailbox, while the mailbox still waits here
+                    Volatile.Write(&closingConnection, Some clientCnx)
                     connectionHandler.Closing()
                     Log.Logger.LogInformation("{0} starting unsubscribe ", prefix)
                     let requestId = Generators.getNextRequestId()
@@ -1661,6 +1667,9 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                             // As in the Java client, the consumer is ready again: it can go on, and be closed. What
                             // its connection told it meanwhile, such as that it has closed, is next in the mailbox.
                             connectionHandler.SetReady clientCnx
+                        | Closed when not stopped ->
+                            // closed without its mailbox meanwhile, which leaves the waiters to the mailbox
+                            stopConsumer()
                         | _ ->
                             ()
                         channel.SetException ex
@@ -2073,9 +2082,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
         member this.DisposeAsync() =
             match connectionHandler.ConnectionState with
-            | Closing | Closed ->
+            | Closed ->
+                ValueTask()
+            | Closing when Volatile.Read(&closeStarted) ->
                 ValueTask()
             | _ ->
+                // Also while the consumer unsubscribes: the close waits behind the unsubscribe, and closes the consumer
+                // if that fails. The Java client takes a consumer that unsubscribes for closed already, so one whose
+                // unsubscribe then fails stays open with nothing left to close it.
                 backgroundTask {
                     try
                         do! (postAndAsyncReply mb ConsumerMessage.Close).WaitAsync(closeTimeout)

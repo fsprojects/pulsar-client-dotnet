@@ -466,4 +466,72 @@ let tests =
             Expect.isTrue connected "The consumer is ready again"
             do! closeConsumer broker consumer
         }
+
+        testTask "A second close doesn't wait for the one in flight" {
+            use broker = new BrokerConnection(clientConfig)
+            let! (consumer: ConsumerImpl<byte[]>) = startConsumer broker consumerConfig clientConfig
+            let closing = (consumer :> IConsumer<byte[]>).DisposeAsync().AsTask()
+            let! (close: BaseCommand) = readClose broker
+
+            // as in the Java client, where closing a consumer that is being closed completes at once
+            let closingAgain = (consumer :> IConsumer<byte[]>).DisposeAsync()
+            Expect.isTrue closingAgain.IsCompleted "The second close is complete"
+            Expect.isFalse closing.IsCompleted "The first close waits for the broker"
+            do! succeed broker close.CloseConsumer.RequestId
+            do! closing.WaitAsync(testTimeout)
+        }
+
+        testTask "A consumer disposed while it unsubscribes is closed once the unsubscribe has failed" {
+            use broker = new BrokerConnection(clientConfig)
+            let! (consumer: ConsumerImpl<byte[]>) = startConsumer broker consumerConfig clientConfig
+            let unsubscribing: Task<unit> = (consumer :> IConsumer<byte[]>).UnsubscribeAsync()
+            let! (unsubscribe: BaseCommand) = readCommandOf BaseCommand.Type.Unsubscribe broker
+
+            // The unsubscribe has no answer yet. A close that took the consumer for closed already would leave it
+            // open once the unsubscribe has failed.
+            let closing = (consumer :> IConsumer<byte[]>).DisposeAsync().AsTask()
+            do! refuse broker unsubscribe.Unsubscribe.RequestId
+            let! _ = expectFailure<BrokerPersistenceException> unsubscribing
+
+            let! (close: BaseCommand) = readClose broker
+            Expect.isFalse closing.IsCompleted "The close waits for the broker"
+            do! succeed broker close.CloseConsumer.RequestId
+            do! closing.WaitAsync(testTimeout)
+        }
+
+        testTask "A consumer disposed while its unsubscribe can't be sent closes its connection" {
+            // the connection keeps its default timeouts, and its keep-alive doesn't run within the test
+            use broker = new BrokerConnection(clientConfig)
+            let consumerClientConfig = { clientConfig with OperationTimeout = TimeSpan.FromMilliseconds(250.0) }
+            let! (consumer: ConsumerImpl<byte[]>) = startConsumer broker consumerConfig consumerClientConfig
+            let pendingReceive: Task<Message<byte[]>> = (consumer :> IConsumer<byte[]>).ReceiveAsync()
+
+            // The connection waits for a write that doesn't end, as on a socket the broker has stopped reading. It
+            // sends nothing that comes after, and a request only gets its timeout when it is sent.
+            let write = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            broker.Connection.SendAndForget(struct ((fun (_: PipeWriter) -> write.Task), BaseCommand.Type.Ping))
+            try
+                let unsubscribing: Task<unit> = (consumer :> IConsumer<byte[]>).UnsubscribeAsync()
+                unsubscribing.ContinueWith(fun (unsubscribe: Task<unit>) -> unsubscribe.Exception |> ignore) |> ignore
+                let unsubscribeBegun = DateTime.UtcNow + testTimeout
+                while (consumer :> IConsumer<byte[]>).IsConnected().Result && DateTime.UtcNow < unsubscribeBegun do
+                    do! Task.Delay(10)
+
+                // neither the unsubscribe nor the close made without the mailbox is sent
+                do! (consumer :> IConsumer<byte[]>).DisposeAsync().AsTask().WaitAsync(testTimeout)
+
+                // The consumer is off its connection, so the broker only lets go of it with the connection. An
+                // exclusive subscription would stay taken otherwise.
+                let deadline = DateTime.UtcNow + testTimeout
+                while broker.Connection.IsActive && DateTime.UtcNow < deadline do
+                    do! Task.Delay(10)
+                Expect.isFalse broker.Connection.IsActive "The connection is closed"
+
+                // the write ends, the unsubscribe fails, and the mailbox finds the consumer closed without it
+                write.TrySetResult() |> ignore
+                let! _ = expectFailure<AlreadyClosedException> pendingReceive
+                return ()
+            finally
+                write.TrySetResult() |> ignore
+        }
     ]

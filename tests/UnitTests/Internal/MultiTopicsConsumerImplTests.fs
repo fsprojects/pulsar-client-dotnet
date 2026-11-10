@@ -99,6 +99,30 @@ let tests =
                 (broker :> IDisposable).Dispose()
         }
 
+        testTask "Children whose unsubscribe got no answer are still closed at the broker when the consumer closes" {
+            // the connections keep their default timeouts, so no request timeout ends the broker's silence
+            let consumerClientConfig = { clientConfig with OperationTimeout = TimeSpan.FromMilliseconds(250.0) }
+            // it answers no unsubscribe
+            let broker = new LocalBroker()
+            broker.ReleaseCloses()
+            let connectionPool = ConnectionPool(clientConfig)
+            try
+                let! (multiConsumer: MultiTopicsConsumerImpl<byte[]>) = createConsumer broker consumerClientConfig connectionPool
+                let consumer = multiConsumer :> IConsumer<byte[]>
+
+                // as in the Java client, where the children's requests would time out
+                let! _ = expectFailure<Pulsar.Client.Api.TimeoutException> (consumer.UnsubscribeAsync())
+                Expect.isFalse broker.CloseRequested.IsCompleted "Nothing has closed the children yet"
+
+                // The children still wait for the broker. A close that took them for closed already would leave them
+                // at the broker, where an exclusive subscription stays taken.
+                do! consumer.DisposeAsync().AsTask().WaitAsync(testTimeout)
+                do! broker.CloseRequested.WaitAsync(testTimeout)
+            finally
+                connectionPool.CloseAllConnections().Wait(testTimeout) |> ignore
+                (broker :> IDisposable).Dispose()
+        }
+
         // sequenced: it replaces the logger that everything shares
         testSequenced <| testTask "A consumer fails when a cancellation stops its mailbox" {
             let broker = new LocalBroker()
