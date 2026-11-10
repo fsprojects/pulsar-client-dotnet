@@ -289,6 +289,7 @@ let tests =
             Expect.equal originalSend.``type`` BaseCommand.Type.Send "The queued send should remain intact"
             let! (close: BaseCommand) = broker.ReadCommand()
             Expect.equal close.``type`` BaseCommand.Type.CloseProducer "Close the producer before re-registering"
+            Expect.isFalse sending.IsCompleted "The pending send should survive the mailbox failure"
             do! broker.Reply(
                 BaseCommand(
                     ``type`` = BaseCommand.Type.Success,
@@ -312,6 +313,46 @@ let tests =
             do! replyReceipt broker replayedSend
             let! _ = sending.WaitAsync(testTimeout)
             Expect.isTrue broker.Connection.IsActive "Recovery must preserve the shared connection"
+        }
+
+        testTask "Close queued during recovery fails retained sends before completing" {
+            let clientConfig =
+                { clientConfig with
+                    InitialBackoffInterval = TimeSpan.FromMinutes(1.0)
+                    MaxBackoffInterval = TimeSpan.FromMinutes(1.0) }
+            use broker = new BrokerConnection(clientConfig)
+            let config = { producerConfig with BatchingEnabled = false; SendTimeout = TimeSpan.Zero }
+            let interceptor = new RecordingInterceptor()
+            let mutable cleaned = 0
+            let! producer =
+                broker.StartProducer(config, ProducerInterceptors<byte[]>([| interceptor |]), fun _ -> cleaned <- cleaned + 1)
+            let sending = enqueueMessage producer [| 1uy |]
+            let! (send: BaseCommand) = broker.ReadCommand()
+            Expect.equal send.``type`` BaseCommand.Type.Send "The send should await its broker receipt"
+            crashMailbox producer
+            let! (close: BaseCommand) = broker.ReadCommand()
+            Expect.equal close.``type`` BaseCommand.Type.CloseProducer "Recovery should close the old broker registration"
+            Expect.isFalse sending.IsCompleted "Recovery should retain the pending send"
+
+            // Hold recovery at the broker until Close is queued; the long backoff keeps it ahead of re-registration.
+            let closing = postAndAsyncReply producer.Mb ProducerMessage.Close
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = close.CloseProducer.RequestId)))
+            let! result = closing.WaitAsync(testTimeout)
+            match result with
+            | Ok () -> ()
+            | Error ex -> failtestf "Close should complete after recovery: %O" ex
+            Expect.isTrue sending.IsFaulted "The retained send must fail before Close completes"
+            let! _ = expectFailure<AlreadyClosedException> sending
+            let! connected = (producer :> IProducer<byte[]>).IsConnected()
+            Expect.isFalse connected "A queued Close must leave the producer closed"
+            Expect.equal cleaned 1 "Close should clean up the producer exactly once"
+            Expect.sequenceEqual interceptor.Events [ "failed"; "disposed" ] "Fail the retained send before disposing interceptors"
+            expectTimersStopped producer
+            let! _ = expectFailure<AlreadyClosedException> ((producer :> IProducer<byte[]>).GetStats())
+            Expect.isTrue broker.Connection.IsActive "Closing the producer must preserve the shared connection"
         }
 
         testTask "Requests after an unrecoverable mailbox failure keep its cause" {

@@ -1147,9 +1147,9 @@ let tests =
             Log.Debug("Finished Producer closes its broker registration and recovers after a mailbox failure")
         }
 
-        testTask "Pending broker sends fault when the producer mailbox fails" {
+        testTask "Pending broker sends complete after producer mailbox recovery" {
 
-            Log.Debug("Started Pending broker sends fault when the producer mailbox fails")
+            Log.Debug("Started Pending broker sends complete after producer mailbox recovery")
             let client = getClient()
             let topicName = "public/default/topic-" + Guid.NewGuid().ToString("N")
             let mutable producerImpl = Unchecked.defaultof<ProducerImpl<byte[]>>
@@ -1178,12 +1178,16 @@ let tests =
             post producerImpl.Mb
                 (ProducerMessage.BeginSendMessage(struct (producer.NewMessage([| 1uy |]), pendingSend, false)))
 
-            do! assertFailure<InvalidOperationException> pendingSend.Task
+            let! _ = pendingSend.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+            let! recoveredSequenceId = producer.LastSequenceId()
+            Expect.equal "Recovery should preserve the pending send's sequence id" %0L recoveredSequenceId
             let! _ = producer.GetStats().WaitAsync(TimeSpan.FromSeconds(5.0))
             let! _ = producer.SendAsync([| 2uy |]).WaitAsync(TimeSpan.FromSeconds(5.0))
+            let! nextSequenceId = producer.LastSequenceId()
+            Expect.equal "The next send should continue the sequence after recovery" %1L nextSequenceId
             do! producer.DisposeAsync()
 
-            Log.Debug("Finished Pending broker sends fault when the producer mailbox fails")
+            Log.Debug("Finished Pending broker sends complete after producer mailbox recovery")
         }
 
         testTask "Batched sends fault when the producer mailbox fails" {
@@ -1366,7 +1370,8 @@ let tests =
             let! (connected, sendCompleted) = atClose.WaitAsync(TimeSpan.FromSeconds(5.0))
             Expect.isFalse "Producer should be closed before the queued Close completes" connected
             Expect.isTrue "Pending sends should be failed before the queued Close completes" sendCompleted
-            do! assertFailure<InvalidOperationException> pendingSend.Task
+            // Recovery retains the pending send; the queued Close, not the mailbox failure, ends it.
+            do! assertAlreadyClosed pendingSend.Task
             match close.Task.Result with
             | Ok () -> ()
             | Error other -> failwith $"Close failed after mailbox failure with {other.GetType().Name}: {other.Message}"
