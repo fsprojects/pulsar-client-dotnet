@@ -61,13 +61,19 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                 | false, _ -> Seq.empty)
 
     // Nothing ends an activity once the loop has stopped, so it ends the ones that are open, and no more are started.
+    // Ending an activity runs the code of its listeners, and what one of them throws must not leave the rest open.
     let endOpenActivities () =
-        for KeyValue(_, activity) in cache do
-            activity
-                .SetTag("messaging.acknowledge_type", "InterceptorStopped")
-                .Dispose()
-        activitySource.Dispose()
-        cache.Clear()
+        try
+            for KeyValue(_, activity) in cache do
+                try
+                    activity
+                        .SetTag("messaging.acknowledge_type", "InterceptorStopped")
+                        .Dispose()
+                with ex ->
+                    log.LogError(ex, "{0} failed to end an open activity", prefix)
+        finally
+            cache.Clear()
+            activitySource.Dispose()
 
     let mb = Channel.CreateUnbounded<InterceptorCommand>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (backgroundTask {
