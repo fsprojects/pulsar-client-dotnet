@@ -314,4 +314,67 @@ let tests =
             finally
                 Log.Logger <- original
         }
+
+        testTask "A consumer whose mailbox stalls in its close is closed at the broker without it" {
+            // the connection keeps its default timeouts, so no request timeout ends the broker's silence
+            use broker = new BrokerConnection(clientConfig)
+            let consumerClientConfig = { clientConfig with OperationTimeout = TimeSpan.FromMilliseconds(250.0) }
+            let! (starting: Task<ConsumerImpl<byte[]>>) = broker.CreateConsumer(consumerConfig, consumerClientConfig)
+            let! (subscribe: BaseCommand) = broker.ReadCommand()
+            Expect.equal subscribe.``type`` BaseCommand.Type.Subscribe "Expected subscription"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = subscribe.Subscribe.RequestId)))
+            let! (consumer: ConsumerImpl<byte[]>) = starting.WaitAsync(testTimeout)
+
+            // the mailbox begins to close, and waits for the broker
+            let closing = (consumer :> IConsumer<byte[]>).DisposeAsync().AsTask()
+            let! (mailboxClose: BaseCommand) = readClose broker
+
+            // the close is finished without the mailbox, on the connection the mailbox was closing on
+            let! (close: BaseCommand) = readClose broker
+            Expect.notEqual close.CloseConsumer.RequestId mailboxClose.CloseConsumer.RequestId "The broker is asked again"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = close.CloseConsumer.RequestId)))
+            do! closing.WaitAsync(testTimeout)
+        }
+
+        testTask "A consumer closed without its mailbox closes its connection when the broker refuses the close" {
+            // the connection keeps its default timeouts, so no request timeout ends the broker's silence
+            use broker = new BrokerConnection(clientConfig)
+            let consumerClientConfig = { clientConfig with OperationTimeout = TimeSpan.FromMilliseconds(250.0) }
+            let! (starting: Task<ConsumerImpl<byte[]>>) = broker.CreateConsumer(consumerConfig, consumerClientConfig)
+            let! (subscribe: BaseCommand) = broker.ReadCommand()
+            Expect.equal subscribe.``type`` BaseCommand.Type.Subscribe "Expected subscription"
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Success,
+                    Success = CommandSuccess(RequestId = subscribe.Subscribe.RequestId)))
+            let! (consumer: ConsumerImpl<byte[]>) = starting.WaitAsync(testTimeout)
+
+            // the mailbox waits for the broker's answer to a seek, and never gets to the close
+            let seeking: Task<unit> = (consumer :> IConsumer<byte[]>).SeekAsync(MessageId.Earliest)
+            seeking.ContinueWith(fun (seek: Task<unit>) -> seek.Exception |> ignore) |> ignore
+            let! (_: BaseCommand) = readCommandOf BaseCommand.Type.Seek broker
+            let closing = (consumer :> IConsumer<byte[]>).DisposeAsync().AsTask()
+            let! (close: BaseCommand) = readClose broker
+            do! broker.Reply(
+                BaseCommand(
+                    ``type`` = BaseCommand.Type.Error,
+                    Error = CommandError(
+                        RequestId = close.CloseConsumer.RequestId,
+                        Error = ServerError.PersistenceError,
+                        Message = "Close rejected")))
+            do! closing.WaitAsync(testTimeout)
+
+            // The consumer is off its connection, so the broker only lets go of it with the connection. An exclusive
+            // subscription would stay taken otherwise.
+            let deadline = DateTime.UtcNow + testTimeout
+            while broker.Connection.IsActive && DateTime.UtcNow < deadline do
+                do! Task.Delay(10)
+            Expect.isFalse broker.Connection.IsActive "The connection is closed"
+        }
     ]

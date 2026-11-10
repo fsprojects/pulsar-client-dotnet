@@ -89,6 +89,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mutable avalablePermits = 0
     let mutable mailboxRecoveryInProgress = false
     let mutable mailboxRecoveriesSinceLastMessage = 0
+    // the connection the mailbox is closing the consumer on, for a close that is finished without the mailbox
+    let mutable closingConnection: ClientCnx option = None
     let mutable startMessageId =
         match startMessageId with
         | Some startMsgId ->
@@ -612,8 +614,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         Log.Logger.LogError("{0} did not close within {1}, closing it without its mailbox", prefix, closeTimeout)
         let previousState = connectionHandler.ConnectionState
         connectionHandler.Closed()
-        match previousState with
-        | Ready clientCnx ->
+        let connection =
+            match previousState with
+            | Ready clientCnx -> Some clientCnx
+            // the mailbox has begun to close on this connection, and may not have got to telling the broker
+            | Closing -> Volatile.Read(&closingConnection)
+            | _ -> None
+        match connection with
+        | Some clientCnx ->
             // the broker would otherwise keep sending messages to a consumer that nobody reads
             clientCnx.RemoveConsumer consumerId
             let requestId = Generators.getNextRequestId()
@@ -623,9 +631,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                     let! response = clientCnx.SendAndWaitForReply requestId payload
                     response |> PulsarResponseType.GetEmpty
                 with Flatten ex ->
-                    Log.Logger.LogWarning(ex, "{0} failed to close consumer at the broker", prefix)
+                    // As after a failed recovery: the consumer is off its connection, so the broker only lets go
+                    // of it with the connection. An exclusive subscription would stay taken otherwise.
+                    Log.Logger.LogWarning(ex, "{0} failed to close consumer at the broker, closing its connection", prefix)
+                    clientCnx.Dispose()
             } |> ignore
-        | _ ->
+        | None ->
             ()
         releaseResources()
 
@@ -1600,6 +1611,7 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
+                    Volatile.Write(&closingConnection, Some clientCnx)
                     connectionHandler.Closing()
                     Log.Logger.LogInformation("{0} starting close", prefix)
                     let requestId = Generators.getNextRequestId()
