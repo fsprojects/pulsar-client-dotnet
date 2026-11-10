@@ -30,13 +30,18 @@ type private ControlledGenerator<'T>() =
             source.SetResult result
         }
 
-let private failsWith (cause: exn) (request: Task) =
+let private failureOf (request: Task) =
     task {
         let! finished = Task.WhenAny(request, Task.Delay(TimeSpan.FromSeconds(5.0)))
         Expect.isTrue "The request must not wait for a loop that has stopped" (obj.ReferenceEquals(finished, request))
         Expect.isTrue "The request must fail" request.IsFaulted
-        Expect.isTrue "The request must fail with what stopped the loop"
-            (obj.ReferenceEquals(request.Exception.GetBaseException(), cause))
+        return request.Exception.GetBaseException()
+    }
+
+let private failsWith (cause: exn) (request: Task) =
+    task {
+        let! (failure: exn) = failureOf request
+        Expect.isTrue "The request must fail with what stopped the loop" (obj.ReferenceEquals(failure, cause))
     }
 
 [<Tests>]
@@ -329,5 +334,24 @@ let tests =
             ts.AddGenerators([failing])
 
             do! failsWith failure waiting
+        }
+
+        testTask "Requests fail when what stopped the loop is a cancellation" {
+            let cancellation = OperationCanceledException "generator was cancelled"
+            let pending: TaskGenerator<int> = fun () -> TaskCompletionSource<int>().Task
+            let cancelled: TaskGenerator<int> = fun () -> raise cancellation
+            let ts = TaskSeq([pending; cancelled])
+            // A request that failed with the cancellation itself would end cancelled, which its caller could take
+            // for a normal stop, as the loop's own task ends cancelled instead of faulted.
+            let failsHoldingTheCancellation (request: Task) =
+                task {
+                    let! (failure: exn) = failureOf request
+                    Expect.isTrue "The failure must hold what stopped the loop"
+                        (obj.ReferenceEquals(failure.InnerException, cancellation))
+                }
+
+            do! failsHoldingTheCancellation (ts.Next())
+            do! failsHoldingTheCancellation (ts.Next())
+            do! failsHoldingTheCancellation (ts.RemoveGenerator pending)
         }
     ]

@@ -149,8 +149,23 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
                     Log.Logger.LogWarning("TaskSeq: trying to remove non-existing generator")
                 channel.SetResult()
         }:> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            // An OperationCanceledException that stops the loop leaves its task cancelled instead of faulted. It would
+            // do the same to the task of a caller that got it as the failure of its request, where it could pass for
+            // a normal stop once more, as in the poller of a multi-topic consumer. So the requests fail with an
+            // exception that holds it.
+            if t.IsFaulted || t.IsCanceled then
+                let ex =
+                    if t.IsFaulted then
+                        let (Flatten ex) = t.Exception
+                        ex
+                    else
+                        let cancellation: exn =
+                            try
+                                t.GetAwaiter().GetResult()
+                                null
+                            with cancellation ->
+                                cancellation
+                        InvalidOperationException("Taskseq mailbox was cancelled", cancellation) :> exn
                 Log.Logger.LogCritical(ex, "Taskseq mailbox failure")
                 // Nothing reads the mailbox any more. The request the loop stopped on, the ones waiting for a task,
                 // and every request queued or made later fail, so no caller waits for a reply that can't come.
