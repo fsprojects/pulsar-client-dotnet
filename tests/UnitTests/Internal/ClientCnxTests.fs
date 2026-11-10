@@ -18,6 +18,7 @@ open ProtoBuf
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
+open Pulsar.Client.UnitTests.Internal.ConnectionHandlerTests
 open pulsar.proto
 
 let private config =
@@ -446,5 +447,38 @@ let tests =
             do! consumer.ConnectionClosed.WaitAsync(TimeSpan.FromSeconds(5.0))
             Expect.isFalse cnx.IsActive "The connection is deactivated"
             do! mailboxesStopped cnx
+        }
+
+        // sequenced: it replaces the logger that everything shares
+        testSequenced <| testTask "A removal is answered although the connection fails while it deals with it" {
+            let incoming = Pipe()
+            let cnx = newCnx incoming (Pipe().Writer)
+            let held = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let gate = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let original = Log.Logger
+            try
+                Log.Logger <-
+                    FailingLogger(original, fun message ->
+                        if message.Contains "adding consumer 1" then
+                            // Holds the loop, so the removal waits in the mailbox. A removal the loop takes as it
+                            // is posted is dealt with before its caller looks at the connection once more.
+                            held.TrySetResult() |> ignore
+                            gate.Task.Wait(TimeSpan.FromSeconds(5.0)) |> ignore
+                            false
+                        else
+                            // as anything else that can fail where the removal is dealt with
+                            message.Contains "consumer 2")
+                // from another thread, as the loop can run on the thread that posts to it
+                Task.Run(fun () -> RegisteredConsumer(cnx, %1UL) |> ignore) |> ignore
+                do! held.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+                let removal = cnx.RemoveConsumerAndWait(%2UL)
+                gate.SetResult()
+
+                do! removal.WaitAsync(TimeSpan.FromSeconds(5.0))
+            finally
+                gate.TrySetResult() |> ignore
+                Log.Logger <- original
+                if cnx.IsActive then
+                    cnx.Dispose()
         }
     ]

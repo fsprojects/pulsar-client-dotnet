@@ -289,9 +289,11 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                     Log.Logger.LogDebug("{0} adding transaction metastore {1}", prefix, transactionMetaStoreId)
                     transactionMetaStores[transactionMetaStoreId] <- transactionMetaStoreOperations
                 | RemoveConsumer (consumerId, completion) ->
-                    Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
+                    // Made and answered before anything that can fail. A removal that has failed is neither with
+                    // the loop nor in its mailbox any more, so nothing else would answer it.
                     consumers.Remove(consumerId) |> ignore
                     completion |> Option.iter (fun tcs -> tcs.TrySetResult() |> ignore)
+                    Log.Logger.LogDebug("{0} removed consumer {1}", prefix, consumerId)
                 | RemoveProducer producerId ->
                     Log.Logger.LogDebug("{0} removing producer {1}", prefix, producerId)
                     producers.Remove(producerId) |> ignore
