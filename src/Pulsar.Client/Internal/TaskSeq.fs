@@ -24,12 +24,18 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
     let mutable started = false
     let mutable nextWaiting = false
     let waitingQueue = Queue()
-    let mutable resetWhenAnyTcs = TaskCompletionSource<'T>()
+    // The first of the tasks is the sequence's own. It is cancelled to make a request that waits for the tasks look
+    // at them again. It carries a marker to be told by, because a generator's task can end cancelled as well, and
+    // that one is a result to deliver: taken for the signal, it would be found again each time the tasks are looked at.
+    let resetMarker = obj()
+    let newResetTcs () = TaskCompletionSource<'T>(resetMarker)
+    let isReset (t: Task<'T>) = obj.ReferenceEquals(t.AsyncState, resetMarker)
+    let mutable resetWhenAnyTcs = newResetTcs ()
     let random = Random()
 
     let resetWhenAny () =
         let previous = resetWhenAnyTcs
-        resetWhenAnyTcs <- TaskCompletionSource<'T>()
+        resetWhenAnyTcs <- newResetTcs ()
         tasks[0] <- resetWhenAnyTcs.Task
         previous.SetCanceled()
 
@@ -177,7 +183,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
         async {
             let! completedTask = postAndAsyncReplyOrFail mb getStopCause WhenAnyTask |> Async.AwaitTask
             Log.Logger.LogTrace("TaskSeq.RestartNext {0}", completedTask.Status)
-            if completedTask.IsCanceled then
+            if isReset completedTask then
                 return! this.RestartNext()
             else
                 return completedTask
@@ -187,7 +193,7 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
         backgroundTask {
             let! completedTask = postAndAsyncReplyOrFail mb getStopCause Next |> Async.AwaitTask
             Log.Logger.LogTrace("TaskSeq.Next {0}", completedTask.Status)
-            if completedTask.IsCanceled then
+            if isReset completedTask then
                 let! restartedTask = this.RestartNext()
                 post mb (NextComplete restartedTask)
                 return! restartedTask

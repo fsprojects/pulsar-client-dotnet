@@ -354,4 +354,27 @@ let tests =
             do! failsHoldingTheCancellation (ts.Next())
             do! failsHoldingTheCancellation (ts.RemoveGenerator pending)
         }
+
+        // The sequence cancels a task of its own to make a waiting request look at the tasks again. A generator's
+        // task that ends cancelled is not that signal. Taken for it, the task would be found again and again.
+        testTask "A generator's cancelled task is delivered like any other" {
+            let first = TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let calls = ref 0
+            let generator: TaskGenerator<int> =
+                fun () ->
+                    calls.Value <- calls.Value + 1
+                    if calls.Value = 1 then first.Task else Task.FromResult 2
+            let ts = TaskSeq([generator])
+
+            let cancelled = ts.Next()
+            first.SetCanceled()
+            let! finished = Task.WhenAny(cancelled :> Task, Task.Delay(TimeSpan.FromSeconds(5.0)))
+            Expect.isTrue "The request must not go on looking at a task that has ended"
+                (obj.ReferenceEquals(finished, cancelled))
+            Expect.isTrue "The request ends as the task did" cancelled.IsCanceled
+
+            // the generator is asked for its next task, as after any other
+            let! next = ts.Next().WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.equal "" 2 next
+        }
     ]
