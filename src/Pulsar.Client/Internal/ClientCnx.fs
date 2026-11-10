@@ -840,11 +840,15 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         backgroundTask {
             Log.Logger.LogDebug("{0} Started read socket", prefix)
             let mutable continueLooping = true
+            let mutable incompleteFrame = false
             let reader = connection.Input
 
             try
                 while continueLooping do
-                    let! result = reader.ReadAtLeastAsync(8)
+                    // After an incomplete frame any new bytes must wake the reader: Pipe.ReadAtLeastAsync counts only
+                    // bytes not examined yet, so ReadAtLeastAsync(8) would not wake for the last few bytes of a frame.
+                    let! result = if incompleteFrame then reader.ReadAsync() else reader.ReadAtLeastAsync(8)
+                    incompleteFrame <- false
                     if result.IsCompleted then
                         if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
                             Log.Logger.LogWarning("{0} New connection was aborted", prefix)
@@ -859,6 +863,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                             reader.AdvanceTo consumed
                         | Result.Error IncompleteCommand, _ ->
                             Log.Logger.LogDebug("{0} IncompleteCommand received", prefix)
+                            incompleteFrame <- true
                             reader.AdvanceTo(buffer.Start, buffer.End)
                         | Result.Error (CorruptedCommand ex), consumed ->
                             Log.Logger.LogError(ex, "{0} Ignoring corrupted command.", prefix)

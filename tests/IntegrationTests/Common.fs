@@ -159,6 +159,24 @@ let waitForDispatchedMessages (topicName: string) (subscriptionName: string) (co
                 do! Task.Delay(50)
     }
 
+// the names the broker shows for the consumers of each partition's subscription, ordered by partition;
+// None takes every subscription, e.g. the one a reader generates for itself
+let getPartitionConsumerNames (topicName: string) (subscriptionName: string option) =
+    task {
+        use http = new HttpClient(new HttpClientHandler(UseProxy = false))
+        http.BaseAddress <- Uri(pulsarHttpAddress)
+        http.Timeout <- TimeSpan.FromSeconds(15.0)
+        let! stats = http.GetStringAsync($"/admin/v2/persistent/{topicName}/partitioned-stats?perPartition=true")
+        use json = JsonDocument.Parse(stats)
+        return
+            [ for partition in json.RootElement.GetProperty("partitions").EnumerateObject() do
+                for subscription in partition.Value.GetProperty("subscriptions").EnumerateObject() do
+                    if subscriptionName |> Option.forall ((=) subscription.Name) then
+                        for consumer in subscription.Value.GetProperty("consumers").EnumerateArray() do
+                            yield partition.Name, consumer.GetProperty("consumerName").GetString() ]
+            |> List.sortBy fst
+    }
+
 let produceMessages (producer: IProducer<byte[]>) number producerName =
     task {
         for i in 1..number do
