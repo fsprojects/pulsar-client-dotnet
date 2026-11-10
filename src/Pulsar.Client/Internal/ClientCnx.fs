@@ -62,9 +62,9 @@ and internal RequestsOperation =
     | Tick
 
 and internal CnxOperation =
-    | AddProducer of ProducerId * ProducerOperations
-    | AddConsumer of ConsumerId * ConsumerOperations
-    | AddTransactionMetaStoreHandler of TransactionCoordinatorId * TransactionMetaStoreOperations
+    | AddProducer of ProducerId * ProducerOperations * TaskCompletionSource<unit>
+    | AddConsumer of ConsumerId * ConsumerOperations * TaskCompletionSource<unit>
+    | AddTransactionMetaStoreHandler of TransactionCoordinatorId * TransactionMetaStoreOperations * TaskCompletionSource<unit>
     | RemoveConsumer of ConsumerId
     | RemoveProducer of ProducerId
     | RemoveTransactionMetaStoreHandler of TransactionCoordinatorId
@@ -216,7 +216,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         post this.OperationsMb CnxOperation.Stop
         post this.RequestsMb RequestsOperation.Stop
 
-    let requestsMb = Channel.CreateUnbounded<RequestsOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let requestsMb = Channel.CreateUnbounded<RequestsOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
@@ -264,20 +264,23 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 Log.Logger.LogInformation("{0} requestsMb mailbox has stopped normally", prefix))
         |> ignore
 
-    let operationsMb = Channel.CreateUnbounded<CnxOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let operationsMb = Channel.CreateUnbounded<CnxOperation>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
             match! operationsMb.Reader.ReadAsync() with
-            | AddProducer (producerId, producerOperation) ->
+            | AddProducer (producerId, producerOperation, channel) ->
                 Log.Logger.LogDebug("{0} adding producer {1}", prefix, producerId)
                 producers.Add(producerId, producerOperation)
-            | AddConsumer (consumerId, consumerOperation) ->
+                channel.SetResult()
+            | AddConsumer (consumerId, consumerOperation, channel) ->
                 Log.Logger.LogDebug("{0} adding consumer {1}", prefix, consumerId)
                 consumers.Add(consumerId, consumerOperation)
-            | AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations) ->
+                channel.SetResult()
+            | AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations, channel) ->
                 Log.Logger.LogDebug("{0} adding transaction metastore {1}", prefix, transactionMetaStoreId)
                 transactionMetaStores[transactionMetaStoreId] <- transactionMetaStoreOperations
+                channel.SetResult()
             | RemoveConsumer consumerId ->
                 Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
                 consumers.Remove(consumerId) |> ignore
@@ -319,7 +322,7 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 return false
         }
 
-    let sendMb = Channel.CreateUnbounded<SocketMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let sendMb = Channel.CreateUnbounded<SocketMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
@@ -943,16 +946,23 @@ and internal ClientCnx (config: PulsarClientConfiguration,
 
     member this.AddProducer (producerId: ProducerId, producerOperations: ProducerOperations) =
         if this.IsActive then
-            post operationsMb (AddProducer (producerId, producerOperations))
+            postAndAsyncReply operationsMb (fun channel -> AddProducer (producerId, producerOperations, channel))
+        else
+            unitTask
 
     member this.AddConsumer (consumerId: ConsumerId, consumerOperations: ConsumerOperations) =
         if this.IsActive then
-            post operationsMb (AddConsumer (consumerId, consumerOperations))
+            postAndAsyncReply operationsMb (fun channel -> AddConsumer (consumerId, consumerOperations, channel))
+        else
+            unitTask
 
     member this.AddTransactionMetaStoreHandler(transactionMetaStoreId: TransactionCoordinatorId,
                                                transactionMetaStoreOperations: TransactionMetaStoreOperations) =
         if this.IsActive then
-            post operationsMb (AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations))
+            postAndAsyncReply operationsMb (fun channel ->
+                AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations, channel))
+        else
+            unitTask
 
     member this.Dispose() =
         connection.Dispose()

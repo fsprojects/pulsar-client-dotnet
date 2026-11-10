@@ -45,7 +45,7 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
         |> UMX.tag
 
 
-    let mb = Channel.CreateUnbounded<TransactionCoordinatorMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mb = Channel.CreateUnbounded<TransactionCoordinatorMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do

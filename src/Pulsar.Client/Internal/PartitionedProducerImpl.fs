@@ -151,7 +151,7 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
         interceptors.Close()
         cleanup(this)
 
-    let mb = Channel.CreateUnbounded<PartitionedProducerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    let mb = Channel.CreateUnbounded<PartitionedProducerMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = false))
 
     let replyFromStoppedMailbox (ex: exn) (msg: PartitionedProducerMessage) =
         match msg with
