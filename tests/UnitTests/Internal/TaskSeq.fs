@@ -176,7 +176,33 @@ let tests =
             Expect.isTrue "Next must finish once the loop has stopped" (obj.ReferenceEquals(finished, next))
             Expect.isTrue "Next must fail, not return a value" next.IsFaulted
         }
-        
+
+        testTask "A Next already waiting for a result fails when the loop stops" {
+            let never = TaskCompletionSource<int>()
+            let ts = TaskSeq([fun () -> never.Task])
+            let waiting = ts.Next()
+            // the loop handles Next before this, so the generator above is running and Next waits for it
+            ts.AddGenerators([fun () -> raise (InvalidOperationException "generator could not start")])
+
+            let! finished = Task.WhenAny(waiting, Task.Delay(TimeSpan.FromSeconds(5.0)))
+
+            Expect.isTrue "The waiting Next must finish once the loop has stopped" (obj.ReferenceEquals(finished, waiting))
+            Expect.isTrue "The waiting Next must fail, not return a value" waiting.IsFaulted
+            let cause = waiting.Exception.InnerException.InnerException
+            Expect.equal "The failure carries the loop's cause" "generator could not start" cause.Message
+        }
+
+        testTask "RemoveGenerator completes after the loop has stopped" {
+            let failing () : Task<int> = raise (InvalidOperationException "generator could not start")
+            let ts = TaskSeq([failing])
+            let next = ts.Next()
+            let! finished = Task.WhenAny(next, Task.Delay(TimeSpan.FromSeconds(5.0)))
+            Expect.isTrue "Next must finish once the loop has stopped" (obj.ReferenceEquals(finished, next))
+            Expect.isTrue "Next must fail, not return a value" next.IsFaulted
+
+            do! ts.RemoveGenerator(failing).WaitAsync(TimeSpan.FromSeconds(5.0))
+        }
+
         testTask "Adding generator resets waitAny" {
             
             let gen1 = fun () -> task {
