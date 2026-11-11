@@ -14,35 +14,20 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
     let Propagator = Propagators.DefaultTextMapPropagator
     static let prefix = "OtelProducerInterceptor:"
     static let activityKey = "traceparent"
-    static let traceStateKey = "tracestate"
     let activitySource = new ActivitySource(sourceName)
     let cache = ConcurrentDictionary<string,Activity>()
-    // A message can have these properties already, as one has whose properties are copied from a consumed message.
-    // They are replaced, which is what a propagator expects of its setter.
     let setter =
         Action<Dictionary<string,string>,string,string>
-            (fun msg key value -> msg.[key] <- value)
-
-    // Ending an activity makes the one that was current where it started the current one of whoever ends it. For
-    // the activity of a send that is the producer's loop, or whoever disposes the interceptor, which would go on in
-    // the activity of the application that sent the message. So what is current is left as it is, unless it is the
-    // activity that ends.
-    let endActivity (activity: Activity) =
-        let current = Activity.Current
-        try
-            activity.Dispose()
-        finally
-            if not (obj.ReferenceEquals(current, activity)) then
-                // one that has ended can't be made current again
-                Activity.Current <- if isNull current || current.IsStopped then null else current
+            (fun msg key value -> msg.Add (key,value))
 
     let addToCache activityId activity =
         match cache.TryAdd(activityId, activity) with
         | true ->
             ()
         | _ ->
-            activity.SetTag("messaging.acknowledge_type", "Duplicate")
-            |> endActivity
+            activity
+                .SetTag("messaging.acknowledge_type", "Duplicate")
+                .Dispose()
             log.LogWarning("{0} Duplicate activity detected", prefix)
 
     interface IProducerInterceptor<'T> with
@@ -65,44 +50,33 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                     .SetTag("messaging.operation", "send")
                     .SetTag("messaging.producer_id",$"{producer.Name} - {producer.ProducerId}")
                     |> ignore
-                //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/messaging.md
-                //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
-                // The trace of the send goes into the message whether the activity is recorded or not. One that is
-                // not recorded (IsAllDataRequested is false, the same as Span.IsRecording) is of a trace that the
-                // sampler didn't take, which whoever consumes the message learns only from the message: without a
-                // trace in it, they start one of their own for it, and sample that one by themselves.
-                let contextToInject = activity.Context
-                // A message can have a trace already, as one has whose properties are copied from a consumed
-                // message. It is removed before the propagator sets that of this send: the propagator sets a
-                // trace state only if this send has one, so that of the other trace would go out with this
-                // one, and a propagator that sets nothing would leave the other trace to be taken for this one.
-                mutableDict.Remove activityKey |> ignore
-                mutableDict.Remove traceStateKey |> ignore
-                Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
-                if not (mutableDict.ContainsKey activityKey) then
-                    log.LogWarning("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
-                    // nothing in the message tells its receipt which activity to end, so the activity ends here
-                    activity.SetTag("messaging.acknowledge_type", "NotPropagated")
-                    |> endActivity
-                    message // OTEL listeners are not configured correctly, so return message as is
+                if activity.IsAllDataRequested then
+                   // It is highly recommended to check activity.IsAllDataRequested,
+                   // before populating any tags which are not readily available.
+                   // IsAllDataRequested is the same as Span.IsRecording and will be false
+                   // when samplers decide to not record the activity,
+                   // and this can be used to avoid any expensive operation to retrieve tags.
+                   //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/messaging.md
+                   //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
+                   let contextToInject = activity.Context
+                   Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
+                   if not (mutableDict.ContainsKey activityKey) then
+                       log.LogWarning("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
+                       message // OTEL listeners are not configured correctly, so return message as is
+                   else
+                       addToCache mutableDict.[activityKey] activity
+                       message.WithProperties(mutableDict)
                 else
-                    // recorded or not, the activity ends with the receipt for the message
-                    addToCache mutableDict.[activityKey] activity
-                    message.WithProperties(mutableDict)
+                   //don't handle activity
+                   message
 
         member this.Dispose() =
-            // Ending an activity runs the code of its listeners, and what one of them throws must not leave the rest
-            // open, nor the activity source undisposed.
-            try
-                for KeyValue(_, activity) in cache do
-                    try
-                        activity.SetTag("messaging.acknowledge_type", "InterceptorStopped")
-                        |> endActivity
-                    with ex ->
-                        log.LogError(ex, "{0} failed to end an open activity", prefix)
-            finally
-                cache.Clear()
-                activitySource.Dispose()
+            for KeyValue(_, activity) in cache do
+                activity
+                    .SetTag("messaging.acknowledge_type", "InterceptorStopped")
+                    .Dispose()
+            activitySource.Dispose()
+            cache.Clear()
             log.LogInformation("{0} Closed", prefix)
 
         member this.Eligible _ = true
@@ -117,7 +91,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                          activity
                             .SetTag("messaging.acknowledge_type", "Success")
                             .SetTag("messaging.message_id", messageId)
-                         |> endActivity
+                            .Dispose()
                     |  _ ->
                         //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md
                         activity
@@ -125,7 +99,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                             .SetTag("exception.type", exn.GetType().FullName)
                             .SetTag("exception.message", exn.Message)
                             .SetTag("exception.stacktrace", exn.StackTrace)
-                        |> endActivity
+                            .Dispose()
                 | _ ->
                     log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
             | _ ->

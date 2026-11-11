@@ -34,33 +34,24 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
     let endActivity messageId (ackResult: AckResult) =
         match cache.TryGetValue messageId with
         | true, activity ->
-            // Ending an activity runs the code of its listeners. Whatever one of them throws, the activity has ended,
-            // and would otherwise stay here for as long as the consumer runs.
-            try
-                match ackResult with
-                | Ok ackType ->
-                     stopActivitySuccessfully activity ackType
-                | Error exn ->
-                    activity
-                        .SetTag("messaging.acknowledge_type", "Error")
-                        .SetTag("exception.type", exn.GetType().FullName)
-                        .SetTag("exception.message", exn.Message)
-                        .SetTag("exception.stacktrace", exn.StackTrace)
-                        .Dispose()
-            finally
-                cache.Remove messageId |> ignore
+            match ackResult with
+            | Ok ackType ->
+                 stopActivitySuccessfully activity ackType
+            | Error exn ->
+                activity
+                    .SetTag("messaging.acknowledge_type", "Error")
+                    .SetTag("exception.type", exn.GetType().FullName)
+                    .SetTag("exception.message", exn.Message)
+                    .SetTag("exception.stacktrace", exn.StackTrace)
+                    .Dispose()
+            cache.Remove messageId |> ignore
         | _ ->
             log.LogDebug("{0} Can't find start of activity for msgId={1}", prefix, messageId)
 
     let endPreviousActivities msgId (ackResult: AckResult) =
         cache.Keys
         |> Seq.filter (fun key -> key <= msgId)
-        |> Seq.iter (fun key ->
-            // each on its own, so that what a listener throws for one doesn't leave the others open
-            try
-                endActivity key ackResult
-            with ex ->
-                log.LogError(ex, "{0} failed to end the activity of msgId={1}", prefix, key))
+        |> Seq.iter (fun key -> endActivity key ackResult)
 
     let getter =
         Func<IReadOnlyDictionary<string, string>, string, IEnumerable<string>>
@@ -69,85 +60,39 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                 | true, v -> seq { v }
                 | false, _ -> Seq.empty)
 
-    // Nothing ends an activity once the loop has stopped, so it ends the ones that are open, and no more are started.
-    // Ending an activity runs the code of its listeners, and what one of them throws must not leave the rest open.
-    let endOpenActivities () =
-        try
-            for KeyValue(_, activity) in cache do
-                try
-                    activity
-                        .SetTag("messaging.acknowledge_type", "InterceptorStopped")
-                        .Dispose()
-                with ex ->
-                    log.LogError(ex, "{0} failed to end an open activity", prefix)
-        finally
-            cache.Clear()
-            activitySource.Dispose()
-
     let mb = Channel.CreateUnbounded<InterceptorCommand>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-            let! msg = mb.Reader.ReadAsync()
-            try
-                match msg with
-                | InterceptorCommand.Ack (msgId, ackResult) ->
-                    endActivity msgId ackResult
-                | InterceptorCommand.NegativeAck (msgId, ackResult) ->
-                    endActivity msgId ackResult
-                | InterceptorCommand.Timeout (msgId, ackResult) ->
-                    endActivity msgId ackResult
-                | InterceptorCommand.CumulativeAck (msgId, ackResult) ->
-                    endPreviousActivities msgId ackResult
-                | InterceptorCommand.BeforeConsume (msgId, activity) ->
-                    match cache.TryGetValue msgId with
-                    | true, _ ->
-                        activity
-                            .SetTag("messaging.acknowledge_type", "Duplicate")
-                            .Dispose()
-                    | _ ->
-                        cache.Add(msgId, activity)
-                | InterceptorCommand.Stop ->
-                    endOpenActivities()
-                    log.LogInformation("{0} Closed", prefix)
-                    continueLoop <- false
-            // what fails for one message must not end the tracing of all the later ones
-            with ex ->
-                log.LogError(ex, "{0} failed to process a command", prefix)
-                match msg with
-                | InterceptorCommand.Stop -> continueLoop <- false
-                | _ -> ()
-        } :> Task).ContinueWith(fun t ->
-            // Nothing reads the mailbox any more, so it takes no more commands: they would pile up with their
-            // activities for as long as the consumer runs.
-            mb.Writer.TryComplete() |> ignore
-            let mutable msg = Unchecked.defaultof<InterceptorCommand>
-            while mb.Reader.TryRead(&msg) do
-                match msg with
-                | InterceptorCommand.BeforeConsume (_, activity) ->
-                    try
-                        activity.Dispose()
-                    with _ ->
-                        ()
+            match! mb.Reader.ReadAsync() with
+            | InterceptorCommand.Ack (msgId, ackResult) ->
+                endActivity msgId ackResult
+            | InterceptorCommand.NegativeAck (msgId, ackResult) ->
+                endActivity msgId ackResult
+            | InterceptorCommand.Timeout (msgId, ackResult) ->
+                endActivity msgId ackResult
+            | InterceptorCommand.CumulativeAck (msgId, ackResult) ->
+                endPreviousActivities msgId ackResult
+            | InterceptorCommand.BeforeConsume (msgId, activity) ->
+                match cache.TryGetValue msgId with
+                | true, _ ->
+                    activity
+                        .SetTag("messaging.acknowledge_type", "Duplicate")
+                        .Dispose()
                 | _ ->
-                    ()
-            if t.IsFaulted || t.IsCanceled then
-                // what a Stop would have done
-                try
-                    endOpenActivities()
-                with ex ->
-                    log.LogError(ex, "{0} failed to end the open activities", prefix)
-                // a cancelled task has no exception of its own: what cancelled it is thrown to whoever waits for it
-                let failure: exn =
-                    if t.IsFaulted then
-                        t.Exception :> exn
-                    else
-                        try
-                            t.GetAwaiter().GetResult()
-                            null
-                        with ex ->
-                            ex
-                log.LogCritical(failure, "{0} mailbox failure", prefix)
+                    cache.Add(msgId, activity)
+            | InterceptorCommand.Stop ->
+                for KeyValue(_, activity) in cache do
+                    activity
+                        .SetTag("messaging.acknowledge_type", "InterceptorStopped")
+                        .Dispose()
+                activitySource.Dispose()
+                cache.Clear()
+                log.LogInformation("{0} Closed", prefix)
+                continueLoop <- false
+        } :> Task).ContinueWith(fun t ->
+            if t.IsFaulted then
+                log.LogCritical(t.Exception, "{0} mailbox failure", prefix)
             else
                 log.LogInformation("{0} mailbox has stopped normally", prefix))
         |> ignore
@@ -160,29 +105,12 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
             let contextToInject = Unchecked.defaultof<PropagationContext>
             let parentContext = Propagator.Extract(contextToInject, message.Properties, getter)
 
-            // The consumer calls this from its own loop, where the current activity is the one that the consumer
-            // was created in, if any. One that has ended is no parent for a message, and can't be made current again.
-            let ambient =
-                match Activity.Current with
-                | null ->
-                    null
-                | current when current.IsStopped ->
-                    Activity.Current <- null
-                    null
-                | current ->
-                    current
-
             // https://github.com/open-telemetry/opentelemetry-dotnet/blob/main/examples/MicroserviceExample/Utils/Messaging/MessageReceiver.cs#L68
             let activity =
                 activitySource.StartActivity(consumer.Topic + " receive",
                                              ActivityKind.Consumer,
                                              parentContext.ActivityContext)
             if activity |> isNull |> not then
-                // Starting the activity has made it the current one of the consumer's loop, and ending it doesn't
-                // undo that, as another loop does it. Left current, it would be the parent of the next message that
-                // carries no trace, and each activity would keep the one before it in memory for as long as the
-                // consumer runs.
-                Activity.Current <- ambient
                 activity
                     .SetTag("messaging.system", "pulsar")
                     .SetTag("messaging.destination_kind", "topic")
@@ -195,11 +123,10 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     parentContext.Baggage.GetBaggage()
                     |> Seq.iter (fun (KeyValue kv) ->
                         activity.AddBaggage kv |> ignore)
-                // An activity that is not recorded, as one of a trace that the sampler didn't take, ends with the
-                // acknowledgment of its message like any other. Nothing else would end it.
-                if not (mb.Writer.TryWrite(InterceptorCommand.BeforeConsume(message.MessageId, activity))) then
-                    // the loop has stopped, so nothing else would end this activity
-                    activity.Dispose()
+                    postMb (InterceptorCommand.BeforeConsume(message.MessageId, activity))
+                else
+                   //don't handle activity
+                    ()
             message
 
 
