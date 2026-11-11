@@ -16,9 +16,11 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
     static let activityKey = "traceparent"
     let activitySource = new ActivitySource(sourceName)
     let cache = ConcurrentDictionary<string,Activity>()
+    // A message can have these properties already, as one has whose properties are copied from a consumed message.
+    // They are replaced, which is what a propagator expects of its setter.
     let setter =
         Action<Dictionary<string,string>,string,string>
-            (fun msg key value -> msg.Add (key,value))
+            (fun msg key value -> msg.[key] <- value)
 
     let addToCache activityId activity =
         match cache.TryAdd(activityId, activity) with
