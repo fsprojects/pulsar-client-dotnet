@@ -14,6 +14,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
     let Propagator = Propagators.DefaultTextMapPropagator
     static let prefix = "OtelProducerInterceptor:"
     static let activityKey = "traceparent"
+    static let traceStateKey = "tracestate"
     let activitySource = new ActivitySource(sourceName)
     let cache = ConcurrentDictionary<string,Activity>()
     // A message can have these properties already, as one has whose properties are copied from a consumed message.
@@ -73,6 +74,12 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                    //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/messaging.md
                    //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
                    let contextToInject = activity.Context
+                   // A message can have a trace already, as one has whose properties are copied from a consumed
+                   // message. It is removed before the propagator sets that of this send: the propagator sets a
+                   // trace state only if this send has one, so that of the other trace would go out with this
+                   // one, and a propagator that sets nothing would leave the other trace to be taken for this one.
+                   mutableDict.Remove activityKey |> ignore
+                   mutableDict.Remove traceStateKey |> ignore
                    Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
                    if not (mutableDict.ContainsKey activityKey) then
                        log.LogWarning("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
