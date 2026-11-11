@@ -60,12 +60,10 @@ Features list (based on [Client Feature Matrix](https://github.com/apache/pulsar
  
 #### MacOS steps before building:
 
- - Install Snappy: `brew install snappy`
  - Install Libzstd: `brew install zstd`
  
 #### Ubuntu steps before building:
  
- - Install Snappy: `sudo apt-get install -y libsnappy-dev`
  - Install Libzstd: `sudo apt-get install -y libzstd-dev`
  
 #### Building and Testing
