@@ -160,12 +160,29 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
             let contextToInject = Unchecked.defaultof<PropagationContext>
             let parentContext = Propagator.Extract(contextToInject, message.Properties, getter)
 
+            // The consumer calls this from its own loop, where the current activity is the one that the consumer
+            // was created in, if any. One that has ended is no parent for a message, and can't be made current again.
+            let ambient =
+                match Activity.Current with
+                | null ->
+                    null
+                | current when current.IsStopped ->
+                    Activity.Current <- null
+                    null
+                | current ->
+                    current
+
             // https://github.com/open-telemetry/opentelemetry-dotnet/blob/main/examples/MicroserviceExample/Utils/Messaging/MessageReceiver.cs#L68
             let activity =
                 activitySource.StartActivity(consumer.Topic + " receive",
                                              ActivityKind.Consumer,
                                              parentContext.ActivityContext)
             if activity |> isNull |> not then
+                // Starting the activity has made it the current one of the consumer's loop, and ending it doesn't
+                // undo that, as another loop does it. Left current, it would be the parent of the next message that
+                // carries no trace, and each activity would keep the one before it in memory for as long as the
+                // consumer runs.
+                Activity.Current <- ambient
                 activity
                     .SetTag("messaging.system", "pulsar")
                     .SetTag("messaging.destination_kind", "topic")
