@@ -61,9 +61,41 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
         } |> ignore
 
     let mb = Channel.CreateUnbounded<TaskSeqMessage<'T>>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+
+    let mutable currentMessage : TaskSeqMessage<'T> option = None
+    let mutable stoppedError : exn = null
+
+    let stoppedException () =
+        InvalidOperationException($"TaskSeq has stopped and can't produce more results: {stoppedError.Message}", stoppedError) :> exn
+
+    let replyFromStoppedLoop (msg: TaskSeqMessage<'T>) =
+        match msg with
+        | WhenAnyTask channel
+        | Next channel ->
+            channel.TrySetException(stoppedException ()) |> ignore
+        | RemoveGenerator (_, channel) ->
+            // nothing polls a stopped sequence, so there is nothing left to remove the generator from
+            channel.TrySetResult() |> ignore
+        | NextComplete _
+        | AddGenerators _ ->
+            ()
+
+    // requests posted after the loop exits would otherwise never be completed
+    let drainStoppedLoop () =
+        backgroundTask {
+            while true do
+                let! msg = mb.Reader.ReadAsync()
+                try
+                    replyFromStoppedLoop msg
+                with ex ->
+                    Log.Logger.LogWarning(ex, "TaskSeq failed to reply to a request after the loop stopped")
+        } |> ignore
+
     do (backgroundTask {
         while true do
-            match! mb.Reader.ReadAsync() with
+            let! msg = mb.Reader.ReadAsync()
+            currentMessage <- Some msg
+            match msg with
             | WhenAnyTask channel ->
 
                 Log.Logger.LogTrace("TaskSeq.WhenAnyTask nextWaiting:{0}", nextWaiting)
@@ -132,6 +164,19 @@ type internal TaskSeq<'T> (initialGenerators: TaskGenerator<'T> seq) =
             if t.IsFaulted then
                 let (Flatten ex) = t.Exception
                 Log.Logger.LogCritical(ex, "Taskseq mailbox failure")
+                stoppedError <- ex
+                try
+                    try
+                        currentMessage |> Option.iter replyFromStoppedLoop
+                        while waitingQueue.Count > 0 do
+                            waitingQueue.Dequeue().TrySetException(stoppedException ()) |> ignore
+                        // wakes a Next already waiting for any task, since no generator will be re-armed
+                        resetWhenAnyTcs.TrySetException(stoppedException ()) |> ignore
+                    with replyEx ->
+                        Log.Logger.LogWarning(replyEx, "TaskSeq failed to fail waiting requests after the loop stopped")
+                finally
+                    // only after stoppedError is set, so every drained request carries the cause
+                    drainStoppedLoop()
             else
                 Log.Logger.LogInformation("Taskseq mailbox has stopped normally"))
     |> ignore
