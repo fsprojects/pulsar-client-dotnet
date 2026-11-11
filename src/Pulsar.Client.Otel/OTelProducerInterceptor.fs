@@ -71,12 +71,19 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                    message
 
         member this.Dispose() =
-            for KeyValue(_, activity) in cache do
-                activity
-                    .SetTag("messaging.acknowledge_type", "InterceptorStopped")
-                    .Dispose()
-            activitySource.Dispose()
-            cache.Clear()
+            // Ending an activity runs the code of its listeners, and what one of them throws must not leave the rest
+            // open, nor the activity source undisposed.
+            try
+                for KeyValue(_, activity) in cache do
+                    try
+                        activity
+                            .SetTag("messaging.acknowledge_type", "InterceptorStopped")
+                            .Dispose()
+                    with ex ->
+                        log.LogError(ex, "{0} failed to end an open activity", prefix)
+            finally
+                cache.Clear()
+                activitySource.Dispose()
             log.LogInformation("{0} Closed", prefix)
 
         member this.Eligible _ = true
