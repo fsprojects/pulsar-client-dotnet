@@ -195,12 +195,11 @@ type OTelConsumerInterceptor<'T>(sourceName: string, log: ILogger) =
                     parentContext.Baggage.GetBaggage()
                     |> Seq.iter (fun (KeyValue kv) ->
                         activity.AddBaggage kv |> ignore)
-                    if not (mb.Writer.TryWrite(InterceptorCommand.BeforeConsume(message.MessageId, activity))) then
-                        // the loop has stopped, so nothing else would end this activity
-                        activity.Dispose()
-                else
-                   //don't handle activity
-                    ()
+                // An activity that is not recorded, as one of a trace that the sampler didn't take, ends with the
+                // acknowledgment of its message like any other. Nothing else would end it.
+                if not (mb.Writer.TryWrite(InterceptorCommand.BeforeConsume(message.MessageId, activity))) then
+                    // the loop has stopped, so nothing else would end this activity
+                    activity.Dispose()
             message
 
 
