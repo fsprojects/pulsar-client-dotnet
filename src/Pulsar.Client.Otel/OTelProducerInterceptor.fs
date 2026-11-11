@@ -83,6 +83,9 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                    Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
                    if not (mutableDict.ContainsKey activityKey) then
                        log.LogWarning("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
+                       // nothing in the message tells its receipt which activity to end, so the activity ends here
+                       activity.SetTag("messaging.acknowledge_type", "NotPropagated")
+                       |> endActivity
                        message // OTEL listeners are not configured correctly, so return message as is
                    else
                        addToCache mutableDict.[activityKey] activity
