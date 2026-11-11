@@ -22,14 +22,26 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
         Action<Dictionary<string,string>,string,string>
             (fun msg key value -> msg.[key] <- value)
 
+    // Ending an activity makes the one that was current where it started the current one of whoever ends it. For
+    // the activity of a send that is the producer's loop, or whoever disposes the interceptor, which would go on in
+    // the activity of the application that sent the message. So what is current is left as it is, unless it is the
+    // activity that ends.
+    let endActivity (activity: Activity) =
+        let current = Activity.Current
+        try
+            activity.Dispose()
+        finally
+            if not (obj.ReferenceEquals(current, activity)) then
+                // one that has ended can't be made current again
+                Activity.Current <- if isNull current || current.IsStopped then null else current
+
     let addToCache activityId activity =
         match cache.TryAdd(activityId, activity) with
         | true ->
             ()
         | _ ->
-            activity
-                .SetTag("messaging.acknowledge_type", "Duplicate")
-                .Dispose()
+            activity.SetTag("messaging.acknowledge_type", "Duplicate")
+            |> endActivity
             log.LogWarning("{0} Duplicate activity detected", prefix)
 
     interface IProducerInterceptor<'T> with
@@ -78,9 +90,8 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
             try
                 for KeyValue(_, activity) in cache do
                     try
-                        activity
-                            .SetTag("messaging.acknowledge_type", "InterceptorStopped")
-                            .Dispose()
+                        activity.SetTag("messaging.acknowledge_type", "InterceptorStopped")
+                        |> endActivity
                     with ex ->
                         log.LogError(ex, "{0} failed to end an open activity", prefix)
             finally
@@ -100,7 +111,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                          activity
                             .SetTag("messaging.acknowledge_type", "Success")
                             .SetTag("messaging.message_id", messageId)
-                            .Dispose()
+                         |> endActivity
                     |  _ ->
                         //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/exceptions.md
                         activity
@@ -108,7 +119,7 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                             .SetTag("exception.type", exn.GetType().FullName)
                             .SetTag("exception.message", exn.Message)
                             .SetTag("exception.stacktrace", exn.StackTrace)
-                            .Dispose()
+                        |> endActivity
                 | _ ->
                     log.LogWarning("{0} Can't find start of activity for msgId={1}", prefix, messageId)
             | _ ->
