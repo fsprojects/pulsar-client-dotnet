@@ -370,8 +370,8 @@ type internal PartitionedProducerImpl<'T> private (producerConfig: ProducerConfi
                     channel.SetException ex
         }:> Task).ContinueWith(fun t ->
             try
-                if t.IsFaulted then
-                    let (Flatten ex) = t.Exception
+                let ex = loopFailure t
+                if not (isNull ex) then
                     Log.Logger.LogCritical(ex, "{0} mailbox failure", prefix)
                     terminalError <- ex
                     this.ConnectionState <- Failed

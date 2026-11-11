@@ -30,10 +30,8 @@ jobs:
     - name: Dotnet Build Release
       run: dotnet build -c Release --no-restore
 
-    - name: Apt-get Install Snappy & ZSTD
-      run: |
-        sudo apt-get install -y libsnappy-dev
-        sudo apt-get install -y libzstd-dev
+    - name: Apt-get Install ZSTD
+      run: sudo apt-get install -y libzstd-dev
 
     - name: Run Unit Tests
       run: |

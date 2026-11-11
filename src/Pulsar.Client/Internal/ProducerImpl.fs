@@ -863,7 +863,15 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
                 Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
                 let nonRetriableError = ex |> PulsarClientException.isRetriableError |> not
                 let timeout = Stopwatch.GetElapsedTime(createProducerStartTime) > clientConfig.OperationTimeout
-                if ((nonRetriableError || timeout) && producerCreatedTsc.TrySetException(ex)) then
+                if connectionHandler.ConnectionState = Failed then
+                    // Only the connection handler itself fails while the producer runs: its loop has stopped, and
+                    // nothing would connect the producer again, so its sends must not wait for that.
+                    Log.Logger.LogError(ex, "{0} stopping because its connection handler failed", prefix)
+                    failPendingMessages (stoppedMailboxException ())
+                    stopProducer()
+                    producerCreatedTsc.TrySetException(ex) |> ignore
+                    continueLoop <- false
+                elif ((nonRetriableError || timeout) && producerCreatedTsc.TrySetException(ex)) then
                     Log.Logger.LogInformation("{0} connection failed {1}", prefix,
                                                 if nonRetriableError then "with unretriableError" else "after timeout")
                     connectionHandler.Failed(ex)
@@ -1107,8 +1115,8 @@ type internal ProducerImpl<'T> private (producerConfig: ProducerConfiguration, c
             }:> Task).ContinueWith(fun t ->
                 let mutable recovering = false
                 try
-                    if t.IsFaulted then
-                        let (Flatten ex) = t.Exception
+                    let ex = loopFailure t
+                    if not (isNull ex) then
                         if producerCreatedTsc.Task.IsCompletedSuccessfully then
                             // as in the Java client, a created producer outlives an unexpected error
                             recovering <- true

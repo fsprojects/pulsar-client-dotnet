@@ -46,10 +46,21 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
 
 
     let mb = Channel.CreateUnbounded<TransactionCoordinatorMessage>(UnboundedChannelOptions(SingleReader = true, AllowSynchronousContinuations = true))
+    // why the loop stopped, if it failed; set before the mailbox is completed
+    let mutable stopCause: exn = null
+
+    // for a request the loop no longer answers: the client is closed, or its loop has failed
+    let stoppedException () =
+        match Volatile.Read(&stopCause) with
+        | null -> CoordinatorClientStateException $"{prefix} is closed" :> exn
+        | cause -> cause
+
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-                match! mb.Reader.ReadAsync() with
+            let! msg = mb.Reader.ReadAsync()
+            try
+                match msg with
                 | TransactionCoordinatorMessage.Start ch ->
 
                     Log.Logger.LogDebug("{0} starting", prefix)
@@ -99,10 +110,26 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
                         handlers.Clear()
                         state <- TransactionCoordinatorState.CLOSED
                     continueLoop <- false
+            // only the request that failed is lost: a start is answered with the failure, and a close still ends the loop
+            with Flatten ex ->
+                Log.Logger.LogError(ex, "{0} failed to process a request", prefix)
+                match msg with
+                | TransactionCoordinatorMessage.Start ch -> ch.TrySetResult(Error ex) |> ignore
+                | Close -> continueLoop <- false
         } :> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
-                Log.Logger.LogCritical(ex, "transaction coordinator mailbox failure")
+            let ex = loopFailure t
+            if not (isNull ex) then
+                Volatile.Write(&stopCause, ex)
+            // Nothing reads the mailbox any more: a start still queued is answered here, and a later one by its
+            // caller, instead of being left waiting.
+            mb.Writer.TryComplete() |> ignore
+            let mutable msg = Unchecked.defaultof<TransactionCoordinatorMessage>
+            while mb.Reader.TryRead(&msg) do
+                match msg with
+                | TransactionCoordinatorMessage.Start ch -> ch.TrySetResult(Error (stoppedException ())) |> ignore
+                | Close -> ()
+            if not (isNull ex) then
+                Log.Logger.LogCritical(stoppedException (), "transaction coordinator mailbox failure")
             else
                 Log.Logger.LogInformation("transaction coordinator mailbox has stopped normally"))
         |> ignore
@@ -110,7 +137,10 @@ type internal TransactionCoordinatorClient (clientConfig: PulsarClientConfigurat
     member this.Mb: Channel<TransactionCoordinatorMessage> = mb
 
     member this.Start() =
-        postAndAsyncReply mb Start
+        let channel = TaskCompletionSource<ResultOrException<Unit>>(TaskCreationOptions.RunContinuationsAsynchronously)
+        if not (mb.Writer.TryWrite(Start channel)) then
+            channel.SetResult(Error (stoppedException ()))
+        channel.Task
 
     member this.NewTransactionAsync() =
         this.NewTransactionAsync(DEFAULT_TXN_TTL)

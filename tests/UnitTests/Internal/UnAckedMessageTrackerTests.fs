@@ -104,4 +104,39 @@ let tests =
             redelivered |> Expect.equal "" 1
             tracker.Close()
         }
+
+        testTask "A redelivery that fails doesn't stop the tracker" {
+
+            let scheduler = new ManualInvokeScheduler()
+            let getScheduler onTick =
+                scheduler.Callback <- onTick
+                scheduler :> IDisposable
+
+            let tsc = TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously)
+            let calls = ref 0
+            let redeliver msgIds =
+                calls.Value <- calls.Value + 1
+                if calls.Value = 1 then
+                    failwith "could not redeliver"
+                tsc.TrySetResult(msgIds |> Seq.length) |> ignore
+
+            let tracker = UnAckedMessageTracker("UnAckedMessageTracker_6", TimeSpan.FromMilliseconds(50.0), TimeSpan.FromMilliseconds(25.0), redeliver, getScheduler) :> IUnAckedMessageTracker
+            let msgId1 = { LedgerId = %1L; EntryId = %1L;  Partition = 1; Type = Single; TopicName = %""; ChunkMessageIds = None }
+            let msgId2 = { msgId1 with EntryId = %2L }
+
+            tracker.Add(msgId1)
+            //first two ticks just needed to get rid of 2 empty redelivery sets, the third one fails to redeliver
+            scheduler.Tick(); scheduler.Tick(); scheduler.Tick()
+
+            // as in the Java client, the next tick follows a failed one, and the message waits its whole ack timeout
+            tracker.Add(msgId2)
+            scheduler.Tick(); scheduler.Tick()
+            let! _ = tracker.RemoveMessagesTill({ msgId1 with LedgerId = %0L }).WaitAsync(TimeSpan.FromSeconds(5.0))
+            tsc.Task.IsCompleted |> Expect.isFalse ""
+            scheduler.Tick()
+
+            let! redelivered = tsc.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+            redelivered |> Expect.equal "" 1
+            tracker.Close()
+        }
     ]

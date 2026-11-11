@@ -18,6 +18,7 @@ open ProtoBuf
 open Pulsar.Client.Api
 open Pulsar.Client.Common
 open Pulsar.Client.Internal
+open Pulsar.Client.UnitTests.Internal.ConnectionHandlerTests
 open pulsar.proto
 
 let private config =
@@ -59,13 +60,67 @@ let private newCnx (incoming: Pipe) (output: PipeWriter) =
         ignore)
 
 /// The bytes a broker sends for a command: [total size][command size][command].
-let private frameOf (command: BaseCommand) =
+let internal frameOf (command: BaseCommand) =
     use stream = new MemoryStream()
     stream.Write(Array.zeroCreate<byte> 4, 0, 4)
     Serializer.SerializeWithLengthPrefix(stream, command, PrefixStyle.Fixed32BigEndian)
     let frame = stream.ToArray()
     BinaryPrimitives.WriteInt32BigEndian(frame.AsSpan(0, 4), frame.Length - 4)
     frame
+
+let private serialize (value: 'T) =
+    use stream = new MemoryStream()
+    Serializer.Serialize(stream, value)
+    stream.ToArray()
+
+/// The bytes a broker sends for a message:
+/// [total size][command size][command][magic number][checksum][metadata size][metadata][payload].
+let private messageFrameOf (consumerId: ConsumerId) (metadata: byte[]) (payload: byte[]) =
+    let command =
+        BaseCommand(
+            ``type`` = BaseCommand.Type.Message,
+            Message = CommandMessage(
+                ConsumerId = %consumerId,
+                MessageId = MessageIdData(ledgerId = 1UL, entryId = 1UL)))
+    use stream = new MemoryStream()
+    stream.Write(Array.zeroCreate<byte> 4, 0, 4)
+    Serializer.SerializeWithLengthPrefix(stream, command, PrefixStyle.Fixed32BigEndian)
+    let magicPosition = int stream.Position
+    stream.Write(Array.zeroCreate<byte> 10, 0, 10)
+    stream.Write(metadata, 0, metadata.Length)
+    stream.Write(payload, 0, payload.Length)
+    let frame = stream.ToArray()
+    BinaryPrimitives.WriteInt32BigEndian(frame.AsSpan(0, 4), frame.Length - 4)
+    BinaryPrimitives.WriteInt16BigEndian(frame.AsSpan(magicPosition, 2), MagicNumber)
+    BinaryPrimitives.WriteInt32BigEndian(frame.AsSpan(magicPosition + 6, 4), metadata.Length)
+    let checksum = ReadOnlySequence<byte>(frame.AsMemory(magicPosition + 6)) |> CRC32C.GetForROS |> int32
+    BinaryPrimitives.WriteInt32BigEndian(frame.AsSpan(magicPosition + 2, 4), checksum)
+    frame
+
+let private validMetadata () =
+    serialize (MessageMetadata(ProducerName = "test-producer", SequenceId = 1UL, PublishTime = 1UL))
+
+/// A consumer on the connection, with what the connection told it.
+type private RegisteredConsumer(cnx: ClientCnx, consumerId: ConsumerId) =
+    let received = TaskCompletionSource<RawMessage>(TaskCreationOptions.RunContinuationsAsynchronously)
+    let closed = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+    do cnx.AddConsumer(consumerId, {
+        MessageReceived = fun struct(message, _) ->
+            received.TrySetResult message |> ignore
+            message.Payload.Dispose()
+        ReachedEndOfTheTopic = ignore
+        ActiveConsumerChanged = ignore
+        ConnectionClosed = fun _ -> closed.TrySetResult() |> ignore
+        AckReceipt = ignore
+        AckError = ignore
+    })
+    member _.ConsumerId = consumerId
+    member _.Received = received.Task
+    member _.ConnectionClosed = closed.Task
+
+/// Consumers are added through the operations mailbox, so the reply to a later request there means they are registered.
+let private registered (cnx: ClientCnx) =
+    cnx.RemoveConsumerAndWait(%UInt64.MaxValue).WaitAsync(TimeSpan.FromSeconds(5.0))
 
 let private request (cnx: ClientCnx) =
     let requestId = Generators.getNextRequestId()
@@ -128,6 +183,13 @@ let private failsWithConnectException (request: Task<PulsarResponseType>) descri
         Expect.isTrue (ex :? ConnectException) $"{description} fails with ConnectException, got {ex}"
     }
 
+let private undisposable (incoming: Pipe) (config: PulsarClientConfiguration) =
+    ClientCnx(config, broker,
+        { Input = incoming.Reader; Output = Pipe().Writer; Dispose = fun () -> failwith "could not dispose" },
+        Commands.DEFAULT_MAX_MESSAGE_SIZE,
+        TaskCompletionSource<ClientCnx>(TaskCreationOptions.RunContinuationsAsynchronously),
+        ignore)
+
 [<Tests>]
 let tests =
     testList "ClientCnx" [
@@ -158,31 +220,8 @@ let tests =
                 })
                 do! cnx.RemoveConsumerAndWait(consumerId).WaitAsync(TimeSpan.FromSeconds(5.0))
 
-                use frame = new MemoryStream()
-                use writer = new BinaryWriter(frame)
-                writer.Write(0)
-                let command =
-                    BaseCommand(
-                        ``type`` = BaseCommand.Type.Message,
-                        Message = CommandMessage(
-                            ConsumerId = %consumerId,
-                            MessageId = MessageIdData(ledgerId = 1UL, entryId = 1UL)))
-                Serializer.SerializeWithLengthPrefix(frame, command, PrefixStyle.Fixed32BigEndian)
-                writer.Write(int16ToBigEndian MagicNumber)
-                let checksumPosition = frame.Position
-                writer.Write(0)
-                let metadata = MessageMetadata(ProducerName = "test-producer", SequenceId = 1UL, PublishTime = 1UL)
-                Serializer.SerializeWithLengthPrefix(frame, metadata, PrefixStyle.Fixed32BigEndian)
-                writer.Write([| 42uy |])
-                let checksum =
-                    ReadOnlySequence<byte>(frame.ToArray().AsMemory(int checksumPosition + 4))
-                    |> CRC32C.GetForROS
-                    |> int32
-                frame.Position <- checksumPosition
-                writer.Write(int32ToBigEndian checksum)
-                frame.Position <- 0L
-                writer.Write(int32ToBigEndian (int frame.Length - 4))
-                let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(frame.ToArray())).AsTask()
+                let frame = messageFrameOf consumerId (validMetadata ()) [| 42uy |]
+                let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(frame)).AsTask()
 
                 do! disposed.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
                 Expect.isFalse delivered.Task.IsCompleted "Removed consumers must not receive messages"
@@ -190,6 +229,69 @@ let tests =
                 cnx.Dispose()
                 MemoryStreamManager <- originalManager
                 subscription.Dispose()
+        }
+
+        testTask "A message that fails its checksum reaches its consumer as corrupted" {
+            let incoming = Pipe()
+            let cnx = newCnx incoming (Pipe().Writer)
+            let consumer = RegisteredConsumer(cnx, %1UL)
+            do! registered cnx
+            let frame = messageFrameOf consumer.ConsumerId (validMetadata ()) [| 42uy |]
+            frame[frame.Length - 1] <- 43uy
+            let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(frame)).AsTask()
+
+            // as in the Java client, the consumer discards it and tells the broker
+            let! (message: RawMessage) = consumer.Received.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse message.CheckSumValid "The message is marked as corrupted"
+            Expect.isTrue cnx.IsActive "A corrupted message leaves the connection open"
+            cnx.Dispose()
+        }
+
+        testTask "A message whose metadata can't be parsed reaches its consumer as corrupted" {
+            let incoming = Pipe()
+            let cnx = newCnx incoming (Pipe().Writer)
+            let consumer = RegisteredConsumer(cnx, %1UL)
+            let nextConsumer = RegisteredConsumer(cnx, %2UL)
+            do! registered cnx
+            // a string field that claims more bytes than the metadata has
+            let frame = messageFrameOf consumer.ConsumerId [| 0x0Auy; 0x64uy |] [| 42uy |]
+            let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(frame)).AsTask()
+
+            // as in the Java client, instead of the frame being skipped with its permit never returned
+            let! (message: RawMessage) = consumer.Received.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse message.CheckSumValid "The message is marked as corrupted"
+            Expect.equal message.Metadata.NumMessages 1 "A corrupted message counts as one message"
+
+            // the connection stays open and reads the next frame
+            let next = messageFrameOf nextConsumer.ConsumerId (validMetadata ()) [| 42uy |]
+            let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(next)).AsTask()
+            let! (nextMessage: RawMessage) = nextConsumer.Received.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isTrue nextMessage.CheckSumValid "The next message is delivered as usual"
+            Expect.isTrue cnx.IsActive "A corrupted message leaves the connection open"
+            cnx.Dispose()
+        }
+
+        testSequenced <| testTask "A message that can't be read for any other reason closes the connection" {
+            let originalManager = MemoryStreamManager
+            let incoming = Pipe()
+            let cnx = newCnx incoming (Pipe().Writer)
+            let consumer = RegisteredConsumer(cnx, %1UL)
+            try
+                do! registered cnx
+                // This test runs alone because the stream manager is shared by all connections. No payload fits it,
+                // as when the process is out of memory.
+                MemoryStreamManager <- RecyclableMemoryStreamManager(RecyclableMemoryStreamManager.Options(MaximumStreamCapacity = 1L))
+                let frame = messageFrameOf consumer.ConsumerId (validMetadata ()) (Array.zeroCreate 16)
+                let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(frame)).AsTask()
+
+                // As in the Java client, the consumer reconnects and the broker sends the message again. Skipping the
+                // frame would lose the message and its permit while the consumer stays connected.
+                do! consumer.ConnectionClosed.WaitAsync(TimeSpan.FromSeconds(5.0))
+                Expect.isFalse cnx.IsActive "The connection is deactivated"
+                Expect.isFalse consumer.Received.IsCompleted "The message was not delivered"
+            finally
+                cnx.Dispose()
+                MemoryStreamManager <- originalManager
         }
 
         testTask "A request the send loop reaches after the connection is deactivated still completes" {
@@ -292,5 +394,115 @@ let tests =
 
             let! _ = connected.Task.WaitAsync(TimeSpan.FromSeconds(2.0))
             incoming.Writer.Complete()
+        }
+
+        testTask "Registering a consumer again replaces its earlier registration" {
+            let incoming = Pipe()
+            let cnx = newCnx incoming (Pipe().Writer)
+            let first = RegisteredConsumer(cnx, %1UL)
+            let second = RegisteredConsumer(cnx, %1UL)
+            // as in the Java client, and the connection goes on looking after its consumers
+            do! registered cnx
+            let frame = messageFrameOf %1UL (validMetadata ()) [| 42uy |]
+            let! _ = incoming.Writer.WriteAsync(ReadOnlyMemory(frame)).AsTask()
+
+            let! (_: RawMessage) = second.Received.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse first.Received.IsCompleted "The earlier registration was replaced"
+            Expect.isTrue cnx.IsActive "The connection stays open"
+            cnx.Dispose()
+        }
+
+        testTask "A closed connection tells every consumer, whatever fails on the way" {
+            let incoming = Pipe()
+            let cnx = undisposable incoming config
+            cnx.AddConsumer(%1UL, {
+                MessageReceived = fun struct(message, _) -> message.Payload.Dispose()
+                ReachedEndOfTheTopic = ignore
+                ActiveConsumerChanged = ignore
+                ConnectionClosed = fun _ -> failwith "the consumer could not be told"
+                AckReceipt = ignore
+                AckError = ignore
+            })
+            let consumer = RegisteredConsumer(cnx, %2UL)
+            do! registered cnx
+            let pending = request cnx
+
+            // the broker closes the connection
+            incoming.Writer.Complete()
+
+            // the consumer reconnects only if it learns that, and the requests are answered by the other mailboxes
+            do! consumer.ConnectionClosed.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse cnx.IsActive "The connection is deactivated"
+            do! mailboxesStopped cnx
+            do! failsWithConnectException pending "A pending request"
+        }
+
+        testTask "A connection that can't be disposed after a keep-alive timeout is still deactivated" {
+            let incoming = Pipe()
+            let cnx = undisposable incoming { config with KeepAliveInterval = TimeSpan.FromMilliseconds(50.0) }
+            let consumer = RegisteredConsumer(cnx, %1UL)
+
+            // The broker never answers the ping. As in the Java client, what fails while the connection is looked
+            // after closes it, so its consumers reconnect instead of staying on a connection nobody looks after.
+            do! consumer.ConnectionClosed.WaitAsync(TimeSpan.FromSeconds(5.0))
+            Expect.isFalse cnx.IsActive "The connection is deactivated"
+            do! mailboxesStopped cnx
+        }
+
+        // sequenced: it replaces the logger that everything shares
+        testSequenced <| testTask "A removal is answered although the connection fails while it deals with it" {
+            let incoming = Pipe()
+            let cnx = newCnx incoming (Pipe().Writer)
+            let held = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let gate = TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            let original = Log.Logger
+            try
+                Log.Logger <-
+                    FailingLogger(original, fun message ->
+                        if message.Contains "adding consumer 1" then
+                            // Holds the loop, so the removal waits in the mailbox. A removal the loop takes as it
+                            // is posted is dealt with before its caller looks at the connection once more.
+                            held.TrySetResult() |> ignore
+                            gate.Task.Wait(TimeSpan.FromSeconds(5.0)) |> ignore
+                            false
+                        else
+                            // as anything else that can fail where the removal is dealt with
+                            message.Contains "consumer 2")
+                // from another thread, as the loop can run on the thread that posts to it
+                Task.Run(fun () -> RegisteredConsumer(cnx, %1UL) |> ignore) |> ignore
+                do! held.Task.WaitAsync(TimeSpan.FromSeconds(5.0))
+                let removal = cnx.RemoveConsumerAndWait(%2UL)
+                gate.SetResult()
+
+                do! removal.WaitAsync(TimeSpan.FromSeconds(5.0))
+            finally
+                gate.TrySetResult() |> ignore
+                Log.Logger <- original
+                if cnx.IsActive then
+                    cnx.Dispose()
+        }
+
+        // sequenced: it replaces the logger that everything shares
+        testSequenced <| testTask "A connection is deactivated when a cancellation stops the loop that looks after it" {
+            let incoming = Pipe()
+            let cnx = newCnx incoming (Pipe().Writer)
+            let consumer = RegisteredConsumer(cnx, %1UL)
+            do! registered cnx
+            let original = Log.Logger
+            try
+                // the removal fails where it is logged, and so does dealing with that failure
+                Log.Logger <-
+                    cancellingLogger original (fun message ->
+                        message.Contains "removed consumer 2" || message.Contains "operation failed")
+                cnx.RemoveConsumer(%2UL)
+
+                // As when the loop ends faulted. Its consumers would otherwise stay on a connection that nothing
+                // looks after any more.
+                do! consumer.ConnectionClosed.WaitAsync(TimeSpan.FromSeconds(5.0))
+                Expect.isFalse cnx.IsActive "The connection is deactivated"
+            finally
+                Log.Logger <- original
+                if cnx.IsActive then
+                    cnx.Dispose()
         }
     ]

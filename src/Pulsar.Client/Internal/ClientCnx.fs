@@ -198,16 +198,23 @@ and internal ClientCnx (config: PulsarClientConfiguration,
             rspTask.SetException(ConnectException "Disconnected.")
         requests.Clear()
 
+    // Whatever fails here, every producer and consumer still has to learn that the connection is gone, or it would
+    // stay on it without reconnecting, and the other mailboxes still have to stop.
     let deactivateChannel() =
         this.IsActive <- false
-        unregisterClientCnx(broker)
-        this.Dispose()
+        let attempt (action: unit -> unit) =
+            try
+                action()
+            with ex ->
+                Log.Logger.LogError(ex, "{0} failure while deactivating the connection", prefix)
+        attempt (fun () -> unregisterClientCnx(broker))
+        attempt this.Dispose
         for KeyValue(_,consumerOperation) in consumers do
-            consumerOperation.ConnectionClosed(this)
+            attempt (fun () -> consumerOperation.ConnectionClosed(this))
         for KeyValue(_,producerOperation) in producers do
-            producerOperation.ConnectionClosed(this)
+            attempt (fun () -> producerOperation.ConnectionClosed(this))
         for KeyValue(_,transactionMetaStoreOperation) in transactionMetaStores do
-            transactionMetaStoreOperation.ConnectionClosed(this)
+            attempt (fun () -> transactionMetaStoreOperation.ConnectionClosed(this))
         consumers.Clear()
         producers.Clear()
         transactionMetaStores.Clear()
@@ -257,8 +264,8 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 match msg with
                 | AddRequest (_, _, tsc) -> tsc.TrySetException(ConnectException "Disconnected.") |> ignore
                 | _ -> ()
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            let ex = loopFailure t
+            if not (isNull ex) then
                 Log.Logger.LogCritical(ex, "{0} requestsMb mailbox failure", prefix)
             else
                 Log.Logger.LogInformation("{0} requestsMb mailbox has stopped normally", prefix))
@@ -268,40 +275,62 @@ and internal ClientCnx (config: PulsarClientConfiguration,
     do (backgroundTask {
         let mutable continueLoop = true
         while continueLoop do
-            match! operationsMb.Reader.ReadAsync() with
-            | AddProducer (producerId, producerOperation) ->
-                Log.Logger.LogDebug("{0} adding producer {1}", prefix, producerId)
-                producers.Add(producerId, producerOperation)
-            | AddConsumer (consumerId, consumerOperation) ->
-                Log.Logger.LogDebug("{0} adding consumer {1}", prefix, consumerId)
-                consumers.Add(consumerId, consumerOperation)
-            | AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations) ->
-                Log.Logger.LogDebug("{0} adding transaction metastore {1}", prefix, transactionMetaStoreId)
-                transactionMetaStores[transactionMetaStoreId] <- transactionMetaStoreOperations
-            | RemoveConsumer (consumerId, completion) ->
-                Log.Logger.LogDebug("{0} removing consumer {1}", prefix, consumerId)
-                consumers.Remove(consumerId) |> ignore
-                completion |> Option.iter (fun tcs -> tcs.TrySetResult() |> ignore)
-            | RemoveProducer producerId ->
-                Log.Logger.LogDebug("{0} removing producer {1}", prefix, producerId)
-                producers.Remove(producerId) |> ignore
-            | RemoveTransactionMetaStoreHandler transactionMetaStoreId ->
-                Log.Logger.LogDebug("{0} removing transactionMetaStore {1}", prefix, transactionMetaStoreId)
-                transactionMetaStores.Remove(transactionMetaStoreId) |> ignore
-            | ChannelInactive ->
-                Log.Logger.LogDebug("{0} ChannelInactive, currently IsActive={1}", prefix, this.IsActive)
+            let! msg = operationsMb.Reader.ReadAsync()
+            try
+                match msg with
+                | AddProducer (producerId, producerOperation) ->
+                    Log.Logger.LogDebug("{0} adding producer {1}", prefix, producerId)
+                    // as in the Java client, a registration replaces an earlier one
+                    producers[producerId] <- producerOperation
+                | AddConsumer (consumerId, consumerOperation) ->
+                    Log.Logger.LogDebug("{0} adding consumer {1}", prefix, consumerId)
+                    consumers[consumerId] <- consumerOperation
+                | AddTransactionMetaStoreHandler (transactionMetaStoreId, transactionMetaStoreOperations) ->
+                    Log.Logger.LogDebug("{0} adding transaction metastore {1}", prefix, transactionMetaStoreId)
+                    transactionMetaStores[transactionMetaStoreId] <- transactionMetaStoreOperations
+                | RemoveConsumer (consumerId, completion) ->
+                    // Made and answered before anything that can fail. A removal that has failed is neither with
+                    // the loop nor in its mailbox any more, so nothing else would answer it.
+                    consumers.Remove(consumerId) |> ignore
+                    completion |> Option.iter (fun tcs -> tcs.TrySetResult() |> ignore)
+                    Log.Logger.LogDebug("{0} removed consumer {1}", prefix, consumerId)
+                | RemoveProducer producerId ->
+                    Log.Logger.LogDebug("{0} removing producer {1}", prefix, producerId)
+                    producers.Remove(producerId) |> ignore
+                | RemoveTransactionMetaStoreHandler transactionMetaStoreId ->
+                    Log.Logger.LogDebug("{0} removing transactionMetaStore {1}", prefix, transactionMetaStoreId)
+                    transactionMetaStores.Remove(transactionMetaStoreId) |> ignore
+                | ChannelInactive ->
+                    Log.Logger.LogDebug("{0} ChannelInactive, currently IsActive={1}", prefix, this.IsActive)
+                    if this.IsActive then
+                        deactivateChannel()
+                | CnxOperation.Stop ->
+                    Log.Logger.LogDebug("{0} operationsMb stopped", prefix)
+                    keepAliveTimer.Stop()
+                    continueLoop <- false
+                | CnxOperation.Tick ->
+                    Log.Logger.LogDebug("{0} keepalive tick", prefix)
+                    handleKeepAliveTimeout()
+            // As in the Java client, where an exception in the channel closes the connection: its producers and
+            // consumers reconnect, instead of staying on a connection that can no longer look after them.
+            with ex ->
+                Log.Logger.LogError(ex, "{0} operation failed, closing the connection", prefix)
                 if this.IsActive then
                     deactivateChannel()
-            | CnxOperation.Stop ->
-                Log.Logger.LogDebug("{0} operationsMb stopped", prefix)
-                keepAliveTimer.Stop()
-                continueLoop <- false
-            | CnxOperation.Tick ->
-                Log.Logger.LogDebug("{0} keepalive tick", prefix)
-                handleKeepAliveTimeout()
         } :> Task).ContinueWith(fun t ->
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            // Nothing reads the mailbox any more: answer the removals still queued, and deactivate a connection that
+            // is still active, so nobody waits for this loop or stays on a connection it no longer looks after.
+            operationsMb.Writer.TryComplete() |> ignore
+            keepAliveTimer.Stop()
+            let mutable msg = Unchecked.defaultof<CnxOperation>
+            while operationsMb.Reader.TryRead(&msg) do
+                match msg with
+                | RemoveConsumer (_, Some completion) -> completion.TrySetResult() |> ignore
+                | _ -> ()
+            let ex = loopFailure t
+            if not (isNull ex) then
+                if this.IsActive then
+                    deactivateChannel()
                 Log.Logger.LogCritical(ex, "{0} operationsMb mailbox failure", prefix)
             else
                 Log.Logger.LogInformation("{0} operationsMb mailbox has stopped normally", prefix))
@@ -350,37 +379,68 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                 | SocketMessageWithReply (_, channel) -> channel.TrySetResult(false) |> ignore
                 | SocketRequestMessageWithReply (_, _, channel) -> channel.TrySetException(ConnectException "Disconnected.") |> ignore
                 | SocketMessageWithoutReply _ | SocketMessage.Stop -> ()
-            if t.IsFaulted then
-                let (Flatten ex) = t.Exception
+            let ex = loopFailure t
+            if not (isNull ex) then
                 Log.Logger.LogCritical(ex, "{0} sendMb mailbox failure", prefix)
             else
                 Log.Logger.LogInformation("{0} sendMb mailbox has stopped normally", prefix))
     |> ignore
 
+    // As in the Java client, a message is corrupted when it fails its checksum or its metadata can't be parsed. It is
+    // then handed to its consumer without metadata or payload, to be discarded there. Any other failure is thrown,
+    // and closes the connection.
     let readMessage (reader: byref<SequenceReader<byte>>) frameLength =
         let stream = reader.Sequence
         let mutable magicNumber = -1s
-        if (reader.TryReadBigEndian(&magicNumber) |> not)
-           || magicNumber <> MagicNumber then
-            raise <| ArgumentException("Invalid magicNumber")
-        let mutable messageCheckSum = -1
-        reader.TryReadBigEndian(&messageCheckSum) |> ignore
-        let metadataPointer = int reader.Consumed
-        let mutable metadataLength = -1
-        reader.TryReadBigEndian(&metadataLength) |> ignore
-        let metadata = Serializer.Deserialize<MessageMetadata>(reader.Sequence.Slice(reader.Consumed, metadataLength))
-        reader.Advance(metadataLength)
-        let payloadPointer = int reader.Consumed
-        let payloadLength = frameLength - payloadPointer
-        let payload = MemoryStreamManager.GetStream("payload", payloadLength)
-        let payloadBytes = reader.Sequence.Slice(payloadPointer, payloadLength)
-        for segment in payloadBytes do
-            payload.Write(segment.Span)
-        let size = frameLength-metadataPointer
-        let calculatedCheckSum = CRC32C.GetForROS(stream.Slice(metadataPointer, size)) |> int32
-        if (messageCheckSum <> calculatedCheckSum) then
-            Log.Logger.LogError("{0} Invalid checksum. Received: {1} Calculated: {2}", prefix, messageCheckSum, calculatedCheckSum)
-        (metadata, payload, messageCheckSum = calculatedCheckSum)
+        let hasChecksum =
+            if reader.TryReadBigEndian(&magicNumber) then
+                if magicNumber = MagicNumber then
+                    true
+                else
+                    // as in the Java client, there is no checksum to verify without the magic number
+                    reader.Rewind(2L)
+                    false
+            else
+                false
+        let checksumValid =
+            if hasChecksum then
+                let mutable messageCheckSum = -1
+                reader.TryReadBigEndian(&messageCheckSum) |> ignore
+                let checksumStart = int reader.Consumed
+                let calculatedCheckSum = CRC32C.GetForROS(stream.Slice(checksumStart, frameLength - checksumStart)) |> int32
+                if messageCheckSum <> calculatedCheckSum then
+                    Log.Logger.LogError("{0} Invalid checksum. Received: {1} Calculated: {2}", prefix, messageCheckSum, calculatedCheckSum)
+                messageCheckSum = calculatedCheckSum
+            else
+                true
+        let metadata =
+            if checksumValid then
+                try
+                    let mutable metadataLength = -1
+                    reader.TryReadBigEndian(&metadataLength) |> ignore
+                    let metadata = Serializer.Deserialize<MessageMetadata>(stream.Slice(reader.Consumed, metadataLength))
+                    reader.Advance(metadataLength)
+                    metadata
+                // The Java client discards the message here for any Throwable. Running out of memory says nothing
+                // about the message, so it is not discarded for that.
+                with ex when not (ex :? OutOfMemoryException) ->
+                    Log.Logger.LogError(ex, "{0} Invalid message metadata", prefix)
+                    null
+            else
+                null
+        if isNull metadata then
+            (MessageMetadata(), new MemoryStream(Array.Empty<byte>()), false)
+        else
+            let payloadPointer = int reader.Consumed
+            let payloadLength = frameLength - payloadPointer
+            let payload = MemoryStreamManager.GetStream("payload", payloadLength)
+            try
+                for segment in stream.Slice(payloadPointer, payloadLength) do
+                    payload.Write(segment.Span)
+            with _ ->
+                payload.Dispose()
+                reraise()
+            (metadata, payload :> MemoryStream, true)
 
     let readCommand (command: BaseCommand) (reader: byref<SequenceReader<byte>>) frameLength =
         match command.``type`` with
@@ -445,18 +505,18 @@ and internal ClientCnx (config: PulsarClientConfiguration,
         reader.TryReadBigEndian(&totalLength) |> ignore
         let frameLength = totalLength + 4
         if (length >= frameLength) then
-            let mutable baseCommandLength = -1
-            reader.TryReadBigEndian(&baseCommandLength) |> ignore
-            let command = Serializer.Deserialize<BaseCommand>(buffer.Slice(reader.Consumed, baseCommandLength))
-            reader.Advance baseCommandLength
-            if Log.Logger.IsEnabled LogLevel.Debug then
-                Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
-            let consumed = int64 frameLength |> buffer.GetPosition
             try
+                let mutable baseCommandLength = -1
+                reader.TryReadBigEndian(&baseCommandLength) |> ignore
+                let command = Serializer.Deserialize<BaseCommand>(buffer.Slice(reader.Consumed, baseCommandLength))
+                reader.Advance baseCommandLength
+                if Log.Logger.IsEnabled LogLevel.Debug then
+                    Log.Logger.LogDebug("{0} Got message of type {1}", prefix, command.``type``)
+                let consumed = int64 frameLength |> buffer.GetPosition
                 let wrappedCommand = readCommand command &reader frameLength
                 wrappedCommand, consumed
             with ex ->
-                Result.Error (CorruptedCommand ex), consumed
+                Result.Error (CorruptedCommand ex), SequencePosition()
         else
             Result.Error IncompleteCommand, SequencePosition()
 
@@ -865,9 +925,15 @@ and internal ClientCnx (config: PulsarClientConfiguration,
                             Log.Logger.LogDebug("{0} IncompleteCommand received", prefix)
                             incompleteFrame <- true
                             reader.AdvanceTo(buffer.Start, buffer.End)
-                        | Result.Error (CorruptedCommand ex), consumed ->
-                            Log.Logger.LogError(ex, "{0} Ignoring corrupted command.", prefix)
-                            reader.AdvanceTo consumed
+                        | Result.Error (CorruptedCommand ex), _ ->
+                            // As in the Java client, where an exception while a frame is decoded closes the connection.
+                            // The frame may have been a message or a reply, so skipping it would leave a consumer
+                            // without its message and its permit, or a request without its answer.
+                            Log.Logger.LogError(ex, "{0} Closing the connection because a received command could not be read", prefix)
+                            if initialConnectionTsc.TrySetException(ConnectException("Unable to initiate connection")) then
+                                Log.Logger.LogWarning("{0} New connection was aborted", prefix)
+                            post operationsMb ChannelInactive
+                            continueLooping <- false
                         | Result.Error (UnknownCommandType unknownType), consumed ->
                             Log.Logger.LogError("{0} UnknownCommandType {1}, ignoring message", prefix, unknownType)
                             reader.AdvanceTo consumed

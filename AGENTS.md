@@ -30,4 +30,4 @@
 - TLS integration tests can be disabled locally with the `NOTLS` compile constant as described in `tests/README.md`.
 
 ## Platform Notes
-- Ubuntu/macOS integration-related compression support requires native `snappy` and `zstd` packages; see `README.md` and `.github/workflows/dotnetcore-ubuntu.yml`.
+- Ubuntu/macOS compression support requires the native `zstd` package; see `README.md` and `.github/workflows/dotnetcore-ubuntu.yml`. Snappy needs none: `Snappier` is managed code.

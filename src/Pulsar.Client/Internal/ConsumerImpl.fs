@@ -89,6 +89,11 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
     let mutable avalablePermits = 0
     let mutable mailboxRecoveryInProgress = false
     let mutable mailboxRecoveriesSinceLastMessage = 0
+    // the connection the mailbox is closing the consumer on, for a close that is finished without the mailbox
+    let mutable closingConnection: ClientCnx option = None
+    // Set when the mailbox gets to a close, and never reset. An unsubscribe leaves the consumer Closing as well, but
+    // it can fail, and then the consumer is open again.
+    let mutable closeStarted = false
     let mutable startMessageId =
         match startMessageId with
         | Some startMsgId ->
@@ -574,12 +579,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
             duringSeek <- None
         | _ -> ()
 
-    let closeConsumerTasks() =
-        failSeekTask()
+    // the part of closing that is safe outside the mailbox, and more than once
+    let releaseResources() =
         unAckedMessageTracker.Close()
         acksGroupingTracker.Close()
-        clearDeadLetters()
-        clearAckRequests()
         negativeAcksTracker.Close()
         connectionHandler.Close()
         interceptors.Close()
@@ -587,11 +590,60 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         chunkTimer.Stop()
         cleanup(this)
 
+    let closeConsumerTasks() =
+        failSeekTask()
+        clearDeadLetters()
+        clearAckRequests()
+        releaseResources()
+
+    let mutable stopped = false
+
     let stopConsumer () =
+        stopped <- true
         closeConsumerTasks()
         // a failed consumer passes on why it stopped, e.g. to a multi-topic parent
         failWaiters <| AlreadyClosedException("Consumer is already closed", connectionHandler.FailureCause)
         Log.Logger.LogInformation("{0} stopped", prefix)
+
+    // As in the Java client, closing takes no longer than its request to the broker can take to time out. Here that
+    // is up to twice the operation timeout, as a request is failed by the first timer tick after its timeout. The
+    // mailbox closes the consumer, so if the consumer is not closed by then, the mailbox has not got to it: it waits
+    // for something that doesn't end, or it has stopped without answering.
+    let closeTimeout = clientConfig.OperationTimeout + clientConfig.OperationTimeout
+
+    // Closes what can be closed without the mailbox. The queues, the waiters and the pending requests are its own,
+    // and it deals with them if it ever gets to the Close it was sent.
+    let closeWithoutMailbox () =
+        Log.Logger.LogError("{0} did not close within {1}, closing it without its mailbox", prefix, closeTimeout)
+        let previousState = connectionHandler.ConnectionState
+        connectionHandler.Closed()
+        let connection =
+            match previousState with
+            | Ready clientCnx -> Some clientCnx
+            // the mailbox has begun to close on this connection, and may not have got to telling the broker
+            | Closing -> Volatile.Read(&closingConnection)
+            | _ -> None
+        match connection with
+        | Some clientCnx ->
+            // the broker would otherwise keep sending messages to a consumer that nobody reads
+            clientCnx.RemoveConsumer consumerId
+            let requestId = Generators.getNextRequestId()
+            let payload = Commands.newCloseConsumer consumerId requestId
+            backgroundTask {
+                try
+                    // A request gets its timeout when the connection sends it. A connection that doesn't get to
+                    // sending it, because an earlier write doesn't end, would leave this waiting.
+                    let! response = (clientCnx.SendAndWaitForReply requestId payload).WaitAsync(closeTimeout)
+                    response |> PulsarResponseType.GetEmpty
+                with Flatten ex ->
+                    // As after a failed recovery: the consumer is off its connection, so the broker only lets go
+                    // of it with the connection. An exclusive subscription would stay taken otherwise.
+                    Log.Logger.LogWarning(ex, "{0} failed to close consumer at the broker, closing its connection", prefix)
+                    clientCnx.Dispose()
+            } |> ignore
+        | None ->
+            ()
+        releaseResources()
 
     let isInvalidConsumerEpoch = isInvalidConsumerEpoch consumerConfig.SubscriptionType
     let isConsumerEpochSupported = isConsumerEpochSupported consumerConfig.SubscriptionType
@@ -1526,7 +1578,14 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                 Log.Logger.LogDebug("{0} ConnectionFailed", prefix)
                 let nonRetriableError = ex |> PulsarClientException.isRetriableError |> not
                 let timeout = Stopwatch.GetElapsedTime(createConsumerStartTime) > clientConfig.OperationTimeout
-                if ((nonRetriableError || timeout) && subscribeTsc.TrySetException(ex)) then
+                if connectionHandler.ConnectionState = Failed then
+                    // Only the connection handler itself fails while the consumer runs: its loop has stopped, and
+                    // nothing would connect the consumer again.
+                    Log.Logger.LogError(ex, "{0} stopping because its connection handler failed", prefix)
+                    subscribeTsc.TrySetException(ex) |> ignore
+                    stopConsumer()
+                    continueLoop <- false
+                elif ((nonRetriableError || timeout) && subscribeTsc.TrySetException(ex)) then
                     Log.Logger.LogInformation("{0} creation failed {1}", prefix,
                                                 if nonRetriableError then "with unretriableError" else "after timeout")
                     connectionHandler.Failed(ex)
@@ -1555,8 +1614,10 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
             | ConsumerMessage.Close channel ->
 
+                Volatile.Write(&closeStarted, true)
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
+                    Volatile.Write(&closingConnection, Some clientCnx)
                     connectionHandler.Closing()
                     Log.Logger.LogInformation("{0} starting close", prefix)
                     let requestId = Generators.getNextRequestId()
@@ -1585,6 +1646,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
                 match connectionHandler.ConnectionState with
                 | Ready clientCnx ->
+                    // for a close that is finished without the mailbox, while the mailbox still waits here
+                    Volatile.Write(&closingConnection, Some clientCnx)
                     connectionHandler.Closing()
                     Log.Logger.LogInformation("{0} starting unsubscribe ", prefix)
                     let requestId = Generators.getNextRequestId()
@@ -1599,6 +1662,16 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                         channel.SetResult()
                     with Flatten ex ->
                         Log.Logger.LogError(ex, "{0} failed to unsubscribe", prefix)
+                        match connectionHandler.ConnectionState with
+                        | Closing ->
+                            // As in the Java client, the consumer is ready again: it can go on, and be closed. What
+                            // its connection told it meanwhile, such as that it has closed, is next in the mailbox.
+                            connectionHandler.SetReady clientCnx
+                        | Closed when not stopped ->
+                            // closed without its mailbox meanwhile, which leaves the waiters to the mailbox
+                            stopConsumer()
+                        | _ ->
+                            ()
                         channel.SetException ex
 
                     if connectionHandler.ConnectionState = Closed then
@@ -1609,8 +1682,8 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
         } :> Task).ContinueWith(fun t ->
             let mutable recovering = false
             try
-                if t.IsFaulted then
-                    let (Flatten ex) = t.Exception
+                let ex = loopFailure t
+                if not (isNull ex) then
                     if subscribeTsc.Task.IsCompletedSuccessfully then
                         recovering <- true
                         backgroundTask {
@@ -1618,7 +1691,12 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
                                 do! recoverMailboxFailure ex
                                 match connectionHandler.ConnectionState with
                                 | Uninitialized | Connecting | Ready _ -> startMailboxLoop() |> ignore
-                                | _ -> drainStoppedMailbox()
+                                | _ ->
+                                    // The state changed while the consumer was recovering, e.g. it was closed without
+                                    // its mailbox, so nothing has stopped the consumer yet and failed its waiters.
+                                    if not stopped then
+                                        stopConsumer()
+                                    drainStoppedMailbox()
                             with recoveryEx ->
                                 Log.Logger.LogCritical(recoveryEx, "{0} failed to recover consumer for topic {1}",
                                                        prefix, topicName)
@@ -2004,11 +2082,19 @@ type internal ConsumerImpl<'T> (consumerConfig: ConsumerConfiguration<'T>, clien
 
         member this.DisposeAsync() =
             match connectionHandler.ConnectionState with
-            | Closing | Closed ->
+            | Closed ->
+                ValueTask()
+            | Closing when Volatile.Read(&closeStarted) ->
                 ValueTask()
             | _ ->
+                // Also while the consumer unsubscribes: the close waits behind the unsubscribe, and closes the consumer
+                // if that fails. The Java client takes a consumer that unsubscribes for closed already, so one whose
+                // unsubscribe then fails stays open with nothing left to close it.
                 backgroundTask {
-                    do! postAndAsyncReply mb ConsumerMessage.Close
+                    try
+                        do! (postAndAsyncReply mb ConsumerMessage.Close).WaitAsync(closeTimeout)
+                    with :? System.TimeoutException ->
+                        closeWithoutMailbox()
                 } |> ValueTask
 
 

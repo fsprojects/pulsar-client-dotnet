@@ -6,6 +6,16 @@ open Expecto.Flip
 open Pulsar.Client.Internal
 open Pulsar.Client.Common
 open System
+open System.Diagnostics
+
+/// Lets a millisecond pass. A tick counts its rates over the time since the tick before, which it measures in whole
+/// milliseconds, and it has no rate to count over none: it reports 0 then.
+let private aMillisecond () =
+    task {
+        let watch = Stopwatch.StartNew()
+        while watch.ElapsedMilliseconds < 1L do
+            do! Task.Delay 1
+    } :> Task
 
 [<Tests>]
 let tests =
@@ -25,6 +35,7 @@ let tests =
                 stats.IncrementNumAcksReceived(TimeSpan.FromMilliseconds(latencyMs))
             
             let realBeforeTick = stats.GetStats()
+            do! aMillisecond ()
             stats.TickTime(5)
             let realAfterTick = stats.GetStats()
             do! Task.Delay 10 // need to have a duration of large zero
@@ -106,6 +117,7 @@ let tests =
                 stats.IncrementNumBatchReceiveFailed()
             
             let realBeforeTick = stats.GetStats()
+            do! aMillisecond ()
             stats.TickTime(5)
             let realAfterTick = stats.GetStats()
             do! Task.Delay 10 // need to have a duration of large zero
