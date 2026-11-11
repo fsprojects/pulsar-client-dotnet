@@ -65,34 +65,30 @@ type OTelProducerInterceptor<'T>(sourceName: string, log: ILogger) =
                     .SetTag("messaging.operation", "send")
                     .SetTag("messaging.producer_id",$"{producer.Name} - {producer.ProducerId}")
                     |> ignore
-                if activity.IsAllDataRequested then
-                   // It is highly recommended to check activity.IsAllDataRequested,
-                   // before populating any tags which are not readily available.
-                   // IsAllDataRequested is the same as Span.IsRecording and will be false
-                   // when samplers decide to not record the activity,
-                   // and this can be used to avoid any expensive operation to retrieve tags.
-                   //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/messaging.md
-                   //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
-                   let contextToInject = activity.Context
-                   // A message can have a trace already, as one has whose properties are copied from a consumed
-                   // message. It is removed before the propagator sets that of this send: the propagator sets a
-                   // trace state only if this send has one, so that of the other trace would go out with this
-                   // one, and a propagator that sets nothing would leave the other trace to be taken for this one.
-                   mutableDict.Remove activityKey |> ignore
-                   mutableDict.Remove traceStateKey |> ignore
-                   Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
-                   if not (mutableDict.ContainsKey activityKey) then
-                       log.LogWarning("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
-                       // nothing in the message tells its receipt which activity to end, so the activity ends here
-                       activity.SetTag("messaging.acknowledge_type", "NotPropagated")
-                       |> endActivity
-                       message // OTEL listeners are not configured correctly, so return message as is
-                   else
-                       addToCache mutableDict.[activityKey] activity
-                       message.WithProperties(mutableDict)
+                //https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/messaging.md
+                //https://github.com/open-telemetry/opentelemetry-dotnet/blob/a25741030f05c60c85be102ce7c33f3899290d49/examples/MicroserviceExample/Utils/Messaging/MessageSender.cs#L102
+                // The trace of the send goes into the message whether the activity is recorded or not. One that is
+                // not recorded (IsAllDataRequested is false, the same as Span.IsRecording) is of a trace that the
+                // sampler didn't take, which whoever consumes the message learns only from the message: without a
+                // trace in it, they start one of their own for it, and sample that one by themselves.
+                let contextToInject = activity.Context
+                // A message can have a trace already, as one has whose properties are copied from a consumed
+                // message. It is removed before the propagator sets that of this send: the propagator sets a
+                // trace state only if this send has one, so that of the other trace would go out with this
+                // one, and a propagator that sets nothing would leave the other trace to be taken for this one.
+                mutableDict.Remove activityKey |> ignore
+                mutableDict.Remove traceStateKey |> ignore
+                Propagator.Inject(PropagationContext(contextToInject, Baggage.Current), mutableDict, setter)
+                if not (mutableDict.ContainsKey activityKey) then
+                    log.LogWarning("activityKey {0} is missing in dictionary. Check if OTEL propagators are configured correctly.", activityKey)
+                    // nothing in the message tells its receipt which activity to end, so the activity ends here
+                    activity.SetTag("messaging.acknowledge_type", "NotPropagated")
+                    |> endActivity
+                    message // OTEL listeners are not configured correctly, so return message as is
                 else
-                   //don't handle activity
-                   message
+                    // recorded or not, the activity ends with the receipt for the message
+                    addToCache mutableDict.[activityKey] activity
+                    message.WithProperties(mutableDict)
 
         member this.Dispose() =
             // Ending an activity runs the code of its listeners, and what one of them throws must not leave the rest
